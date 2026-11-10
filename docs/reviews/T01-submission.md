@@ -7,7 +7,7 @@
 - Upstream: `origin/feature/t01-toolchain-foundation`  
 - Pull Request: https://github.com/MohamedAlksas/LawyerOS/pull/2 (Draft PR)  
 **Implementation inspected SHA:** `0cae31cdfc5ddd19fd3bca438203ebdf97b46bb4`  
-**Final published HEAD SHA:** `74f8ec5a76f7bf261a6fcb6b5c328f3474bf6dc4` (documentation attestation commit; diff against inspected implementation contains only this report)  
+**Final published HEAD SHA:** `9b01ab2d9b83efe0eb644cb1f290bdcb887bb257` (and subsequent documentation attestation updates; diff against inspected implementation contains only `docs/reviews/T01-submission.md`)  
 **Changed files:**
 - `docs/DEPENDENCIES.md` (new)
 - `package.json` (new)
