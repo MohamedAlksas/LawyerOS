@@ -1,0 +1,12 @@
+#!/bin/sh
+# Local guardrail; GitHub branch protections are a separate server setting.
+while read -r local_ref local_sha remote_ref remote_sha
+do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      printf '%s\n' 'Direct pushes to the stable branch are blocked. Push your task branch and use its pull request.' >&2
+      exit 1
+      ;;
+  esac
+done
+exit 0
