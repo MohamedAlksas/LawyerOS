@@ -2,6 +2,8 @@
 
 Open `D:\Lawyer` as the workspace. These project-specific skills are instruction-only packages maintained alongside the plan. They require no Codex plugin, host-specific binary, account connection, or global installation. Application code, deployment, and real-data migration remain separate tasks.
 
+The task cards additionally require specific installed Agency Agent profiles. Their registry is [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json), and their loading/evidence contract is [AGENCY_AGENTS](AGENCY_AGENTS.md). These external profiles are expected in the named global skill folders; they are not bundled copies. Fourteen selected profile names/files were verified locally when preparing this edition. Another machine must verify its own installation; portable CI validates the registry/cards without claiming installed access or running Antigravity.
+
 Use `https://github.com/MohamedAlksas/LawyerOS.git` as origin and read `docs/GIT_WORKFLOW.md`. Each task card includes its exact dedicated branch, checkpoint commit/push rules, PR handoff, and remote-SHA verification. The planning baseline must normally be merged into main before T01. Access in a running Antigravity session must still be verified; Codex's GitHub access does not prove that session's credentials are working.
 
 ## How loading works
@@ -12,6 +14,8 @@ For T01, read exactly:
 
 - [lawoffice-delivery](../.agents/skills/lawoffice-delivery/SKILL.md)
 - [lawoffice-foundation](../.agents/skills/lawoffice-foundation/SKILL.md)
+
+In addition, use lead `agency-software-architect` from `~/.gemini/config/skills/engineering-software-architect/SKILL.md` and support `agency-devops-automator` from `~/.gemini/config/skills/engineering-devops-automator/SKILL.md`. Read both full files, verify their frontmatter names, and keep their advice within T01's toolchain-only scope. The task card supplies the same exact assignment.
 
 The first prompt tells the implementer to report the files it actually loaded. If it cannot read a required file, it must report that path instead of claiming successful skill activation. Reading instructions is not proof that tests passed.
 
@@ -28,6 +32,8 @@ The first prompt tells the implementer to report the files it actually loaded. I
 | `lawoffice-testing` | Behavioral implementation and verification | Public Interfaces, real PostgreSQL, relevant browser checks and actual evidence |
 
 Use only the skills named by the current card. Do not load every skill or substitute a generic design workflow for the project's established screens and constraints. Extra installed skills may be used for a demonstrated need, but their availability is not required by this package; identify them and preserve task scope.
+
+The explicitly assigned Agency lead/support profiles are required, not the optional extra skills described above. Apply supporting roles as scoped sequential passes unless real delegation is separately available and authorized. Never equate role selection with launching parallel agents or with independent Codex approval.
 
 ## One card per conversation assignment
 

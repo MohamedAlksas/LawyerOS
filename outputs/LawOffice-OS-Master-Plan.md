@@ -35,6 +35,10 @@ Canonical references live at the repository root and in `docs/`. [outputs](.) co
 
 The documentation is in English. The product remains an Arabic RTL application for an Egyptian law office.
 
+## Agency specialists during implementation
+
+Every task card explicitly selects one installed Agency Agent lead and the relevant supporting profiles, in addition to its LawOffice skills. Read [AGENCY_AGENTS](../docs/AGENCY_AGENTS.md); [the routing registry](../docs/AGENCY_AGENT_ROUTING.json) maps all 23 tasks to 14 locally verified Agency profiles. T01 uses `agency-software-architect` with `agency-devops-automator`; frontend, identity, backend, and recovery tasks have their own appropriate leads. Supporting profiles are scoped role passes, not an unsupported claim of spawned agents or Codex approval. Missing required profiles are reported before dependent implementation.
+
 ## GitHub workflow
 
 Canonical repository: [MohamedAlksas/LawyerOS](https://github.com/MohamedAlksas/LawyerOS). `main` holds the stable integration baseline. The initial plan is published on `docs/project-plan-and-git-workflow`; merge its reviewed PR before starting T01 from `origin/main`. Each task card names its own `feature/` branch, and subsequent checkpoint commits are pushed to that same branch and PR. Read [GIT_WORKFLOW](../docs/GIT_WORKFLOW.md). Codex reviews; a push does not itself approve or merge a task.
@@ -45,12 +49,16 @@ Regenerate and validate the maintained package with PowerShell 7:
 
 ```powershell
 pwsh -File scripts/Add-TaskGitInstructions.ps1
+pwsh -File scripts/Update-AgencyAgentPrompts.ps1
 pwsh -File scripts/Build-TaskPromptIndex.ps1
 pwsh -File scripts/Validate-AntigravityKit.ps1
+pwsh -File scripts/Validate-AgencyAgentRouting.ps1
 pwsh -File scripts/Build-PlanningKit.ps1
 ```
 
 The planning validation GitHub Actions workflow checks the instructions and generated text deliverables; application CI is implemented later in T02. `work/`, credentials, and runtime client files are excluded from Git. Project skills and generated planning deliverables are tracked.
+
+Locally, `pwsh -File scripts/Validate-AgencyAgentRouting.ps1 -VerifyInstalled` additionally checks the named global profile files/frontmatter/hashes. CI runs portable checks only; a successful portable check does not prove Antigravity loaded a profile. Global Agency installations are not modified or copied by this package.
 
 ---
 
@@ -1222,6 +1230,7 @@ Branch / upstream / PR URL:
 Local HEAD / independently verified remote pushed SHA:
 Changed files:
 Skills loaded (exact SKILL.md paths and task-specific application):
+Agency Agent evidence (lead/support, actual metadata name, resolved path, SHA-256, applied guidance, supporting findings/actions):
 Behavior delivered:
 Requirements and acceptance IDs covered:
 Commands actually run + exit status + short output:
@@ -1312,6 +1321,8 @@ The planning PR must be integrated before T01 normally starts from `origin/main`
 
 The executable assignment is the single task card in `docs/tasks/` named by the owner. `docs/PROMPTS.md` is its index, not permission to execute a milestone. Read `.agents/skills/lawoffice-delivery/SKILL.md` for every assignment, plus each additional skill file named in the card, before editing. Record the actual skill paths loaded in the submission. Project skills are bundled locally; do not assume Codex's global skills or tools exist in Antigravity. If discovery does not list a skill, read its named file directly; if the file is absent or unreadable, report the missing prerequisite. See `docs/ANTIGRAVITY.md` for the installed skill map.
 
+Each card also has a required Agency Agent assignment from `docs/AGENCY_AGENT_ROUTING.json`. Read `docs/AGENCY_AGENTS.md`, explicitly apply that task's lead profile, and read every named supporting profile from its installed `SKILL.md` path before implementation. Verify YAML names rather than inferring them from folder names. Use one lead persona for implementation and scoped supporting passes for checks; do not claim separate agents were spawned without actual supported delegation. The existing LawOffice project skills remain mandatory. The approved stack, task scope, and Codex review ownership govern conflicting generic persona suggestions. Missing/unreadable/misnamed required profiles stop dependent work; no silent substitution or automatic installation.
+
 For any task after T01, inspect the explicitly named predecessor's `docs/reviews/*-review.md` for an actual `ACCEPTED` decision and verify its files. A submission alone does not authorize dependent work. Do not fabricate review reports or execute missing predecessor tasks.
 
 For a material conflict, name both documents and the conflicting cases and raise it with the reviewer. Do not invent financial or legal rules. Do not reread the entire codebase for each task; start with the required references and relevant paths.
@@ -1336,6 +1347,8 @@ Run the appropriate checks and report their actual results. Mark anything not ex
 
 Include a `Skills loaded` section listing exact files read, how they applied to this task, and any missing capabilities. This records instruction loading, not proof that the Antigravity UI automatically discovered or activated them.
 
+Also include `Agency Agent evidence`: lead/support role, actual frontmatter name, resolved installed path, content SHA-256, task-specific guidance applied, supporting-pass findings/actions, and actual test results or `NOT RUN`. A profile file's presence, its loading, or an internal reviewer persona does not grant Codex acceptance.
+
 After submission, stop at the assigned task until review. If the result is `CHANGES_REQUESTED`, fix the requested findings, rerun affected checks, and resubmit the same task. You do not approve your own work.
 
 ---
@@ -1349,6 +1362,7 @@ Source: `AGENTS.md`
 - Planning documents, implementation prompts, and review reports are in English. Code and domain identifiers are in English. The application remains Arabic RTL for an Egyptian law office; preserve Arabic UI examples and locale requirements. Do not reopen settled user facts.
 - Each task needs a clear scope, acceptance criteria, and evidence. Review the actual implementation; do not accept another model's report without appropriate inspection.
 - Antigravity assignments live in `docs/tasks/`. Every card names exact project-local skills under `.agents/skills/`; load them and record actual paths read. See `docs/ANTIGRAVITY.md`. Skill use does not replace Codex's independent acceptance.
+- Every implementation card also explicitly names its required installed Agency lead and supporting profiles from `docs/AGENCY_AGENT_ROUTING.json`. Follow `docs/AGENCY_AGENTS.md`: verify/read actual SKILL.md files and frontmatter names; report role/path/hash/application and supporting findings. Keep project skills, approved scope/stack, and independent Codex review; no invented agent spawning, missing-profile substitution, or self-approval.
 - Critical rules: Matter differs from Proceeding; Party roles are scoped to a matter; legal deadlines require manual review; fees, reimbursable expenses, and client advances remain separate; posted financial entries are immutable; documents are private; backups must be restorable.
 - Changes to an agreed rule must explain their impact and update its source documents. Do not add SaaS, offline synchronization, or document AI to V1 tasks.
 - Use synthetic test data. Never put credentials or real client documents into Git, logs, or review reports.
@@ -1367,35 +1381,37 @@ Each linked card contains one complete, copyable prompt. Give Antigravity only t
 
 Open `D:\Lawyer` in Antigravity and copy the full prompt in [T01](../docs/tasks/T01.md). It explicitly loads `lawoffice-delivery` and `lawoffice-foundation` from their actual `.agents/skills/` files. T01 is the only task without a predecessor acceptance requirement. The generated output `LawOffice-OS-Antigravity-T01.md` contains the same prompt.
 
+It also explicitly selects lead `agency-software-architect` and support `agency-devops-automator` from their verified installed SKILL.md paths. The following table maps every task to its actual Agency lead/support profiles. See [Agency usage](../docs/AGENCY_AGENTS.md) and [the routing registry](../docs/AGENCY_AGENT_ROUTING.json). Local profile verification does not claim runtime activation in Antigravity.
+
 ## Task and skill map
 
 Every task loads `lawoffice-delivery`. Additional skills are listed below; every card includes their exact paths. See [Antigravity setup](../docs/ANTIGRAVITY.md) for the bundled skills. Do not load all skills or execute all cards together. Each predecessor refers to an actual `docs/reviews/<ID>-review.md` decision stating `ACCEPTED`, with delivered files inspected. A submission is not acceptance.
 
-| Task | Exact card | Required predecessor | Additional required skills |
-|---|---|---|---|
-| T01 | [T01](../docs/tasks/T01.md) | None — first task | `lawoffice-foundation` |
-| T02 | [T02](../docs/tasks/T02.md) | T01 | `lawoffice-foundation`, `lawoffice-testing` |
-| T03 | [T03](../docs/tasks/T03.md) | T02 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T04 | [T04](../docs/tasks/T04.md) | T03 | `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T05 | [T05](../docs/tasks/T05.md) | T04 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T06 | [T06](../docs/tasks/T06.md) | T05 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T07 | [T07](../docs/tasks/T07.md) | T06 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T08 | [T08](../docs/tasks/T08.md) | T07 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T09 | [T09](../docs/tasks/T09.md) | T08 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T10 | [T10](../docs/tasks/T10.md) | T09 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T11 | [T11](../docs/tasks/T11.md) | T10 | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T12 | [T12](../docs/tasks/T12.md) | T11 | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
-| T13 | [T13](../docs/tasks/T13.md) | T12 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T14 | [T14](../docs/tasks/T14.md) | T13 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15a | [T15a](../docs/tasks/T15a.md) | T14 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15b | [T15b](../docs/tasks/T15b.md) | T15a | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15c | [T15c](../docs/tasks/T15c.md) | T15b | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T16 | [T16](../docs/tasks/T16.md) | T15c | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T17 | [T17](../docs/tasks/T17.md) | T16 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T18 | [T18](../docs/tasks/T18.md) | T17 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T19 | [T19](../docs/tasks/T19.md) | T18 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T20 | [T20](../docs/tasks/T20.md) | T19 | `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T21 | [T21](../docs/tasks/T21.md) | T20 | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
+| Task | Exact card | Required predecessor | Agency lead | Agency support | Additional project skills |
+|---|---|---|---|---|---|
+| T01 | [T01](../docs/tasks/T01.md) | None — first task | `agency-software-architect` | `agency-devops-automator` | `lawoffice-foundation` |
+| T02 | [T02](../docs/tasks/T02.md) | T01 | `agency-devops-automator` | `agency-backend-architect`, `agency-test-automation-engineer` | `lawoffice-foundation`, `lawoffice-testing` |
+| T03 | [T03](../docs/tasks/T03.md) | T02 | `agency-identity-access-engineer` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T04 | [T04](../docs/tasks/T04.md) | T03 | `agency-frontend-developer` | `agency-accessibility-auditor`, `agency-test-automation-engineer` | `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T05 | [T05](../docs/tasks/T05.md) | T04 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T06 | [T06](../docs/tasks/T06.md) | T05 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T07 | [T07](../docs/tasks/T07.md) | T06 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T08 | [T08](../docs/tasks/T08.md) | T07 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T09 | [T09](../docs/tasks/T09.md) | T08 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T10 | [T10](../docs/tasks/T10.md) | T09 | `agency-backend-architect` | `agency-devops-automator`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T11 | [T11](../docs/tasks/T11.md) | T10 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T12 | [T12](../docs/tasks/T12.md) | T11 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
+| T13 | [T13](../docs/tasks/T13.md) | T12 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T14 | [T14](../docs/tasks/T14.md) | T13 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15a | [T15a](../docs/tasks/T15a.md) | T14 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15b | [T15b](../docs/tasks/T15b.md) | T15a | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15c | [T15c](../docs/tasks/T15c.md) | T15b | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T16 | [T16](../docs/tasks/T16.md) | T15c | `agency-frontend-developer` | `agency-document-generator`, `agency-application-security-engineer` | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T17 | [T17](../docs/tasks/T17.md) | T16 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T18 | [T18](../docs/tasks/T18.md) | T17 | `agency-devops-automator` | `agency-security-architect`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T19 | [T19](../docs/tasks/T19.md) | T18 | `agency-database-reliability-engineer` | `agency-devops-automator`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T20 | [T20](../docs/tasks/T20.md) | T19 | `agency-reality-checker` | `agency-accessibility-auditor`, `agency-frontend-developer` | `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T21 | [T21](../docs/tasks/T21.md) | T20 | `agency-database-reliability-engineer` | `agency-technical-writer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
 
 ## What every prompt specifies
 
@@ -1517,6 +1533,14 @@ The owner selected `MohamedAlksas/LawyerOS` and authorized checkpoint pushes wit
 
 Independent review clarified the initial planning-merge dependency, reviewed implementation SHA versus later report-only commits, and single-writer/worktree isolation. The local pre-push guard is not a claim of configured server-side protection. GitHub Actions results and actual published commit/ref verification are checked separately from static planning validation.
 
+## Explicit Agency Agent routing
+
+The owner requested using the appropriate installed Agency Agent during implementation. The routing registry assigns one lead plus scoped supporting profiles to every task, using 14 actual installed frontmatter names and exact source folders. Names, readable files and SHA-256 inventory snapshots were checked locally; profile updates are reported as hash drift rather than silently substituting another role. The original seven LawOffice skills remain required. Generic personas cannot expand scope, replace the approved stack, invent legal/accounting rules, or grant acceptance.
+
+The changes are prepared on an isolated `docs/agency-agent-routing` worktree because `D:\Lawyer` already has T01's feature branch active. Global profile installations and that active checkout are preserved. Portable CI validates registry/cards without assuming global installations; the optional installed check verifies the actual local metadata names and hashes. No Antigravity runtime invocation or native multi-agent spawning is claimed by those checks.
+
+Behavioral validation also deliberately changed a lead declaration, added an unassigned profile, and referenced a missing installed file: all were rejected. A changed inventory hash with a matching installed metadata name was accepted and reported as drift. The wrong-lead test exposed and corrected a validator that had matched a name elsewhere in the line rather than the declared role. The rerun passed all four isolated scenarios without modifying global installations.
+
 ---
 
 Source: `docs/START_HERE.md`
@@ -1536,6 +1560,8 @@ The plan is ready in `D:\Lawyer`. It currently contains documentation only; no a
 First integrate the reviewed planning PR from `docs/project-plan-and-git-workflow` into `main`. T01 then branches from updated `origin/main` as `feature/t01-toolchain-foundation`. Do not treat an unmerged local planning branch as the normal base; a stacked workflow requires an explicit Codex decision. See `docs/GIT_WORKFLOW.md`.
 
 Open `D:\Lawyer` as the Antigravity workspace and start a fresh agent conversation. Copy the single prompt in `docs/tasks/T01.md`, also delivered as `outputs/LawOffice-OS-Antigravity-T01.md`. It explicitly names the two skills to read: `lawoffice-delivery` and `lawoffice-foundation`, with their `.agents/skills/` paths. See `docs/ANTIGRAVITY.md` for skill loading. If local files are unavailable, attach the T01 references and required skills from the kit, not real client files. Actual discovery in your Antigravity session has not been tested here.
+
+T01 now also requires the installed Agency lead `agency-software-architect` and supporting `agency-devops-automator`, with exact global SKILL.md paths in its prompt. The implementer must read/verify these profiles and report their actual use. See `docs/AGENCY_AGENTS.md`; the planning ZIP does not copy global Agency profiles. If T01's feature branch already exists, merge this documentation update into main first, then safely integrate updated main into that branch without resetting/stashing another agent's work.
 
 T01 establishes tool compatibility and a minimal build foundation; it does not build the entire system. After submission, return `docs/reviews/T01-submission.md` here for review, with the changes if they are not visible in the shared folder. We then prepare the next assignment or a fix request.
 
@@ -1565,6 +1591,8 @@ Source: `docs/ANTIGRAVITY.md`
 
 Open `D:\Lawyer` as the workspace. These project-specific skills are instruction-only packages maintained alongside the plan. They require no Codex plugin, host-specific binary, account connection, or global installation. Application code, deployment, and real-data migration remain separate tasks.
 
+The task cards additionally require specific installed Agency Agent profiles. Their registry is [AGENCY_AGENT_ROUTING.json](../docs/AGENCY_AGENT_ROUTING.json), and their loading/evidence contract is [AGENCY_AGENTS](../docs/AGENCY_AGENTS.md). These external profiles are expected in the named global skill folders; they are not bundled copies. Fourteen selected profile names/files were verified locally when preparing this edition. Another machine must verify its own installation; portable CI validates the registry/cards without claiming installed access or running Antigravity.
+
 Use `https://github.com/MohamedAlksas/LawyerOS.git` as origin and read `docs/GIT_WORKFLOW.md`. Each task card includes its exact dedicated branch, checkpoint commit/push rules, PR handoff, and remote-SHA verification. The planning baseline must normally be merged into main before T01. Access in a running Antigravity session must still be verified; Codex's GitHub access does not prove that session's credentials are working.
 
 ## How loading works
@@ -1575,6 +1603,8 @@ For T01, read exactly:
 
 - [lawoffice-delivery](../.agents/skills/lawoffice-delivery/SKILL.md)
 - [lawoffice-foundation](../.agents/skills/lawoffice-foundation/SKILL.md)
+
+In addition, use lead `agency-software-architect` from `~/.gemini/config/skills/engineering-software-architect/SKILL.md` and support `agency-devops-automator` from `~/.gemini/config/skills/engineering-devops-automator/SKILL.md`. Read both full files, verify their frontmatter names, and keep their advice within T01's toolchain-only scope. The task card supplies the same exact assignment.
 
 The first prompt tells the implementer to report the files it actually loaded. If it cannot read a required file, it must report that path instead of claiming successful skill activation. Reading instructions is not proof that tests passed.
 
@@ -1591,6 +1621,8 @@ The first prompt tells the implementer to report the files it actually loaded. I
 | `lawoffice-testing` | Behavioral implementation and verification | Public Interfaces, real PostgreSQL, relevant browser checks and actual evidence |
 
 Use only the skills named by the current card. Do not load every skill or substitute a generic design workflow for the project's established screens and constraints. Extra installed skills may be used for a demonstrated need, but their availability is not required by this package; identify them and preserve task scope.
+
+The explicitly assigned Agency lead/support profiles are required, not the optional extra skills described above. Apply supporting roles as scoped sequential passes unless real delegation is separately available and authorized. Never equate role selection with launching parallel agents or with independent Codex approval.
 
 ## One card per conversation assignment
 
@@ -1733,6 +1765,48 @@ Record the base SHA, published head SHA, and `docs/reviews/` report. Codex accep
 
 ---
 
+Source: `docs/AGENCY_AGENTS.md`
+
+# Agency Agents: task routing and usage contract
+
+## What is installed, and what activation means
+
+The Agency Agents Antigravity integration packages specialist profiles as skills with `agency-` names. Its documented global installation location is `~/.gemini/config/skills/`; project-scoped skills use `.agents/skills/`. This describes instruction loading, not the automatic creation of an independent agent process. [Agency Antigravity integration](https://github.com/msitarzewski/agency-agents/blob/main/integrations/antigravity/README.md).
+
+Antigravity documents skill discovery, activation by reading `SKILL.md`, and these global/workspace locations. The frontmatter `name` identifies the skill; when absent, the folder name is the default. Use the actual installed metadata rather than inferring a slug from a directory. [Antigravity skills documentation](https://antigravity.google/docs/skills).
+
+Local inspection on 10 November 2026 verified installed profiles under `C:/Users/Alksas/.gemini/config/skills/`. For example, `engineering-software-architect/SKILL.md` declares `agency-software-architect`; its activation name is not `engineering-software-architect`. This is a local inventory observation, not proof that a running Antigravity session discovered or applied the profile. Another machine must resolve and verify its own installation.
+
+## One routing source
+
+[AGENCY_AGENT_ROUTING.json](../docs/AGENCY_AGENT_ROUTING.json) is the source of truth for the installed profile registry and task assignments: slug, installed folder, inventoried file SHA, and each task's lead, support profiles, scope, and rationale. Read the current task entry and its task card; the generated prompt collection displays that assignment. Do not maintain a competing 23-row table here or load the entire Agency roster for every task.
+
+Agency profiles supplement the seven tracked LawOffice project skills. Every project skill named by the task card remains required. The approved task scope, stack, domain rules, security policy, and established Arabic RTL design govern implementation; generic Agency advice does not authorize new branding, a replacement architecture, extra features, or a larger milestone.
+
+The global Agency installation is not assumed to be copied into this repository. On the verified machine, resolve the registered folder under `C:/Users/Alksas/.gemini/config/skills/`; on another machine, resolve `~/.gemini/config/skills/` for that user. Do not silently download, reinstall, or vendor profiles. Installation is separate work requiring a user request.
+
+## Execute the assigned roles honestly
+
+1. Read `GEMINI.md`, the current task card, its routing entry, and every named project skill. Resolve the lead and each listed support profile to its installed `SKILL.md`, read the complete instructions, verify its metadata name, and calculate the actual file SHA against the inventory.
+2. Report a missing, unreadable, or misnamed required profile by exact expected slug and resolved path, and stop dependent implementation for resolution. Inventory hash drift is informational rather than an automatic stop: record the actual hash, read the updated instructions, and raise a substantive scope conflict if one exists. Do not claim activation, substitute a generic persona, or continue with zero Agency profiles. Lead and listed supports are required unless the current assignment explicitly marks a support optional. An optional profile's absence is still reported, never silently omitted.
+3. Apply the lead profile to the assigned implementation slice. Use support profiles for their listed checks and return their findings to the lead before submission. If the environment has verified native subagent tooling, report actual invocations and ownership. Loading a skill alone does not launch child processes.
+4. If native subagent tooling is unavailable, perform explicit sequential role passes in the same session: lead implementation, each assigned support examination, then lead reconciliation. Label this as sequential role application, not parallel agents or independent review. A pass may conclude that it found no issues, but must state what it actually examined and what remains untested.
+5. Preserve the task's branch, prerequisites, file ownership, and stopping rule. Supports do not self-approve work or release the next task. Codex independently reviews the actual published implementation and required evidence under `docs/REVIEW_PROTOCOL.md`.
+
+## Required submission evidence
+
+For each Agency profile, record its lead/support role, actual frontmatter name, resolved path, actual file SHA, whether it matched the inventory, rules applied to this task, and support findings with their resolution. Distinguish direct file reading, UI discovery, and actual native subagent execution; claim only what was observed.
+
+Retain the task's normal `Skills loaded`, base/head/pushed SHA, exact commands and exit statuses, screenshots or artifacts, migrations, and `NOT RUN` limitations. Profile loading, a role-pass narrative, or a support's confident verdict is not evidence that the application, Arabic UI, financial behavior, backup, or recovery passed validation. Never retroactively claim profiles were used in earlier work before they were read.
+
+## Integrating this routing update with active T01
+
+T01 may already be active in `D:/Lawyer`. Preparing this documentation does not authorize switching that checkout, rewriting its changes, or claiming the new routing was previously applied. Wait for this documentation PR to be merged through the project's approval process, then inspect and fetch the current state before integrating the updated `origin/main` into the actual T01 feature branch.
+
+Perform that integration only in a clean, task-owned working tree, or a separately coordinated worktree, preserving all existing work. No reset, force push, automatic stash, or branch switch beneath another agent. Resolve integration conflicts within the documented task ownership and obtain Codex guidance on substantive conflicts. Report the resulting baseline and newly applied profile evidence before continuing T01; do not fabricate predecessor acceptance or start T02 as part of integration.
+
+---
+
 Source: `docs/tasks/T01.md`
 
 # T01 — Prove dependency compatibility and create the minimum build
@@ -1740,6 +1814,16 @@ Source: `docs/tasks/T01.md`
 Copy the complete block into Antigravity. This is the first implementation task; it has no predecessor review.
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-software-architect skill/profile. Read ~/.gemini/config/skills/engineering-software-architect/SKILL.md and verify its YAML name is agency-software-architect.
+- Supporting specialist: use the agency-devops-automator skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-devops-automator/SKILL.md and verify its YAML name is agency-devops-automator.
+- Task focus: Prove compatible pinned dependencies and the smallest strict build scaffold; do not redesign the stack or implement business features.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t01-toolchain-foundation. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1775,6 +1859,17 @@ Source: `docs/tasks/T02.md`
 # T02 — Local runtime, database foundation, and CI
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-devops-automator skill/profile. Read ~/.gemini/config/skills/engineering-devops-automator/SKILL.md and verify its YAML name is agency-devops-automator.
+- Supporting specialist: use the agency-backend-architect skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Local PostgreSQL/environment/readiness/CI foundation and isolated failure checks; no authentication or business CRUD.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t02-runtime-ci. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1807,6 +1902,17 @@ Source: `docs/tasks/T03.md`
 # T03 — Secure login, sessions, and the security settings section
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-identity-access-engineer skill/profile. Read ~/.gemini/config/skills/engineering-identity-access-engineer/SKILL.md and verify its YAML name is agency-identity-access-engineer.
+- Supporting specialist: use the agency-application-security-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-appsec-engineer/SKILL.md and verify its YAML name is agency-application-security-engineer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Implement the accepted Better Auth/MFA/session policy; inspect direct-request authorization, secret handling, and recovery/revocation evidence.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t03-identity-sessions. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1844,6 +1950,17 @@ Source: `docs/tasks/T04.md`
 # T04 — Arabic navigation shell and installable PWA
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-frontend-developer skill/profile. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-accessibility-auditor skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-accessibility-auditor/SKILL.md and verify its YAML name is agency-accessibility-auditor.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Implement only the approved Arabic RTL shell/PWA and real state behavior; test keyboard/reflow and prevent confidential caches.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t04-arabic-pwa-shell. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1881,6 +1998,17 @@ Source: `docs/tasks/T05.md`
 # T05 — Parties, client profiles, communication, and powers of attorney
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-application-security-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-appsec-engineer/SKILL.md and verify its YAML name is agency-application-security-engineer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Party/identity/POA metadata and shared audit/idempotency; examine encryption-key handling, version conflicts, and actual isolated tests.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t05-parties. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1918,6 +2046,17 @@ Source: `docs/tasks/T06.md`
 # T06 — Matters, proceedings, relationships, and office reference lists
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Matter/Proceeding/party relations, reference settings and migrations; preserve same-matter constraints and validate real PostgreSQL behavior.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t06-matters-proceedings. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1955,6 +2094,17 @@ Source: `docs/tasks/T07.md`
 # T07 — Search, filters, pagination, and safe archiving
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-frontend-developer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Normalized bounded search and archive behavior using the approved Arabic screens and failure cases; no document-content search.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t07-search-archiving. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -1992,6 +2142,17 @@ Source: `docs/tasks/T08.md`
 # T08 — Hearings, results, adjournments, and atomic follow-up creation
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-frontend-developer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Atomic hearing result/next hearing/tasks/outbox plus usable mobile failure/retry states; no premature reminder worker.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t08-hearing-results. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2029,6 +2190,17 @@ Source: `docs/tasks/T09.md`
 # T09 — Manually confirmed deadlines, tasks, and the agenda
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-frontend-developer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Manual deadline confirmation, tasks and Cairo agenda states; never invent legal periods, dates, or completion evidence.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t09-deadlines-tasks. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2066,6 +2238,17 @@ Source: `docs/tasks/T10.md`
 # T10 — Durable reminders, worker leases, and the in-app inbox
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-devops-automator skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-devops-automator/SKILL.md and verify its YAML name is agency-devops-automator.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Durable PostgreSQL reminder jobs/leases/retries and worker failure evidence; no Redis, external delivery promises, or extra infrastructure.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t10-reminders. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2103,6 +2286,17 @@ Source: `docs/tasks/T11.md`
 # T11 — Private upload, scanning, and authorized preview
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-application-security-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-appsec-engineer/SKILL.md and verify its YAML name is agency-application-security-engineer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Private upload/finalization/scanning and authorized preview; inspect fail-closed validation and real negative cases.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t11-private-uploads. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2135,6 +2329,17 @@ Source: `docs/tasks/T12.md`
 # T12 — Document versions, paper originals, and existing-record links
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-application-security-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-appsec-engineer/SKILL.md and verify its YAML name is agency-application-security-engineer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Immutable document versions, authorized metadata search/links and backup-safe cleanup without public exposure.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t12-document-versions. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2167,6 +2372,17 @@ Source: `docs/tasks/T13.md`
 # T13 — Balanced ledger, fee agreements, payments, and receipts
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Exact EGP piastres, balanced fee posting/allocation/receipts and transactional concurrency; no tax or legal-revenue claims.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t13-fees-collections. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2204,6 +2420,17 @@ Source: `docs/tasks/T14.md`
 # T14 — Reimbursable expenses, client advances, and office expenses
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Separate reimbursable expenses, office costs and advances with locked balance checks and independent expected outcomes.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t14-expenses-advances. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2241,6 +2468,17 @@ Source: `docs/tasks/T15a.md`
 # T15a — Full reversal of an erroneous financial record
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Full correction reversals and allocation release; preserve immutable history and prevent duplicate actual cash effects.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t15a-reversals. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2278,6 +2516,17 @@ Source: `docs/tasks/T15b.md`
 # T15b — Actual refunds and fee adjustments
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Actual partial/full refunds and fee adjustments with capacity/locking tests; do not substitute reversal for disbursement.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t15b-refunds-adjustments. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2315,6 +2564,17 @@ Source: `docs/tasks/T15c.md`
 # T15c — Multi-client distribution, statements, and reconciliation
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-database-optimizer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-database-optimizer/SKILL.md and verify its YAML name is agency-database-optimizer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Multi-client distribution, reconciled statements and restricted opening positions; no floating balances or fabricated history.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t15c-statements-opening-balances. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2354,6 +2614,17 @@ Source: `docs/tasks/T16.md`
 # T16 — Arabic printing and authorized private exports
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-frontend-developer skill/profile. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-document-generator skill/profile for its scoped pass. Read ~/.gemini/config/skills/specialized-document-generator/SKILL.md and verify its YAML name is agency-document-generator.
+- Supporting specialist: use the agency-application-security-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-appsec-engineer/SKILL.md and verify its YAML name is agency-application-security-engineer.
+- Task focus: Generate the planned HTML/Playwright Arabic PDFs and private CSV/ZIP exports; inspect layout, totals, authorization and formula injection without changing stacks.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t16-print-export. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2392,6 +2663,17 @@ Source: `docs/tasks/T17.md`
 # T17 — Limited CSV import, preview, and safe batch replay
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-backend-architect skill/profile. Read ~/.gemini/config/skills/engineering-backend-architect/SKILL.md and verify its YAML name is agency-backend-architect.
+- Supporting specialist: use the agency-frontend-developer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: The accepted limited import template, clear Arabic preview and persistent replay/source-link checks; no universal migration engine.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t17-csv-import. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2429,6 +2711,17 @@ Source: `docs/tasks/T18.md`
 # T18 — Restricted deployment configuration and operational checks
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-devops-automator skill/profile. Read ~/.gemini/config/skills/engineering-devops-automator/SKILL.md and verify its YAML name is agency-devops-automator.
+- Supporting specialist: use the agency-security-architect skill/profile for its scoped pass. Read ~/.gemini/config/skills/security-architect/SKILL.md and verify its YAML name is agency-security-architect.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Pinned private deployment configuration and isolated fault checks; no service purchase or live deployment without the existing explicit operational assignment.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t18-restricted-deployment. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2461,6 +2754,17 @@ Source: `docs/tasks/T19.md`
 # T19 — Consistent backup, key recovery, and restore drill
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-database-reliability-engineer skill/profile. Read ~/.gemini/config/skills/engineering-database-reliability-engineer/SKILL.md and verify its YAML name is agency-database-reliability-engineer.
+- Supporting specialist: use the agency-devops-automator skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-devops-automator/SKILL.md and verify its YAML name is agency-devops-automator.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Coordinate dump/files/manifest/key backup and clean restore drills with measured evidence; do not add HA, replication or PITR.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t19-backup-restore. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2493,6 +2797,17 @@ Source: `docs/tasks/T20.md`
 # T20 — Observed lawyer pilot and usability evidence
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-reality-checker skill/profile. Read ~/.gemini/config/skills/testing-reality-checker/SKILL.md and verify its YAML name is agency-reality-checker.
+- Supporting specialist: use the agency-accessibility-auditor skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-accessibility-auditor/SKILL.md and verify its YAML name is agency-accessibility-auditor.
+- Supporting specialist: use the agency-frontend-developer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-frontend-developer/SKILL.md and verify its YAML name is agency-frontend-developer.
+- Task focus: Observe the real lawyer pilot and record actual usability/accessibility findings; do not invent user participation, self-approve, or expand the UI.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t20-lawyer-pilot. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.
@@ -2530,6 +2845,17 @@ Source: `docs/tasks/T21.md`
 # T21 — Approved migration, cutover, and office handover
 
 ```text
+Agency Agent assignment (required):
+- Read docs/AGENCY_AGENTS.md and the task entry in docs/AGENCY_AGENT_ROUTING.json before editing.
+- Lead implementer: use the agency-database-reliability-engineer skill/profile. Read ~/.gemini/config/skills/engineering-database-reliability-engineer/SKILL.md and verify its YAML name is agency-database-reliability-engineer.
+- Supporting specialist: use the agency-technical-writer skill/profile for its scoped pass. Read ~/.gemini/config/skills/engineering-technical-writer/SKILL.md and verify its YAML name is agency-technical-writer.
+- Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read ~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
+- Task focus: Use accepted migration/opening commands and approved cutover/recovery gates; prepare the Arabic handover and reconcile actual authorized results.
+- Expand ~ to the current user home. A skill name is its frontmatter name, not its folder name. Read the installed files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not install profiles or silently substitute one.
+- Keep the lead role for implementation. Apply supporting profiles as sequential scoped passes (or report actual supported delegation if explicitly authorized); do not claim separate agents were spawned just because profiles were read. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership over generic persona suggestions.
+- Before submission, apply the named supporting profiles to the relevant changed behavior and record concrete findings/actions and tests. Record each role, actual metadata name, resolved SKILL.md path, content SHA-256, and how its guidance was applied. Loading a profile is not test evidence or Codex acceptance. Do not self-approve or merge main.
+End Agency Agent assignment.
+
 Git delivery contract (required):
 - Read docs/GIT_WORKFLOW.md. Canonical origin is https://github.com/MohamedAlksas/LawyerOS.git.
 - Use the dedicated branch feature/t21-office-handover. Inspect current changes, origin, and latest origin/main before editing. Do not switch a dirty/shared checkout or stage another agent's work. Use an isolated worktree if another task is active.

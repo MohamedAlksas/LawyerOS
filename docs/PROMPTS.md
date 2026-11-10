@@ -6,35 +6,37 @@ Each linked card contains one complete, copyable prompt. Give Antigravity only t
 
 Open `D:\Lawyer` in Antigravity and copy the full prompt in [T01](tasks/T01.md). It explicitly loads `lawoffice-delivery` and `lawoffice-foundation` from their actual `.agents/skills/` files. T01 is the only task without a predecessor acceptance requirement. The generated output `LawOffice-OS-Antigravity-T01.md` contains the same prompt.
 
+It also explicitly selects lead `agency-software-architect` and support `agency-devops-automator` from their verified installed SKILL.md paths. The following table maps every task to its actual Agency lead/support profiles. See [Agency usage](AGENCY_AGENTS.md) and [the routing registry](AGENCY_AGENT_ROUTING.json). Local profile verification does not claim runtime activation in Antigravity.
+
 ## Task and skill map
 
 Every task loads `lawoffice-delivery`. Additional skills are listed below; every card includes their exact paths. See [Antigravity setup](ANTIGRAVITY.md) for the bundled skills. Do not load all skills or execute all cards together. Each predecessor refers to an actual `docs/reviews/<ID>-review.md` decision stating `ACCEPTED`, with delivered files inspected. A submission is not acceptance.
 
-| Task | Exact card | Required predecessor | Additional required skills |
-|---|---|---|---|
-| T01 | [T01](tasks/T01.md) | None — first task | `lawoffice-foundation` |
-| T02 | [T02](tasks/T02.md) | T01 | `lawoffice-foundation`, `lawoffice-testing` |
-| T03 | [T03](tasks/T03.md) | T02 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T04 | [T04](tasks/T04.md) | T03 | `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T05 | [T05](tasks/T05.md) | T04 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T06 | [T06](tasks/T06.md) | T05 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T07 | [T07](tasks/T07.md) | T06 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T08 | [T08](tasks/T08.md) | T07 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T09 | [T09](tasks/T09.md) | T08 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T10 | [T10](tasks/T10.md) | T09 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T11 | [T11](tasks/T11.md) | T10 | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T12 | [T12](tasks/T12.md) | T11 | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
-| T13 | [T13](tasks/T13.md) | T12 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T14 | [T14](tasks/T14.md) | T13 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15a | [T15a](tasks/T15a.md) | T14 | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15b | [T15b](tasks/T15b.md) | T15a | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T15c | [T15c](tasks/T15c.md) | T15b | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T16 | [T16](tasks/T16.md) | T15c | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T17 | [T17](tasks/T17.md) | T16 | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T18 | [T18](tasks/T18.md) | T17 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T19 | [T19](tasks/T19.md) | T18 | `lawoffice-security-operations`, `lawoffice-testing` |
-| T20 | [T20](tasks/T20.md) | T19 | `lawoffice-arabic-ui`, `lawoffice-testing` |
-| T21 | [T21](tasks/T21.md) | T20 | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
+| Task | Exact card | Required predecessor | Agency lead | Agency support | Additional project skills |
+|---|---|---|---|---|---|
+| T01 | [T01](tasks/T01.md) | None — first task | `agency-software-architect` | `agency-devops-automator` | `lawoffice-foundation` |
+| T02 | [T02](tasks/T02.md) | T01 | `agency-devops-automator` | `agency-backend-architect`, `agency-test-automation-engineer` | `lawoffice-foundation`, `lawoffice-testing` |
+| T03 | [T03](tasks/T03.md) | T02 | `agency-identity-access-engineer` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T04 | [T04](tasks/T04.md) | T03 | `agency-frontend-developer` | `agency-accessibility-auditor`, `agency-test-automation-engineer` | `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T05 | [T05](tasks/T05.md) | T04 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T06 | [T06](tasks/T06.md) | T05 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T07 | [T07](tasks/T07.md) | T06 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T08 | [T08](tasks/T08.md) | T07 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T09 | [T09](tasks/T09.md) | T08 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T10 | [T10](tasks/T10.md) | T09 | `agency-backend-architect` | `agency-devops-automator`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T11 | [T11](tasks/T11.md) | T10 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T12 | [T12](tasks/T12.md) | T11 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
+| T13 | [T13](tasks/T13.md) | T12 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T14 | [T14](tasks/T14.md) | T13 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15a | [T15a](tasks/T15a.md) | T14 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15b | [T15b](tasks/T15b.md) | T15a | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T15c | [T15c](tasks/T15c.md) | T15b | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-finance`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T16 | [T16](tasks/T16.md) | T15c | `agency-frontend-developer` | `agency-document-generator`, `agency-application-security-engineer` | `lawoffice-security-operations`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T17 | [T17](tasks/T17.md) | T16 | `agency-backend-architect` | `agency-frontend-developer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T18 | [T18](tasks/T18.md) | T17 | `agency-devops-automator` | `agency-security-architect`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T19 | [T19](tasks/T19.md) | T18 | `agency-database-reliability-engineer` | `agency-devops-automator`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T20 | [T20](tasks/T20.md) | T19 | `agency-reality-checker` | `agency-accessibility-auditor`, `agency-frontend-developer` | `lawoffice-arabic-ui`, `lawoffice-testing` |
+| T21 | [T21](tasks/T21.md) | T20 | `agency-database-reliability-engineer` | `agency-technical-writer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-security-operations`, `lawoffice-testing` |
 
 ## What every prompt specifies
 

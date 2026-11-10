@@ -28,6 +28,7 @@ Branch / upstream / PR URL:
 Local HEAD / independently verified remote pushed SHA:
 Changed files:
 Skills loaded (exact SKILL.md paths and task-specific application):
+Agency Agent evidence (lead/support, actual metadata name, resolved path, SHA-256, applied guidance, supporting findings/actions):
 Behavior delivered:
 Requirements and acceptance IDs covered:
 Commands actually run + exit status + short output:

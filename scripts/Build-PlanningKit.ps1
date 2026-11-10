@@ -13,7 +13,7 @@ $documents = @(
     'docs/adr/0001-matter-and-proceeding.md',
     'docs/adr/0002-financial-subledger.md',
     'docs/PLAN_REVIEW.md', 'docs/START_HERE.md', 'docs/ANTIGRAVITY.md',
-    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md'
+    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md'
 )
 $taskDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs/tasks') -Filter '*.md' -File | Sort-Object Name | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
 $skillDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills') -Filter 'SKILL.md' -File -Recurse -Force | Sort-Object FullName | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
@@ -22,7 +22,8 @@ $documents += $skillDocuments
 $archiveFiles = $documents + @(
     '.gitignore', '.gitattributes', '.githooks/pre-push', '.github/workflows/planning-validation.yml',
     'scripts/Add-TaskGitInstructions.ps1', 'scripts/Build-TaskPromptIndex.ps1',
-    'scripts/Validate-AntigravityKit.ps1', 'scripts/Build-PlanningKit.ps1'
+    'scripts/Validate-AntigravityKit.ps1', 'scripts/Build-PlanningKit.ps1',
+    'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json'
 )
 $broken = [System.Collections.Generic.List[string]]::new()
 $linkCount = 0
@@ -127,6 +128,7 @@ $report = [ordered]@{
     sourceDocuments = $documents.Count
     taskCards = $taskDocuments.Count
     projectSkills = $skillDocuments.Count
+    agencyProfiles = ([System.IO.File]::ReadAllText((Join-Path $projectRoot 'docs/AGENCY_AGENT_ROUTING.json')) | ConvertFrom-Json -AsHashtable).profiles.Count
     localLinksChecked = $linkCount
     brokenLinks = $broken.Count
     codeFences = 'Balanced'
