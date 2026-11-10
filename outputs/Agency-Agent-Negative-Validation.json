@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "scope": "Isolated validator behavior; no global profiles modified and no application execution",
+  "scenarios": [
+    {
+      "scenario": "Wrong lead role rejected",
+      "outcome": "PASS",
+      "expected": "Invalid routing rejected"
+    },
+    {
+      "scenario": "Unassigned profile rejected",
+      "outcome": "PASS",
+      "expected": "Invalid routing rejected"
+    },
+    {
+      "scenario": "Missing installed profile rejected",
+      "outcome": "PASS",
+      "expected": "Invalid routing rejected"
+    },
+    {
+      "scenario": "Legitimate inventory hash drift reported",
+      "outcome": "PASS",
+      "expected": "Matching metadata accepted with hashChanged=true"
+    }
+  ]
+}

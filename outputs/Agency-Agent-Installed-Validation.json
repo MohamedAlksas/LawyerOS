@@ -1,0 +1,370 @@
+{
+  "schemaVersion": 1,
+  "result": "PASS",
+  "mode": "installed-profile-verification",
+  "scope": "Agency Agent routing and optional installed-profile proof only; no application tests or runtime agent execution",
+  "taskCards": 23,
+  "profiles": 14,
+  "checks": [
+    {
+      "task": "T01",
+      "lead": "agency-software-architect",
+      "support": [
+        "agency-devops-automator"
+      ],
+      "focus": "Prove compatible pinned dependencies and the smallest strict build scaffold; do not redesign the stack or implement business features.",
+      "result": "PASS"
+    },
+    {
+      "task": "T02",
+      "lead": "agency-devops-automator",
+      "support": [
+        "agency-backend-architect",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Local PostgreSQL/environment/readiness/CI foundation and isolated failure checks; no authentication or business CRUD.",
+      "result": "PASS"
+    },
+    {
+      "task": "T03",
+      "lead": "agency-identity-access-engineer",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Implement the accepted Better Auth/MFA/session policy; inspect direct-request authorization, secret handling, and recovery/revocation evidence.",
+      "result": "PASS"
+    },
+    {
+      "task": "T04",
+      "lead": "agency-frontend-developer",
+      "support": [
+        "agency-accessibility-auditor",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Implement only the approved Arabic RTL shell/PWA and real state behavior; test keyboard/reflow and prevent confidential caches.",
+      "result": "PASS"
+    },
+    {
+      "task": "T05",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Party/identity/POA metadata and shared audit/idempotency; examine encryption-key handling, version conflicts, and actual isolated tests.",
+      "result": "PASS"
+    },
+    {
+      "task": "T06",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Matter/Proceeding/party relations, reference settings and migrations; preserve same-matter constraints and validate real PostgreSQL behavior.",
+      "result": "PASS"
+    },
+    {
+      "task": "T07",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Normalized bounded search and archive behavior using the approved Arabic screens and failure cases; no document-content search.",
+      "result": "PASS"
+    },
+    {
+      "task": "T08",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Atomic hearing result/next hearing/tasks/outbox plus usable mobile failure/retry states; no premature reminder worker.",
+      "result": "PASS"
+    },
+    {
+      "task": "T09",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Manual deadline confirmation, tasks and Cairo agenda states; never invent legal periods, dates, or completion evidence.",
+      "result": "PASS"
+    },
+    {
+      "task": "T10",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-devops-automator",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Durable PostgreSQL reminder jobs/leases/retries and worker failure evidence; no Redis, external delivery promises, or extra infrastructure.",
+      "result": "PASS"
+    },
+    {
+      "task": "T11",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Private upload/finalization/scanning and authorized preview; inspect fail-closed validation and real negative cases.",
+      "result": "PASS"
+    },
+    {
+      "task": "T12",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Immutable document versions, authorized metadata search/links and backup-safe cleanup without public exposure.",
+      "result": "PASS"
+    },
+    {
+      "task": "T13",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Exact EGP piastres, balanced fee posting/allocation/receipts and transactional concurrency; no tax or legal-revenue claims.",
+      "result": "PASS"
+    },
+    {
+      "task": "T14",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Separate reimbursable expenses, office costs and advances with locked balance checks and independent expected outcomes.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15a",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Full correction reversals and allocation release; preserve immutable history and prevent duplicate actual cash effects.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15b",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Actual partial/full refunds and fee adjustments with capacity/locking tests; do not substitute reversal for disbursement.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15c",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Multi-client distribution, reconciled statements and restricted opening positions; no floating balances or fabricated history.",
+      "result": "PASS"
+    },
+    {
+      "task": "T16",
+      "lead": "agency-frontend-developer",
+      "support": [
+        "agency-document-generator",
+        "agency-application-security-engineer"
+      ],
+      "focus": "Generate the planned HTML/Playwright Arabic PDFs and private CSV/ZIP exports; inspect layout, totals, authorization and formula injection without changing stacks.",
+      "result": "PASS"
+    },
+    {
+      "task": "T17",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "The accepted limited import template, clear Arabic preview and persistent replay/source-link checks; no universal migration engine.",
+      "result": "PASS"
+    },
+    {
+      "task": "T18",
+      "lead": "agency-devops-automator",
+      "support": [
+        "agency-security-architect",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Pinned private deployment configuration and isolated fault checks; no service purchase or live deployment without the existing explicit operational assignment.",
+      "result": "PASS"
+    },
+    {
+      "task": "T19",
+      "lead": "agency-database-reliability-engineer",
+      "support": [
+        "agency-devops-automator",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Coordinate dump/files/manifest/key backup and clean restore drills with measured evidence; do not add HA, replication or PITR.",
+      "result": "PASS"
+    },
+    {
+      "task": "T20",
+      "lead": "agency-reality-checker",
+      "support": [
+        "agency-accessibility-auditor",
+        "agency-frontend-developer"
+      ],
+      "focus": "Observe the real lawyer pilot and record actual usability/accessibility findings; do not invent user participation, self-approve, or expand the UI.",
+      "result": "PASS"
+    },
+    {
+      "task": "T21",
+      "lead": "agency-database-reliability-engineer",
+      "support": [
+        "agency-technical-writer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Use accepted migration/opening commands and approved cutover/recovery gates; prepare the Arabic handover and reconcile actual authorized results.",
+      "result": "PASS"
+    }
+  ],
+  "installedProfiles": [
+    {
+      "slug": "agency-accessibility-auditor",
+      "source": "~/.gemini/config/skills/testing-accessibility-auditor/SKILL.md",
+      "metadataName": "agency-accessibility-auditor",
+      "observedSha256": "1b099d10cc4f82568ded01d9918cd63e24ad177702f5dc76b991e60e7eff71dd",
+      "actualSha256": "1b099d10cc4f82568ded01d9918cd63e24ad177702f5dc76b991e60e7eff71dd",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-application-security-engineer",
+      "source": "~/.gemini/config/skills/security-appsec-engineer/SKILL.md",
+      "metadataName": "agency-application-security-engineer",
+      "observedSha256": "77c29a754e6c25b97f189c06d8459b02fd29f4d8de8602ca53740f4c92a1f259",
+      "actualSha256": "77c29a754e6c25b97f189c06d8459b02fd29f4d8de8602ca53740f4c92a1f259",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-backend-architect",
+      "source": "~/.gemini/config/skills/engineering-backend-architect/SKILL.md",
+      "metadataName": "agency-backend-architect",
+      "observedSha256": "05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf",
+      "actualSha256": "05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-database-optimizer",
+      "source": "~/.gemini/config/skills/engineering-database-optimizer/SKILL.md",
+      "metadataName": "agency-database-optimizer",
+      "observedSha256": "bd5f5e6813c8931c1387689f6a4d6137e3385734d402f72bd0dfc4292f7ee068",
+      "actualSha256": "bd5f5e6813c8931c1387689f6a4d6137e3385734d402f72bd0dfc4292f7ee068",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-database-reliability-engineer",
+      "source": "~/.gemini/config/skills/engineering-database-reliability-engineer/SKILL.md",
+      "metadataName": "agency-database-reliability-engineer",
+      "observedSha256": "c17d3c559d25049697f19a76852661d531430a900208b4a5aefcdd2d9944547e",
+      "actualSha256": "c17d3c559d25049697f19a76852661d531430a900208b4a5aefcdd2d9944547e",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-devops-automator",
+      "source": "~/.gemini/config/skills/engineering-devops-automator/SKILL.md",
+      "metadataName": "agency-devops-automator",
+      "observedSha256": "90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e",
+      "actualSha256": "90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-document-generator",
+      "source": "~/.gemini/config/skills/specialized-document-generator/SKILL.md",
+      "metadataName": "agency-document-generator",
+      "observedSha256": "b739ac3de64d11b7fdc7e38e4df401963f61b259871fcbd70581a4fc0976bc58",
+      "actualSha256": "b739ac3de64d11b7fdc7e38e4df401963f61b259871fcbd70581a4fc0976bc58",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-frontend-developer",
+      "source": "~/.gemini/config/skills/engineering-frontend-developer/SKILL.md",
+      "metadataName": "agency-frontend-developer",
+      "observedSha256": "69d473c132831e0861bbf3cc50bb933c1dc231d74872b08731c3b453d79925f0",
+      "actualSha256": "69d473c132831e0861bbf3cc50bb933c1dc231d74872b08731c3b453d79925f0",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-identity-access-engineer",
+      "source": "~/.gemini/config/skills/engineering-identity-access-engineer/SKILL.md",
+      "metadataName": "agency-identity-access-engineer",
+      "observedSha256": "34163d05151805a8f320bf89c4a25ce2743cb96090592ea0d6d34da6533ef618",
+      "actualSha256": "34163d05151805a8f320bf89c4a25ce2743cb96090592ea0d6d34da6533ef618",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-reality-checker",
+      "source": "~/.gemini/config/skills/testing-reality-checker/SKILL.md",
+      "metadataName": "agency-reality-checker",
+      "observedSha256": "d6bc996bbf602b38b77641eff4cf74215a3f6644238321bca202a255dc4183d6",
+      "actualSha256": "d6bc996bbf602b38b77641eff4cf74215a3f6644238321bca202a255dc4183d6",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-security-architect",
+      "source": "~/.gemini/config/skills/security-architect/SKILL.md",
+      "metadataName": "agency-security-architect",
+      "observedSha256": "16dbbf9883bd0766f9a865271a4210e01c6f3eee7678640f0355dab93f35cb85",
+      "actualSha256": "16dbbf9883bd0766f9a865271a4210e01c6f3eee7678640f0355dab93f35cb85",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-software-architect",
+      "source": "~/.gemini/config/skills/engineering-software-architect/SKILL.md",
+      "metadataName": "agency-software-architect",
+      "observedSha256": "77c26fb9f7072ac351e864446e97c9c9ca6ca0de91183f3d42c95b60202daa8b",
+      "actualSha256": "77c26fb9f7072ac351e864446e97c9c9ca6ca0de91183f3d42c95b60202daa8b",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-technical-writer",
+      "source": "~/.gemini/config/skills/engineering-technical-writer/SKILL.md",
+      "metadataName": "agency-technical-writer",
+      "observedSha256": "b4c37195e10dbe108e52994bc8fef2779bfac0d6722b421f81eae9506cdd1820",
+      "actualSha256": "b4c37195e10dbe108e52994bc8fef2779bfac0d6722b421f81eae9506cdd1820",
+      "hashChanged": false,
+      "result": "PASS"
+    },
+    {
+      "slug": "agency-test-automation-engineer",
+      "source": "~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md",
+      "metadataName": "agency-test-automation-engineer",
+      "observedSha256": "af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4",
+      "actualSha256": "af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4",
+      "hashChanged": false,
+      "result": "PASS"
+    }
+  ],
+  "installedProfileChecks": "PASS: metadata names and actual hashes read; observed hash drift is informational",
+  "antigravityRuntimeExecution": "NOT RUN: profile routing does not prove automatic agent loading or spawning",
+  "projectSkills": "Validated separately by Validate-AntigravityKit.ps1; Agency profiles do not replace the seven project skills"
+}

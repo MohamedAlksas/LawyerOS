@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "result": "PASS",
+  "mode": "portable-manifest-and-cards",
+  "scope": "Agency Agent routing and optional installed-profile proof only; no application tests or runtime agent execution",
+  "taskCards": 23,
+  "profiles": 14,
+  "checks": [
+    {
+      "task": "T01",
+      "lead": "agency-software-architect",
+      "support": [
+        "agency-devops-automator"
+      ],
+      "focus": "Prove compatible pinned dependencies and the smallest strict build scaffold; do not redesign the stack or implement business features.",
+      "result": "PASS"
+    },
+    {
+      "task": "T02",
+      "lead": "agency-devops-automator",
+      "support": [
+        "agency-backend-architect",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Local PostgreSQL/environment/readiness/CI foundation and isolated failure checks; no authentication or business CRUD.",
+      "result": "PASS"
+    },
+    {
+      "task": "T03",
+      "lead": "agency-identity-access-engineer",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Implement the accepted Better Auth/MFA/session policy; inspect direct-request authorization, secret handling, and recovery/revocation evidence.",
+      "result": "PASS"
+    },
+    {
+      "task": "T04",
+      "lead": "agency-frontend-developer",
+      "support": [
+        "agency-accessibility-auditor",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Implement only the approved Arabic RTL shell/PWA and real state behavior; test keyboard/reflow and prevent confidential caches.",
+      "result": "PASS"
+    },
+    {
+      "task": "T05",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Party/identity/POA metadata and shared audit/idempotency; examine encryption-key handling, version conflicts, and actual isolated tests.",
+      "result": "PASS"
+    },
+    {
+      "task": "T06",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Matter/Proceeding/party relations, reference settings and migrations; preserve same-matter constraints and validate real PostgreSQL behavior.",
+      "result": "PASS"
+    },
+    {
+      "task": "T07",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Normalized bounded search and archive behavior using the approved Arabic screens and failure cases; no document-content search.",
+      "result": "PASS"
+    },
+    {
+      "task": "T08",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Atomic hearing result/next hearing/tasks/outbox plus usable mobile failure/retry states; no premature reminder worker.",
+      "result": "PASS"
+    },
+    {
+      "task": "T09",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Manual deadline confirmation, tasks and Cairo agenda states; never invent legal periods, dates, or completion evidence.",
+      "result": "PASS"
+    },
+    {
+      "task": "T10",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-devops-automator",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Durable PostgreSQL reminder jobs/leases/retries and worker failure evidence; no Redis, external delivery promises, or extra infrastructure.",
+      "result": "PASS"
+    },
+    {
+      "task": "T11",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Private upload/finalization/scanning and authorized preview; inspect fail-closed validation and real negative cases.",
+      "result": "PASS"
+    },
+    {
+      "task": "T12",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-application-security-engineer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Immutable document versions, authorized metadata search/links and backup-safe cleanup without public exposure.",
+      "result": "PASS"
+    },
+    {
+      "task": "T13",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Exact EGP piastres, balanced fee posting/allocation/receipts and transactional concurrency; no tax or legal-revenue claims.",
+      "result": "PASS"
+    },
+    {
+      "task": "T14",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Separate reimbursable expenses, office costs and advances with locked balance checks and independent expected outcomes.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15a",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Full correction reversals and allocation release; preserve immutable history and prevent duplicate actual cash effects.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15b",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Actual partial/full refunds and fee adjustments with capacity/locking tests; do not substitute reversal for disbursement.",
+      "result": "PASS"
+    },
+    {
+      "task": "T15c",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-database-optimizer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Multi-client distribution, reconciled statements and restricted opening positions; no floating balances or fabricated history.",
+      "result": "PASS"
+    },
+    {
+      "task": "T16",
+      "lead": "agency-frontend-developer",
+      "support": [
+        "agency-document-generator",
+        "agency-application-security-engineer"
+      ],
+      "focus": "Generate the planned HTML/Playwright Arabic PDFs and private CSV/ZIP exports; inspect layout, totals, authorization and formula injection without changing stacks.",
+      "result": "PASS"
+    },
+    {
+      "task": "T17",
+      "lead": "agency-backend-architect",
+      "support": [
+        "agency-frontend-developer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "The accepted limited import template, clear Arabic preview and persistent replay/source-link checks; no universal migration engine.",
+      "result": "PASS"
+    },
+    {
+      "task": "T18",
+      "lead": "agency-devops-automator",
+      "support": [
+        "agency-security-architect",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Pinned private deployment configuration and isolated fault checks; no service purchase or live deployment without the existing explicit operational assignment.",
+      "result": "PASS"
+    },
+    {
+      "task": "T19",
+      "lead": "agency-database-reliability-engineer",
+      "support": [
+        "agency-devops-automator",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Coordinate dump/files/manifest/key backup and clean restore drills with measured evidence; do not add HA, replication or PITR.",
+      "result": "PASS"
+    },
+    {
+      "task": "T20",
+      "lead": "agency-reality-checker",
+      "support": [
+        "agency-accessibility-auditor",
+        "agency-frontend-developer"
+      ],
+      "focus": "Observe the real lawyer pilot and record actual usability/accessibility findings; do not invent user participation, self-approve, or expand the UI.",
+      "result": "PASS"
+    },
+    {
+      "task": "T21",
+      "lead": "agency-database-reliability-engineer",
+      "support": [
+        "agency-technical-writer",
+        "agency-test-automation-engineer"
+      ],
+      "focus": "Use accepted migration/opening commands and approved cutover/recovery gates; prepare the Arabic handover and reconcile actual authorized results.",
+      "result": "PASS"
+    }
+  ],
+  "installedProfiles": null,
+  "installedProfileChecks": "NOT RUN: use -VerifyInstalled on the implementation machine",
+  "antigravityRuntimeExecution": "NOT RUN: profile routing does not prove automatic agent loading or spawning",
+  "projectSkills": "Validated separately by Validate-AntigravityKit.ps1; Agency profiles do not replace the seven project skills"
+}

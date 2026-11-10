@@ -24,10 +24,12 @@ jobs:
       - name: Rebuild prompt index and planning package
         shell: pwsh
         run: |
+          ./scripts/Validate-AgencyAgentRouting.ps1
+          ./scripts/Update-AgencyAgentPrompts.ps1
           ./scripts/Build-TaskPromptIndex.ps1
           ./scripts/Build-PlanningKit.ps1
       - name: Check maintained text deliverables are current
         shell: pwsh
         run: |
-          git diff --exit-code -- docs/PROMPTS.md outputs/LawOffice-OS-Master-Plan.md outputs/LawOffice-OS-Gemini-Prompts.md outputs/LawOffice-OS-Antigravity-T01.md outputs/LawOffice-OS-Start-Here.md
+          git diff --exit-code -- docs/tasks docs/PROMPTS.md outputs/LawOffice-OS-Master-Plan.md outputs/LawOffice-OS-Gemini-Prompts.md outputs/LawOffice-OS-Antigravity-T01.md outputs/LawOffice-OS-Start-Here.md
           if ($LASTEXITCODE -ne 0) { throw 'Regenerate the planning deliverables and commit the updated files.' }

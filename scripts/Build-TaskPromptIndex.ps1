@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskIds = @('T01','T02','T03','T04','T05','T06','T07','T08','T09','T10','T11','T12','T13','T14','T15a','T15b','T15c','T16','T17','T18','T19','T20','T21')
+$agencyRouting = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'docs/AGENCY_AGENT_ROUTING.json')) | ConvertFrom-Json -AsHashtable
 $lines = [System.Collections.Generic.List[string]]::new()
 $intro = @'
 # Antigravity implementation prompts — one task at a time
@@ -11,12 +12,14 @@ Each linked card contains one complete, copyable prompt. Give Antigravity only t
 
 Open `D:\Lawyer` in Antigravity and copy the full prompt in [T01](tasks/T01.md). It explicitly loads `lawoffice-delivery` and `lawoffice-foundation` from their actual `.agents/skills/` files. T01 is the only task without a predecessor acceptance requirement. The generated output `LawOffice-OS-Antigravity-T01.md` contains the same prompt.
 
+It also explicitly selects lead `agency-software-architect` and support `agency-devops-automator` from their verified installed SKILL.md paths. The following table maps every task to its actual Agency lead/support profiles. See [Agency usage](AGENCY_AGENTS.md) and [the routing registry](AGENCY_AGENT_ROUTING.json). Local profile verification does not claim runtime activation in Antigravity.
+
 ## Task and skill map
 
 Every task loads `lawoffice-delivery`. Additional skills are listed below; every card includes their exact paths. See [Antigravity setup](ANTIGRAVITY.md) for the bundled skills. Do not load all skills or execute all cards together. Each predecessor refers to an actual `docs/reviews/<ID>-review.md` decision stating `ACCEPTED`, with delivered files inspected. A submission is not acceptance.
 
-| Task | Exact card | Required predecessor | Additional required skills |
-|---|---|---|---|
+| Task | Exact card | Required predecessor | Agency lead | Agency support | Additional project skills |
+|---|---|---|---|---|---|
 '@
 $lines.Add($intro)
 $previous = 'None — first task'
@@ -25,7 +28,10 @@ foreach ($taskId in $taskIds) {
     $body = [System.IO.File]::ReadAllText((Join-Path $projectRoot $relative))
     $skillNames = @([regex]::Matches($body, '\.agents/skills/([a-z0-9-]+)/SKILL\.md') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Where-Object { $_ -ne 'lawoffice-delivery' })
     $skills = ($skillNames | ForEach-Object { '`' + $_ + '`' }) -join ', '
-    $lines.Add('| ' + $taskId + ' | [' + $taskId + '](tasks/' + $taskId + '.md) | ' + $previous + ' | ' + $skills + ' |')
+    $routing = $agencyRouting.tasks[$taskId]
+    if (-not $routing) { throw ('Missing Agency routing for ' + $taskId) }
+    $support = ($routing.support | ForEach-Object { '`' + $_ + '`' }) -join ', '
+    $lines.Add('| ' + $taskId + ' | [' + $taskId + '](tasks/' + $taskId + '.md) | ' + $previous + ' | `' + $routing.lead + '` | ' + $support + ' | ' + $skills + ' |')
     $previous = $taskId
 }
 $outro = @'
