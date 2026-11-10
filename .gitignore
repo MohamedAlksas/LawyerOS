@@ -1,0 +1,44 @@
+# Local scratch work and historical source snapshots
+/work/
+
+# Credentials and private key material
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+
+# Dependencies, build products, and temporary test artifacts
+node_modules/
+.next/
+.turbo/
+.cache/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Runtime client records and operational backups
+/data/
+/storage/
+/uploads/
+/quarantine/
+/backups/
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
+
+# Historical one-time translation evidence is kept locally only
+/outputs/Translation-Validation.json
+
+# Common local editor/OS files
+.DS_Store
+Thumbs.db
+.idea/
+*.log
