@@ -1,5 +1,7 @@
 # T02 — Independent Codex review
 
+Latest review: **CHANGES_REQUESTED** at published head `111c8256692f79fa8d22c243ec1ba2d52ee66264`. See [correction-round review](T02-review-round2.md) and [the next correction assignment](T02-corrections-round2.md). The original review below is preserved as historical evidence; T03 remains unreleased.
+
 Decision: **CHANGES_REQUESTED**. Keep PR #4 draft. T03 is not released.
 
 Review date: 11 November 2026, Africa/Cairo.
