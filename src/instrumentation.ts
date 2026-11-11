@@ -3,8 +3,14 @@ export async function register() {
     // Validate runtime environment at server startup.
     // Preserves builds that legitimately do not require live runtime secrets.
     if (process.env.NEXT_PHASE !== 'phase-production-build') {
-      const { validateStartupEnv } = await import('@/lib/env');
-      validateStartupEnv();
+      try {
+        const { validateStartupEnv } = await import('@/lib/env');
+        validateStartupEnv();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[Startup Failure] ${message}\n`);
+        process.exit(1);
+      }
     }
   }
 }
