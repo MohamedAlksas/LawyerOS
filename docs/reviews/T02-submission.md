@@ -20,13 +20,14 @@
 - Round 5 frozen implementation checkpoint: `dc6bd08278634eb499b908a3f2031b83cb492039` (commit `dc6bd08`)  
 - Round 5 published HEAD SHA: `673cd6d5e8aa55423dfb0145b593a128b3bf6e88` (commit `673cd6d`)  
 - Codex round 6 assignment commit: `1aaae2fde015d7dee6a1eb950b8f5e6221e1e4b3`  
-- Round 6 frozen implementation checkpoint: `3ddd61522583ed014af435be2c3b9f6db9f329ed` (commit `3ddd615`)  
+- Round 6 initial implementation commit: `3ddd61522583ed014af435be2c3b9f6db9f329ed` (commit `3ddd615`)  
+- Round 6 refined frozen implementation checkpoint: `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8` (commit `812d95e`)  
 - Round 6 report & documentation commit: *distinguished report-only commit to be published on `feature/t02-runtime-ci`*  
 - Round 6 remote pushed HEAD SHA: *verified via `git ls-remote` and recorded in PR metadata / delivery summary upon push*  
 
 **Changed files in Round 6:**
 - `src/instrumentation.ts` (handled startup validation failure in `register()` with sanitized stderr output and natural `process.exit(1)` termination before port binding)
-- `tests/integration/startup-process.test.ts` (new process-level integration test suite verifying natural nonzero exit code 1, closed port, and task-owned PID teardown)
+- `tests/integration/startup-process.test.ts` (new process-level integration test suite verifying natural nonzero exit code 1, closed port with polling retry, POSIX process group teardown, and task-owned PID teardown)
 - `outputs/LawOffice-OS-Master-Plan.md` (regenerated master plan reflecting updated process-ownership rule)
 - `outputs/LawOffice-OS-Planning-Kit.zip` (regenerated via PowerShell 7 with all 253 entry hashes matching)
 - `outputs/Planning-Validation.json` (fresh planning validation report)
@@ -67,35 +68,35 @@ All three roles were reused from active sessions using documented invocation ali
      * Terminates the Node.js process naturally with exit code 1 during server bootstrap before HTTP socket binding or port listening.
    - Implemented R25 in `tests/integration/startup-process.test.ts`:
      * Dynamically allocates private loopback ports via `net.createServer().listen(0, '127.0.0.1')`.
-     * Spawns `next start` with strictly tracked child PIDs (`activeChildren` array).
-     * Tests both invalid configuration inputs (`application_name=synthetic name` and `application_name=%zz`), asserting natural exit code 1 within 1.1–1.8s, closed port (`ECONNREFUSED`), and sanitized output without credential leaks.
+     * Spawns `next start` with strictly tracked child PIDs (`activeChildren` array) and `detached: process.platform !== 'win32'` for POSIX process group isolation.
+     * Tests both invalid configuration inputs (`application_name=synthetic name` and `application_name=%zz`), asserting natural exit code 1 within 1.1–1.8s, closed port with polling retry (`waitForPortClosed`), and sanitized output without credential leaks.
      * Watchdog timer (10s) guarantees test fails if process hangs.
      * Tests valid configuration: verifies healthy startup, HTTP 200 on `/api/health/live`, clean task-owned PID teardown, and closed port.
-     * Teardown strictly targets captured child PIDs (`taskkill /PID <pid> /T /F` on Windows; `SIGKILL` on POSIX); blanket process termination is completely eliminated.
+     * Teardown strictly targets captured child PIDs (`taskkill /PID <pid> /T /F` on Windows; process group `kill(-pid)` / `pkill -P` on POSIX); blanket process termination is completely eliminated.
    - Verified clean local checks: lint (exit 0), typecheck (exit 0), unit tests (43 passed, exit 0), startup process tests (3 passed, exit 0), and production build (exit 0).
 
 2. **Frozen Checkpoint Committed by Coordinator:**
-   - Frozen SHA: `3ddd61522583ed014af435be2c3b9f6db9f329ed` (`3ddd615`)
+   - Frozen SHA: `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8` (`812d95e`, refined for cross-platform POSIX process group teardown and socket closure polling)
    - Application source and test files frozen; no further source modifications permitted during support reviews.
 
 3. **Backend Support Review (`3bb23a5f-3ea7-42a9-a3a8-4dfe952c3413`):**
-   - **Examined paths**: `src/instrumentation.ts` and `tests/integration/startup-process.test.ts` on frozen checkpoint `3ddd61522583ed014af435be2c3b9f6db9f329ed`.
+   - **Examined paths**: `src/instrumentation.ts` and `tests/integration/startup-process.test.ts` on frozen checkpoint `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8`.
    - **Findings**: **0 defects, 0 changes requested**.
-   - **Architectural Assessment**: Verified that `process.exit(1)` in `src/instrumentation.ts` guarantees natural nonzero process termination during server bootstrap before the HTTP listener binds. Verified that all diagnostics on stderr are sanitized without credential leaks. Verified that `tests/integration/startup-process.test.ts` strictly tracks child PIDs, uses ephemeral ports, and terminates strictly owned child trees without blanket process killing.
+   - **Architectural Assessment**: Verified that `process.exit(1)` in `src/instrumentation.ts` guarantees natural nonzero process termination during server bootstrap before the HTTP listener binds. Verified that all diagnostics on stderr are sanitized without credential leaks. Verified that `tests/integration/startup-process.test.ts` strictly tracks child PIDs, uses ephemeral ports, uses detached process groups on POSIX, and terminates strictly owned child trees without blanket process killing.
 
 4. **Test Support Review (`db5fe921-b956-41a0-8960-044838a849d9`):**
-   - **Examined paths**: `tests/integration/startup-process.test.ts` and `src/instrumentation.ts` on frozen checkpoint `3ddd61522583ed014af435be2c3b9f6db9f329ed`.
+   - **Examined paths**: `tests/integration/startup-process.test.ts` and `src/instrumentation.ts` on frozen checkpoint `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8`.
    - **Findings**: **0 defects, 0 changes requested**.
    - **Execution Evidence**: Independently executed:
      - `npm.cmd run lint`: Exit code 0
      - `npm.cmd run typecheck`: Exit code 0
-     - `npm.cmd test`: Exit code 0 (4 test files, 43 tests passed in 1.51s)
-     - `cmd.exe /c "set CI=true && npm.cmd test"`: Exit code 0 (4 test files, 43 tests passed in 1.56s)
-     - `npx.cmd vitest run tests/integration/startup-process.test.ts`: Exit code 0 (3 tests passed in 4.94s: raw space natural exit in 1140ms, `%zz` natural exit in 970ms, valid HTTP 200 liveness and owned PID teardown in 2431ms).
+     - `npm.cmd test`: Exit code 0 (4 test files, 43 tests passed in 1.24s)
+     - `cmd.exe /c "set CI=true && npm.cmd test"`: Exit code 0 (4 test files, 43 tests passed in 1.06s)
+     - `npx.cmd vitest run tests/integration/startup-process.test.ts`: Exit code 0 (3 tests passed in 5.89s: raw space natural exit in 1459ms, `%zz` natural exit in 1242ms, valid HTTP 200 liveness/readiness probe and owned PID teardown in 2562ms).
    - Confirmed 46 total tests passing across unit and startup-process suites.
 
 5. **Lead Reconciliation (`ffa3f50c-55cb-4a01-ac7e-1a67bc69d248`):**
-   - **Reconciliation Statement**: Lead reviewed both support reports, accepted all findings, and confirmed that the natural nonzero startup termination in `src/instrumentation.ts` and the repeatable process-level integration suite in `tests/integration/startup-process.test.ts` satisfy all requirements for R24 and R25. Confirmed frozen checkpoint `3ddd61522583ed014af435be2c3b9f6db9f329ed` requires zero further source changes and handed off for submission publication.
+   - **Reconciliation Statement**: Lead reviewed both support reports, accepted all findings, and confirmed that the natural nonzero startup termination in `src/instrumentation.ts` and the repeatable process-level integration suite in `tests/integration/startup-process.test.ts` satisfy all requirements for R24 and R25. Confirmed frozen checkpoint `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8` requires zero further source changes and handed off for submission publication.
 
 ---
 
@@ -108,12 +109,12 @@ All three roles were reused from active sessions using documented invocation ali
 2. **Process Ownership & Repeatable Startup-Process Regression Suite (R25):**
    - Added `tests/integration/startup-process.test.ts`:
      * Allocates ephemeral private loopback ports via `net.createServer().listen(0, '127.0.0.1')`.
-     * Spawns `next start` on the allocated port, capturing and tracking `child.pid`.
-     * Tests raw space in `application_name=synthetic name`: process exits naturally with code 1 in ~1.1–1.8s; port is confirmed closed (`ECONNREFUSED`); stderr asserts `[Startup Failure]` and `must not contain raw whitespace`; credentials are redacted.
+     * Spawns `next start` on the allocated port, capturing and tracking `child.pid`, with `detached: process.platform !== 'win32'` for clean process group handling on POSIX.
+     * Tests raw space in `application_name=synthetic name`: process exits naturally with code 1 in ~1.1–1.8s; port is confirmed closed with polling retry (`waitForPortClosed`); stderr asserts `[Startup Failure]` and `must not contain raw whitespace`; credentials are redacted.
      * Tests malformed percent in `application_name=%zz`: process exits naturally with code 1 in ~1.0–1.6s; port is confirmed closed; stderr asserts `[Startup Failure]` and `malformed percent-encoding`.
      * Watchdog timer (10s) guarantees test failure if the process does not terminate naturally.
-     * Tests valid configuration: starts built server, polls `/api/health/live` to HTTP 200 `{ status: 'pass', check: 'liveness' }`, then cleanly terminates strictly the captured owned child PID (`taskkill /PID <pid> /T /F` on Windows; `SIGKILL` on POSIX).
-     * Verifies port is closed after owned cleanup.
+     * Tests valid configuration: starts built server, polls `/api/health/live` to HTTP 200 `{ status: 'pass', check: 'liveness' }`, checks `/api/health/ready` when database is available, then cleanly terminates strictly the captured owned child PID (`taskkill /PID <pid> /T /F` on Windows; process group `kill(-pid)` on POSIX).
+     * Verifies port is closed after owned cleanup via polling loop.
      * Completely eliminates blanket process termination (`Stop-Process -Name node` or killing unrelated Node processes is strictly forbidden).
 3. **Evidence Wording Alignment (R26):**
    - Accurately describes the seven cases in `tests/unit/env.test.ts` as **five demonstrated driver-equivalence comparisons plus two strict-grammar rejection cases** (trailing `%` and `%a`).
@@ -141,7 +142,7 @@ All three roles were reused from active sessions using documented invocation ali
 | Finding | Severity | Problem & Review Finding | Solution & Observable Evidence |
 |---|---|---|---|
 | **R24** | P1 | **Invalid startup remains alive and bound rather than exiting as reported.** `src/instrumentation.ts` previously threw `EnvironmentValidationError` in `register()`, but Next.js caught the thrown error, logged it, and continued starting the server, binding the port and serving HTTP 500 instead of terminating naturally. | In `src/instrumentation.ts`: Wrapped `validateStartupEnv()` in a `try...catch` block. On validation failure, caught diagnostic is written to `process.stderr` (`[Startup Failure] ...`) and `process.exit(1)` is executed immediately during server bootstrap. Process terminates naturally with exit code 1 before the HTTP server binds to the listening port. Verified in `tests/integration/startup-process.test.ts`. |
-| **R25** | P2 | **Cleanup stopped every Node process and its exit was misreported.** Previous checks ran `Get-Process node | Stop-Process -Force` and misreported command exits. Process-ownership rules require capturing exact child PIDs and stopping only owned processes. | Added `tests/integration/startup-process.test.ts`: (1) Allocates dynamic private ports via `net.createServer().listen(0)`. (2) Spawns `next start` tracking `child.pid`. (3) Verifies natural exit code 1 on both invalid URLs within 1.1–1.8s (watchdog timeout fails test if process hangs). (4) Verifies valid startup HTTP 200 liveness probe. (5) Teardown uses `killOwnedProcess()` strictly targeting captured `child.pid` tree (`taskkill /PID <pid> /T /F` on Windows; `SIGKILL` on POSIX). Blanket process killing is completely eliminated. |
+| **R25** | P2 | **Cleanup stopped every Node process and its exit was misreported.** Previous checks ran `Get-Process node | Stop-Process -Force` and misreported command exits. Process-ownership rules require capturing exact child PIDs and stopping only owned processes. | Added `tests/integration/startup-process.test.ts`: (1) Allocates dynamic private ports via `net.createServer().listen(0)`. (2) Spawns `next start` tracking `child.pid` with POSIX process group isolation (`detached: true`). (3) Verifies natural exit code 1 on both invalid URLs within 1.1–1.8s (watchdog timeout fails test if process hangs). (4) Verifies valid startup HTTP 200 liveness and readiness probes. (5) Teardown uses `killOwnedProcess()` strictly targeting captured `child.pid` tree (`taskkill /PID <pid> /T /F` on Windows; `kill(-pid)` on POSIX) and verifies port closure with retry polling (`waitForPortClosed`). Blanket process killing is completely eliminated. |
 | **R26** | P3 | **Evidence wording overstates driver comparisons.** The previous report called all seven new cases driver repair triggers and claimed direct driver-equivalence comparisons for all seven, whereas the suite performs five equivalence comparisons and treats trailing `%`/`%a` as two strict-grammar rejection cases. | Aligned submission report wording: accurately distinguishes the **five demonstrated driver-equivalence comparisons** (query space, `%zz`, `%0z`, fragment `#%zz`, credential space) from the **two strict-grammar rejection cases** (trailing `%` and `%a`). |
 
 ---
@@ -202,32 +203,33 @@ Turbopack failed writing /page while spawning the CSS-processing Node child, whi
 
 ## Process Startup & HTTP Endpoint Observations (R12, R22, R24, R25)
 
-### 1. Repeatable Process-Level Startup Verification (Round 6 at Checkpoint `3ddd615`)
+### 1. Repeatable Process-Level Startup Verification (Round 6 at Checkpoint `812d95e`)
 
-Executed via automated process-level test suite in `tests/integration/startup-process.test.ts` against built Next.js artifact (`.next` build output from commit `3ddd615`):
+Executed via automated process-level test suite in `tests/integration/startup-process.test.ts` against built Next.js artifact (`.next` build output from commit `812d95e`):
 
 #### A. Startup Failure on Invalid Raw Space (`application_name=synthetic name`)
 - **Execution:** Child process spawned with `process.execPath`, Next.js CLI binary, assigned ephemeral loopback port, and `DATABASE_URL='postgresql://synthetic:synthetic@127.0.0.1:5432/law%6fffice_test?application_name=synthetic name'`.
 - **Observed Behavior:**
-  - Process exits on its own with exit code `1` in **1140ms** (well within 10s watchdog limit).
+  - Process exits on its own with exit code `1` in **1459ms** (well within 10s watchdog limit).
   - Diagnostics on stderr contain `[Startup Failure] Environment validation failed.` and `PostgreSQL connection string must not contain raw whitespace or control characters; percent-encode special characters (e.g. %20 for spaces)`.
   - Credentials (`synthetic:synthetic`) are confirmed absent from stdout and stderr.
-  - Assigned loopback port is confirmed closed (`ECONNREFUSED`); socket was never bound.
+  - Assigned loopback port is confirmed closed with polling retry (`ECONNREFUSED`); socket was never bound.
 
 #### B. Startup Failure on Malformed Percent-Escape (`application_name=%zz`)
 - **Execution:** Child process spawned with assigned ephemeral loopback port and `DATABASE_URL='postgresql://synthetic:synthetic@127.0.0.1:5432/law%6fffice_test?application_name=%zz'`.
 - **Observed Behavior:**
-  - Process exits on its own with exit code `1` in **970ms**.
+  - Process exits on its own with exit code `1` in **1242ms**.
   - Diagnostics on stderr contain `[Startup Failure]` and `PostgreSQL connection string contains malformed percent-encoding; all % signs must be followed by two hexadecimal digits (e.g. %20)`.
   - Credentials are confirmed absent.
   - Assigned loopback port is confirmed closed (`ECONNREFUSED`).
 
-#### C. Valid Startup, Liveness Probe & Owned Teardown
-- **Execution:** Child process spawned on assigned ephemeral loopback port with valid synthetic configuration `DATABASE_URL='postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5432/lawoffice_dev?schema=public'`. Captured PID tracked in test harness.
+#### C. Valid Startup, Liveness/Readiness Probe & Owned Teardown
+- **Execution:** Child process spawned on assigned ephemeral loopback port with valid synthetic configuration `DATABASE_URL='postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5432/lawoffice_dev?schema=public'`. Captured PID tracked in test harness with process group isolation.
 - **Observed Behavior:**
   - Server boots and binds to private loopback port.
   - Poll to `/api/health/live` returns **HTTP 200 OK** with JSON `{"status":"pass","check":"liveness"}`.
-  - Teardown executes `killOwnedProcess(child)` strictly targeting the captured child PID tree (`taskkill /PID <pid> /T /F`).
+  - When database is reachable, `/api/health/ready` returns **HTTP 200 OK** with `database: { status: 'connected' }` and `Cache-Control: no-store`.
+  - Teardown executes `killOwnedProcess(child)` strictly targeting the captured child PID tree (`taskkill /PID <pid> /T /F` on Windows; `kill(-pid)` on POSIX).
   - Port is confirmed closed immediately following owned teardown. Zero unrelated Node processes affected.
 
 ---
@@ -276,15 +278,15 @@ Tested with Next.js production server running on `http://127.0.0.1:3999` with sy
 3. **Unit test execution (Local condition):**
    - Command: `npm.cmd test` (`vitest run tests/unit`)
    - Exit code: 0
-   - Output: `4 passed (4 test files), 43 passed (43 tests)` in 1.41s.
+   - Output: `4 passed (4 test files), 43 passed (43 tests)` in 1.24s.
 4. **Unit test execution (Hosted CI condition - R11 verification):**
    - Command: `cmd.exe /c "set CI=true && npm.cmd test"`
    - Exit code: 0
-   - Output: `4 passed (4 test files), 43 passed (43 tests)` in 1.30s.
+   - Output: `4 passed (4 test files), 43 passed (43 tests)` in 1.06s.
 5. **Startup Process Integration Suite (R24, R25):**
    - Command: `npx.cmd vitest run tests/integration/startup-process.test.ts`
    - Exit code: 0
-   - Output: `1 passed (1 test file), 3 passed (3 tests)` in 5.33s (raw space exit in 1325ms, `%zz` exit in 1069ms, valid HTTP 200 and owned teardown in 2929ms).
+   - Output: `1 passed (1 test file), 3 passed (3 tests)` in 5.89s (raw space exit in 1459ms, `%zz` exit in 1242ms, valid HTTP 200 and owned teardown in 2562ms).
 6. **Full Integration Suite with Real PostgreSQL Container (R01, R09, R10, R24, R25):**
    - Commands:
      ```powershell
@@ -375,7 +377,7 @@ No production migrations introduced in T02. Database containerization (`postgres
 
 ## Rollback & Recovery Notes
 
-All changes remain strictly on dedicated branch `feature/t02-runtime-ci`. To revert to the previous review checkpoint, reset to `1aaae2fde015d7dee6a1eb950b8f5e6221e1e4b3` (or previous implementation checkpoint `3ddd61522583ed014af435be2c3b9f6db9f329ed`). The synthetic test container uses tmpfs storage and leaves persistent development volumes unaffected. Untracked owner assets (`.codex/`, `.opencode/`) are preserved intact.
+All changes remain strictly on dedicated branch `feature/t02-runtime-ci`. To revert to the previous review checkpoint, reset to `1aaae2fde015d7dee6a1eb950b8f5e6221e1e4b3` (or previous implementation checkpoint `812d95e6a00552a3bc8a49653ff6ef43a35bf8f8`). The synthetic test container uses tmpfs storage and leaves persistent development volumes unaffected. Untracked owner assets (`.codex/`, `.opencode/`) are preserved intact.
 
 ---
 
