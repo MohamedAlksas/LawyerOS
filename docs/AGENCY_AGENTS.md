@@ -1,37 +1,56 @@
-# Agency Agents: task routing and usage contract
+# Agency Agents: native execution contract
 
-## What is installed, and what activation means
+## Decision and scope
 
-The Agency Agents Antigravity integration packages specialist profiles as skills with `agency-` names. Its documented global installation location is `~/.gemini/config/skills/`; project-scoped skills use `.agents/skills/`. This describes instruction loading, not the automatic creation of an independent agent process. [Agency Antigravity integration](https://github.com/msitarzewski/agency-agents/blob/main/integrations/antigravity/README.md).
+The owner requested actual delegated agents on 11 November 2026. From the next implementation assignment or correction round after this policy is integrated, each assigned Agency lead and support must run in a distinct native Antigravity session. Same-session persona passes no longer satisfy the contract. Earlier submissions remain historical evidence and must not be rewritten to claim delegation that did not occur. This changes delivery and evidence requirements, not product scope or the stack.
 
-Antigravity documents skill discovery, activation by reading `SKILL.md`, and these global/workspace locations. The frontmatter `name` identifies the skill; when absent, the folder name is the default. Use the actual installed metadata rather than inferring a slug from a directory. [Antigravity skills documentation](https://antigravity.google/docs/skills).
+Agency's Antigravity integration supplies profiles as skills. A skill file alone is not a running agent. [Agency integration source](https://github.com/msitarzewski/agency-agents/blob/main/integrations/antigravity/README.md).
 
-Local inspection on 10 November 2026 verified installed profiles under `C:/Users/Alksas/.gemini/config/skills/`. For example, `engineering-software-architect/SKILL.md` declares `agency-software-architect`; its activation name is not `engineering-software-architect`. This is a local inventory observation, not proof that a running Antigravity session discovered or applied the profile. Another machine must resolve and verify its own installation.
+Current Antigravity documentation provides `invoke_subagent` and workspace definitions in `.agents/agents/`, with `subagent: true` and inherited model selection. The repository now supplies thin definitions for its 14 selected installed profiles. [Official custom-subagent documentation](https://antigravity.google/docs/subagents). These definitions are prepared configuration, not proof of execution in the owner's installed session.
 
-## One routing source
+## Sources of truth
 
-[AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) is the source of truth for the installed profile registry and task assignments: slug, installed folder, inventoried file SHA, and each task's lead, support profiles, scope, and rationale. Read the current task entry and its task card; the generated prompt collection displays that assignment. Do not maintain a competing 23-row table here or load the entire Agency roster for every task.
+- [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) names the task's lead/support profiles and required execution policy.
+- `.agents/agents/<profile-name>.md` is the generated native definition, using the same name as the profile. Regenerate it with `scripts/Update-AgencyAgentPrompts.ps1`; do not hand-edit derived definitions.
+- `.agents/skills/<registered-folder>/SKILL.md` is now the project-local profile source. Read it in each delegated session, verify its frontmatter name, and record the loaded SHA-256. The 149 recovered Agency profiles are byte-identical copies from the owner's surviving global installation; only the 14 routed specialties receive native definitions. The global installation remains unchanged. [Recovery inventory](../outputs/Agency-Profile-Recovery.json).
+- Every LawOffice project skill listed by the task remains mandatory. Project rules govern generic Agency suggestions.
 
-Agency profiles supplement the seven tracked LawOffice project skills. Every project skill named by the task card remains required. The approved task scope, stack, domain rules, security policy, and established Arabic RTL design govern implementation; generic Agency advice does not authorize new branding, a replacement architecture, extra features, or a larger milestone.
+Retain [the upstream MIT license](third-party/agency-agents-LICENSE.txt) with redistributed profiles. Do not automatically update the recovered files or load the entire roster for a single task. The planning ZIP includes the project-local profiles and native definitions; the consolidated reading document omits the full roster's instruction bodies.
 
-The global Agency installation is not assumed to be copied into this repository. On the verified machine, resolve the registered folder under `C:/Users/Alksas/.gemini/config/skills/`; on another machine, resolve `~/.gemini/config/skills/` for that user. Do not silently download, reinstall, or vendor profiles. Installation is separate work requiring a user request.
+Observed profile hashes are inventory snapshots. Record drift, read the actual file, and escalate a substantive conflict; drift alone is not a missing-profile failure. A missing, unreadable, or misnamed required profile stops dependent work with an exact path/name report.
 
-## Execute the assigned roles honestly
+## Capability preflight
 
-1. Read `GEMINI.md`, the current task card, its routing entry, and every named project skill. Resolve the lead and each listed support profile to its installed `SKILL.md`, read the complete instructions, verify its metadata name, and calculate the actual file SHA against the inventory.
-2. Report a missing, unreadable, or misnamed required profile by exact expected slug and resolved path, and stop dependent implementation for resolution. Inventory hash drift is informational rather than an automatic stop: record the actual hash, read the updated instructions, and raise a substantive scope conflict if one exists. Do not claim activation, substitute a generic persona, or continue with zero Agency profiles. Lead and listed supports are required unless the current assignment explicitly marks a support optional. An optional profile's absence is still reported, never silently omitted.
-3. Apply the lead profile to the assigned implementation slice. Use support profiles for their listed checks and return their findings to the lead before submission. If the environment has verified native subagent tooling, report actual invocations and ownership. Loading a skill alone does not launch child processes.
-4. If native subagent tooling is unavailable, perform explicit sequential role passes in the same session: lead implementation, each assigned support examination, then lead reconciliation. Label this as sequential role application, not parallel agents or independent review. A pass may conclude that it found no issues, but must state what it actually examined and what remains untested.
-5. Preserve the task's branch, prerequisites, file ownership, and stopping rule. Supports do not self-approve work or release the next task. Codex independently reviews the actual published implementation and required evidence under `docs/REVIEW_PROTOCOL.md`.
+Before dependent implementation, the parent coordinator checks that its actual session exposes `invoke_subagent`, discovers every assigned `.agents/agents/<profile-name>.md`, and supports the definition's declared tool names. The definitions use the documented `view_file`, `grep_search`, `run_command`, and `replace_file_content` names. Antigravity warns that unrecognized tool names can hang a subagent; do not guess an alternative tool schema. [Official tool configuration](https://antigravity.google/docs/subagents#frontmatter-configuration-yaml).
 
-## Required submission evidence
+If discovery, invocation, permissions, or model inheritance fails, report **BLOCKED_NATIVE_AGENTS** with the installed version if observable, missing capability/error, affected task/roles, and the last successful step. Stop dependent implementation. Do not simulate children with role headings, invent IDs, install or upgrade tools, change models, or fall back silently. Prepared configuration and portable CI cannot establish that the running session has the capability. Resolve that specific prerequisite with the owner/Codex.
 
-For each Agency profile, record its lead/support role, actual frontmatter name, resolved path, actual file SHA, whether it matched the inventory, rules applied to this task, and support findings with their resolution. Distinguish direct file reading, UI discovery, and actual native subagent execution; claim only what was observed.
+The owner selected the main implementation model; definitions use `model: inherit`. Record the resolved model if the environment exposes it, otherwise mark it unobserved. Do not substitute another model merely to obtain delegation. Actual launch is the decisive discovery check, and any launch failure remains visible.
 
-Retain the task's normal `Skills loaded`, base/head/pushed SHA, exact commands and exit statuses, screenshots or artifacts, migrations, and `NOT RUN` limitations. Profile loading, a role-pass narrative, or a support's confident verdict is not evidence that the application, Arabic UI, financial behavior, backup, or recovery passed validation. Never retroactively claim profiles were used in earlier work before they were read.
+## Coordinator, implementation, and review ownership
 
-## Integrating this routing update with active T01
+1. The parent inspects Git state and prerequisites, reads the task/required references, and assigns one real lead child and each routed support child. It coordinates the task and publication; it does not satisfy the lead assignment by taking that persona itself.
+2. Give every child a complete bounded assignment: task ID, role/profile, required project skills/references, base or reviewed SHA, workspace, owned/examined paths, allowed actions, acceptance criteria, checks, and report destination. Native children may start without the parent's conversation history, so passing a role name alone is insufficient.
+3. The lead owns only the assigned implementation slice. One writer owns a file at a time. Children preserve existing changes and do not switch the parent's branch, stage unrelated files, publish, merge, or spawn nested agents. The parent handles coherent commits/pushes on the task's existing feature branch.
+4. Before support review, the parent creates a committed checkpoint and freezes application source. Each support examines that exact SHA in its own session; support review does not edit application source. Give build/test runs separate worktrees when generated files, ports, databases, or watchers could conflict. Independent support reviews may run concurrently; dependent implementation and reconciliation stay ordered.
+5. Supports return concrete findings and test evidence. The lead reconciles them; the parent records dispositions. If implementation changes, commit a new checkpoint and rerun the affected support checks against it. A report about an older SHA does not verify new code.
+6. Normally use one lead plus at most two routed supports, at most three active children. Do not load or launch the entire Agency roster. Each task's routing remains the scope limit. Supports can finish with no findings but must state what they examined and what remains untested.
+7. Codex independently reviews the published implementation. Native delegation, a support verdict, a green build, and a successful portable validator never grant task acceptance, a main merge, or the next assignment.
 
-T01 may already be active in `D:/Lawyer`. Preparing this documentation does not authorize switching that checkout, rewriting its changes, or claiming the new routing was previously applied. Wait for this documentation PR to be merged through the project's approval process, then inspect and fetch the current state before integrating the updated `origin/main` into the actual T01 feature branch.
+## Required execution evidence
 
-Perform that integration only in a clean, task-owned working tree, or a separately coordinated worktree, preserving all existing work. No reset, force push, automatic stash, or branch switch beneath another agent. Resolve integration conflicts within the documented task ownership and obtain Codex guidance on substantive conflicts. Report the resulting baseline and newly applied profile evidence before continuing T01; do not fabricate predecessor acceptance or start T02 as part of integration.
+Extend `docs/reviews/Txx-submission.md` with one row per required child:
+
+| Role/profile | Native invocation or conversation ID | Definition path | Loaded profile path/name/hash | Owned/examined paths | Inspected SHA | Result and evidence |
+|---|---|---|---|---|---|---|
+| Assigned lead or support | Actual tool result or observable UI reference | Actual discovered file | Actual file read, metadata, SHA-256 and drift | Explicit scope | Exact code checkpoint | Findings/actions, commands/exits, artifacts or NOT RUN |
+
+IDs must be distinct and attributable to native tool/UI output. Retain a concise invocation record and the returned result/artifact reference; if no durable log is exposed, state that limit and provide the observable conversation reference. Do not request hidden reasoning or publish full conversations containing secrets. Record lead reconciliation and which checks were rerun after changes.
+
+Missing execution evidence is **NOT RUN**, not a completed Agency requirement. Profile reading and SHA lists remain useful but cannot replace native invocation records. Synthetic data only; no credentials or client records in Git, logs, or reports.
+
+## Integration with active work
+
+Prepare this policy on its own documentation branch/PR from `origin/main`; do not change the active task's checkout or mix in its application fixes. After owner-approved integration into main, safely integrate the policy into the existing task branch at a clean checkpoint before assigning the next correction round. No automatic stash, reset, force-push, or branch switch beneath another agent. Current uncommitted work is preserved, and earlier sequential execution is never retroactively relabeled as native delegation.
+
+Owner-installed agent assets are owned work even before a Git commit. Never clean/delete `.agents/`, `.codex/`, or `.opencode/` content merely because it is untracked or a validator expects fewer files. The project validator checks its seven `lawoffice-*` skills separately from Agency profiles. Resolve a mismatch by checking validator scope and preserving additions. Deletion requires an explicit owner assignment naming the target. Native definitions and recovered profiles are committed so normal untracked-file cleanup cannot remove them, but Git tracking does not prevent every deletion and does not replace this rule.

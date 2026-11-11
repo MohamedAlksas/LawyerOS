@@ -1,10 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "result": "PASS",
   "mode": "portable-manifest-and-cards",
   "scope": "Agency Agent routing and optional installed-profile proof only; no application tests or runtime agent execution",
   "taskCards": 23,
   "profiles": 14,
+  "nativeDefinitions": 14,
+  "executionPolicy": "native-subagents-required",
   "checks": [
     {
       "task": "T01",
@@ -238,6 +240,6 @@
   ],
   "installedProfiles": null,
   "installedProfileChecks": "NOT RUN: use -VerifyInstalled on the implementation machine",
-  "antigravityRuntimeExecution": "NOT RUN: profile routing does not prove automatic agent loading or spawning",
+  "antigravityRuntimeExecution": "NOT RUN: native definitions and required invocation policy are statically checked, not executed in Antigravity",
   "projectSkills": "Validated separately by Validate-AntigravityKit.ps1; Agency profiles do not replace the seven project skills"
 }

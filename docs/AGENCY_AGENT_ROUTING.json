@@ -1,106 +1,116 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "provider": "Agency Agents",
-  "verifiedOn": "2026-11-10",
-  "profileRoot": "~/.gemini/config/skills",
-  "executionMode": "One lead persona with scoped supporting passes; no spawned-agent claim",
+  "verifiedOn": "2026-11-11",
+  "profileRoot": ".agents/skills",
+  "executionMode": "native-subagents-required",
+  "executionPolicy": {
+    "effectiveFrom": "Next implementation assignment or correction round after this policy is integrated; no retrospective execution claims",
+    "agentRoot": ".agents/agents",
+    "invocationTool": "invoke_subagent",
+    "modelPolicy": "inherit",
+    "sequentialPersonaFallback": false,
+    "maxActiveChildren": 3,
+    "unavailableBehavior": "Report BLOCKED_NATIVE_AGENTS with the actual missing capability before dependent implementation; do not simulate independent agents",
+    "evidence": "Distinct native conversation IDs, assignment and owned paths, profile path/hash, inspected SHA, results, lead reconciliation"
+  },
   "observedHashPolicy": "Inventory snapshot, not an immutable version pin. Report the actual loaded hash and any drift; metadata names must match.",
   "profiles": {
     "agency-software-architect": {
       "folder": "engineering-software-architect",
       "metadataName": "agency-software-architect",
-      "source": "~/.gemini/config/skills/engineering-software-architect/SKILL.md",
+      "source": ".agents/skills/engineering-software-architect/SKILL.md",
       "observedSha256": "77c26fb9f7072ac351e864446e97c9c9ca6ca0de91183f3d42c95b60202daa8b",
       "purpose": "Toolchain compatibility within the approved architecture; no stack redesign."
     },
     "agency-devops-automator": {
       "folder": "engineering-devops-automator",
       "metadataName": "agency-devops-automator",
-      "source": "~/.gemini/config/skills/engineering-devops-automator/SKILL.md",
+      "source": ".agents/skills/engineering-devops-automator/SKILL.md",
       "observedSha256": "90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e",
       "purpose": "Reproducible runtime, CI, private deployment configuration, and operational failure evidence."
     },
     "agency-backend-architect": {
       "folder": "engineering-backend-architect",
       "metadataName": "agency-backend-architect",
-      "source": "~/.gemini/config/skills/engineering-backend-architect/SKILL.md",
+      "source": ".agents/skills/engineering-backend-architect/SKILL.md",
       "observedSha256": "05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf",
       "purpose": "Existing Module Interfaces, domain invariants, relational transactions, and server-side behavior."
     },
     "agency-identity-access-engineer": {
       "folder": "engineering-identity-access-engineer",
       "metadataName": "agency-identity-access-engineer",
-      "source": "~/.gemini/config/skills/engineering-identity-access-engineer/SKILL.md",
+      "source": ".agents/skills/engineering-identity-access-engineer/SKILL.md",
       "observedSha256": "34163d05151805a8f320bf89c4a25ce2743cb96090592ea0d6d34da6533ef618",
       "purpose": "The approved Better Auth login, MFA, session lifecycle, and record authorization."
     },
     "agency-application-security-engineer": {
       "folder": "security-appsec-engineer",
       "metadataName": "agency-application-security-engineer",
-      "source": "~/.gemini/config/skills/security-appsec-engineer/SKILL.md",
+      "source": ".agents/skills/security-appsec-engineer/SKILL.md",
       "observedSha256": "77c29a754e6c25b97f189c06d8459b02fd29f4d8de8602ca53740f4c92a1f259",
       "purpose": "Task-scoped implementation checks for secrets, private files, input handling, and access control."
     },
     "agency-test-automation-engineer": {
       "folder": "testing-test-automation-engineer",
       "metadataName": "agency-test-automation-engineer",
-      "source": "~/.gemini/config/skills/testing-test-automation-engineer/SKILL.md",
+      "source": ".agents/skills/testing-test-automation-engineer/SKILL.md",
       "observedSha256": "af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4",
       "purpose": "Meaningful scoped regression/integration/browser checks with actual results and NOT RUN limits."
     },
     "agency-frontend-developer": {
       "folder": "engineering-frontend-developer",
       "metadataName": "agency-frontend-developer",
-      "source": "~/.gemini/config/skills/engineering-frontend-developer/SKILL.md",
+      "source": ".agents/skills/engineering-frontend-developer/SKILL.md",
       "observedSha256": "69d473c132831e0861bbf3cc50bb933c1dc231d74872b08731c3b453d79925f0",
       "purpose": "The approved Arabic RTL screens, actual UI states, accessible interactions, and responsive behavior."
     },
     "agency-accessibility-auditor": {
       "folder": "testing-accessibility-auditor",
       "metadataName": "agency-accessibility-auditor",
-      "source": "~/.gemini/config/skills/testing-accessibility-auditor/SKILL.md",
+      "source": ".agents/skills/testing-accessibility-auditor/SKILL.md",
       "observedSha256": "1b099d10cc4f82568ded01d9918cd63e24ad177702f5dc76b991e60e7eff71dd",
       "purpose": "Observed keyboard, text scaling, focus, labels, and assistive-technology evidence; no unsupported compliance claim."
     },
     "agency-database-optimizer": {
       "folder": "engineering-database-optimizer",
       "metadataName": "agency-database-optimizer",
-      "source": "~/.gemini/config/skills/engineering-database-optimizer/SKILL.md",
+      "source": ".agents/skills/engineering-database-optimizer/SKILL.md",
       "observedSha256": "bd5f5e6813c8931c1387689f6a4d6137e3385734d402f72bd0dfc4292f7ee068",
       "purpose": "Existing PostgreSQL schema/index/constraint and concurrency correctness without replacing the database or adding infrastructure."
     },
     "agency-security-architect": {
       "folder": "security-architect",
       "metadataName": "agency-security-architect",
-      "source": "~/.gemini/config/skills/security-architect/SKILL.md",
+      "source": ".agents/skills/security-architect/SKILL.md",
       "observedSha256": "16dbbf9883bd0766f9a865271a4210e01c6f3eee7678640f0355dab93f35cb85",
       "purpose": "Check the already approved private-access and trust assumptions; no new architecture or compliance certification."
     },
     "agency-document-generator": {
       "folder": "specialized-document-generator",
       "metadataName": "agency-document-generator",
-      "source": "~/.gemini/config/skills/specialized-document-generator/SKILL.md",
+      "source": ".agents/skills/specialized-document-generator/SKILL.md",
       "observedSha256": "b739ac3de64d11b7fdc7e38e4df401963f61b259871fcbd70581a4fc0976bc58",
       "purpose": "Arabic PDF layout and data agreement through the approved HTML/Playwright application path, without replacing it with another stack."
     },
     "agency-database-reliability-engineer": {
       "folder": "engineering-database-reliability-engineer",
       "metadataName": "agency-database-reliability-engineer",
-      "source": "~/.gemini/config/skills/engineering-database-reliability-engineer/SKILL.md",
+      "source": ".agents/skills/engineering-database-reliability-engineer/SKILL.md",
       "observedSha256": "c17d3c559d25049697f19a76852661d531430a900208b4a5aefcdd2d9944547e",
       "purpose": "The planned coordinated dump/files/key recovery and cutover; no replication, HA, or PITR expansion."
     },
     "agency-reality-checker": {
       "folder": "testing-reality-checker",
       "metadataName": "agency-reality-checker",
-      "source": "~/.gemini/config/skills/testing-reality-checker/SKILL.md",
+      "source": ".agents/skills/testing-reality-checker/SKILL.md",
       "observedSha256": "d6bc996bbf602b38b77641eff4cf74215a3f6644238321bca202a255dc4183d6",
       "purpose": "Verify observed pilot evidence and disclose gaps; internal findings never grant Codex ACCEPTED or production approval."
     },
     "agency-technical-writer": {
       "folder": "engineering-technical-writer",
       "metadataName": "agency-technical-writer",
-      "source": "~/.gemini/config/skills/engineering-technical-writer/SKILL.md",
+      "source": ".agents/skills/engineering-technical-writer/SKILL.md",
       "observedSha256": "b4c37195e10dbe108e52994bc8fef2779bfac0d6722b421f81eae9506cdd1820",
       "purpose": "Clear scoped cutover/runbook and Arabic lawyer handover instructions using the actual accepted behavior."
     }

@@ -1,0 +1,27 @@
+{
+  "result": "PASS",
+  "scope": "Native-agent policy validator behavior in isolated fixtures; no Antigravity runtime execution",
+  "scenarios": [
+    {
+      "scenario": "Sequential persona fallback rejected",
+      "exit": 1,
+      "result": "PASS: invalid configuration rejected"
+    },
+    {
+      "scenario": "Invalid native definition rejected",
+      "exit": 1,
+      "result": "PASS: invalid configuration rejected"
+    },
+    {
+      "scenario": "Unrequested model override rejected",
+      "exit": 1,
+      "result": "PASS: invalid configuration rejected"
+    },
+    {
+      "scenario": "Missing native invocation gate rejected",
+      "exit": 1,
+      "result": "PASS: invalid configuration rejected"
+    }
+  ],
+  "nativeRuntime": "NOT RUN: no native Antigravity session invoked"
+}

@@ -2,48 +2,62 @@
   "scope": "Planning documents only; no application tests executed",
   "documentationLanguage": "English",
   "applicationLocale": "Arabic RTL / ar-EG / Africa/Cairo",
-  "sourceDocuments": 55,
+  "sourceDocuments": 69,
   "taskCards": 23,
   "projectSkills": 7,
+  "nativeAgentDefinitions": 14,
+  "bundledAgencyProfiles": 149,
   "agencyProfiles": 14,
-  "localLinksChecked": 95,
+  "localLinksChecked": 100,
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 66,
+  "zipEntries": 230,
   "zipSourceHashes": "All match",
   "outputs": [
     {
       "Name": "Agency-Agent-Installed-Validation.json",
-      "Length": 15201
+      "Length": 15189
     },
     {
       "Name": "Agency-Agent-Negative-Validation.json",
-      "Length": 737
+      "Length": 712
     },
     {
       "Name": "Agency-Agent-Validation.json",
-      "Length": 9081
+      "Length": 9195
+    },
+    {
+      "Name": "Agency-Profile-Recovery.json",
+      "Length": 36711
+    },
+    {
+      "Name": "Agency-Profile-Secret-Review.json",
+      "Length": 762
     },
     {
       "Name": "LawOffice-OS-Antigravity-T01.md",
-      "Length": 6210
+      "Length": 7243
     },
     {
       "Name": "LawOffice-OS-Gemini-Prompts.md",
-      "Length": 162567
+      "Length": 186192
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 382049
+      "Length": 447181
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 192745
+      "Length": 1231511
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
-      "Length": 3705
+      "Length": 3851
+    },
+    {
+      "Name": "Native-Agent-Policy-Validation.json",
+      "Length": 818
     },
     {
       "Name": "Prompt-Skill-Validation.json",
