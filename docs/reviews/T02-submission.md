@@ -10,7 +10,8 @@
 - Round 1 implementation: `698858e6f92d59b09141302b1627b6ecae6b8c42`  
 - Inspected PR #4 head: `111c8256692f79fa8d22c243ec1ba2d52ee66264`  
 - Main integration merge: `62287d0`  
-- Round 2 implementation HEAD: will be recorded at commit time.  
+- Round 2 implementation inspected SHA: `4e9cc4586d06283bb940916cf63117452d3a2da5`  
+- Final published HEAD SHA: recorded upon publication.  
 **Changed files:**
 - `.github/workflows/ci.yml`
 - `outputs/Agency-Agent-Validation.json`
