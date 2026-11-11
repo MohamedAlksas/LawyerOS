@@ -89,6 +89,8 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
   }
 
+  const { user } = session;
+
   const now = Date.now();
 
   // Expiration check from database
@@ -117,9 +119,15 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     );
   }
 
-  // MFA enforcement check:
-  // If user has twoFactorEnabled, session must be fully verified
-  const user = session.user;
+  // Mandatory MFA enforcement check (R02):
+  // For OWNER role, Two-Factor Authentication is non-negotiable and strictly mandatory.
+  if (user.role === 'OWNER' && user.twoFactorEnabled !== true) {
+    throw new AuthenticationError(
+      'MFA_REQUIRED',
+      'المصادقة الثنائية إلزامية لحساب المالك ولا يمكن تعطيلها أو تجاوزها.'
+    );
+  }
+
   const is2faEnabled = Boolean(user.twoFactorEnabled);
   const twoFactorRecord = user.twoFactors?.[0];
 

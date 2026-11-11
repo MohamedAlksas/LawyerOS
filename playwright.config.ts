@@ -1,4 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
+import fs from 'fs';
+import path from 'path';
+
+// Load .env.test if present and not already loaded into process.env
+if (!process.env.TEST_DATABASE_URL) {
+  const envTestPath = path.resolve(process.cwd(), '.env.test');
+  if (fs.existsSync(envTestPath) && typeof process.loadEnvFile === 'function') {
+    process.loadEnvFile(envTestPath);
+  }
+}
+
 import { validateTestEnvironment } from './tests/helpers/test-db';
 
 const PORT = 3100;

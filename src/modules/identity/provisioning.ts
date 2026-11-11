@@ -24,10 +24,23 @@ export interface ProvisionOwnerResult {
 }
 
 /**
- * Checks whether any OWNER account already exists in the system.
+ * Checks whether the office bootstrap is closed permanently.
+ */
+export async function isBootstrapClosed(): Promise<boolean> {
+  const prisma = getPrismaClient();
+  const bootstrap = await prisma.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+  return Boolean(bootstrap?.isClosed);
+}
+
+/**
+ * Checks whether any OWNER account already exists in the system or bootstrap is closed.
  */
 export async function hasAnyOwner(): Promise<boolean> {
   const prisma = getPrismaClient();
+  const bootstrapClosed = await isBootstrapClosed();
+  if (bootstrapClosed) {
+    return true;
+  }
   const count = await prisma.user.count({
     where: { role: 'OWNER' },
   });
@@ -36,7 +49,8 @@ export async function hasAnyOwner(): Promise<boolean> {
 
 /**
  * Controlled initial Owner provisioning without default/embedded credentials.
- * Fails closed if any owner account already exists.
+ * Fails closed if any owner account already exists or bootstrap was previously closed.
+ * Uses PostgreSQL transaction advisory lock to guarantee race safety during concurrent bootstrap attempts.
  * Public sign-up remains strictly disabled.
  */
 export async function provisionOwner(input: ProvisionOwnerInput): Promise<ProvisionOwnerResult> {
@@ -59,7 +73,15 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     throw new ProvisioningError('INVALID_INPUT', 'كلمة المرور يجب أن لا تقل عن 8 أحرف.');
   }
 
-  // Fail closed if any owner already exists in the database
+  // Pre-check before transaction
+  const bootstrapClosed = await isBootstrapClosed();
+  if (bootstrapClosed) {
+    throw new ProvisioningError(
+      'BOOTSTRAP_ALREADY_CLOSED',
+      'تم إغلاق مرحلة التهيئة الأولية للنظام مسبقاً وبشكل دائم. لا يمكن إعادة تهيئة المالك.'
+    );
+  }
+
   const ownerExists = await hasAnyOwner();
   if (ownerExists) {
     throw new ProvisioningError(
@@ -81,8 +103,9 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
   // Hash password using Better Auth standard password hashing
   const hashedPassword = await hashPassword(password);
 
-  // Generate Base32 TOTP secret for authenticator apps
-  const totpSecret = base32.encode(randomBytes(20));
+  // Generate Base32 TOTP secret for authenticator apps (20 random bytes)
+  const rawSecretBytes = randomBytes(20);
+  const totpSecret = base32.encode(rawSecretBytes);
   const totpURI = `otpauth://totp/LawOffice%20OS:${encodeURIComponent(email)}?secret=${totpSecret}&issuer=LawOffice%20OS&digits=6&period=30`;
 
   // Generate 10 single-use recovery backup codes
@@ -91,10 +114,11 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     return `${raw.slice(0, 5)}-${raw.slice(5)}`;
   });
 
-  // Encrypt secrets using BETTER_AUTH_SECRET
+  // Encrypt secrets using BETTER_AUTH_SECRET.
+  // Prefix TOTP secret with "base32:" to match Better Auth's decryptTOTPSecret decoding behavior (R01).
   const encryptedTotpSecret = await symmetricEncrypt({
     key: env.BETTER_AUTH_SECRET,
-    data: totpSecret,
+    data: `base32:${totpSecret}`,
   });
 
   const encryptedBackupCodes = await symmetricEncrypt({
@@ -104,8 +128,20 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
 
   const userId = randomUUID();
 
-  // Execute inside transaction for strict atomicity and race prevention
+  // Execute inside transaction with advisory lock for strict atomicity and race prevention (R06)
   const createdUser = await prisma.$transaction(async (tx) => {
+    // Acquire transaction-scoped advisory lock (released automatically on commit/rollback)
+    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(742910481234912);');
+
+    // Re-verify bootstrap state inside the lock
+    const lockedBootstrap = await tx.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+    if (lockedBootstrap?.isClosed) {
+      throw new ProvisioningError(
+        'BOOTSTRAP_ALREADY_CLOSED',
+        'تم إغلاق مرحلة التهيئة الأولية للنظام مسبقاً وبشكل دائم. لا يمكن إعادة تهيئة المالك.'
+      );
+    }
+
     const checkInside = await tx.user.findFirst({ where: { role: 'OWNER' } });
     if (checkInside) {
       throw new ProvisioningError(
@@ -142,6 +178,16 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
         secret: encryptedTotpSecret,
         backupCodes: encryptedBackupCodes,
         verified: true,
+      },
+    });
+
+    // Permanently record bootstrap completion with singleton row
+    await tx.officeBootstrap.create({
+      data: {
+        id: 'singleton',
+        isClosed: true,
+        closedAt: new Date(),
+        ownerId: userId,
       },
     });
 

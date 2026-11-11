@@ -50,9 +50,12 @@ export class AuthorizationError extends Error {
 }
 
 export class ProvisioningError extends Error {
-  public readonly code: 'OWNER_ALREADY_EXISTS' | 'INVALID_INPUT';
+  public readonly code: 'OWNER_ALREADY_EXISTS' | 'BOOTSTRAP_ALREADY_CLOSED' | 'INVALID_INPUT';
 
-  constructor(code: 'OWNER_ALREADY_EXISTS' | 'INVALID_INPUT', message: string) {
+  constructor(
+    code: 'OWNER_ALREADY_EXISTS' | 'BOOTSTRAP_ALREADY_CLOSED' | 'INVALID_INPUT',
+    message: string
+  ) {
     super(message);
     this.name = 'ProvisioningError';
     this.code = code;

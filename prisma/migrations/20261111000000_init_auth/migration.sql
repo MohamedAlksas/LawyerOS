@@ -100,3 +100,13 @@ ALTER TABLE "account" ADD CONSTRAINT "account_userId_fkey" FOREIGN KEY ("userId"
 
 -- AddForeignKey
 ALTER TABLE "twoFactor" ADD CONSTRAINT "twoFactor_userId_fkey" FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateTable
+CREATE TABLE "office_bootstrap" (
+    "id" TEXT NOT NULL DEFAULT 'singleton',
+    "isClosed" BOOLEAN NOT NULL DEFAULT true,
+    "closedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ownerId" TEXT NOT NULL,
+
+    CONSTRAINT "office_bootstrap_pkey" PRIMARY KEY ("id")
+);

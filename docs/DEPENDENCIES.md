@@ -74,6 +74,7 @@ These packages provide the minimum foundation for building, linting, typecheckin
 | `postcss` | `8.5.23` | `devDependency` | CSS transformation pipeline required by Tailwind. |
 | `eslint` | `9.39.5` | `devDependency` | Linter engine. Note: npm displays an unsupported maintenance notice for `eslint@9.39.5`, but its selected Next.js peer requirement is satisfied and linting passes cleanly with 0 errors. Source: [ESLint Docs](https://eslint.org). |
 | `eslint-config-next` | `16.4.6` | `devDependency` | Official Next.js ESLint configuration ruleset (native flat-config arrays `nextVitals` and `nextTypescript`). |
+| `tsx` | `4.23.15` | `devDependency` | TypeScript execution tool for CLI scripts (such as first-owner provisioning CLI). Pinned exact in T03. |
 
 ---
 

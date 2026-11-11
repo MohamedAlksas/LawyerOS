@@ -15,7 +15,8 @@ function getFreeLoopbackPort(): Promise<number> {
     srv.listen(0, '127.0.0.1', () => {
       const port = (srv.address() as net.AddressInfo).port;
       srv.close((err) => {
-        if (err) reject(err);
+        if (err) return reject(err);
+        if (port >= 6665 && port <= 6669) resolve(getFreeLoopbackPort());
         else resolve(port);
       });
     });

@@ -17,6 +17,7 @@ describe('Environment validation (src/lib/env.ts)', () => {
     HOST: '127.0.0.1',
     DATABASE_URL: 'postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5432/lawoffice_dev?schema=public',
     TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5433/lawoffice_test?schema=public',
+    BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
   };
 
   it('successfully validates a well-formed synthetic environment matching .env.example', () => {
@@ -158,6 +159,7 @@ describe('Environment validation (src/lib/env.ts)', () => {
       NODE_ENV: 'test',
       CI: 'true',
       TEST_DATABASE_URL: 'postgresql://lawoffice_user:secret@localhost:5432/lawoffice_test?schema=public',
+      BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
     };
 
     const validated = validateEnv(testOnlyCiEnv);
@@ -248,6 +250,7 @@ describe('Environment validation (src/lib/env.ts)', () => {
   it('applies standard defaults for PORT and HOST when omitted', () => {
     const minimalEnv = {
       DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_dev',
+      BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
     };
 
     const validated = validateEnv(minimalEnv);
@@ -440,6 +443,7 @@ describe('Environment validation (src/lib/env.ts)', () => {
         NODE_ENV: 'test',
         DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
         TEST_DATABASE_URL: validDocumentedUrl,
+        BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
         CI: 'false',
       });
       expect(validated.TEST_DATABASE_URL).toBe(validDocumentedUrl);
@@ -556,9 +560,44 @@ describe('Environment validation (src/lib/env.ts)', () => {
         NODE_ENV: 'test',
         DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
         TEST_DATABASE_URL: validEncodedUrl,
+        BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
         CI: 'false',
       });
       expect(validated.TEST_DATABASE_URL).toBe(validEncodedUrl);
+    });
+
+    it('strictly requires BETTER_AUTH_SECRET without falling back to a default (R05)', () => {
+      const envWithoutSecret = {
+        ...validSyntheticEnv,
+        BETTER_AUTH_SECRET: undefined,
+      };
+
+      expect(() => validateEnv(envWithoutSecret)).toThrowError(EnvironmentValidationError);
+      try {
+        validateEnv(envWithoutSecret);
+      } catch (err) {
+        const error = err as EnvironmentValidationError;
+        expect(error.missingKeys).toContain('BETTER_AUTH_SECRET');
+        expect(error.message).toContain('Missing required environment variable(s): BETTER_AUTH_SECRET');
+      }
+    });
+
+    it('rejects BETTER_AUTH_SECRET shorter than 32 characters (R05)', () => {
+      const envWithShortSecret = {
+        ...validSyntheticEnv,
+        BETTER_AUTH_SECRET: 'short_secret_under_32_bytes',
+      };
+
+      expect(() => validateEnv(envWithShortSecret)).toThrowError(EnvironmentValidationError);
+      try {
+        validateEnv(envWithShortSecret);
+      } catch (err) {
+        const error = err as EnvironmentValidationError;
+        expect(error.invalidKeys).toContain('BETTER_AUTH_SECRET');
+        expect(error.message).toContain('BETTER_AUTH_SECRET must be at least 32 characters');
+        // Ensure secret value is never printed
+        expect(error.message).not.toContain('short_secret_under_32_bytes');
+      }
     });
   });
 });

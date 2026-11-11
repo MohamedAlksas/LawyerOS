@@ -29,8 +29,16 @@ async function prompt(question: string, hidden = false): Promise<string> {
           case '\u0003':
             process.exit(1);
             break;
+          case '\u007f':
+          case '\b':
+            if (input.length > 0) {
+              input = input.slice(0, -1);
+              process.stdout.write('\b \b');
+            }
+            break;
           default:
             input += str;
+            process.stdout.write('*');
             break;
         }
       };
@@ -53,7 +61,7 @@ async function main() {
   try {
     const alreadyExists = await hasAnyOwner();
     if (alreadyExists) {
-      console.error('[خطأ أمني]: حساب المالك مهيأ بالفعل في قاعدة البيانات.');
+      console.error('[خطأ أمني]: حساب المالك مهيأ بالفعل أو تم إغلاق مسار التهيئة الأولية بشكل دائم.');
       console.error('تم إغلاق مسار التهيئة تلقائياً لمنع إضافة حسابات مالك إضافية.');
       process.exit(1);
     }

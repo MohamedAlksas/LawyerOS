@@ -88,3 +88,12 @@ model TwoFactor {
   @@index([userId])
   @@map("twoFactor")
 }
+
+model OfficeBootstrap {
+  id       String   @id @default("singleton")
+  isClosed Boolean  @default(true)
+  closedAt DateTime @default(now())
+  ownerId  String
+
+  @@map("office_bootstrap")
+}

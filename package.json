@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "postinstall": "prisma generate",
+    "auth:provision-owner": "tsx src/cli/provision-owner.ts"
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "1.7.20",
@@ -35,6 +37,7 @@
     "postcss": "8.5.23",
     "prisma": "7.10.1",
     "tailwindcss": "4.3.5",
+    "tsx": "4.23.15",
     "typescript": "5.8.3",
     "vitest": "5.1.0"
   }
