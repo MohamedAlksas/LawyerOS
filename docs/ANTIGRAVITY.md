@@ -8,6 +8,8 @@ Use `https://github.com/MohamedAlksas/LawyerOS.git` as origin and read `docs/GIT
 
 ## How loading works
 
+For supplementary source navigation, see [GRAPHIFY](GRAPHIFY.md). Its optional project-local skill is `.agents/skills/graphify/SKILL.md`; it maps committed code locally with the source SHA recorded. Use the bounded instruction in that guide alongside the assigned card. It does not replace the seven project skills, required native Agency children, direct source inspection, or acceptance checks.
+
 Antigravity documents workspace skills at `.agents/skills/<name>/SKILL.md`, supports selecting a skill by name, and reads the full file when applying it. Sources: [official Agent Skills documentation](https://antigravity.google/docs/skills/). The prompts explicitly name paths so loading can be verified even if automatic discovery is unavailable. A fresh conversation may be needed after adding skills; actual discovery in your installed Antigravity session has not been observed here.
 
 For T01, read exactly:
