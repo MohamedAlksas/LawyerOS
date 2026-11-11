@@ -5,6 +5,7 @@ import {
   validateStartupEnv,
   EnvironmentValidationError,
   validatePostgresUrlStructure,
+  validateRawPostgresUrlSyntax,
   extractNormalizedDbIdentity,
   areDatabaseIdentitiesEqual,
 } from '@/lib/env';
@@ -442,6 +443,122 @@ describe('Environment validation (src/lib/env.ts)', () => {
         CI: 'false',
       });
       expect(validated.TEST_DATABASE_URL).toBe(validDocumentedUrl);
+    });
+  });
+
+  describe('Driver repair branch triggers and raw syntax rejection (R16)', () => {
+    const operationalBase = 'postgresql://synthetic:synthetic@127.0.0.1:5432/law%6fffice_test';
+    const testBase = 'postgresql://synthetic:synthetic@127.0.0.1:5432/law%256fffice_test';
+
+    const repairTriggerCases = [
+      {
+        description: 'raw ASCII space in query parameter',
+        url: `${operationalBase}?application_name=synthetic name`,
+        expectedDriverEquivalence: true,
+      },
+      {
+        description: 'non-hex percent escape (%zz) in query parameter',
+        url: `${operationalBase}?application_name=%zz`,
+        expectedDriverEquivalence: true,
+      },
+      {
+        description: 'mixed non-hex percent escape (%0z) in query parameter',
+        url: `${operationalBase}?application_name=%0z`,
+        expectedDriverEquivalence: true,
+      },
+      {
+        description: 'fragment with non-hex percent escape (#%zz)',
+        url: `${operationalBase}#%zz`,
+        expectedDriverEquivalence: true,
+      },
+      {
+        description: 'raw space in credentials',
+        url: 'postgresql://synthetic user:synthetic@127.0.0.1:5432/law%6fffice_test',
+        expectedDriverEquivalence: true,
+      },
+      {
+        description: 'trailing incomplete percent escape (%)',
+        url: `${operationalBase}%`,
+        expectedDriverEquivalence: false,
+      },
+      {
+        description: 'trailing single-hex percent escape (%a)',
+        url: `${operationalBase}%a`,
+        expectedDriverEquivalence: false,
+      },
+    ];
+
+    it.each(repairTriggerCases)(
+      'rejects $description on both original inputs before connection',
+      ({ url, expectedDriverEquivalence }) => {
+        // 1. Raw syntax validation rejects the raw string
+        const rawCheck = validateRawPostgresUrlSyntax(url);
+        expect(rawCheck.valid).toBe(false);
+
+        // 2. Structural validation fails closed before URL parsing
+        const structCheck = validatePostgresUrlStructure(url);
+        expect(structCheck.valid).toBe(false);
+
+        // 3. Normalization helper fails closed and returns null
+        expect(extractNormalizedDbIdentity(url)).toBeNull();
+
+        // 4. If driver repair branch applies, verify that installed pg resolves both to database law%6fffice_test without connection
+        if (expectedDriverEquivalence) {
+          const clientOp = new Client({ connectionString: url }) as unknown as {
+            connectionParameters: { host: string; port: number; database: string };
+          };
+          const clientTest = new Client({ connectionString: testBase }) as unknown as {
+            connectionParameters: { host: string; port: number; database: string };
+          };
+          expect(clientOp.connectionParameters.host).toBe('127.0.0.1');
+          expect(clientOp.connectionParameters.port).toBe(5432);
+          expect(clientOp.connectionParameters.database).toBe('law%6fffice_test');
+          expect(clientTest.connectionParameters.database).toBe('law%6fffice_test');
+        }
+
+        // 5. validateEnv rejects upfront when provided as DATABASE_URL
+        expect(() =>
+          validateEnv({
+            NODE_ENV: 'test',
+            DATABASE_URL: url,
+            TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5433/lawoffice_test?schema=public',
+            CI: 'false',
+          })
+        ).toThrowError(EnvironmentValidationError);
+
+        // 6. validateEnv rejects upfront when provided as TEST_DATABASE_URL
+        expect(() =>
+          validateEnv({
+            NODE_ENV: 'test',
+            DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
+            TEST_DATABASE_URL: url,
+            CI: 'false',
+          })
+        ).toThrowError(EnvironmentValidationError);
+      }
+    );
+
+    it('permits properly encoded spaces (%20) and valid %HH sequences', () => {
+      const validEncodedUrl =
+        'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_test?application_name=synthetic%20name&schema=public';
+
+      expect(validateRawPostgresUrlSyntax(validEncodedUrl).valid).toBe(true);
+      expect(validatePostgresUrlStructure(validEncodedUrl).valid).toBe(true);
+
+      const identity = extractNormalizedDbIdentity(validEncodedUrl);
+      expect(identity).toEqual({
+        host: '127.0.0.1',
+        port: '5432',
+        database: 'lawoffice_test',
+      });
+
+      const validated = validateEnv({
+        NODE_ENV: 'test',
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
+        TEST_DATABASE_URL: validEncodedUrl,
+        CI: 'false',
+      });
+      expect(validated.TEST_DATABASE_URL).toBe(validEncodedUrl);
     });
   });
 });

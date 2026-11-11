@@ -50,6 +50,7 @@ Follow these steps to run LawOffice OS locally for development and testing:
        ```env
        TEST_DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test?schema=public"
        ```
+   - **Supported connection string encoding**: Connection URLs must adhere to strict URL syntax without ambiguous raw characters. Raw whitespace and control characters are rejected (spaces must be explicitly percent-encoded, e.g. `%20`), and all percent signs (`%`) must be followed by two hexadecimal digits (`%HH`).
    - Vitest automatically loads `TEST_DATABASE_URL` from `.env.local` or `.env.test` via `vitest.config.mjs`, or from the active shell environment.
 
 3. **Start local PostgreSQL services**:

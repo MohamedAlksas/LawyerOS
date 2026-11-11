@@ -1,11 +1,41 @@
 import { z } from 'zod';
 
 /**
+ * Validates the raw string syntax of a PostgreSQL connection URL before URL parsing.
+ * Enforces a strict supported grammar that avoids triggering the installed driver's
+ * whole-string repair branch (which repairs raw spaces and malformed percent escapes by rewriting %25HH).
+ */
+export function validateRawPostgresUrlSyntax(val: string): { valid: boolean; error?: string } {
+  // 1. Reject raw whitespace and ASCII control characters across the complete string
+  if (/[\s\u0000-\u001f\u007f]/u.test(val)) {
+    return {
+      valid: false,
+      error: 'PostgreSQL connection string must not contain raw whitespace or control characters; percent-encode special characters (e.g. %20 for spaces)',
+    };
+  }
+
+  // 2. Reject malformed percent escapes (any % not followed by exactly two hexadecimal digits)
+  if (/%(?![0-9A-Fa-f]{2})/u.test(val)) {
+    return {
+      valid: false,
+      error: 'PostgreSQL connection string contains malformed percent-encoding; every % must be followed by two hexadecimal digits',
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Validates the structural integrity of a PostgreSQL connection URL.
  * Checks protocol, presence of host, valid port if specified, and presence of target database.
  * Sanitizes errors so that no credentials or secrets leak.
  */
 export function validatePostgresUrlStructure(val: string): { valid: boolean; error?: string } {
+  const rawCheck = validateRawPostgresUrlSyntax(val);
+  if (!rawCheck.valid) {
+    return rawCheck;
+  }
+
   try {
     const parsed = new URL(val);
     if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
@@ -91,6 +121,11 @@ export interface NormalizedDbIdentity {
  * - Normalizes default port (5432)
  */
 export function extractNormalizedDbIdentity(urlStr: string): NormalizedDbIdentity | null {
+  const rawCheck = validateRawPostgresUrlSyntax(urlStr);
+  if (!rawCheck.valid) {
+    return null;
+  }
+
   try {
     const parsed = new URL(urlStr);
     if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
