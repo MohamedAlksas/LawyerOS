@@ -29,6 +29,7 @@ Local HEAD / independently verified remote pushed SHA:
 Changed files:
 Skills loaded (exact SKILL.md paths and task-specific application):
 Agency Agent evidence (distinct native invocation/conversation IDs, definition paths, lead/support, profile names/paths/hashes, ownership, inspected SHAs, findings/actions, lead reconciliation, test exits and evidence references):
+Slice routing decision (why the specialty fits, retained defaults or explicit Codex refinement, phase/file ownership and independent reviewers):
 Behavior delivered:
 Requirements and acceptance IDs covered:
 Commands actually run + exit status + short output:
