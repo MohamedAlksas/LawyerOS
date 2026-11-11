@@ -82,6 +82,7 @@ Follow these steps to run LawOffice OS locally for development and testing:
    npm run build            # Production compilation
    ```
    *Note on `npm run test:e2e`:* E2E browser tests (Playwright) are deferred to Milestones M1 (T04) and M6 (T16) and intentionally exit non-zero (`NOT RUN`) in T02.
+   The startup-process integration suite requires an explicit isolated `TEST_DATABASE_URL`, validates it against the original operational URL before spawning any process, and always builds the current checkout before its HTTP checks. Readiness must return HTTP 200 with the expected body and no-store headers; an unavailable database fails the test. It reports the fresh build ID and uses Turbopack by default. For environments with the documented local Turbopack CSS-worker failure, set `$env:STARTUP_TEST_BUNDLER='webpack'` explicitly to perform a fresh webpack test build; this does not change the application's default build command. Remove that environment variable to return to the default. No cached `.next` directory is accepted as build provenance.
 
 5. **Start development server**:
    ```powershell
