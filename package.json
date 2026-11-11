@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "echo 'E2E tests (Playwright) will be introduced in T04/T16. Documented as NOT RUN in T02.' && exit 0"
+    "test:e2e": "node -e \"console.error('E2E tests (Playwright) are deferred to T04/T16 and NOT RUN in T02.'); process.exit(1);\""
   },
   "dependencies": {
     "@prisma/adapter-pg": "7.10.1",

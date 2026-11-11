@@ -4,7 +4,7 @@ import { z } from 'zod';
  * Server-only environment schema for LawOffice OS.
  * Validates presence, formatting, and safety of operational variables.
  */
-const envSchema = z.object({
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().min(1).default('127.0.0.1'),
@@ -22,9 +22,10 @@ const envSchema = z.object({
       'TEST_DATABASE_URL must be a valid PostgreSQL connection string'
     )
     .optional(),
+  CI: z.string().optional(),
 });
 
-export type AppEnv = z.infer<typeof envSchema>;
+export type AppEnv = z.infer<typeof baseEnvSchema>;
 
 export class EnvironmentValidationError extends Error {
   public readonly missingKeys: string[];
@@ -39,6 +40,19 @@ export class EnvironmentValidationError extends Error {
 }
 
 /**
+ * Helper to safely extract database name from a PostgreSQL connection string.
+ */
+function extractDatabaseName(urlStr: string): string | null {
+  try {
+    const parsed = new URL(urlStr);
+    const dbName = parsed.pathname.replace(/^\//, '').split('?')[0];
+    return dbName || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Validates the provided environment map with actionable, sanitized error reporting.
  * Explicitly excludes secret values from the output to prevent log leakage.
  */
@@ -49,13 +63,49 @@ export function validateEnv(
     throw new Error('Environment configuration must never be evaluated in client-side code.');
   }
 
-  // In test mode, prefer TEST_DATABASE_URL over DATABASE_URL if provided, ensuring test isolation.
   const effectiveSource = { ...source };
-  if (effectiveSource.NODE_ENV === 'test' && effectiveSource.TEST_DATABASE_URL) {
+  const nodeEnv = effectiveSource.NODE_ENV || 'development';
+  const isTest = nodeEnv === 'test';
+  const isCI = effectiveSource.CI === 'true' || process.env.CI === 'true';
+
+  // In test mode: TEST_DATABASE_URL is strictly required; operational DATABASE_URL fallback is forbidden.
+  if (isTest) {
+    if (!effectiveSource.TEST_DATABASE_URL) {
+      throw new EnvironmentValidationError(
+        'Environment validation failed.\nMissing required environment variable(s): TEST_DATABASE_URL\nIn test mode (NODE_ENV=test), TEST_DATABASE_URL is strictly required and must not fall back to operational DATABASE_URL.\nConsult .env.example for required configuration. Secret values are redacted.',
+        ['TEST_DATABASE_URL'],
+        []
+      );
+    }
+
+    // Verify test target is distinct from operational database
+    const testDbName = extractDatabaseName(effectiveSource.TEST_DATABASE_URL);
+    const devDbName = effectiveSource.DATABASE_URL
+      ? extractDatabaseName(effectiveSource.DATABASE_URL)
+      : null;
+
+    // In local non-CI environment, ensure TEST_DATABASE_URL does not target the same database as DATABASE_URL
+    if (!isCI && (testDbName === 'lawoffice_dev' || (devDbName && testDbName === devDbName))) {
+      throw new EnvironmentValidationError(
+        `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must not target the operational/development database ('${testDbName || 'unknown'}').\nConsult .env.example for required configuration. Secret values are redacted.`,
+        [],
+        ['TEST_DATABASE_URL']
+      );
+    }
+
+    if (!testDbName || (!testDbName.endsWith('_test') && testDbName !== 'lawoffice_test')) {
+      throw new EnvironmentValidationError(
+        `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must point to a dedicated test database (e.g. ending in _test, such as lawoffice_test), but received database '${testDbName || 'unknown'}'.\nConsult .env.example for required configuration. Secret values are redacted.`,
+        [],
+        ['TEST_DATABASE_URL']
+      );
+    }
+
+    // In test mode, effective DATABASE_URL for all database connections is TEST_DATABASE_URL
     effectiveSource.DATABASE_URL = effectiveSource.TEST_DATABASE_URL;
   }
 
-  const result = envSchema.safeParse(effectiveSource);
+  const result = baseEnvSchema.safeParse(effectiveSource);
 
   if (!result.success) {
     const missingKeys: string[] = [];
@@ -101,4 +151,13 @@ export function getEnv(reload = false): AppEnv {
     cachedEnv = validateEnv(process.env);
   }
   return cachedEnv;
+}
+
+/**
+ * Supported runtime-startup validation boundary.
+ * Called at server bootstrap (or instrumentation) to ensure missing/invalid required configuration
+ * fails fast with actionable sanitized error reporting.
+ */
+export function validateStartupEnv(): AppEnv {
+  return validateEnv(process.env);
 }

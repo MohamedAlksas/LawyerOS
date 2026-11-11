@@ -15,11 +15,11 @@
   "outputs": [
     {
       "Name": "Agency-Agent-Installed-Validation.json",
-      "Length": 15201
+      "Length": 14832
     },
     {
       "Name": "Agency-Agent-Negative-Validation.json",
-      "Length": 737
+      "Length": 712
     },
     {
       "Name": "Agency-Agent-Validation.json",
@@ -35,11 +35,11 @@
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 382049
+      "Length": 385076
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 192745
+      "Length": 193850
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",

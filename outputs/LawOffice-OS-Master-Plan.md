@@ -35,6 +35,80 @@ Canonical references live at the repository root and in `docs/`. [outputs](.) co
 
 The documentation is in English. The product remains an Arabic RTL application for an Egyptian law office.
 
+## Local development startup
+
+Follow these steps to run LawOffice OS locally for development and testing:
+
+1. **Prerequisites**:
+   - Node.js 26 Active LTS (`^26.13.0`) and npm 11.x
+   - Docker Desktop with Docker Compose v2+
+   - Git
+
+2. **Environment configuration**:
+   - Copy the synthetic environment template:
+     ```powershell
+     cp .env.example .env.local
+     ```
+   - In `.env.local`, review loopback variables:
+     - Development database URL (default host port `5432` on Linux/CI, or `6432` on Windows to avoid Hyper-V excluded port ranges):
+       ```env
+       DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6432/lawoffice_dev?schema=public"
+       ```
+     - Isolated test database URL (default host port `5433` on Linux/CI, or `6433` on Windows):
+       ```env
+       TEST_DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test?schema=public"
+       ```
+   - Vitest automatically loads `TEST_DATABASE_URL` from `.env.local` or `.env.test` via `vitest.config.mjs`, or from the active shell environment.
+
+3. **Start local PostgreSQL services**:
+   - **Development database** (persistent volume `lawoffice_pgdata`):
+     ```powershell
+     # On Windows (specifying PGPORT):
+     $env:PGPORT="6432"
+     docker compose -f ops/docker-compose.yml up -d
+     ```
+   - **Isolated test database** (disposable tmpfs storage):
+     ```powershell
+     # On Windows (specifying TEST_PGPORT):
+     $env:TEST_PGPORT="6433"
+     docker compose -f ops/docker-compose.test.yml up -d
+     ```
+   - Verify container health status:
+     ```powershell
+     docker compose -f ops/docker-compose.yml ps
+     docker compose -f ops/docker-compose.test.yml ps
+     ```
+
+4. **Run tests & quality checks**:
+   ```powershell
+   npm ci
+   npm run lint             # ESLint flat configuration check
+   npm run typecheck        # Strict TypeScript typechecking
+   npm run test             # Unit tests (environment, pool lifecycle, and health routes)
+   npm run test:integration # Real PostgreSQL readiness probe & failure mode checks
+   npm run build            # Production compilation
+   ```
+   *Note on `npm run test:e2e`:* E2E browser tests (Playwright) are deferred to Milestones M1 (T04) and M6 (T16) and intentionally exit non-zero (`NOT RUN`) in T02.
+
+5. **Start development server**:
+   ```powershell
+   npm run dev
+   ```
+   - Placeholder page: `http://localhost:3000` (Arabic RTL, `lang="ar-EG"`)
+   - Liveness probe: `http://localhost:3000/api/health/live` (HTTP 200)
+   - Readiness probe: `http://localhost:3000/api/health/ready` (HTTP 200 when DB is connected, HTTP 503 when down)
+
+6. **Safe teardown**:
+   - To stop the disposable test database:
+     ```powershell
+     docker compose -f ops/docker-compose.test.yml down
+     ```
+   - To stop the development database while preserving persistent data:
+     ```powershell
+     docker compose -f ops/docker-compose.yml down
+     ```
+     *(Note: Do not pass `-v` unless an explicit database reset is intended).*
+
 ## Agency specialists during implementation
 
 Every task card explicitly selects one installed Agency Agent lead and the relevant supporting profiles, in addition to its LawOffice skills. Read [AGENCY_AGENTS](../docs/AGENCY_AGENTS.md); [the routing registry](../docs/AGENCY_AGENT_ROUTING.json) maps all 23 tasks to 14 locally verified Agency profiles. T01 uses `agency-software-architect` with `agency-devops-automator`; frontend, identity, backend, and recovery tasks have their own appropriate leads. Supporting profiles are scoped role passes, not an unsupported claim of spawned agents or Codex approval. Missing required profiles are reported before dependent implementation.

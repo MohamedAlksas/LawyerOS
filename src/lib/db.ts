@@ -1,21 +1,24 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { getEnv } from './env';
 
 declare global {
   var __lawoffice_pg_pool: Pool | undefined;
 }
 
+let singletonPool: Pool | undefined;
+
 /**
  * Returns a singleton connection pool for PostgreSQL.
- * In development, reuses globalThis to avoid socket leaks across HMR cycles.
+ * Reused across requests in production and development (using globalThis to avoid socket leaks across HMR cycles).
  */
 export function getDbPool(): Pool {
   if (typeof window !== 'undefined') {
     throw new Error('Database connections cannot be created on the client.');
   }
 
-  if (global.__lawoffice_pg_pool) {
-    return global.__lawoffice_pg_pool;
+  const cached = global.__lawoffice_pg_pool ?? singletonPool;
+  if (cached) {
+    return cached;
   }
 
   const env = getEnv();
@@ -33,9 +36,8 @@ export function getDbPool(): Pool {
     console.error('[Database Pool Error]:', sanitized);
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    global.__lawoffice_pg_pool = pool;
-  }
+  singletonPool = pool;
+  global.__lawoffice_pg_pool = pool;
 
   return pool;
 }
@@ -48,30 +50,60 @@ export interface ReadinessCheckResult {
 
 /**
  * Executes a minimal read-only connectivity probe (SELECT 1 AS probe)
- * against PostgreSQL with strict timeout and sanitized error handling.
+ * against PostgreSQL with bounded timeout, connection eviction on failure,
+ * and sanitized error handling.
  */
 export async function checkDatabaseReadiness(
   timeoutMs = 3000,
   overridePool?: Pool
 ): Promise<ReadinessCheckResult> {
-  const pool = overridePool ?? getDbPool();
-  const start = Date.now();
+  let pool: Pool;
+  try {
+    pool = overridePool ?? getDbPool();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Database configuration error';
+    return {
+      ok: false,
+      latencyMs: 0,
+      error: message.includes('Missing required') || message.includes('Environment validation')
+        ? 'Database configuration missing or invalid'
+        : 'Database initialization failed',
+    };
+  }
 
-  let timeoutId: NodeJS.Timeout | undefined;
+  const start = Date.now();
+  let client: PoolClient | undefined;
+  let clientAcquired = false;
+  let released = false;
+  let timedOut = false;
+  let timeoutTimer: NodeJS.Timeout | undefined;
 
   try {
     const probePromise = (async () => {
-      const client = await pool.connect();
-      try {
-        const res = await client.query('SELECT 1 AS probe');
-        return res.rows[0]?.probe === 1;
-      } finally {
-        client.release();
+      // 1. Acquire client from pool
+      client = await pool.connect();
+      clientAcquired = true;
+
+      // If timeout already fired while waiting for connection, destroy client immediately
+      if (timedOut) {
+        if (!released) {
+          released = true;
+          try {
+            client.release(true);
+          } catch {}
+        }
+        return false;
       }
+
+      // 2. Query execution (bounded by enclosing timeout and eviction)
+      const res = await client.query('SELECT 1 AS probe');
+
+      return res.rows[0]?.probe === 1;
     })();
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
         reject(new Error('DATABASE_PROBE_TIMEOUT'));
       }, timeoutMs);
     });
@@ -84,18 +116,30 @@ export async function checkDatabaseReadiness(
       latencyMs,
     };
   } catch (error: unknown) {
+    timedOut = true;
     const latencyMs = Date.now() - start;
     let safeMessage = 'Database connection failed';
 
+    // On probe error or timeout, evict the client if acquired so broken connections cannot poison pool
+    if (clientAcquired && client && !released) {
+      released = true;
+      try {
+        client.release(true); // destroy client and evict from pool
+      } catch {}
+    }
+
     if (error instanceof Error) {
-      if (error.message === 'DATABASE_PROBE_TIMEOUT') {
+      if (error.message === 'DATABASE_PROBE_TIMEOUT' || error.message.includes('Query read timeout')) {
         safeMessage = `Database probe timed out after ${timeoutMs}ms`;
       } else if (
         error.message.includes('ECONNREFUSED') ||
         error.message.includes('ENOTFOUND')
       ) {
         safeMessage = 'Database service unreachable (connection refused)';
-      } else if (error.message.includes('authentication failed')) {
+      } else if (
+        error.message.includes('password authentication failed') ||
+        error.message.includes('authentication failed')
+      ) {
         safeMessage = 'Database authentication failed';
       }
     }
@@ -106,8 +150,15 @@ export async function checkDatabaseReadiness(
       error: safeMessage,
     };
   } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+    }
+    // Clean return to pool for healthy connection
+    if (clientAcquired && client && !released) {
+      released = true;
+      try {
+        client.release();
+      } catch {}
     }
   }
 }
@@ -116,9 +167,10 @@ export async function checkDatabaseReadiness(
  * Closes the active database connection pool (for teardown in tests or graceful shutdown).
  */
 export async function closeDbPool(): Promise<void> {
-  if (global.__lawoffice_pg_pool) {
-    const pool = global.__lawoffice_pg_pool;
-    global.__lawoffice_pg_pool = undefined;
+  const pool = global.__lawoffice_pg_pool ?? singletonPool;
+  global.__lawoffice_pg_pool = undefined;
+  singletonPool = undefined;
+  if (pool) {
     await pool.end();
   }
 }

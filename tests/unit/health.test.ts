@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { GET as livenessHandler } from '@/app/api/health/live/route';
 import { GET as readinessHandler } from '@/app/api/health/ready/route';
 import * as dbModule from '@/lib/db';
-import { vi } from 'vitest';
+import { EnvironmentValidationError } from '@/lib/env';
 
 describe('Health Routes (Liveness and Readiness)', () => {
   it('liveness route returns HTTP 200 with non-sensitive status and uptime', async () => {
@@ -58,6 +58,23 @@ describe('Health Routes (Liveness and Readiness)', () => {
     expect(body.check).toBe('readiness');
     expect(body.database.status).toBe('connected');
     expect(body.database.latencyMs).toBe(4);
+
+    checkReadinessSpy.mockRestore();
+  });
+
+  it('readiness route catches configuration failures and returns HTTP 503 without unhandled 500 (R05)', async () => {
+    const checkReadinessSpy = vi.spyOn(dbModule, 'checkDatabaseReadiness').mockRejectedValueOnce(
+      new EnvironmentValidationError('Missing required environment variable(s): DATABASE_URL', ['DATABASE_URL'])
+    );
+
+    const response = await readinessHandler();
+    expect(response.status).toBe(503);
+
+    const body = await response.json();
+    expect(body.status).toBe('fail');
+    expect(body.check).toBe('readiness');
+    expect(body.database.status).toBe('disconnected');
+    expect(body.database.error).toBe('Database configuration missing or invalid');
 
     checkReadinessSpy.mockRestore();
   });

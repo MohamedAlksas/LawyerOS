@@ -110,4 +110,7 @@ npm run test:integration
 
 # 6. Production build
 npm run build
+
+# 7. Deferred E2E command convention (exits 1 with NOT RUN message in T02)
+npm run test:e2e
 ```
