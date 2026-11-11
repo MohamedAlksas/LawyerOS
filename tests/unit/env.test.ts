@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { validateEnv, validateStartupEnv, EnvironmentValidationError } from '@/lib/env';
+import {
+  validateEnv,
+  validateStartupEnv,
+  EnvironmentValidationError,
+  validatePostgresUrlStructure,
+  extractNormalizedDbIdentity,
+  areDatabaseIdentitiesEqual,
+} from '@/lib/env';
 
 describe('Environment validation (src/lib/env.ts)', () => {
   const validSyntheticEnv = {
@@ -249,5 +256,106 @@ describe('Environment validation (src/lib/env.ts)', () => {
 
   it('provides validateStartupEnv boundary helper (R05, R12)', () => {
     expect(typeof validateStartupEnv).toBe('function');
+  });
+
+  describe('Driver-effective routing and ambiguous input rejection (R16)', () => {
+    const operationalTarget = 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_test';
+
+    it('rejects test URL using authority port 65432 with ?port=5432 overriding to operational port', () => {
+      const testUrlWithQueryPort = 'postgresql://synthetic:synthetic@127.0.0.1:65432/lawoffice_test?port=5432';
+
+      // 1. Structural validation rejects routing override query parameters before connection
+      const structCheck = validatePostgresUrlStructure(testUrlWithQueryPort);
+      expect(structCheck.valid).toBe(false);
+      expect(structCheck.error).toContain('must not use query parameters to override host or port routing');
+
+      // 2. Identity extraction accurately derives driver-effective port matching installed pg
+      const operationalId = extractNormalizedDbIdentity(operationalTarget);
+      const testId = extractNormalizedDbIdentity(testUrlWithQueryPort);
+      expect(testId?.port).toBe('5432');
+      expect(operationalId?.port).toBe('5432');
+      expect(areDatabaseIdentitiesEqual(operationalTarget, testUrlWithQueryPort)).toBe(true);
+
+      // 3. validateEnv rejects before connection
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: operationalTarget,
+          TEST_DATABASE_URL: testUrlWithQueryPort,
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+    });
+
+    it('rejects test URL using authority host unused.invalid with ?host=127.0.0.1 overriding to operational host', () => {
+      const testUrlWithQueryHost = 'postgresql://synthetic:synthetic@unused.invalid:5432/lawoffice_test?host=127.0.0.1';
+
+      // 1. Structural validation rejects routing override query parameters before connection
+      const structCheck = validatePostgresUrlStructure(testUrlWithQueryHost);
+      expect(structCheck.valid).toBe(false);
+      expect(structCheck.error).toContain('must not use query parameters to override host or port routing');
+
+      // 2. Identity extraction accurately derives driver-effective host matching installed pg
+      const operationalId = extractNormalizedDbIdentity(operationalTarget);
+      const testId = extractNormalizedDbIdentity(testUrlWithQueryHost);
+      expect(testId?.host).toBe('127.0.0.1');
+      expect(operationalId?.host).toBe('127.0.0.1');
+      expect(areDatabaseIdentitiesEqual(operationalTarget, testUrlWithQueryHost)).toBe(true);
+
+      // 3. validateEnv rejects before connection
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: operationalTarget,
+          TEST_DATABASE_URL: testUrlWithQueryHost,
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+    });
+
+    it('recognizes reserved character path encoding /%3F_test vs /%253F_test as driver-equivalent database targets', () => {
+      const url1 = 'postgresql://synthetic:synthetic@127.0.0.1:5432/%3F_test';
+      const url2 = 'postgresql://synthetic:synthetic@127.0.0.1:5432/%253F_test';
+
+      // Both match installed pg (pg-connection-string) decodeURI database resolution
+      const id1 = extractNormalizedDbIdentity(url1);
+      const id2 = extractNormalizedDbIdentity(url2);
+      expect(id1?.database).toBe('%3F_test');
+      expect(id2?.database).toBe('%3F_test');
+      expect(areDatabaseIdentitiesEqual(url1, url2)).toBe(true);
+
+      // validateEnv rejects TEST_DATABASE_URL targeting DATABASE_URL across percent-encoding aliases
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: url1,
+          TEST_DATABASE_URL: url2,
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+    });
+
+    it('permits normal documented query parameters such as ?schema=public and ?sslmode=disable', () => {
+      const validDocumentedUrl =
+        'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_test?schema=public&sslmode=disable';
+
+      const structCheck = validatePostgresUrlStructure(validDocumentedUrl);
+      expect(structCheck.valid).toBe(true);
+
+      const identity = extractNormalizedDbIdentity(validDocumentedUrl);
+      expect(identity).toEqual({
+        host: '127.0.0.1',
+        port: '5432',
+        database: 'lawoffice_test',
+      });
+
+      const validated = validateEnv({
+        NODE_ENV: 'test',
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
+        TEST_DATABASE_URL: validDocumentedUrl,
+        CI: 'false',
+      });
+      expect(validated.TEST_DATABASE_URL).toBe(validDocumentedUrl);
+    });
   });
 });

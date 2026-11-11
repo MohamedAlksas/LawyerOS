@@ -30,6 +30,19 @@ export function validatePostgresUrlStructure(val: string): { valid: boolean; err
         };
       }
     }
+
+    // Reject ambiguous routing query overrides (e.g. ?host= or ?port=)
+    // Standard URL authority must be used; routing overrides via query string are rejected.
+    for (const [key] of parsed.searchParams.entries()) {
+      const lower = key.toLowerCase();
+      if (lower === 'host' || lower === 'port') {
+        return {
+          valid: false,
+          error: 'PostgreSQL connection string must not use query parameters to override host or port routing; specify host and port in authority',
+        };
+      }
+    }
+
     const rawPath = parsed.pathname.replace(/^\//, '').split('?')[0];
     if (!rawPath || rawPath.trim().length === 0) {
       return {
@@ -38,7 +51,7 @@ export function validatePostgresUrlStructure(val: string): { valid: boolean; err
       };
     }
     try {
-      decodeURIComponent(rawPath);
+      decodeURI(rawPath);
     } catch {
       return {
         valid: false,
@@ -62,8 +75,11 @@ export interface NormalizedDbIdentity {
 
 /**
  * Safely extracts normalized database connection identity for driver-level equivalence checks.
- * Decodes URL-encoded components (e.g. /law%6fffice_test -> lawoffice_test)
- * and normalizes host and default port (5432).
+ * Matches installed pg driver (pg-connection-string) semantics:
+ * - Resolves query routing overrides (?host=, ?port=)
+ * - Strips IPv6 brackets
+ * - Decodes database path using decodeURI (matching pg-connection-string)
+ * - Normalizes default port (5432)
  */
 export function extractNormalizedDbIdentity(urlStr: string): NormalizedDbIdentity | null {
   try {
@@ -71,14 +87,31 @@ export function extractNormalizedDbIdentity(urlStr: string): NormalizedDbIdentit
     if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
       return null;
     }
-    const host = parsed.hostname.toLowerCase();
+
+    // Inspect searchParams for driver-effective routing overrides (?host=, ?port=)
+    // pg-connection-string iterates entries: config[entry[0]] = entry[1]
+    let queryHost: string | undefined;
+    let queryPort: string | undefined;
+    for (const [key, value] of parsed.searchParams.entries()) {
+      const lower = key.toLowerCase();
+      if (lower === 'host') queryHost = value;
+      if (lower === 'port') queryPort = value;
+    }
+
+    const host = (queryHost || parsed.hostname).toLowerCase().replace(/^\[(.+)\]$/, '$1');
     if (!host) return null;
 
-    const port = parsed.port || '5432';
+    const port = queryPort || parsed.port || '5432';
     const rawDb = parsed.pathname.replace(/^\//, '').split('?')[0];
     if (!rawDb) return null;
 
-    const database = decodeURIComponent(rawDb);
+    let database: string;
+    try {
+      database = decodeURI(rawDb);
+    } catch {
+      return null;
+    }
+
     return { host, port, database };
   } catch {
     return null;

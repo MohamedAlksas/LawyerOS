@@ -10,10 +10,10 @@ const __dirname = path.dirname(__filename);
  * Helper to parse local environment files for test execution without external dependencies.
  * Loads .env.test first, then falls back to .env.local or .env.
  */
-function loadLocalTestEnv() {
+export function loadLocalTestEnv(baseDir = __dirname) {
   const loaded = {};
   for (const filename of ['.env.test', '.env.local', '.env']) {
-    const filePath = path.resolve(__dirname, filename);
+    const filePath = path.resolve(baseDir, filename);
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, 'utf-8');
       for (const line of content.split(/\r?\n/)) {
