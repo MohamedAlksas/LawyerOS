@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { Client } from 'pg';
 import {
   validateEnv,
   validateStartupEnv,
@@ -330,6 +331,91 @@ describe('Environment validation (src/lib/env.ts)', () => {
           NODE_ENV: 'test',
           DATABASE_URL: url1,
           TEST_DATABASE_URL: url2,
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+    });
+
+    it('rejects test URL using percent-encoded hostname 127.0.0.%31 while installed pg resolves to 127.0.0.1', () => {
+      const testUrlWithEncodedHost = 'postgresql://synthetic:synthetic@127.0.0.%31:5432/lawoffice_test';
+
+      // 1. Structural validation rejects percent-encoded hostname before connection
+      const structCheck = validatePostgresUrlStructure(testUrlWithEncodedHost);
+      expect(structCheck.valid).toBe(false);
+      expect(structCheck.error).toContain('must not use percent-encoded characters in hostname');
+
+      // 2. Direct driver comparison proves installed pg decodes hostname to 127.0.0.1 without connection
+      const clientOp = new Client({ connectionString: operationalTarget }) as unknown as {
+        connectionParameters: { host: string; port: number; database: string };
+      };
+      const clientTest = new Client({ connectionString: testUrlWithEncodedHost }) as unknown as {
+        connectionParameters: { host: string; port: number; database: string };
+      };
+      expect(clientTest.connectionParameters.host).toBe('127.0.0.1');
+      expect(clientOp.connectionParameters.host).toBe('127.0.0.1');
+      expect(clientTest.connectionParameters.port).toBe(5432);
+      expect(clientTest.connectionParameters.database).toBe('lawoffice_test');
+
+      // 3. Identity extraction accurately derives driver-effective host matching installed pg
+      const operationalId = extractNormalizedDbIdentity(operationalTarget);
+      const testId = extractNormalizedDbIdentity(testUrlWithEncodedHost);
+      expect(testId?.host).toBe('127.0.0.1');
+      expect(operationalId?.host).toBe('127.0.0.1');
+      expect(areDatabaseIdentitiesEqual(operationalTarget, testUrlWithEncodedHost)).toBe(true);
+
+      // 4. validateEnv rejects before connection on either input
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: operationalTarget,
+          TEST_DATABASE_URL: testUrlWithEncodedHost,
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: testUrlWithEncodedHost,
+          TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5433/lawoffice_test?schema=public',
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+    });
+
+    it('rejects uppercase routing query parameter ?HOST=unused.invalid on either input before connection', () => {
+      const opUrlWithUpperHost =
+        'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_test?HOST=unused.invalid';
+
+      // 1. Structural validation rejects routing override query parameters case-insensitively before connection
+      const structCheck = validatePostgresUrlStructure(opUrlWithUpperHost);
+      expect(structCheck.valid).toBe(false);
+      expect(structCheck.error).toContain('must not use query parameters to override host or port routing');
+
+      // 2. Direct driver comparison proves installed pg ignores uppercase HOST for routing without connection
+      const clientOp = new Client({ connectionString: opUrlWithUpperHost }) as unknown as {
+        connectionParameters: { host: string; port: number; database: string };
+      };
+      expect(clientOp.connectionParameters.host).toBe('127.0.0.1');
+      expect(clientOp.connectionParameters.port).toBe(5432);
+      expect(clientOp.connectionParameters.database).toBe('lawoffice_test');
+
+      // 3. validateEnv rejects upfront on DATABASE_URL before comparison or test-mode replacement
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: opUrlWithUpperHost,
+          TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5433/lawoffice_test?schema=public',
+          CI: 'false',
+        })
+      ).toThrowError(EnvironmentValidationError);
+
+      // 4. validateEnv rejects upfront on TEST_DATABASE_URL as well
+      expect(() =>
+        validateEnv({
+          NODE_ENV: 'test',
+          DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/lawoffice_dev?schema=public',
+          TEST_DATABASE_URL: opUrlWithUpperHost,
           CI: 'false',
         })
       ).toThrowError(EnvironmentValidationError);

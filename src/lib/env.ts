@@ -21,6 +21,15 @@ export function validatePostgresUrlStructure(val: string): { valid: boolean; err
         error: 'PostgreSQL connection string must include a valid host (e.g. 127.0.0.1 or localhost)',
       };
     }
+
+    // Reject percent-encoded hostnames (unsupported/ambiguous host representation)
+    if (host.includes('%') && !host.startsWith('[')) {
+      return {
+        valid: false,
+        error: 'PostgreSQL connection string must not use percent-encoded characters in hostname; specify a plain hostname or IP address',
+      };
+    }
+
     if (parsed.port) {
       const portNum = Number(parsed.port);
       if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
@@ -88,17 +97,14 @@ export function extractNormalizedDbIdentity(urlStr: string): NormalizedDbIdentit
       return null;
     }
 
-    // Inspect searchParams for driver-effective routing overrides (?host=, ?port=)
-    // pg-connection-string iterates entries: config[entry[0]] = entry[1]
-    let queryHost: string | undefined;
-    let queryPort: string | undefined;
-    for (const [key, value] of parsed.searchParams.entries()) {
-      const lower = key.toLowerCase();
-      if (lower === 'host') queryHost = value;
-      if (lower === 'port') queryPort = value;
-    }
+    // Driver-effective query parameter resolution matching installed pg-connection-string:
+    // pg-connection-string only checks exact lowercase !config.host and !config.port
+    const queryHost = parsed.searchParams.get('host') || undefined;
+    const queryPort = parsed.searchParams.get('port') || undefined;
 
-    const host = (queryHost || parsed.hostname).toLowerCase().replace(/^\[(.+)\]$/, '$1');
+    // Decode hostname matching pg-connection-string: decodeURIComponent(hostname)
+    const rawHostname = (queryHost || parsed.hostname).replace(/^\[(.+)\]$/, '$1');
+    const host = decodeURIComponent(rawHostname).toLowerCase();
     if (!host) return null;
 
     const port = queryPort || parsed.port || '5432';
@@ -222,9 +228,23 @@ export function validateEnv(
         []
       );
     }
+  }
 
+  // Validate operational DATABASE_URL structure upfront if provided (before comparison or test-mode replacement)
+  if (effectiveSource.DATABASE_URL) {
+    const dbStructure = validatePostgresUrlStructure(effectiveSource.DATABASE_URL);
+    if (!dbStructure.valid) {
+      throw new EnvironmentValidationError(
+        `Environment validation failed.\nInvalid environment variable(s): DATABASE_URL\n${dbStructure.error}\nConsult .env.example for required configuration. Secret values are redacted.`,
+        [],
+        ['DATABASE_URL']
+      );
+    }
+  }
+
+  if (isTest) {
     // Validate structural validity of TEST_DATABASE_URL before identity checks
-    const testStructure = validatePostgresUrlStructure(effectiveSource.TEST_DATABASE_URL);
+    const testStructure = validatePostgresUrlStructure(effectiveSource.TEST_DATABASE_URL!);
     if (!testStructure.valid) {
       throw new EnvironmentValidationError(
         `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\n${testStructure.error}\nConsult .env.example for required configuration. Secret values are redacted.`,
@@ -233,7 +253,7 @@ export function validateEnv(
       );
     }
 
-    const testIdentity = extractNormalizedDbIdentity(effectiveSource.TEST_DATABASE_URL);
+    const testIdentity = extractNormalizedDbIdentity(effectiveSource.TEST_DATABASE_URL!);
     const testDbName = testIdentity?.database;
 
     // Check 1: Ensure TEST_DATABASE_URL does not target operational/development database or match DATABASE_URL (R02, R09)
@@ -241,7 +261,7 @@ export function validateEnv(
       testDbName === 'lawoffice_dev' ||
       testDbName === 'lawoffice_prod' ||
       (effectiveSource.DATABASE_URL &&
-        areDatabaseIdentitiesEqual(effectiveSource.TEST_DATABASE_URL, effectiveSource.DATABASE_URL))
+        areDatabaseIdentitiesEqual(effectiveSource.TEST_DATABASE_URL!, effectiveSource.DATABASE_URL))
     ) {
       throw new EnvironmentValidationError(
         `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must not target the operational/development database ('${testDbName || 'unknown'}').\nConsult .env.example for required configuration. Secret values are redacted.`,
@@ -260,7 +280,7 @@ export function validateEnv(
     }
 
     // In test mode, effective DATABASE_URL for all database connections is TEST_DATABASE_URL
-    effectiveSource.DATABASE_URL = effectiveSource.TEST_DATABASE_URL;
+    effectiveSource.DATABASE_URL = effectiveSource.TEST_DATABASE_URL!;
   }
 
   const result = baseEnvSchema.safeParse(effectiveSource);
