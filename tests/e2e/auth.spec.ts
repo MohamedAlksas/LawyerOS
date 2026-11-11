@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { Pool } from 'pg';
 import { hashPassword, symmetricEncrypt } from 'better-auth/crypto';
 import { randomUUID } from 'crypto';
+import { createValidatedTestPool } from '../helpers/test-db';
 
 const TEST_EMAIL = 'lawyer.e2e@office.eg';
 const TEST_PASSWORD = 'E2EPassword2026!';
@@ -9,16 +9,12 @@ const TOTP_SECRET = 'SZ7CE4ZHNWC37XUUQ5S4HNQLL6SNJ6XT';
 const BACKUP_CODE = 'bkp01-code2';
 
 test.beforeEach(async () => {
-  const dbUrl =
-    process.env.TEST_DATABASE_URL ||
-    'postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:5433/lawoffice_test?schema=public';
-  const pool = new Pool({ connectionString: dbUrl });
+  // 1. Strictly validate test environment before connecting (R07)
+  const { pool, env } = createValidatedTestPool();
   const client = await pool.connect();
   try {
     const hashedPassword = await hashPassword(TEST_PASSWORD);
-    const secretKey =
-      process.env.BETTER_AUTH_SECRET ||
-      'synthetic_development_secret_32_bytes_minimum_length_required';
+    const secretKey = env.BETTER_AUTH_SECRET;
     const encryptedSecret = await symmetricEncrypt({ key: secretKey, data: TOTP_SECRET });
     const encryptedBackupCodes = await symmetricEncrypt({
       key: secretKey,
@@ -57,6 +53,26 @@ test.beforeEach(async () => {
     await pool.end();
   }
 });
+
+test.afterAll(async () => {
+  // Scoped cleanup of owned synthetic E2E test data only (R07)
+  const { pool } = createValidatedTestPool();
+  const client = await pool.connect();
+  try {
+    const existing = await client.query('SELECT id FROM "user" WHERE email = $1', [TEST_EMAIL]);
+    if (existing.rows.length > 0) {
+      const userId = existing.rows[0].id;
+      await client.query('DELETE FROM "twoFactor" WHERE "userId" = $1', [userId]);
+      await client.query('DELETE FROM "session" WHERE "userId" = $1', [userId]);
+      await client.query('DELETE FROM "account" WHERE "userId" = $1', [userId]);
+      await client.query('DELETE FROM "user" WHERE id = $1', [userId]);
+    }
+  } finally {
+    client.release();
+    await pool.end();
+  }
+});
+
 
 test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () => {
   test('invalid login credentials display generic sanitized error without disclosing user existence', async ({ page }) => {

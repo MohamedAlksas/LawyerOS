@@ -17,21 +17,22 @@ import { getPrismaClient, getAuth } from '@/lib/auth';
 import { closeDbPool } from '@/lib/db';
 import { createOTP } from '@better-auth/utils/otp';
 import { symmetricDecrypt } from 'better-auth/crypto';
-import { getEnv } from '@/lib/env';
+import { getEnv, EnvironmentValidationError } from '@/lib/env';
+import {
+  createValidatedTestPool,
+  cleanupSyntheticTestData,
+  validateTestEnvironment,
+} from '../helpers/test-db';
 
 describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
   let pool: Pool;
-  const testDbUrl =
-    process.env.TEST_DATABASE_URL ||
-    'postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:5433/lawoffice_test?schema=public';
 
   beforeAll(async () => {
-    pool = new Pool({
-      connectionString: testDbUrl,
-      connectionTimeoutMillis: 5000,
-    });
+    // 1. Strictly validate test environment before opening any pool or socket (R07)
+    const validated = createValidatedTestPool();
+    pool = validated.pool;
 
-    // 1. Schema installation / migration check from T02
+    // 2. Schema installation / migration check from T02
     // Run the migration SQL idempotently or create tables if they do not exist
     const migrationSqlPath = path.resolve(
       process.cwd(),
@@ -48,14 +49,18 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
           throw err;
         }
       });
-      // Clean auth tables for an isolated clean integration run
-      await client.query('DELETE FROM "twoFactor"; DELETE FROM "session"; DELETE FROM "account"; DELETE FROM "verification"; DELETE FROM "user";');
     } finally {
       client.release();
     }
+
+    // 3. Scoped cleanup of synthetic test data created by this suite (preserving sentinel/pre-existing data)
+    await cleanupSyntheticTestData(pool);
   });
 
   afterAll(async () => {
+    if (pool) {
+      await cleanupSyntheticTestData(pool).catch(() => {});
+    }
     await closeDbPool().catch(() => {});
     if (pool) {
       await pool.end().catch(() => {});
@@ -370,5 +375,116 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(remainingSessions.length).toBe(1);
     expect(remainingSessions[0].id).toBe(actorA.sessionId);
     expect(remainingSessions[0].isCurrent).toBe(true);
+  });
+});
+
+describe('Test Target Validation & Isolation Guard (R07)', () => {
+  it('fails closed and rejects missing TEST_DATABASE_URL with zero socket connection', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: undefined,
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: undefined,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(EnvironmentValidationError);
+      const envErr = err as EnvironmentValidationError;
+      expect(envErr.missingKeys).toContain('TEST_DATABASE_URL');
+      expect(envErr.message).toContain('TEST_DATABASE_URL is strictly required');
+    }
+  });
+
+  it('fails closed and rejects empty TEST_DATABASE_URL string', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: '   ',
+      });
+    }).toThrowError(EnvironmentValidationError);
+  });
+
+  it('fails closed and rejects TEST_DATABASE_URL targeting operational development database (lawoffice_dev) before any connection', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_dev',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_dev',
+      });
+    } catch (err) {
+      const envErr = err as EnvironmentValidationError;
+      expect(envErr.invalidKeys).toContain('TEST_DATABASE_URL');
+      expect(envErr.message).toContain('must not target the operational/development database');
+    }
+  });
+
+  it('fails closed and rejects TEST_DATABASE_URL targeting production database (lawoffice_prod) before any connection', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_prod',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_prod',
+      });
+    } catch (err) {
+      const envErr = err as EnvironmentValidationError;
+      expect(envErr.invalidKeys).toContain('TEST_DATABASE_URL');
+      expect(envErr.message).toContain('must not target the operational/development database');
+    }
+  });
+
+  it('fails closed when TEST_DATABASE_URL is identical to DATABASE_URL before any connection', () => {
+    const target = 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_test?schema=public';
+    expect(() => {
+      validateTestEnvironment({
+        DATABASE_URL: target,
+        TEST_DATABASE_URL: target,
+      });
+    }).toThrowError(EnvironmentValidationError);
+  });
+
+  it('fails closed when TEST_DATABASE_URL is equivalent to DATABASE_URL via loopback alias (localhost vs 127.0.0.1) before any connection', () => {
+    expect(() => {
+      validateTestEnvironment({
+        DATABASE_URL: 'postgresql://lawoffice_user:synthetic@localhost:5433/lawoffice_test?schema=public',
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_test?schema=public',
+      });
+    }).toThrowError(EnvironmentValidationError);
+  });
+
+  it('fails closed when TEST_DATABASE_URL is equivalent to DATABASE_URL via URL-encoding (/lawoffice_test vs /law%6fffice_test) before any connection', () => {
+    expect(() => {
+      validateTestEnvironment({
+        DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/law%6fffice_test?schema=public',
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_test?schema=public',
+      });
+    }).toThrowError(EnvironmentValidationError);
+  });
+
+  it('fails closed when TEST_DATABASE_URL points to a non-test database name not ending in _test', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_staging?schema=public',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_staging?schema=public',
+      });
+    } catch (err) {
+      const envErr = err as EnvironmentValidationError;
+      expect(envErr.invalidKeys).toContain('TEST_DATABASE_URL');
+      expect(envErr.message).toContain('must point to a dedicated test database (e.g. ending in _test');
+    }
   });
 });

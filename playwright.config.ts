@@ -1,7 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
+import { validateTestEnvironment } from './tests/helpers/test-db';
 
 const PORT = 3100;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+
+// Strictly validate test environment before starting test runner or web server (R07)
+const env = validateTestEnvironment();
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -39,20 +43,14 @@ export default defineConfig({
   webServer: {
     command: `npx next start -H 127.0.0.1 -p ${PORT}`,
     url: `${BASE_URL}/login`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 60000,
     env: {
       PORT: String(PORT),
       HOST: '127.0.0.1',
-      DATABASE_URL:
-        process.env.TEST_DATABASE_URL ||
-        'postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:5433/lawoffice_test?schema=public',
-      TEST_DATABASE_URL:
-        process.env.TEST_DATABASE_URL ||
-        'postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:5433/lawoffice_test?schema=public',
-      BETTER_AUTH_SECRET:
-        process.env.BETTER_AUTH_SECRET ||
-        'synthetic_development_secret_32_bytes_minimum_length_required',
+      NODE_ENV: 'test',
+      TEST_DATABASE_URL: env.TEST_DATABASE_URL!,
+      BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: BASE_URL,
     },
   },
