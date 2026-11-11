@@ -7,7 +7,7 @@
 - Upstream: `origin/feature/t02-runtime-ci`  
 - Pull Request: https://github.com/MohamedAlksas/LawyerOS/pull/4 (Draft PR)  
 **Implementation inspected SHA:** `9130333f329bd2596a29393ce8a172b8f4cfcb4f`  
-**Final published report commit HEAD SHA:** `0963d3d29d18eefc4ef4e05b3898e3b313ff5511` (will be finalized upon attestation commit; diff against inspected implementation contains only `docs/reviews/T02-submission.md`)  
+**Final published report commit HEAD SHA:** `b56de42a299a53906c6ebd8b0a68e0ff21e1d1b0` (attestation commit; diff against inspected implementation contains only `docs/reviews/T02-submission.md`)  
 **Changed files:**
 - `.env.example` (new)
 - `.github/workflows/ci.yml` (new)
