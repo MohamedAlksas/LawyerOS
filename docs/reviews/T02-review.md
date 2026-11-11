@@ -1,6 +1,6 @@
 # T02 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at published head `3b9a53b69842dbb7a235199d2b50d287d3130329`. See [the latest review](T02-review-round4.md) and [the next correction assignment](T02-corrections-round4.md). Actual three-child native execution is now independently verified. Earlier reviews are preserved as historical evidence; T03 remains unreleased.
+Latest review: **CHANGES_REQUESTED** at published head `867b312c8dcec847dc18df7784dc382b5e0c911d`. See [the latest review](T02-review-round5.md) and [the next correction assignment](T02-corrections-round5.md). R21 is resolved and actual three-child native execution is verified. R16 still needs a complete lexical input boundary; earlier reviews remain historical and T03 is unreleased.
 
 Decision: **CHANGES_REQUESTED**. Keep PR #4 draft. T03 is not released.
 
