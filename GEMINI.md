@@ -28,6 +28,8 @@ For a material conflict, name both documents and the conflicting cases and raise
 
 ## Implementation boundaries
 
+Use the specialty and owned paths explicitly assigned by Codex for the current slice. Follow the task defaults unless Codex supplies a written slice-level routing decision under `docs/AGENCY_AGENTS.md`; do not infer that a task's original lead owns every later correction. Mixed-specialty implementation uses explicit phases and ownership handoffs. Required native execution, frozen support review, and Codex acceptance still apply. Report an actual role/scope mismatch before expanding your ownership.
+
 - Implement one assigned task. Do not build the entire project from the starter prompt or advance to another task simply because time remains.
 - Do not replace the stack, authentication, domain names, or financial storage approach without a documented review decision.
 - Make the smallest change that delivers the required behavior. Avoid speculative layers, abstractions, or broad refactoring during a feature task.

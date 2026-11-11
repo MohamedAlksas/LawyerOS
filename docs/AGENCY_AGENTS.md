@@ -10,7 +10,7 @@ Current Antigravity documentation provides `invoke_subagent` and workspace defin
 
 ## Sources of truth
 
-- [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) names the task's lead/support profiles and required execution policy.
+- [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) names the task's default lead/support profiles and required execution policy. A later explicit Codex-authored slice assignment may refine role ownership under the routing rule below; the implementer cannot choose a different profile silently.
 - `.agents/agents/<profile-name>.md` is the generated native definition, using the same name as the profile. Regenerate it with `scripts/Update-AgencyAgentPrompts.ps1`; do not hand-edit derived definitions.
 - `.agents/skills/<registered-folder>/SKILL.md` is the project-local profile source. Read it in each delegated session, verify its frontmatter name, and record the loaded SHA-256. The current roster has 155 profiles: 149 recovered from the surviving global installation and six from the owner's subsequent reinstallation. All copied files match their observed source hashes. Only the 14 routed specialties receive native definitions. The global installation remains unchanged. [Recovery inventory](../outputs/Agency-Profile-Recovery.json), [complete classified catalogue](AGENCY_AGENT_CATALOG.md).
 - Every LawOffice project skill listed by the task remains mandatory. Project rules govern generic Agency suggestions.
@@ -18,6 +18,39 @@ Current Antigravity documentation provides `invoke_subagent` and workspace defin
 Retain [the upstream MIT license](third-party/agency-agents-LICENSE.txt) with redistributed profiles. Do not automatically update the recovered files or load the entire roster for a single task. The planning ZIP includes the project-local profiles and native definitions; the consolidated reading document omits the full roster's instruction bodies.
 
 Observed profile hashes are inventory snapshots. Record drift, read the actual file, and escalate a substantive conflict; drift alone is not a missing-profile failure. A missing, unreadable, or misnamed required profile stops dependent work with an exact path/name report.
+
+## Route the actual implementation slice
+
+The owner requested specialty-appropriate assignments on 11 November 2026. This applies prospectively to new assignments/corrections. Codex chooses the lead from the behavior being changed and the expertise it needs, then names the exact profile/definition paths, owned files, acceptance checks and support responsibilities in the assignment. A broad task label such as T02 does not make its original lead the implementation owner of every subsequent correction. This refines the default routing contract without changing product scope, stack, native execution requirements or independent acceptance.
+
+Use these existing installed specialties as the starting map:
+
+| Actual work | Implementation specialty | Relevant support when required by scope |
+|---|---|---|
+| Docker, CI, service startup, process lifecycle and operational configuration | `agency-devops-automator` | Backend for application boundaries; test automation for observed process behavior |
+| Application commands, API behavior, domain rules, configuration validation and database-target identity | `agency-backend-architect` | Security for sensitive boundaries; test automation for regression quality |
+| Authentication, sessions, identity lifecycle and authorization | `agency-identity-access-engineer` | Application security and backend |
+| Arabic RTL screens, responsive interactions and frontend behavior | `agency-frontend-developer` | Accessibility and relevant backend interfaces |
+| A separately assigned test harness, regression suite or test infrastructure | `agency-test-automation-engineer` | The relevant application/operations specialist to review what the tests prove |
+| Schema constraints, query/index design and database concurrency | `agency-database-optimizer` | Backend and relevant behavioral verification |
+| Backup/restore consistency and recovery procedures | `agency-database-reliability-engineer` | DevOps and application-data correctness |
+| Architecture decisions and decomposition | `agency-software-architect` | The implementation specialties affected by the decision |
+| A separately assigned documentation slice | `agency-technical-writer` | The specialist who can verify its technical claims |
+
+The selected application author may add focused regression tests for their change. Test specialists design/check meaningful evidence and may own a distinct testing slice; writing every assertion does not require a separate agent. DevOps may write application-language startup helpers when the behavior is operational. Choose by behavior, responsibility and risk, rather than file extension or a rigid ban on writing code.
+
+Before each new slice, Codex records:
+
+1. **Scope and reason:** the concrete behavior, why this specialty fits, and what is outside the slice.
+2. **Actual assignment:** lead profile, canonical native definition and exact project-skill/profile paths; named supports and their bounded responsibilities.
+3. **Ownership and evidence:** owned paths, base SHA, acceptance checks and expected outputs. Each write phase has one named owner per file.
+4. **Routing decision:** retain task defaults, or explicitly state the roles being refined and why. A correction may use another already-routed specialist as lead, with the original lead supporting only the relevant operational concerns. The written Codex decision takes precedence over the generic task default for that slice; all unchanged requirements remain binding.
+
+If work spans specialties, split it into small explicit implementation phases with an ownership handoff and committed checkpoint. For example, a backend slice owns connection-target validation, an operations slice owns the service launcher, and a test slice can own a process harness. One writer owns each phase/file; independent supports inspect the frozen result read-only. An author must not be presented as the independent reviewer of their own changes. Preserve the normal maximum of three active children and use only relevant specialists.
+
+Antigravity may identify a mismatch and propose a better assignment to Codex, but cannot silently broaden an agent's role, change the selected model, replace required profiles, or use this rule as a fallback after native preflight fails. If a needed specialty lacks a registered definition, Codex must prepare its routing/definition before dependent implementation. Existing profile and native-execution checks remain mandatory. Portable validators check the default registry and generated cards; Codex separately verifies the written slice decision and its actual execution.
+
+Current in-flight assignments retain their explicit ownership until Codex issues a new slice. In particular, T02's current startup/process-lifecycle correction remains appropriately led by DevOps. Earlier execution history is not retroactively reassigned. Codex will use this rule when issuing the next assignment, even when it remains under the same task ID and PR.
 
 ## Capability preflight
 
@@ -34,7 +67,7 @@ The owner selected the main implementation model; definitions use `model: inheri
 3. The lead owns only the assigned implementation slice. One writer owns a file at a time. Children preserve existing changes and do not switch the parent's branch, stage unrelated files, publish, merge, or spawn nested agents. The parent handles coherent commits/pushes on the task's existing feature branch.
 4. Before support review, the parent creates a committed checkpoint and freezes application source. Each support examines that exact SHA in its own session; support review does not edit application source. Give build/test runs separate worktrees when generated files, ports, databases, or watchers could conflict. Independent support reviews may run concurrently; dependent implementation and reconciliation stay ordered.
 5. Supports return concrete findings and test evidence. The lead reconciles them; the parent records dispositions. If implementation changes, commit a new checkpoint and rerun the affected support checks against it. A report about an older SHA does not verify new code.
-6. Normally use one lead plus at most two routed supports, at most three active children. Do not load or launch the entire Agency roster. Each task's routing remains the scope limit. Supports can finish with no findings but must state what they examined and what remains untested.
+6. Normally use one lead plus at most two routed supports, at most three active children. Do not load or launch the entire Agency roster. Use the task's default routing or its explicit Codex-authored slice refinement; that written assignment remains the scope limit. Supports can finish with no findings but must state what they examined and what remains untested.
 7. Codex independently reviews the published implementation. Native delegation, a support verdict, a green build, and a successful portable validator never grant task acceptance, a main merge, or the next assignment.
 
 ## Required execution evidence
