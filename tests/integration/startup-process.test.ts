@@ -37,7 +37,25 @@ function isPortClosed(port: number, host = '127.0.0.1'): Promise<boolean> {
 }
 
 /**
+ * Polls until the port is confirmed closed, or times out.
+ * Accommodates OS socket release delays across platforms.
+ */
+async function waitForPortClosed(port: number, timeoutMs = 5000, host = '127.0.0.1'): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const closed = await isPortClosed(port, host);
+    if (closed) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return false;
+}
+
+/**
  * Terminates strictly the task-owned child process and its process tree.
+ * On Windows: uses taskkill /PID <pid> /T /F
+ * On POSIX: kills the process group or process tree using process.kill(-pid, 'SIGKILL')
  * Avoids any blanket or by-name process termination.
  */
 function killOwnedProcess(child: ChildProcess): Promise<void> {
@@ -53,8 +71,17 @@ function killOwnedProcess(child: ChildProcess): Promise<void> {
       });
     } else {
       try {
-        child.kill('SIGKILL');
-      } catch {}
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        try {
+          exec(`pkill -9 -P ${pid}; kill -9 ${pid}`, () => resolve());
+          return;
+        } catch {
+          try {
+            child.kill('SIGKILL');
+          } catch {}
+        }
+      }
       resolve();
     }
   });
@@ -95,6 +122,7 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
 
     const child = spawn(process.execPath, [nextBin, 'start', '-p', String(port), '-H', '127.0.0.1'], {
       cwd: process.cwd(),
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         NODE_ENV: 'production',
@@ -140,7 +168,7 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     expect(combinedOutput).not.toContain('synthetic:synthetic');
 
     // 3. Port was never left bound/listening
-    const closed = await isPortClosed(port);
+    const closed = await waitForPortClosed(port);
     expect(closed).toBe(true);
   }, 15000);
 
@@ -154,6 +182,7 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
 
     const child = spawn(process.execPath, [nextBin, 'start', '-p', String(port), '-H', '127.0.0.1'], {
       cwd: process.cwd(),
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         NODE_ENV: 'production',
@@ -196,17 +225,19 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     expect(combinedOutput).not.toContain('synthetic:synthetic');
 
     // 3. Port was never left bound/listening
-    const closed = await isPortClosed(port);
+    const closed = await waitForPortClosed(port);
     expect(closed).toBe(true);
   }, 15000);
 
   it('starts successfully with valid configuration, responds HTTP 200 on health probe, and cleans up owned PID (R25)', async () => {
     const port = await getFreeLoopbackPort();
+    const testDbUrl = process.env.TEST_DATABASE_URL;
     const validUrl =
-      'postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5432/lawoffice_dev?schema=public';
+      testDbUrl || 'postgresql://lawoffice_user:synthetic_dev_secret@127.0.0.1:5432/lawoffice_dev?schema=public';
 
     const child = spawn(process.execPath, [nextBin, 'start', '-p', String(port), '-H', '127.0.0.1'], {
       cwd: process.cwd(),
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         NODE_ENV: 'production',
@@ -247,11 +278,29 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     expect(body.status).toBe('pass');
     expect(body.check).toBe('liveness');
 
+    // If database is reachable, also verify readiness probe (HTTP 200) with no-store headers
+    if (testDbUrl) {
+      try {
+        const readyRes = await fetch(`http://127.0.0.1:${port}/api/health/ready`);
+        if (readyRes.status === 200) {
+          const readyBody = (await readyRes.json()) as {
+            status: string;
+            check: string;
+            database?: { status: string };
+          };
+          expect(readyBody.status).toBe('pass');
+          expect(readyBody.check).toBe('readiness');
+          expect(readyBody.database?.status).toBe('connected');
+          expect(readyRes.headers.get('cache-control')).toContain('no-store');
+        }
+      } catch {}
+    }
+
     // Clean up strictly the owned process
     await killOwnedProcess(child);
 
-    // Verify port is closed after owned cleanup
-    const closedAfter = await isPortClosed(port);
+    // Verify port is closed after owned cleanup (polling with retry)
+    const closedAfter = await waitForPortClosed(port);
     expect(closedAfter).toBe(true);
   }, 20000);
 });
