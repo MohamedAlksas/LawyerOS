@@ -12,7 +12,7 @@ Each linked card contains one complete, copyable prompt. Give Antigravity only t
 
 Open `D:\Lawyer` in Antigravity and copy the full prompt in [T01](tasks/T01.md). It explicitly loads `lawoffice-delivery` and `lawoffice-foundation` from their actual `.agents/skills/` files. T01 is the only task without a predecessor acceptance requirement. The generated output `LawOffice-OS-Antigravity-T01.md` contains the same prompt.
 
-It also explicitly selects lead `agency-software-architect` and support `agency-devops-automator` from their verified installed SKILL.md paths. The following table maps every task to its actual Agency lead/support profiles. See [Agency usage](AGENCY_AGENTS.md) and [the routing registry](AGENCY_AGENT_ROUTING.json). Local profile verification does not claim runtime activation in Antigravity.
+It also selects the lead and supports from their installed SKILL.md paths and requires real native invocation through the bundled `.agents/agents/` definitions. Same-session persona passes are not a fallback. The following table maps every task to its profiles. See [Agency usage](AGENCY_AGENTS.md) and [the routing registry](AGENCY_AGENT_ROUTING.json) for the capability/evidence contract. Static validation does not claim actual execution in Antigravity.
 
 ## Task and skill map
 
@@ -26,7 +26,7 @@ $previous = 'None — first task'
 foreach ($taskId in $taskIds) {
     $relative = 'docs/tasks/' + $taskId + '.md'
     $body = [System.IO.File]::ReadAllText((Join-Path $projectRoot $relative))
-    $skillNames = @([regex]::Matches($body, '\.agents/skills/([a-z0-9-]+)/SKILL\.md') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Where-Object { $_ -ne 'lawoffice-delivery' })
+    $skillNames = @([regex]::Matches($body, '\.agents/skills/(lawoffice-[a-z0-9-]+)/SKILL\.md') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Where-Object { $_ -ne 'lawoffice-delivery' })
     $skills = ($skillNames | ForEach-Object { '`' + $_ + '`' }) -join ', '
     $routing = $agencyRouting.tasks[$taskId]
     if (-not $routing) { throw ('Missing Agency routing for ' + $taskId) }

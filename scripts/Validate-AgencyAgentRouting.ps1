@@ -10,7 +10,10 @@ $taskIds = @('T01','T02','T03','T04','T05','T06','T07','T08','T09','T10','T11','
 $errors = [Collections.Generic.List[string]]::new()
 $profiles = $manifest.profiles
 $tasks = $manifest.tasks
-if ($manifest.schemaVersion -ne 1) { $errors.Add('Expected schemaVersion 1.') }
+if ($manifest.schemaVersion -ne 2) { $errors.Add('Expected schemaVersion 2.') }
+if ($manifest.executionMode -cne 'native-subagents-required') { $errors.Add('Native subagent execution must be required.') }
+if ($manifest.executionPolicy.sequentialPersonaFallback -ne $false) { $errors.Add('Sequential persona fallback must be disabled.') }
+if ($manifest.executionPolicy.agentRoot -cne '.agents/agents' -or $manifest.executionPolicy.invocationTool -cne 'invoke_subagent' -or $manifest.executionPolicy.modelPolicy -cne 'inherit') { $errors.Add('Unexpected native-agent discovery, invocation, or model policy.') }
 if ($profiles -isnot [Collections.IDictionary] -or $profiles.Count -eq 0) { throw 'Expected a nonempty profiles map.' }
 if ($tasks -isnot [Collections.IDictionary]) { throw 'Expected a tasks map.' }
 if ($tasks.Count -ne $taskIds.Count) { $errors.Add('Expected exactly 23 routed tasks.') }
@@ -22,16 +25,26 @@ foreach ($slug in ($profiles.Keys | Sort-Object)) {
     if ($slug -notmatch '^agency-[a-z0-9]+(?:-[a-z0-9]+)*$') { $errors.Add("Invalid Agency Agent slug: $slug"); continue }
     if ($profile -isnot [Collections.IDictionary]) { $errors.Add("Invalid profile record: $slug"); continue }
     if ($profile.folder -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { $errors.Add("Invalid installed folder for $slug"); continue }
-    $expectedSource = '~/.gemini/config/skills/' + $profile.folder + '/SKILL.md'
+    $expectedSource = '.agents/skills/' + $profile.folder + '/SKILL.md'
     if ($profile.source -cne $expectedSource) { $errors.Add("Nonportable or mismatched source for $slug"); continue }
     if ($profile.metadataName -cne $slug) { $errors.Add("metadataName must equal profile slug: $slug"); continue }
     if ($profile.observedSha256 -notmatch '^[0-9a-fA-F]{64}$') { $errors.Add("Invalid observedSha256 for $slug") }
     if ([string]::IsNullOrWhiteSpace($profile.purpose)) { $errors.Add("Missing purpose for $slug") }
     [void]$validProfiles.Add($slug)
-    if (-not $VerifyInstalled) { continue }
-    $userProfileRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
-    $installedPath = Join-Path (Join-Path $userProfileRoot '.gemini/config/skills') ($profile.folder + '/SKILL.md')
+    $agentPath = Join-Path $projectRoot ('.agents/agents/' + $slug + '.md')
+    if (-not (Test-Path -LiteralPath $agentPath -PathType Leaf)) { $errors.Add("Missing native subagent definition: $agentPath") }
+    else {
+        $agent = [IO.File]::ReadAllText($agentPath).Replace("`r`n", "`n")
+        $agentMetadata = [regex]::Match($agent, '\A---\n(?<metadata>[\s\S]*?)\n---(?:\n|$)').Groups['metadata'].Value
+        if ($agentMetadata -notmatch ('(?m)^name: ' + [regex]::Escape($slug) + '$') -or $agentMetadata -notmatch '(?m)^subagent: true$' -or $agentMetadata -notmatch '(?m)^mainAgent: false$' -or $agentMetadata -notmatch '(?m)^model: inherit$' -or $agentMetadata -notmatch '(?m)^commandExecutionPolicy: sandbox$') { $errors.Add("Invalid native subagent metadata: $slug") }
+        $declaredTools = @([regex]::Matches($agentMetadata, '(?m)^  - ([a-z_]+)$') | ForEach-Object { $_.Groups[1].Value })
+        $expectedTools = @('view_file','grep_search','run_command','replace_file_content')
+        if (@(Compare-Object $declaredTools $expectedTools).Count -ne 0) { $errors.Add("Unexpected native tool list: $slug") }
+        if (-not $agent.Contains($profile.source) -or -not $agent.Contains('docs/AGENCY_AGENTS.md')) { $errors.Add("Missing profile/contract reference in native definition: $slug") }
+    }
+    $installedPath = Join-Path $projectRoot $profile.source
     if (-not (Test-Path -LiteralPath $installedPath -PathType Leaf)) { $errors.Add("Required installed profile is missing: $installedPath"); continue }
+    if (-not $VerifyInstalled) { continue }
     $body = [IO.File]::ReadAllText($installedPath)
     $frontmatter = [regex]::Match($body, '\A\uFEFF?---\r?\n(?<metadata>[\s\S]*?)\r?\n---(?:\r?\n|$)')
     $nameMatch = [regex]::Match($frontmatter.Groups['metadata'].Value, '(?m)^name:\s*(?<value>[^\r\n]+?)\s*$')
@@ -64,7 +77,9 @@ foreach ($taskId in $taskIds) {
     $sectionMatches = [regex]::Matches($prompt.Groups['body'].Value, '(?ms)^Agency Agent assignment \(required\):\r?\n(?<body>.*?)^End Agency Agent assignment\.\s*$')
     if (-not $prompt.Success -or $sectionMatches.Count -ne 1) { $errors.Add("Expected one delimited Agency Agent section inside the text prompt: $taskId"); continue }
     $section = $sectionMatches[0].Groups['body'].Value
-    $declaredRoles = [regex]::Matches($section, '(?m)^- (?<role>Lead implementer|Supporting specialist): use the (?<slug>agency-[a-z0-9]+(?:-[a-z0-9]+)*) skill/profile[^\r\n]*? Read (?<source>~/.gemini/config/skills/[^\s]+/SKILL\.md) and verify its YAML name is (?<metadata>agency-[a-z0-9]+(?:-[a-z0-9]+)*)\.\s*$')
+    if (-not $section.Contains('Native execution is required: use invoke_subagent') -or -not $section.Contains('BLOCKED_NATIVE_AGENTS') -or -not $section.Contains('actual native invocation/conversation IDs')) { $errors.Add("Missing native execution/evidence gate: $taskId") }
+    if ($section -match 'Apply supporting profiles as sequential scoped passes') { $errors.Add("Obsolete sequential fallback: $taskId") }
+    $declaredRoles = [regex]::Matches($section, '(?m)^- (?<role>Lead implementer|Supporting specialist): use the (?<slug>agency-[a-z0-9]+(?:-[a-z0-9]+)*) skill/profile[^\r\n]*? Read (?<source>\.agents/skills/[^\s]+/SKILL\.md) and verify its YAML name is (?<metadata>agency-[a-z0-9]+(?:-[a-z0-9]+)*)\.\s*$')
     $declaredLeadCount = @($declaredRoles | Where-Object { $_.Groups['role'].Value -ceq 'Lead implementer' }).Count
     if ($declaredRoles.Count -ne $assigned.Count -or $declaredLeadCount -ne 1) { $errors.Add("Incorrect declared lead/support count in $taskId") }
     $namedSlugs = @([regex]::Matches($section, '\bagency-[a-z0-9]+(?:-[a-z0-9]+)*\b') | ForEach-Object Value | Sort-Object -Unique)
@@ -76,7 +91,7 @@ foreach ($taskId in $taskIds) {
         if ($roleLines.Count -ne 1 -or ($validProfiles.Contains([string]$slug) -and ($roleLines[0].Groups['source'].Value -cne $profiles[$slug].source -or $roleLines[0].Groups['metadata'].Value -cne $profiles[$slug].metadataName))) { $errors.Add("Role/profile/source pairing mismatch in ${taskId}: $slug") }
     }
     foreach ($slug in $namedSlugs) { if ($slug -notin $assigned) { $errors.Add("Unassigned or unidentified Agency Agent in ${taskId}: $slug") } }
-    $sourcePaths = @([regex]::Matches($section, '~?[/\\]\.gemini[/\\]config[/\\]skills[/\\][^\s`"<>]+[/\\]SKILL\.md') | ForEach-Object Value | Sort-Object -Unique)
+    $sourcePaths = @([regex]::Matches($section, '\.agents/skills/[^\s`"<>]+/SKILL\.md') | ForEach-Object Value | Sort-Object -Unique)
     $expectedSources = @($assigned | Where-Object { $validProfiles.Contains([string]$_) } | ForEach-Object { $profiles[$_].source })
     foreach ($source in $sourcePaths) { if ($source -cnotin $expectedSources) { $errors.Add("Unexpected installed-skill source in ${taskId}: $source") } }
     $cardProof.Add([ordered]@{ task=$taskId; lead=$routing.lead; support=$support; focus=$routing.focus; result='PASS' })
@@ -85,12 +100,12 @@ $actualCards = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs/tasks'
 if ($actualCards.Count -ne 23 -or @($actualCards | Where-Object { $_ -notin $taskIds }).Count) { $errors.Add('Expected exactly the 23 task cards, excluding a parent T15 card.') }
 if ($errors.Count -gt 0) { throw ($errors -join [Environment]::NewLine) }
 $report = [ordered]@{
-    schemaVersion=1; result='PASS'; mode=$(if ($VerifyInstalled) { 'installed-profile-verification' } else { 'portable-manifest-and-cards' })
+    schemaVersion=2; result='PASS'; mode=$(if ($VerifyInstalled) { 'installed-profile-verification' } else { 'portable-manifest-and-cards' })
     scope='Agency Agent routing and optional installed-profile proof only; no application tests or runtime agent execution'
-    taskCards=$cardProof.Count; profiles=$profiles.Count; checks=$cardProof.ToArray()
+    taskCards=$cardProof.Count; profiles=$profiles.Count; nativeDefinitions=$profiles.Count; executionPolicy=$manifest.executionMode; checks=$cardProof.ToArray()
     installedProfiles=$(if ($VerifyInstalled) { $installedProof.ToArray() } else { @() })
     installedProfileChecks=$(if ($VerifyInstalled) { 'PASS: metadata names and actual hashes read; observed hash drift is informational' } else { 'NOT RUN: use -VerifyInstalled on the implementation machine' })
-    antigravityRuntimeExecution='NOT RUN: profile routing does not prove automatic agent loading or spawning'
+    antigravityRuntimeExecution='NOT RUN: native definitions and required invocation policy are statically checked, not executed in Antigravity'
     projectSkills='Validated separately by Validate-AntigravityKit.ps1; Agency profiles do not replace the seven project skills'
 }
 $outputRoot = Join-Path $projectRoot 'outputs'

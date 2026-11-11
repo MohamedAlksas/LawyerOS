@@ -103,7 +103,7 @@ Follow these steps to run LawOffice OS locally for development and testing:
 
 ## Agency specialists during implementation
 
-Every task card explicitly selects one installed Agency Agent lead and the relevant supporting profiles, in addition to its LawOffice skills. Read [AGENCY_AGENTS](docs/AGENCY_AGENTS.md); [the routing registry](docs/AGENCY_AGENT_ROUTING.json) maps all 23 tasks to 14 locally verified Agency profiles. T01 uses `agency-software-architect` with `agency-devops-automator`; frontend, identity, backend, and recovery tasks have their own appropriate leads. Supporting profiles are scoped role passes, not an unsupported claim of spawned agents or Codex approval. Missing required profiles are reported before dependent implementation.
+Every task card selects one Agency lead and relevant supports alongside its LawOffice skills. [The routing registry](docs/AGENCY_AGENT_ROUTING.json) maps 23 tasks to 14 profiles and native definitions in `.agents/agents/`; profiles are selected from 155 project-local copies. [The complete catalogue](docs/AGENCY_AGENT_CATALOG.md) separates scheduled roles, general/specialized technical roles, and business/professional/creative roles. After this policy is integrated, the next assignment requires actual delegated sessions for the lead and every support, with distinct invocation IDs, checkpoint SHAs, and returned results. Same-session role passes are not a substitute. Read [AGENCY_AGENTS](docs/AGENCY_AGENTS.md); unavailable native execution is `BLOCKED_NATIVE_AGENTS`. Prepared definitions and static validation do not prove execution or Codex acceptance. Preserve extra installed profiles; the managed-skill validator checks only its seven LawOffice skills.
 
 ## GitHub workflow
 
