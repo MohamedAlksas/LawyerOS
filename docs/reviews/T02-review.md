@@ -1,6 +1,6 @@
 # T02 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at published head `673cd6d5e8aa55423dfb0145b593a128b3bf6e88`. See [the latest review](T02-review-round6.md) and [the next correction assignment](T02-corrections-round6.md). R16 and R21 are resolved; current built-server startup/teardown evidence needs correction. Earlier reviews remain historical and T03 is unreleased.
+Latest review: **CHANGES_REQUESTED** at published head `f54d2cd5b92e53c8bec25773dfa753d44c36d3bd`. See [the latest review](T02-review-round7.md) and [the next correction assignment](T02-corrections-round7.md). R24's startup exit is fixed; the remaining correction concerns startup-test readiness assertions, database isolation and artifact provenance. Test Automation leads the next slice. Earlier reviews remain historical and T03 is unreleased.
 
 Decision: **CHANGES_REQUESTED**. Keep PR #4 draft. T03 is not released.
 
