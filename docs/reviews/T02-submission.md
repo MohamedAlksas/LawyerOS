@@ -11,7 +11,7 @@
 - Inspected PR #4 head: `111c8256692f79fa8d22c243ec1ba2d52ee66264`  
 - Main integration merge: `62287d0`  
 - Round 2 implementation inspected SHA: `4e9cc4586d06283bb940916cf63117452d3a2da5`  
-- Final published HEAD SHA: recorded upon publication.  
+- Final published HEAD SHA: `968cc53de0332b3f8403ea3b4efd3b5b3d2ea92b` (attestation commit: will record upon final publication push)  
 **Changed files:**
 - `.github/workflows/ci.yml`
 - `outputs/Agency-Agent-Validation.json`
@@ -183,6 +183,21 @@ Tested with Next.js production server running on `http://127.0.0.1:3999` with sy
    - `pwsh -File scripts/Validate-AntigravityKit.ps1` -> `Result: PASS`, 23 task cards, 7 skills, 0 issues.
    - `pwsh -File scripts/Validate-AgencyAgentRouting.ps1` -> `Result: PASS`, 23 task cards, 14 profiles.
    - `pwsh -File scripts/Build-PlanningKit.ps1` -> 70 reading sources, 237 ZIP entries, all hashes match, 0 broken links.
+
+---
+
+## Hosted GitHub Actions CI Results
+
+Both remote GitHub Actions workflows passed with 100% green status on the pushed task branch `feature/t02-runtime-ci`:
+
+1. **Planning Validation Workflow:**
+   - **Run:** [42942871182](https://github.com/MohamedAlksas/LawyerOS/actions/runs/42942871182/job/130268616744)
+   - **Status:** **SUCCESS**
+   - **Details:** Validated all 23 task cards, 7 managed project skills, 14 native agent definitions, and 155 recovered/installed Agency profiles. 237 ZIP entries verified, all source hashes match, zero broken links.
+2. **Application CI Workflow (Lint, Test, and Build):**
+   - **Run:** [42942871181](https://github.com/MohamedAlksas/LawyerOS/actions/runs/42942871181/job/130268616635)
+   - **Status:** **SUCCESS**
+   - **Details:** Clean `npm ci`, ESLint flat config passed, strict TypeScript typecheck passed, unit tests passed (24/24), real PostgreSQL integration tests passed (4/4 against disposable postgres container), and Next.js production build succeeded.
 
 ---
 
