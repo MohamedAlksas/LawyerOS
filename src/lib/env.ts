@@ -1,6 +1,116 @@
 import { z } from 'zod';
 
 /**
+ * Validates the structural integrity of a PostgreSQL connection URL.
+ * Checks protocol, presence of host, valid port if specified, and presence of target database.
+ * Sanitizes errors so that no credentials or secrets leak.
+ */
+export function validatePostgresUrlStructure(val: string): { valid: boolean; error?: string } {
+  try {
+    const parsed = new URL(val);
+    if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+      return {
+        valid: false,
+        error: 'Must be a valid PostgreSQL connection string starting with postgresql:// or postgres://',
+      };
+    }
+    const host = parsed.hostname;
+    if (!host || host.trim().length === 0) {
+      return {
+        valid: false,
+        error: 'PostgreSQL connection string must include a valid host (e.g. 127.0.0.1 or localhost)',
+      };
+    }
+    if (parsed.port) {
+      const portNum = Number(parsed.port);
+      if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+        return {
+          valid: false,
+          error: 'PostgreSQL connection string contains an invalid port number',
+        };
+      }
+    }
+    const rawPath = parsed.pathname.replace(/^\//, '').split('?')[0];
+    if (!rawPath || rawPath.trim().length === 0) {
+      return {
+        valid: false,
+        error: 'PostgreSQL connection string must specify a target database name',
+      };
+    }
+    try {
+      decodeURIComponent(rawPath);
+    } catch {
+      return {
+        valid: false,
+        error: 'PostgreSQL connection string contains a malformed URL-encoded database name',
+      };
+    }
+    return { valid: true };
+  } catch {
+    return {
+      valid: false,
+      error: 'Invalid PostgreSQL connection URL structure',
+    };
+  }
+}
+
+export interface NormalizedDbIdentity {
+  host: string;
+  port: string;
+  database: string;
+}
+
+/**
+ * Safely extracts normalized database connection identity for driver-level equivalence checks.
+ * Decodes URL-encoded components (e.g. /law%6fffice_test -> lawoffice_test)
+ * and normalizes host and default port (5432).
+ */
+export function extractNormalizedDbIdentity(urlStr: string): NormalizedDbIdentity | null {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
+      return null;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (!host) return null;
+
+    const port = parsed.port || '5432';
+    const rawDb = parsed.pathname.replace(/^\//, '').split('?')[0];
+    if (!rawDb) return null;
+
+    const database = decodeURIComponent(rawDb);
+    return { host, port, database };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Determines whether two database connection URLs resolve to the same database.
+ * Driver semantics resolve both localhost and 127.0.0.1 on the same port to the same instance.
+ */
+export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean {
+  const id1 = extractNormalizedDbIdentity(url1);
+  const id2 = extractNormalizedDbIdentity(url2);
+  if (!id1 || !id2) return false;
+
+  // Databases must match
+  if (id1.database !== id2.database) return false;
+
+  // Ports must match
+  if (id1.port !== id2.port) return false;
+
+  // Hosts match or are equivalent loopback aliases
+  if (id1.host === id2.host) return true;
+  const loopbacks = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+  if (loopbacks.has(id1.host) && loopbacks.has(id2.host)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Server-only environment schema for LawOffice OS.
  * Validates presence, formatting, and safety of operational variables.
  */
@@ -11,16 +121,26 @@ const baseEnvSchema = z.object({
   DATABASE_URL: z
     .string()
     .min(1, 'DATABASE_URL is required')
-    .refine(
-      (val) => val.startsWith('postgresql://') || val.startsWith('postgres://'),
-      'DATABASE_URL must be a valid PostgreSQL connection string starting with postgresql:// or postgres://'
-    ),
+    .superRefine((val, ctx) => {
+      const check = validatePostgresUrlStructure(val);
+      if (!check.valid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: check.error || 'DATABASE_URL must be a valid PostgreSQL connection string',
+        });
+      }
+    }),
   TEST_DATABASE_URL: z
     .string()
-    .refine(
-      (val) => val.startsWith('postgresql://') || val.startsWith('postgres://'),
-      'TEST_DATABASE_URL must be a valid PostgreSQL connection string'
-    )
+    .superRefine((val, ctx) => {
+      const check = validatePostgresUrlStructure(val);
+      if (!check.valid) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: check.error || 'TEST_DATABASE_URL must be a valid PostgreSQL connection string',
+        });
+      }
+    })
     .optional(),
   CI: z.string().optional(),
 });
@@ -40,19 +160,6 @@ export class EnvironmentValidationError extends Error {
 }
 
 /**
- * Helper to safely extract database name from a PostgreSQL connection string.
- */
-function extractDatabaseName(urlStr: string): string | null {
-  try {
-    const parsed = new URL(urlStr);
-    const dbName = parsed.pathname.replace(/^\//, '').split('?')[0];
-    return dbName || null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Validates the provided environment map with actionable, sanitized error reporting.
  * Explicitly excludes secret values from the output to prevent log leakage.
  */
@@ -66,7 +173,12 @@ export function validateEnv(
   const effectiveSource = { ...source };
   const nodeEnv = effectiveSource.NODE_ENV || 'development';
   const isTest = nodeEnv === 'test';
-  const isCI = effectiveSource.CI === 'true' || process.env.CI === 'true';
+
+  // Deterministic CI precedence (R11):
+  // When caller explicitly specifies CI in source, that takes precedence over ambient process.env.CI
+  if (effectiveSource.CI === undefined && process.env.CI !== undefined) {
+    effectiveSource.CI = process.env.CI;
+  }
 
   // In test mode: TEST_DATABASE_URL is strictly required; operational DATABASE_URL fallback is forbidden.
   if (isTest) {
@@ -78,14 +190,26 @@ export function validateEnv(
       );
     }
 
-    // Verify test target is distinct from operational database
-    const testDbName = extractDatabaseName(effectiveSource.TEST_DATABASE_URL);
-    const devDbName = effectiveSource.DATABASE_URL
-      ? extractDatabaseName(effectiveSource.DATABASE_URL)
-      : null;
+    // Validate structural validity of TEST_DATABASE_URL before identity checks
+    const testStructure = validatePostgresUrlStructure(effectiveSource.TEST_DATABASE_URL);
+    if (!testStructure.valid) {
+      throw new EnvironmentValidationError(
+        `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\n${testStructure.error}\nConsult .env.example for required configuration. Secret values are redacted.`,
+        [],
+        ['TEST_DATABASE_URL']
+      );
+    }
 
-    // In local non-CI environment, ensure TEST_DATABASE_URL does not target the same database as DATABASE_URL
-    if (!isCI && (testDbName === 'lawoffice_dev' || (devDbName && testDbName === devDbName))) {
+    const testIdentity = extractNormalizedDbIdentity(effectiveSource.TEST_DATABASE_URL);
+    const testDbName = testIdentity?.database;
+
+    // Check 1: Ensure TEST_DATABASE_URL does not target operational/development database or match DATABASE_URL (R02, R09)
+    if (
+      testDbName === 'lawoffice_dev' ||
+      testDbName === 'lawoffice_prod' ||
+      (effectiveSource.DATABASE_URL &&
+        areDatabaseIdentitiesEqual(effectiveSource.TEST_DATABASE_URL, effectiveSource.DATABASE_URL))
+    ) {
       throw new EnvironmentValidationError(
         `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must not target the operational/development database ('${testDbName || 'unknown'}').\nConsult .env.example for required configuration. Secret values are redacted.`,
         [],
@@ -93,6 +217,7 @@ export function validateEnv(
       );
     }
 
+    // Check 2: Ensure test database name is a dedicated test database (ending in _test or lawoffice_test)
     if (!testDbName || (!testDbName.endsWith('_test') && testDbName !== 'lawoffice_test')) {
       throw new EnvironmentValidationError(
         `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must point to a dedicated test database (e.g. ending in _test, such as lawoffice_test), but received database '${testDbName || 'unknown'}'.\nConsult .env.example for required configuration. Secret values are redacted.`,
@@ -126,6 +251,11 @@ export function validateEnv(
     }
     if (invalidKeys.length > 0) {
       errorDetails.push(`Invalid environment variable(s): ${invalidKeys.join(', ')}`);
+    }
+    for (const issue of result.error.issues) {
+      if (issue.message && !issue.message.startsWith('Invalid input') && issue.message !== 'Required') {
+        errorDetails.push(issue.message);
+      }
     }
 
     const message = [

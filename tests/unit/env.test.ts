@@ -114,17 +114,126 @@ describe('Environment validation (src/lib/env.ts)', () => {
     }
   });
 
-  it('permits disposable test database in CI environment where CI=true (R02)', () => {
-    const ciEnv = {
+  it('rejects equivalent URL-encoded database target aliases (R09)', () => {
+    const encodedTargetEnv = {
+      NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_test',
+      TEST_DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/law%6fffice_test',
+      CI: 'false',
+    };
+
+    expect(() => validateEnv(encodedTargetEnv)).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateEnv(encodedTargetEnv);
+    } catch (error) {
+      const err = error as EnvironmentValidationError;
+      expect(err.invalidKeys).toContain('TEST_DATABASE_URL');
+      expect(err.message).toContain('TEST_DATABASE_URL must not target the operational/development database');
+    }
+  });
+
+  it('strictly rejects identical operational target even when CI=true (R09)', () => {
+    const identicalCiEnv = {
       NODE_ENV: 'test',
       CI: 'true',
       DATABASE_URL: 'postgresql://lawoffice_user:secret@localhost:5432/lawoffice_test?schema=public',
       TEST_DATABASE_URL: 'postgresql://lawoffice_user:secret@localhost:5432/lawoffice_test?schema=public',
     };
 
-    const validated = validateEnv(ciEnv);
+    expect(() => validateEnv(identicalCiEnv)).toThrowError(EnvironmentValidationError);
+  });
+
+  it('permits clean test-only configuration in CI without requiring dummy operational URL (R09)', () => {
+    const testOnlyCiEnv = {
+      NODE_ENV: 'test',
+      CI: 'true',
+      TEST_DATABASE_URL: 'postgresql://lawoffice_user:secret@localhost:5432/lawoffice_test?schema=public',
+    };
+
+    const validated = validateEnv(testOnlyCiEnv);
     expect(validated.NODE_ENV).toBe('test');
     expect(validated.DATABASE_URL).toContain('lawoffice_test');
+    expect(validated.TEST_DATABASE_URL).toContain('lawoffice_test');
+  });
+
+  it('respects explicit source.CI=false even when ambient process.env.CI is true (R11)', () => {
+    const originalAmbientCi = process.env.CI;
+    try {
+      process.env.CI = 'true'; // Simulate hosted GitHub Actions environment
+
+      const explicitSourceEnv = {
+        NODE_ENV: 'test',
+        DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_dev',
+        TEST_DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_dev',
+        CI: 'false', // Explicitly requested false
+      };
+
+      expect(() => validateEnv(explicitSourceEnv)).toThrowError(EnvironmentValidationError);
+
+      try {
+        validateEnv(explicitSourceEnv);
+      } catch (error) {
+        const err = error as EnvironmentValidationError;
+        expect(err.invalidKeys).toContain('TEST_DATABASE_URL');
+        expect(err.message).toContain('must not target the operational/development database');
+      }
+    } finally {
+      process.env.CI = originalAmbientCi;
+    }
+  });
+
+  it('rejects bare postgresql:// without host or database path (R12)', () => {
+    const bareProtocolEnv = {
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://',
+    };
+
+    expect(() => validateEnv(bareProtocolEnv)).toThrowError(EnvironmentValidationError);
+
+    try {
+      validateEnv(bareProtocolEnv);
+    } catch (error) {
+      const err = error as EnvironmentValidationError;
+      expect(err.invalidKeys).toContain('DATABASE_URL');
+      expect(err.message).toContain('PostgreSQL connection string must include a valid host');
+    }
+  });
+
+  it('rejects PostgreSQL connection strings with missing database name or malformed encoding (R12)', () => {
+    const missingDbEnv = {
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://127.0.0.1:5432/',
+    };
+
+    expect(() => validateEnv(missingDbEnv)).toThrowError(EnvironmentValidationError);
+
+    const malformedPercentEnv = {
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://127.0.0.1:5432/invalid_%zz_db',
+    };
+
+    expect(() => validateEnv(malformedPercentEnv)).toThrowError(EnvironmentValidationError);
+  });
+
+  it('fails fast and redacts secrets when validateStartupEnv encounters invalid configuration (R12)', () => {
+    const originalEnv = { ...process.env };
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
+      process.env.DATABASE_URL = 'postgresql://lawoffice_user:super_secret_password_999@127.0.0.1:5432/';
+
+      expect(() => validateStartupEnv()).toThrowError(EnvironmentValidationError);
+
+      try {
+        validateStartupEnv();
+      } catch (error) {
+        const err = error as EnvironmentValidationError;
+        expect(err.invalidKeys).toContain('DATABASE_URL');
+        expect(err.message).not.toContain('super_secret_password_999');
+      }
+    } finally {
+      process.env = { ...originalEnv };
+    }
   });
 
   it('applies standard defaults for PORT and HOST when omitted', () => {
@@ -138,7 +247,7 @@ describe('Environment validation (src/lib/env.ts)', () => {
     expect(validated.NODE_ENV).toBe('development');
   });
 
-  it('provides validateStartupEnv boundary helper (R05)', () => {
+  it('provides validateStartupEnv boundary helper (R05, R12)', () => {
     expect(typeof validateStartupEnv).toBe('function');
   });
 });

@@ -1,7 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import { Pool } from 'pg';
 import { checkDatabaseReadiness } from '@/lib/db';
+import { validateEnv, EnvironmentValidationError } from '@/lib/env';
 import net from 'net';
+
+/**
+ * Creates a validated PostgreSQL pool strictly through the shared isolation guard.
+ * Prevents any pool connection or write if the target resolves to the operational database (R10).
+ */
+function createValidatedTestPool(
+  testUrl: string,
+  extraEnv: Record<string, string | undefined> = {}
+): Pool {
+  validateEnv({
+    ...process.env,
+    ...extraEnv,
+    NODE_ENV: 'test',
+    TEST_DATABASE_URL: testUrl,
+  });
+
+  return new Pool({
+    connectionString: testUrl,
+    connectionTimeoutMillis: 3000,
+  });
+}
 
 /**
  * Helper to dynamically obtain a guaranteed closed loopback port.
@@ -21,7 +43,7 @@ async function getClosedLoopbackPort(): Promise<number> {
 }
 
 describe('Database Readiness Probe Integration (Real PostgreSQL & Failure Modes)', () => {
-  it('strictly requires an explicitly configured disposable test database and verifies identity (R01, R02)', async () => {
+  it('strictly requires an explicitly configured disposable test database and verifies identity (R01, R02, R10)', async () => {
     const testUrl = process.env.TEST_DATABASE_URL;
     if (!testUrl) {
       throw new Error(
@@ -29,10 +51,7 @@ describe('Database Readiness Probe Integration (Real PostgreSQL & Failure Modes)
       );
     }
 
-    const pool = new Pool({
-      connectionString: testUrl,
-      connectionTimeoutMillis: 3000,
-    });
+    const pool = createValidatedTestPool(testUrl);
 
     try {
       const result = await checkDatabaseReadiness(3000, pool);
@@ -58,6 +77,27 @@ describe('Database Readiness Probe Integration (Real PostgreSQL & Failure Modes)
     } finally {
       await pool.end();
     }
+  });
+
+  it('rejects operational target misuse and URL-encoded aliases before connection (R09, R10)', () => {
+    const testUrl = process.env.TEST_DATABASE_URL || 'postgresql://lawoffice_user:secret@127.0.0.1:5433/lawoffice_test';
+    
+    // Test exact match
+    expect(() => {
+      createValidatedTestPool(testUrl, {
+        DATABASE_URL: testUrl,
+        CI: 'false',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    // Test URL-encoded alias equivalence (/lawoffice_test vs /law%6fffice_test)
+    const encodedDevUrl = testUrl.replace('/lawoffice_test', '/law%6fffice_test');
+    expect(() => {
+      createValidatedTestPool(testUrl, {
+        DATABASE_URL: encodedDevUrl,
+        CI: 'false',
+      });
+    }).toThrowError(EnvironmentValidationError);
   });
 
   it('correctly reports failure and sanitizes errors when connecting to an unreachable socket (R01)', async () => {

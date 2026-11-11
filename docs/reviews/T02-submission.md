@@ -1,221 +1,199 @@
-# Task T02 Submission Report — Local Runtime, Database Foundation, and CI (Correction Round 1)
+# Task T02 Submission Report — Local Runtime, Database Foundation, and CI (Correction Round 2)
 
-**Task ID:** T02 (Correction Round 1)  
-**Base commit / snapshot:** `d3fd8f8b5e110858605092553d05911c2914ba37` (merged T01 baseline on `origin/main`), with review commit `628d5e1e39a349bc332f913d8cb5aa1d9ca83b79` integrated.  
+**Task ID:** T02 (Correction Round 2)  
+**Base commit / snapshot:** `62494bad3eca1480d874e578e3cc5cd4926c6e40` (owner-merged PR #5 on `origin/main`), with Codex review fixed point `628d5e1d44e18fa76caa7a13fb766239f97bb5e7` and round 2 review commit `73c6c336b139971032df734dcfc2f0fec243e8ee` integrated via merge commit `62287d0`.  
 **Branch / upstream / PR URL:**  
 - Dedicated branch: `feature/t02-runtime-ci`  
 - Upstream: `origin/feature/t02-runtime-ci`  
 - Pull Request: https://github.com/MohamedAlksas/LawyerOS/pull/4 (Draft PR)  
-**Implementation inspected SHA:** `698858e6f92d59b09141302b1627b6ecae6b8c42`  
-**Final published HEAD SHA:** `698858e6f92d59b09141302b1627b6ecae6b8c42`  
+**Inspected implementation fixed points:**  
+- Round 1 implementation: `698858e6f92d59b09141302b1627b6ecae6b8c42`  
+- Inspected PR #4 head: `111c8256692f79fa8d22c243ec1ba2d52ee66264`  
+- Main integration merge: `62287d0`  
+- Round 2 implementation HEAD: will be recorded at commit time.  
 **Changed files:**
-- `.env.example`
 - `.github/workflows/ci.yml`
-- `README.md`
-- `docs/DEPENDENCIES.md`
-- `docs/PROMPTS.md`
-- `docs/reviews/T02-submission.md`
 - `outputs/Agency-Agent-Validation.json`
 - `outputs/LawOffice-OS-Gemini-Prompts.md`
 - `outputs/LawOffice-OS-Master-Plan.md`
 - `outputs/LawOffice-OS-Planning-Kit.zip`
 - `outputs/Planning-Validation.json`
-- `outputs/Prompt-Skill-Validation.json`
-- `package.json`
-- `src/app/api/health/ready/route.ts`
-- `src/instrumentation.ts`
-- `src/lib/db.ts`
 - `src/lib/env.ts`
 - `tests/integration/db-readiness.test.ts`
 - `tests/unit/db-pool.test.ts`
 - `tests/unit/env.test.ts`
-- `tests/unit/health.test.ts`
 - `vitest.config.mjs`
+- `docs/reviews/T02-submission.md`
 
 ---
 
 ## Skills loaded
 
-- `d:\Lawyer\.agents\skills\lawoffice-delivery\SKILL.md`: Loaded and applied for Git delivery contract compliance, existing draft PR #4 updates, prerequisite verification, clean staging excluding extraneous files, and review protocol adherence.
-- `d:\Lawyer\.agents\skills\lawoffice-foundation\SKILL.md`: Loaded and applied for single lockfile discipline (`package-lock.json`), loopback database binding, server-only environment validation, startup boundary wiring, and non-sensitive health check routes.
-- `d:\Lawyer\.agents\skills\lawoffice-testing\SKILL.md`: Loaded and applied for fail-closed integration test design, real PostgreSQL identity checks (`SELECT current_database()`), connection pool lifecycle tests, timeout eviction proofs, and deterministic offline port probing.
+- `d:\Lawyer\.agents\skills\lawoffice-delivery\SKILL.md`: Loaded and applied for Git delivery contract compliance, draft PR #4 updates, merge conflict reconciliation without loss of owner assets, and review protocol adherence.
+- `d:\Lawyer\.agents\skills\lawoffice-foundation\SKILL.md`: Loaded and applied for test database isolation, driver-level connection normalization, structural URL validation, startup boundaries, and clean reinstall discipline.
+- `d:\Lawyer\.agents\skills\lawoffice-testing\SKILL.md`: Loaded and applied for fail-closed test target guard enforcement before connection, repeated pool timeout/recovery regression tests, late-acquisition eviction tests, and deterministic unit/integration checks under both local and CI conditions.
 
 ---
 
-## Agency Agent evidence
+## Agency Agent Evidence & Preflight Status
 
-- **Lead: `agency-devops-automator`**
-  - *Actual metadata name:* `agency-devops-automator`
-  - *Resolved SKILL.md path:* `C:\Users\Alksas\.gemini\config\skills\engineering-devops-automator\SKILL.md`
-  - *SHA-256:* `90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e`
-  - *Applied guidance & actions:* Corrected README local startup documentation to distinguish persistent development PostgreSQL (`ops/docker-compose.yml`) from isolated disposable tmpfs test database (`ops/docker-compose.test.yml`). Parameterized loopback host ports (`PGPORT=6432`, `TEST_PGPORT=6433`) for Windows Hyper-V port exclusion compatibility. Regenerated all maintained text deliverables via PowerShell 7 (`pwsh.exe`), ensuring 0 broken links and passing `.github/workflows/planning-validation.yml` freshness checks. Added `CI: 'true'` explicitly to `.github/workflows/ci.yml`.
+### Preflight Audit: Native Subagent Invocation Capability
 
-- **Supporting specialist: `agency-backend-architect`**
-  - *Actual metadata name:* `agency-backend-architect`
-  - *Resolved SKILL.md path:* `C:\Users\Alksas\.gemini\config\skills\engineering-backend-architect\SKILL.md`
-  - *SHA-256:* `05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf`
-  - *Applied guidance & actions:* Refactored `src/lib/env.ts` to fail closed in test mode: `TEST_DATABASE_URL` is strictly required and cannot fall back to operational `DATABASE_URL`. Added database target validation forbidding `TEST_DATABASE_URL` from targeting `lawoffice_dev` or matching `DATABASE_URL` in local environments while preserving CI disposable database compatibility. Refactored `src/lib/db.ts` to own and reuse a singleton pool across production and development, with clean teardown in `closeDbPool()`. Bounded readiness timeout around connection acquisition and query execution, destroying timed-out clients via `client.release(true)`. Added runtime startup validation boundary in `src/instrumentation.ts` and wrapped `/api/health/ready` to return HTTP 503 on configuration errors without unhandled exceptions.
+In accordance with `docs/AGENCY_AGENTS.md` and `docs/reviews/T02-corrections-round2.md`, the coordinator performed capability preflight to launch the assigned native definitions:
 
-- **Supporting specialist: `agency-test-automation-engineer`**
-  - *Actual metadata name:* `agency-test-automation-engineer`
-  - *Resolved SKILL.md path:* `C:\Users\Alksas\.gemini\config\skills\testing-test-automation-engineer\SKILL.md`
-  - *SHA-256:* `af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4`
-  - *Applied guidance & actions:* Updated `tests/integration/db-readiness.test.ts` to require real PostgreSQL connectivity and assert `current_database() === 'lawoffice_test'`. Replaced external unroutable IP tests with deterministic closed-loopback port probing (`getClosedLoopbackPort()`) and invalid authentication probing. Built `tests/unit/db-pool.test.ts` to prove production pool reuse, clean teardown, query stall client eviction (`release(true)`), and subsequent probe recovery. Updated `vitest.config.mjs` to automatically parse `.env.local` / `.env.test`. Updated `npm run test:e2e` to print `NOT RUN` and exit code 1.
+| Role | Native definition path | Project-local profile path | Profile SHA-256 | Native Invocation Result |
+|---|---|---|---|---|
+| Lead: `agency-devops-automator` | `.agents/agents/agency-devops-automator.md` | `.agents/skills/engineering-devops-automator/SKILL.md` | `90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e` | **BLOCKED_NATIVE_AGENTS** (`subagent "agency-devops-automator" not found or not allowed to be invoked`) |
+| Backend support: `agency-backend-architect` | `.agents/agents/agency-backend-architect.md` | `.agents/skills/engineering-backend-architect/SKILL.md` | `05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf` | **BLOCKED_NATIVE_AGENTS** (`subagent "agency-backend-architect" not found or not allowed to be invoked`) |
+| Test support: `agency-test-automation-engineer` | `.agents/agents/agency-test-automation-engineer.md` | `.agents/skills/testing-test-automation-engineer/SKILL.md` | `af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4` | **BLOCKED_NATIVE_AGENTS** (`subagent "agency-test-automation-engineer" not found or not allowed to be invoked`) |
+
+**Detailed Preflight Findings:**
+1. The session exposes the `invoke_subagent` and `define_subagent` tools.
+2. Invoking `invoke_subagent` with `TypeName: "agency-devops-automator"`, `TypeName: "agency-backend-architect"`, and `TypeName: "agency-test-automation-engineer"` failed with tool error:
+   `Encountered error in tool execution: subagent "<name>" not found or not allowed to be invoked`
+3. Invoking `define_subagent` with `Name: "agency-devops-automator"` failed with tool error:
+   `Encountered error in tool execution: agent "agency-devops-automator" already exists, please use a different name`
+   *Root Cause:* Antigravity loads installed skills from `.agents/skills/` into its internal registry, which blocks defining a subagent with the identical name. However, the Antigravity runtime does not discover `.agents/agents/*.md` markdown files as invokable subagents under its native `TypeName` parameter.
+4. **Compliance Declaration:** As strictly required by `docs/AGENCY_AGENTS.md` and the user instructions, the coordinator did **NOT** substitute same-session persona headings, fabricate conversation IDs, or silently install unrequested tools. `BLOCKED_NATIVE_AGENTS` is honestly reported. All technical corrections (R08–R15) were directly implemented and verified.
 
 ---
 
-## Review Correction Matrix (R01–R07)
+## Review Correction Matrix (R08–R15)
+
+| Finding | Severity | Problem & Review Finding | Solution & Observable Evidence |
+|---|---|---|---|
+| **R08** | P1 | **Local files override test mode.** `vitest.config.mjs` spread `.env.local` after `NODE_ENV: 'test'`. A template copy of `.env.example` sets `NODE_ENV=development`, causing helpers to select operational `DATABASE_URL`. | Updated `vitest.config.mjs` to spread `...localEnv` FIRST, and force `NODE_ENV: 'test'` unconditionally after loaded values. Explicit shell/CI variables (`DATABASE_URL`, `TEST_DATABASE_URL`, `CI`) are preserved with precedence. Added unit test in `tests/unit/env.test.ts` verifying that test mode is enforced and fails closed without `TEST_DATABASE_URL`. |
+| **R09** | P1 | **Operational target alias accepted & blanket CI bypass.** Undecoded path comparison accepted `/lawoffice_test` vs `/law%6fffice_test`, which PostgreSQL resolves to the same database. Also ambient `CI=true` bypassed isolation. | In `src/lib/env.ts`, created `extractNormalizedDbIdentity` and `areDatabaseIdentitiesEqual`. Normalizes host (including loopback aliases `127.0.0.1`, `localhost`), default port (5432), and decodes database name via `decodeURIComponent`. Removed blanket ambient `CI=true` bypass: identical operational targets are strictly rejected regardless of CI flag. In `.github/workflows/ci.yml`, configured a clean test-only environment with only `TEST_DATABASE_URL` (omitting operational `DATABASE_URL`). |
+| **R10** | P1 | **Integration test bypassed isolation validation.** `tests/integration/db-readiness.test.ts` constructed `new Pool(testUrl)` directly without passing through `validateEnv`. | Introduced `createValidatedTestPool(testUrl, extraEnv)` in `tests/integration/db-readiness.test.ts`. Invokes `validateEnv({ ...process.env, ...extraEnv, NODE_ENV: 'test', TEST_DATABASE_URL: testUrl })` strictly before any `Pool` construction or socket connection. Added explicit integration test case asserting that operational targets and URL-encoded aliases are rejected before connection. |
+| **R11** | P2 | **Hosted unit test failure due to CI precedence.** `validateEnv(source)` let ambient `process.env.CI` override explicit `source.CI = 'false'`, causing test failure on GitHub Actions and local CI runs. | Fixed in `src/lib/env.ts`: explicit `source.CI` strictly takes precedence over ambient `process.env.CI`. Only when `effectiveSource.CI === undefined` does it fall back to `process.env.CI`. Verified unit test suite under both local shell and `$env:CI="true"` (24 passed, 0 failed). |
+| **R12** | P2 | **Startup accepted malformed PostgreSQL URLs.** `DATABASE_URL=postgresql://` passed schema boundary because only prefix was checked. Missing actual startup and HTTP 200/503/200 observations. | Implemented `validatePostgresUrlStructure` in `src/lib/env.ts`: validates protocol, non-empty host, integer port (1-65535), and non-empty database name with valid percent-encoding. Sanitizes errors without leaking credentials. Observed actual process-level startup crash with `DATABASE_URL=postgresql://` (`EnvironmentValidationError: PostgreSQL connection string must include a valid host`). Observed actual HTTP 200 -> 503 -> 200 readiness cycle and 200 liveness against synthetic PostgreSQL container running, stopped, and recovered. |
+| **R13** | P2 | **Incomplete pool lifecycle regressions.** Previous probe test used a fresh mock rather than testing repeated timeouts, pending acquisition, and recovery on the SAME pool. | In `tests/unit/db-pool.test.ts`, added permanent regressions: (1) `recovers cleanly on the exact same pool instance after repeated query timeouts`: 3 consecutive timeouts with client eviction via `release(true)`, followed by clean recovery (`ok: true`, clean release) on the SAME pool. (2) `handles pending acquisition timeout and evicts late-acquired client upon subsequent arrival`: probe times out during delayed `connect()`, and late-arriving client is immediately evicted with `release(true)`. |
+| **R14** | P2 | **Submission inaccuracies & unproven root cause claims.** Previous review commit SHA was incorrect (`628d5e1...` vs `628d5e1d44e18fa76caa7a13fb766239f97bb5e7`). Turbopack CSS worker IPC exit was asserted as proven fact rather than hypothesis. Hosted CI outcomes omitted. | Corrected review commit SHA to `628d5e1d44e18fa76caa7a13fb766239f97bb5e7`. Re-framed local build failure as an unconfirmed environment hypothesis. Recorded hosted run results: Planning validation passed; application CI failed at unit tests due to R11. Documented actual local and hosted outcomes. |
+| **R15** | — | **Preserve merged policy and regenerated artifacts.** Integrate current main (PR #5, commit `62494bad3eca1480d874e578e3cc5cd4926c6e40`) safely without losing untracked `.agents/`, `.codex/`, or `.opencode/` assets. | Safely merged `origin/main` into `feature/t02-runtime-ci` via merge commit `62287d0`. Reconciled generated conflicts in `outputs/LawOffice-OS-Planning-Kit.zip` and `outputs/Planning-Validation.json` using current PowerShell 7 scripts. Preserved all 155 local profiles and 14 native definitions. Retained untracked `.codex/` and `.opencode/` intact. |
+
+---
+
+## Historical Review Correction Matrix (R01–R07)
 
 | Item | Requirement & Codex Finding | Implementation & Evidence |
 |---|---|---|
-| **R01** | **Live integration case must fail when database is unavailable (P1).** Previous test silently returned when unconfigured and accepted either outcome. | Removed permissive branches in `tests/integration/db-readiness.test.ts`. The live test strictly asserts `result.ok === true`, checks latency, and verifies `current_database() === 'lawoffice_test'` and `current_user === 'lawoffice_user'`. Separate negative tests verify closed port returns `ECONNREFUSED` and bad password returns authentication failure with zero credential leakage. When `TEST_DATABASE_URL` is missing or stopped, the suite fails closed with exit code 1. |
-| **R02** | **Test configuration must fail closed (P1).** `DATABASE_URL` fallback in test mode was permitted. | In `src/lib/env.ts`, `TEST_DATABASE_URL` is strictly required in `NODE_ENV === 'test'`. Fallback to operational `DATABASE_URL` throws `EnvironmentValidationError`. Validates that test target ends with `_test` and does not point to `lawoffice_dev` or match `DATABASE_URL` (in non-CI). In CI (`CI=true`), disposable database `lawoffice_test` is accepted. `vitest.config.mjs` automatically loads `.env.local` / `.env.test`. Unit tests in `tests/unit/env.test.ts` assert fail-closed rejection. |
-| **R03** | **Own and reuse production pool (P2).** Production calls created independent pools that `closeDbPool()` did not track. | `src/lib/db.ts` now stores `singletonPool` (and reuses `global.__lawoffice_pg_pool` in development). `getDbPool()` returns the exact same instance in production mode. `closeDbPool()` ends the pool and clears both instances, allowing clean recreation. Verified via `tests/unit/db-pool.test.ts` asserting `pool1 === pool2` in production and clean recreation after `closeDbPool()`. |
-| **R04** | **Bound work behind readiness timeout (P2).** Timed-out probe left running query/client unreleased. | In `src/lib/db.ts`, both connection acquisition and query execution are bounded. If a probe times out or fails, the client is destroyed via `client.release(true)`, evicting it from the pool so unusable connections cannot poison future probes. Late-acquired connections are immediately destroyed. Unit tests in `tests/unit/db-pool.test.ts` use a stalled query seam to prove `release(true)` eviction and subsequent probe recovery. |
-| **R05** | **Validate runtime configuration at explicit boundary (P2).** Missing config produced unhandled 500 in readiness instead of documented 503. | Created `src/instrumentation.ts` invoking `validateStartupEnv()` at server startup (excluding static build phase `phase-production-build`). Wrapped `src/app/api/health/ready/route.ts` in try/catch to return HTTP 503 with `{ status: "fail", check: "readiness", database: { status: "disconnected", error: "Database configuration missing or invalid" } }` if configuration errors reach the route. Verified via `tests/unit/health.test.ts`. |
-| **R06** | **Deferred E2E must not return a false pass (P2).** `npm run test:e2e` exited zero despite no tests. | Updated `package.json` script: `"test:e2e": "node -e \"console.error('E2E tests (Playwright) are deferred to T04/T16 and NOT RUN in T02.'); process.exit(1);\""`. Command outputs NOT RUN message to stderr and exits with code 1. Documented as intentionally deferred and excluded from T02 required suites. |
-| **R07** | **Restore maintained output and green planning validation (P2).** Planning validation workflow failed due to stale `outputs/LawOffice-OS-Master-Plan.md`. | Updated `README.md` with explicit dual Compose service instructions (dev port 6432 vs test port 6433 on Windows), test variable loading, and safe teardown without volume removal. Executed PowerShell 7 regeneration scripts (`Validate-AntigravityKit.ps1`, `Build-PlanningKit.ps1`, etc.). All 55 documents and 95 links validated clean. `outputs/LawOffice-OS-Master-Plan.md` regenerated and committed. Planning validation passes with clean `git diff --exit-code`. |
+| **R01** | Live integration case must fail when database is unavailable (P1). | Strict assertions in `tests/integration/db-readiness.test.ts`: checks `result.ok === true`, latency, and `current_database() === 'lawoffice_test'`. Negative cases verify closed port and bad password with sanitized output. |
+| **R02** | Test configuration must fail closed (P1). | `TEST_DATABASE_URL` strictly required in test mode; fallback to operational `DATABASE_URL` forbidden. Validates database name ends with `_test`. |
+| **R03** | Own and reuse production pool (P2). | Singleton pool stored and reused across calls in production and dev; clean teardown in `closeDbPool()`. |
+| **R04** | Bound work behind readiness timeout (P2). | Bounded timeouts around acquisition and query; evicts timed-out clients via `client.release(true)`. |
+| **R05** | Validate runtime configuration at explicit boundary (P2). | Instrumentation hook `register()` validates startup environment; route returns HTTP 503 on configuration failure. |
+| **R06** | Deferred E2E must not return a false pass (P2). | `npm run test:e2e` prints NOT RUN and exits with code 1. |
+| **R07** | Restore maintained output and green planning validation (P2). | Updated documentation, regenerated outputs with zero broken links, verified clean `git diff --exit-code`. |
 
 ---
 
-## Local Build Evidence Gap Investigation
+## Local Build Evidence & Qualified Root Cause Analysis
 
-During the initial T02 review, Codex observed that `npm run build` failed twice in its isolated Windows checkout with:
+During Codex's review of T02 round 1, `npm run build` failed twice on an isolated Windows review checkout with:
 ```text
 Turbopack failed writing /page while spawning the CSS-processing Node child, which exited before connection.
 ```
 
-**Technical Investigation & Root Cause Analysis:**
-1. **Next.js Turbopack CSS Architecture:**
-   Next.js 16 with Turbopack and Tailwind CSS v4 (`@tailwindcss/postcss`) compiles CSS by spawning a separate Node.js child process via IPC / local pipes to execute PostCSS transformations in a worker thread pool.
-2. **Windows Sandbox / IPC Constraint:**
-   In restricted execution sandboxes (as noted in Codex review section 5, where initial network/loopback restrictions also blocked test ports), Windows named pipe or local loopback IPC connection handshakes between parent Turbopack worker processes and child Node processes are delayed or blocked by security policies/firewalls. When the child process fails to establish the IPC socket connection within Turbopack's connection timeout, Turbopack reports that the child process exited before connection.
-3. **Local & CI Reproduction Evidence:**
-   In unconstrained Windows environments (as verified below) and in Ubuntu Linux CI (`.github/workflows/ci.yml`), `npm run build` compiles with 0 errors in under 3 seconds, correctly outputting static `/`, `/_not-found`, and dynamic `/api/health/*` routes.
-4. **Conclusion:**
-   The build tooling, Tailwind PostCSS configuration, and Next.js 16 setup are strictly standard and compatible. The observed failure in Codex's isolated review checkout was caused by sandbox/IPC execution constraints rather than application code defects.
+**Qualified Engineering Assessment:**
+1. **Unconfirmed Hypothesis:** The Turbopack CSS worker failure is hypothesized to stem from local IPC/pipe handshake restrictions or timing constraints in restricted review sandboxes where child process socket creation was delayed.
+2. **Current Local Observation:** Running `npm.cmd run build` in the active workspace (`D:\Lawyer`) consistently exits with code 0 in ~2.4 seconds, generating static `/`, `/_not-found`, and dynamic `/api/health/*` routes without errors.
+3. **Hosted CI Observation:** In GitHub Actions (`ubuntu-latest`), Next.js production build runs under standard unrestricted runner conditions.
+4. **Qualification:** Because the exact sandbox constraints of the review checkout could not be replicated locally, the IPC explanation remains an unconfirmed environment hypothesis rather than a demonstrated cause.
 
 ---
 
-## Commands actually run, exit status, and short output
+## Actual Process Startup & HTTP Endpoint Observations (R12)
 
-1. **Clean installation from lockfile:**
-   - `npm.cmd ci`  
-     *Exit code:* 0  
-     *Output:* `added 522 packages, and audited 529 packages in 2m`
-2. **ESLint flat configuration check:**
-   - `npm.cmd run lint` (`eslint .`)  
-     *Exit code:* 0  
-     *Output:* Clean, 0 errors, 0 warnings.
-3. **Strict TypeScript typechecking:**
-   - `npm.cmd run typecheck` (`tsc --noEmit`)  
-     *Exit code:* 0  
-     *Output:* Clean, 0 errors.
-4. **Unit test execution:**
-   - `npm.cmd run test` (`vitest run tests/unit`)  
-     *Exit code:* 0  
-     *Output:*
-     ```text
-      RUN  v5.1.0 D:/Lawyer
+### 1. Process Startup Failure Observation (Missing / Invalid Configuration)
+- **Command:** `powershell -Command "& { $env:NODE_ENV='production'; $env:DATABASE_URL='postgresql://'; npm.cmd run start }"`
+- **Observed Exit:** Process crashed immediately during Next.js server bootstrap via instrumentation hook `register()`:
+  ```text
+  ⨯ Failed to preload entries: Error [EnvironmentValidationError]: An error occurred while loading instrumentation hook: Environment validation failed.
+  Invalid environment variable(s): DATABASE_URL
+  PostgreSQL connection string must include a valid host (e.g. 127.0.0.1 or localhost)
+  Consult .env.example for required configuration. Secret values are redacted.
+  ```
+- **Secret Redaction:** Verified that no credentials or internal passwords were leaked in the stack trace.
 
-      ✓ tests/unit/env.test.ts (9 tests) 29ms
-      ✓ tests/unit/db-pool.test.ts (4 tests) 79ms
-      ✓ tests/unit/health.test.ts (4 tests) 20ms
+### 2. HTTP Readiness Probe: 200 -> 503 -> 200 Lifecycle Observation
+Tested with Next.js production server running on `http://127.0.0.1:3999` with synthetic PostgreSQL (`postgres:16.8-alpine` on port 6433):
 
-      Test Files  3 passed (3)
-           Tests  17 passed (17)
-        Duration  2.02s
-     ```
-5. **Disposable test database startup & real integration test execution:**
-   - Started test container: `$env:TEST_PGPORT="6433"; docker compose -f ops/docker-compose.test.yml up -d`  
-     *Exit code:* 0 (healthy on `127.0.0.1:6433->5432/tcp`, tmpfs storage)
-   - Executed integration suite: `$env:TEST_DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test?schema=public"; npm.cmd run test:integration`  
-     *Exit code:* 0  
-     *Output:*
-     ```text
-      RUN  v5.1.0 D:/Lawyer
+- **Phase A (Database Running):**
+  - `curl.exe -i http://127.0.0.1:3999/api/health/ready`
+  - **HTTP Status:** `200 OK`
+  - **Headers:** `cache-control: no-store, no-cache, must-revalidate`, `content-type: application/json`
+  - **Body:** `{"status":"pass","check":"readiness","timestamp":"2026-11-11T01:53:49.642Z","database":{"status":"connected","latencyMs":18}}`
 
-      ✓ tests/integration/db-readiness.test.ts (3 tests) 82ms
+- **Phase B (Database Stopped via `docker compose stop`):**
+  - `curl.exe -i http://127.0.0.1:3999/api/health/ready`
+  - **HTTP Status:** `503 Service Unavailable`
+  - **Headers:** `cache-control: no-store, no-cache, must-revalidate`, `content-type: application/json`
+  - **Body:** `{"status":"fail","check":"readiness","timestamp":"2026-11-11T01:54:08.288Z","database":{"status":"disconnected","error":"Database service unreachable (connection refused)","latencyMs":3}}`
+  - **Redaction Check:** Secret password (`lawoffice_dev_secret`) is completely absent from response.
 
-      Test Files  1 passed (1)
-           Tests  3 passed (3)
-     ```
-   - Teardown: `docker compose -f ops/docker-compose.test.yml down`  
-     *Exit code:* 0 (container and network removed, no volumes affected)
-6. **Negative integration test runs (demonstrating fail-closed behavior):**
-   - Absent `TEST_DATABASE_URL`: `Remove-Item Env:TEST_DATABASE_URL; npm.cmd run test:integration`  
-     *Exit code:* 1 (`Error: TEST_DATABASE_URL environment variable is strictly required`)
-   - Unreachable host/port: `$env:TEST_DATABASE_URL="postgresql://...:5439/..."; npm.cmd run test:integration`  
-     *Exit code:* 1 (`AssertionError: expected false to be true`)
-7. **Production build:**
-   - `npm.cmd run build` (`next build`)  
-     *Exit code:* 0  
-     *Output:*
-     ```text
-     ▲ Next.js 16.4.6 (Turbopack)
-     ✓ Running next.config.ts took 107ms
-       Creating an optimized production build ...
-     ✓ Compiled successfully in 1725ms
-       Running TypeScript ...
-       Finished TypeScript in 8.5s ...
-       Collecting page data using 6 workers ...
-       Generating static pages using 6 workers (0/3) ...
-     ✓ Generating static pages using 6 workers (3/3) in 1584ms
-       Finalizing page optimization ...
+- **Phase C (Database Recovered via `docker compose start`):**
+  - `curl.exe -i http://127.0.0.1:3999/api/health/ready`
+  - **HTTP Status:** `200 OK`
+  - **Headers:** `cache-control: no-store, no-cache, must-revalidate`, `content-type: application/json`
+  - **Body:** `{"status":"pass","check":"readiness","timestamp":"2026-11-11T01:54:41.299Z","database":{"status":"connected","latencyMs":20}}`
 
-     Route (app)
-     ┌ ○ /
-     ├ ○ /_not-found
-     ├ ƒ /api/health/live
-     └ ƒ /api/health/ready
+### 3. HTTP Liveness Probe Observation
+- **Command:** `curl.exe -i http://127.0.0.1:3999/api/health/live`
+- **HTTP Status:** `200 OK`
+- **Headers:** `cache-control: no-store, no-cache, must-revalidate`, `content-type: application/json`
+- **Body:** `{"status":"pass","check":"liveness","timestamp":"2026-11-11T01:54:49.931Z","uptimeSeconds":105}`
 
-     ○  (Static)   prerendered as static content
-     ƒ  (Dynamic)  server-rendered on demand
-     ```
-8. **Deferred E2E check:**
-   - `npm.cmd run test:e2e`  
-     *Exit code:* 1  
-     *Output:* `E2E tests (Playwright) are deferred to T04/T16 and NOT RUN in T02.`
-9. **Planning deliverables validation & regeneration:**
+---
+
+## Commands Actually Executed, Exit Status, and Outputs
+
+1. **ESLint flat configuration check:**
+   - Command: `npm.cmd run lint`
+   - Exit code: 0
+   - Output: Clean, 0 errors, 0 warnings.
+2. **Strict TypeScript typecheck:**
+   - Command: `npm.cmd run typecheck`
+   - Exit code: 0
+   - Output: Clean, 0 errors.
+3. **Unit test execution (Local condition):**
+   - Command: `npm.cmd test`
+   - Exit code: 0
+   - Output: `3 passed (3 test files), 24 passed (24 tests)`
+4. **Unit test execution (Hosted CI condition - R11 verification):**
+   - Command: `powershell -Command "& { $env:CI = 'true'; npm.cmd test }"`
+   - Exit code: 0
+   - Output: `3 passed (3 test files), 24 passed (24 tests)`
+5. **Real PostgreSQL integration test execution (R01, R09, R10):**
+   - Started test container: `powershell -Command "& { $env:TEST_PGPORT = '6433'; docker compose -f ops/docker-compose.test.yml up -d }"` (Exit code: 0)
+   - Executed integration suite: `powershell -Command "& { $env:TEST_DATABASE_URL = 'postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test'; npm.cmd run test:integration }"`
+   - Exit code: 0
+   - Output: `1 passed (1 test file), 4 passed (4 tests)`
+   - Negative fail-closed run (missing `TEST_DATABASE_URL`): `powershell -Command "& { $env:TEST_DATABASE_URL = ''; npm.cmd run test:integration }"`
+   - Exit code: 1 (`Error: TEST_DATABASE_URL environment variable is strictly required for integration tests. The suite fails closed without it.`)
+   - Teardown: `docker compose -f ops/docker-compose.test.yml down` (Exit code: 0)
+6. **Next.js Production Build:**
+   - Command: `npm.cmd run build`
+   - Exit code: 0
+   - Output: Compiled successfully, TypeScript finished, static & dynamic routes generated.
+7. **Deferred E2E check:**
+   - Command: `npm.cmd run test:e2e`
+   - Exit code: 1 (Outputs: `E2E tests (Playwright) are deferred to T04/T16 and NOT RUN in T02.`)
+8. **Planning deliverables validation & regeneration (R15):**
    - `pwsh -File scripts/Validate-AntigravityKit.ps1` -> `Result: PASS`, 23 task cards, 7 skills, 0 issues.
-   - `pwsh -File scripts/Build-PlanningKit.ps1` -> 55 source documents, 95 local links checked, 0 broken links, balanced code fences, UTF-8 clean.
+   - `pwsh -File scripts/Validate-AgencyAgentRouting.ps1` -> `Result: PASS`, 23 task cards, 14 profiles.
+   - `pwsh -File scripts/Build-PlanningKit.ps1` -> 70 reading sources, 237 ZIP entries, all hashes match, 0 broken links.
 
 ---
 
-## Manual demo steps and observations
+## Known Limitations / NOT RUN Checks
 
-1. **Verify fail-closed test environment:**
-   - Run `npm test` and observe `tests/unit/env.test.ts` rejecting operational target reuse and missing test configuration.
-2. **Verify real PostgreSQL probe and identity:**
-   - Start test container: `$env:TEST_PGPORT="6433"; docker compose -f ops/docker-compose.test.yml up -d`
-   - Run `$env:TEST_DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test?schema=public"; npm run test:integration`
-   - Observe 3 passing tests, including explicit `current_database() === 'lawoffice_test'`.
-3. **Verify stopped service detection & recovery:**
-   - Stop test container: `docker stop lawoffice-postgres-test`
-   - Run integration tests: probe immediately returns `ECONNREFUSED` / `Database service unreachable` and test fails.
-   - Start test container: `docker start lawoffice-postgres-test`
-   - Run integration tests: probe recovers and passes.
-
----
-
-## Known limitations / NOT RUN checks
-
-- **Playwright E2E browser tests (`npm run test:e2e`):** NOT RUN. Explicitly deferred to T04/T16; script exits non-zero as required.
+- **Native Subagent Invocations:** **NOT RUN (BLOCKED_NATIVE_AGENTS)**. Preflight check failed because Antigravity runtime does not discover `.agents/agents/*.md` definitions as invokable `TypeName`s, and installed skills conflict with `define_subagent`. No same-session personas were substituted.
+- **Playwright E2E browser tests (`npm run test:e2e`):** NOT RUN. Explicitly deferred to T04/T16; script exits 1 with explanatory notice.
 - **Authentication & session verification (Better Auth):** NOT RUN. Deferred to T03.
-- **Application domain logic (Parties, Matters, Finance):** NOT RUN. Features do not exist in T02.
-- **Remote GitHub Actions CI run:** Evaluated asynchronously upon PR push.
+- **Application domain logic (Parties, Matters, Finance):** NOT RUN. Out of scope for T02.
 
 ---
 
-## Security/privacy effects
+## Rollback & Recovery Notes
 
-- Zero external network exposure: PostgreSQL services strictly bound to `127.0.0.1`.
-- Complete credential redaction in all error messages, pool error events, and health endpoints.
-- Strict test database isolation enforced at environment schema boundary.
-- Single pinned lockfile (`package-lock.json`) maintained.
-
----
-
-## Rollback / recovery notes
-
-Work remains isolated on `feature/t02-runtime-ci`. To revert, reset to base commit `d3fd8f8b5e110858605092553d05911c2914ba37`. Disposable containers and tmpfs storage can be cleaned via `docker compose -f ops/docker-compose.test.yml down`. Persistent development volumes are left intact.
+All changes remain strictly on dedicated branch `feature/t02-runtime-ci`. To revert to the previous review checkpoint, reset to `628d5e1d44e18fa76caa7a13fb766239f97bb5e7`. The synthetic test container uses tmpfs storage and leaves persistent development volumes unaffected.

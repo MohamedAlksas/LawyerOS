@@ -49,11 +49,13 @@ export default defineConfig({
     testTimeout: 10000,
     hookTimeout: 10000,
     env: {
-      NODE_ENV: 'test',
       ...localEnv,
+      // Force test mode unconditionally after local files are loaded (R08)
+      NODE_ENV: 'test',
       // Preserve explicit environment variables from shell or CI
+      ...(process.env.DATABASE_URL ? { DATABASE_URL: process.env.DATABASE_URL } : {}),
       ...(process.env.TEST_DATABASE_URL ? { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL } : {}),
-      ...(process.env.CI ? { CI: process.env.CI } : {}),
+      ...(process.env.CI !== undefined ? { CI: process.env.CI } : {}),
     },
   },
   resolve: {
