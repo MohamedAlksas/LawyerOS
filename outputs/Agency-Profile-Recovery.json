@@ -1,0 +1,753 @@
+{
+  "scope": "Recovery copies of installed Agency profiles into isolated documentation branch; active D:/Lawyer checkout unchanged",
+  "source": "Existing user installation at ~/.gemini/config/skills",
+  "recoveredProfiles": 149,
+  "originalDeletedCodexOpenCodeWrappers": "NOT RECOVERED: their original contents are unavailable; Antigravity-native definitions are prepared separately",
+  "files": [
+    {
+      "path": ".agents/skills/accounts-payable-agent/SKILL.md",
+      "sha256": "fd89f52e0ba9681416470a94a07e5d99dd4be78a68f839aded7ec0a1dedc5ee5",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/agentic-identity-trust/SKILL.md",
+      "sha256": "71f5ae252c04de63937497f943fabdbd81f16b7034545bfa189fdcee1b5da498",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/agents-orchestrator/SKILL.md",
+      "sha256": "e4bc493a4712b4b260da5615871bc34d451b85ee2a787a65cc648576975e3ea0",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/automation-governance-architect/SKILL.md",
+      "sha256": "2aaff92cfaaae07038824c7f0264ac65380ad983960d20524fec133507a9a078",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/business-strategist/SKILL.md",
+      "sha256": "275b89fa61a394d840a090509a0af94fb6067058a6caba9af7539d653fab40d4",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/change-management-consultant/SKILL.md",
+      "sha256": "ecf947289907308f6442ab839a5b3e0132b3f182ea3343f20f580672360d4e89",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/chief-financial-officer/SKILL.md",
+      "sha256": "4e92d1a191e521ba417a23b007e9e6922957d41737573b8e1d992ffda2b5b901",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/corporate-training-designer/SKILL.md",
+      "sha256": "03db222819567f9edfa620addb7e09d706a89a3a12a393ff17b08c4ec18b0c01",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/customer-service/SKILL.md",
+      "sha256": "1d4f738d4b7735a8303d13ac774862f710a1233c64f7919cc238ab618fffc4fe",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/customer-success-manager/SKILL.md",
+      "sha256": "6aa8d13e332e41803fabee7274110bb744fd4e9c865753abe0284eb46c9c5102",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/data-consolidation-agent/SKILL.md",
+      "sha256": "878e326ff5752fee9cb0772c63f0912f7a6f5568d5968c271d70637ecafaa680",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/data-privacy-officer/SKILL.md",
+      "sha256": "872c8b7bf713610ac4ae757fe8a3079f7877fd21453d19d24e4726f4e24b191a",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-brand-guardian/SKILL.md",
+      "sha256": "63d98375cc936eb03530930d6e527b3da6c20cc581f932cd3e971e622f002136",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-image-prompt-engineer/SKILL.md",
+      "sha256": "df03e1068b868291cb85bcbdcc7b39236b1ab3b6f8979cfc6653f1052840f667",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-inclusive-visuals-specialist/SKILL.md",
+      "sha256": "3cd35a4ccf707607072f20dce23be056d07eafc51ea4822450295fd2b2da21d2",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-persona-walkthrough/SKILL.md",
+      "sha256": "1429355fd41f64555ead50bbee2907c4828d763a6775b3188472dd82244b2604",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-ui-designer/SKILL.md",
+      "sha256": "eb19b0e070b796e7ffaa973ccb3f98668694a50bf6cb97e697a6ff21579b6a93",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-ui-finish-gate-reviewer/SKILL.md",
+      "sha256": "60602db2d5adc0d7f82a2f6b77c9665e6f0dff7fcc5b6109ef13f6ecaf6a6572",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-ux-architect/SKILL.md",
+      "sha256": "d4e229cefb70aa1340e4230a9c9916223aaa66d387117fafbd56153b0654883f",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-ux-researcher/SKILL.md",
+      "sha256": "dccee3fb3ca79ac8e011b6c8c1de3bbd7e74ede7d27cfd6ecac6d46bc776d966",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-visual-storyteller/SKILL.md",
+      "sha256": "36019d7567edb2fb7ca70767b1a9fc94d4987f5739d33d046eb9731ee4a1fa41",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/design-whimsy-injector/SKILL.md",
+      "sha256": "cef65a46eeeacbb424b9233166aa8926961004737cf26be7f3b4f5d2b2bd1ab2",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-ai-data-remediation-engineer/SKILL.md",
+      "sha256": "c299aece44ffa669749c2a367c8bc89307ac2a7705c957b17ebc2a133fef188f",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-ai-engineer/SKILL.md",
+      "sha256": "2a6567781b6d6395dfea13f45758e84e08c55c97cf1c1afef4d77c30509a3f8d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-api-platform-engineer/SKILL.md",
+      "sha256": "c931dccf3641f1e29e79dcf4f97d6929a8dc33405537eb1ec1befa23324b8947",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-ats-validator-architect/SKILL.md",
+      "sha256": "cb2b5d661cfdbf9f66cae0b5bdf45bd04e989fda672f71f26d00d81138cc7cdd",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-autonomous-optimization-architect/SKILL.md",
+      "sha256": "407d7b69a6ad091451ac8658e994e9a28f49968e77bdbf6bfbad3e93206e1bf6",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-backend-architect/SKILL.md",
+      "sha256": "05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-code-reviewer/SKILL.md",
+      "sha256": "ecb71253b1094ac6a2315cc8a790189cda60ed9ba2f7334b26b0dea78d2ae240",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-codebase-onboarding-engineer/SKILL.md",
+      "sha256": "9645e59c93a506231d3d04449acc62b81aed454a190a35166370413eb52e28fe",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-data-engineer/SKILL.md",
+      "sha256": "fe010b8d17659a0f2c1b8a7b1e46b5e6a6cde8873be34e740a6c35013dfd9725",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-data-visualization-engineer/SKILL.md",
+      "sha256": "cf9960925b1080c1b2ce7f5fba79325ffad768ee3a7194f6e321466b2ae6e924",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-database-optimizer/SKILL.md",
+      "sha256": "bd5f5e6813c8931c1387689f6a4d6137e3385734d402f72bd0dfc4292f7ee068",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-database-reliability-engineer/SKILL.md",
+      "sha256": "c17d3c559d25049697f19a76852661d531430a900208b4a5aefcdd2d9944547e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-desktop-app-engineer/SKILL.md",
+      "sha256": "81d4c19254ec2fa2f5222bcd8291f44357729d796313905f240d173cd000aeaa",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-developer-tooling-engineer/SKILL.md",
+      "sha256": "0bdec2d3fdba5c10b0ca2382c8df9052c4f54acb054d4ab1f8ffc837d6fd8f62",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-devops-automator/SKILL.md",
+      "sha256": "90538c1e472410eeb408b3ab99accfa3aa6ff723f4af2cb2bcb0bb59f98e209e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-drupal-performance/SKILL.md",
+      "sha256": "448223721bfb2ae05a2969dc543d73b41212ff773ebbe057715175cf88594bc2",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-drupal-shopping-cart/SKILL.md",
+      "sha256": "20470498be2dcd6e43a7e8e75f270e7696eded64490ad506c252a89900b936e5",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-email-intelligence-engineer/SKILL.md",
+      "sha256": "556d09b82f31cdaf4fdedebd357da38e91bd999473054bdd83ee050b84e0b4ec",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-finops-engineer/SKILL.md",
+      "sha256": "5723b18193386ad801b91a0577426a90d91c9f20a0c86b1aaf39250ec218f617",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-frontend-developer/SKILL.md",
+      "sha256": "69d473c132831e0861bbf3cc50bb933c1dc231d74872b08731c3b453d79925f0",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-gaussdb-expert/SKILL.md",
+      "sha256": "ab53e0d402b2b2e71a512533fd76bbd14fe400e9bd980e7c01342d1791d7c49f",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-git-workflow-master/SKILL.md",
+      "sha256": "9a7e79db8958b08ae572a6febc32cabc1adff8e0dd99082d177ad16f6991d6e6",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-i18n-engineer/SKILL.md",
+      "sha256": "96af71e334a6537bfe4800d802cbb7428e5ab8eec1b25c8d87400ff88468bcbc",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-identity-access-engineer/SKILL.md",
+      "sha256": "34163d05151805a8f320bf89c4a25ce2743cb96090592ea0d6d34da6533ef618",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-incident-response-commander/SKILL.md",
+      "sha256": "b1d081d47d954fe61c7a01581d49a35033dc9d3f929969cc258f95d453e6f846",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-iot-fleet-engineer/SKILL.md",
+      "sha256": "6ff65a54687c733f8b2023a94c166c89e06e8cc0cbc361345c6cc5b56c302468",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-it-service-manager/SKILL.md",
+      "sha256": "60601882987e8824e72e634c491cfec7ee5e624e49715b809c5fb8e70764c652",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-knowledge-graph-engineer/SKILL.md",
+      "sha256": "b1dcdf162da4352fd7ee8215a2ed19d4615b884c4c16da91808e07fa670f9b52",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-minimal-change-engineer/SKILL.md",
+      "sha256": "36472acd29b7208bc2065ee277ffff37c55c253e27a4e6e30968920aa4076fd8",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-mobile-app-builder/SKILL.md",
+      "sha256": "5c5a8c8a95a61886f7973566cfe9838f80b11f8d4950559323c9fb481a51e03e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-mobile-release-engineer/SKILL.md",
+      "sha256": "46a182975a03486b993a65e5682a5e476fd8e4783e4def8292293ff411002b71",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-multi-agent-systems-architect/SKILL.md",
+      "sha256": "0705d225ab4dfc3345d4bf03d74e676e2a54560cbc20bd912add4d68d71791eb",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-network-engineer/SKILL.md",
+      "sha256": "a472b33e936482f751a984c29daba135d4ae5eb2edda7f3eda19d48df4a99941",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-orgscript-engineer/SKILL.md",
+      "sha256": "9d9f8b776aba9113025560f0b505d1c13ad6d27f64a35bde508bb66f49bf2deb",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-payments-billing-engineer/SKILL.md",
+      "sha256": "38ba4bff1bc97eba1e563781c71ca7eee09b066cfeefcac007ce71f8cc26e4d3",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-pdf-engine-architect/SKILL.md",
+      "sha256": "97b54169c3031cdb4b11877d6ac8f267ffe90c6a3a1175872b3545b65927a59d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-platform-engineer/SKILL.md",
+      "sha256": "91d4e6dba1a6c922661b77833a32357a48731776724b19f0a183135f589ee3b2",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-privacy-engineer/SKILL.md",
+      "sha256": "37fbaf3e861e3e869c06c0d31c4b2a0f9ec2dc991270304922cdb65e788d533e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-prompt-engineer/SKILL.md",
+      "sha256": "8456c6f5ce130bae668a5a6c9365718a340e992a93404135cb47bacd4369ac77",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-rag-pipeline-engineer/SKILL.md",
+      "sha256": "1431b580092195a6b6283fe30d00f8b2e283ce884694b83858577656112dd482",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-rapid-prototyper/SKILL.md",
+      "sha256": "57eb1224f73bbcdb0edf552d471c6066534c067b05376a0c3f643474b302b855",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-realtime-collaboration-engineer/SKILL.md",
+      "sha256": "88a0e3863782622f87fd8c4ed76ad4e372b24915ab3ddfed6ab5d8ed419ebcb4",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-rust-refactoring-specialist/SKILL.md",
+      "sha256": "b7b713f4495004ebcb31125d6f353070e11eca2cf89689d6c73ef921d84dd999",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-search-relevance-engineer/SKILL.md",
+      "sha256": "524b953489702363ad677ecc6e8656f86630f56a4e5c23769d57fb7c0fda889e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-section-508-specialist/SKILL.md",
+      "sha256": "71ac08173b6993d5c107aefc5535fb14ffb2275b7d21baeaa6e96042ee256877",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-senior-developer/SKILL.md",
+      "sha256": "360b9b080537748f4baf0094a3e1c2e312d8137eac6a390e6334a843583cb7c7",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-servicenow-developer-mentor/SKILL.md",
+      "sha256": "1e65a9182e8088bf94cabf743cf9f8ebd5983cb671f08a78a362eff938383598",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-software-architect/SKILL.md",
+      "sha256": "77c26fb9f7072ac351e864446e97c9c9ca6ca0de91183f3d42c95b60202daa8b",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-solidity-smart-contract-engineer/SKILL.md",
+      "sha256": "76d4e7a12f93542ae9159f0c7e8b370f2ec7ffc0a87b696174b1b1384b89dcb3",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-sre/SKILL.md",
+      "sha256": "9106e59324d0415a95af546f587db54fb22639d4c5ba2f3d4dc9f35939de2475",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-technical-writer/SKILL.md",
+      "sha256": "b4c37195e10dbe108e52994bc8fef2779bfac0d6722b421f81eae9506cdd1820",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-universal-document-compiler/SKILL.md",
+      "sha256": "8350b3cc068ee5254b165aa62bacbf1002d719f79a2b7ae411acc123fd2f0799",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-uswds-developer/SKILL.md",
+      "sha256": "5b3daf8edcb079cee4183a0a4834ea7ff38d8cf02c0bc0f9e3bb721ff4ebdf61",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-video-streaming-engineer/SKILL.md",
+      "sha256": "5bb82aebd48cbb5ca480752506b46947f6ca75f6474733d802895be2d77a1790",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-voice-ai-integration-engineer/SKILL.md",
+      "sha256": "4bd725609e43603a42c7eb52a8ca51a00981d53b4f5f3732f6a623898022d937",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-webassembly-engineer/SKILL.md",
+      "sha256": "a91a757e82bd8a56d94e56112244a76c57e138a18db70c23718b5c7d394fd704",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-wechat-mini-program-developer/SKILL.md",
+      "sha256": "f312d06c2406cd77160d705226718595a750451104e738655217978251ccfdc3",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-wordpress-performance/SKILL.md",
+      "sha256": "dd84d5ae721ad6e0c42b96d1908eb8943689cc41e7b7f12822f00c3ff05f2f6c",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/engineering-wordpress-shopping-cart/SKILL.md",
+      "sha256": "fc0c6b59215207cf1f2a449c18461a7adc653e2111e090d14f94cfc23fe9f8d7",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/esg-sustainability-officer/SKILL.md",
+      "sha256": "fdd8c33b63cd811d3d78807278683584edc5b374d6a3435fadad963399a774bf",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/government-digital-presales-consultant/SKILL.md",
+      "sha256": "d63a6207755f184b67472610b67e1a5e93c44650e4e486db1db962ff5594120c",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/grant-writer/SKILL.md",
+      "sha256": "66999076c7da6c179f37c576392727632455b804330ef199dbaccf3bd00b6b92",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/healthcare-aging-parent-care-companion/SKILL.md",
+      "sha256": "4873802f425ebe0d92657b69a9227eb3de41c3ab30b18f895803c4702c9cc81b",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/healthcare-customer-service/SKILL.md",
+      "sha256": "c33a6ced4a25852acea58219dff836ee319f2e4f7dd3915ab7f1ad9b2a17b290",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/healthcare-marketing-compliance/SKILL.md",
+      "sha256": "13c4281b0edd79ea0434a86b81936cb8eb8a551f8f4933f819ec9aeb34c80051",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/hospitality-guest-services/SKILL.md",
+      "sha256": "149d1f00c811829af99e70491a4c61c3b3a12a141e5accf4e5ce772311113875",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/hr-onboarding/SKILL.md",
+      "sha256": "2a2ddd999429cd955d3ca856629da9d644ebebbfd03373ceb7905a52afc7163c",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/identity-graph-operator/SKILL.md",
+      "sha256": "984c62a9604f8fa7f0811863ebe50706bf11419e1d1c2546d02553b22b3f68bd",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/language-translator/SKILL.md",
+      "sha256": "ebb6ce6cdcf8c34b18dae429a378751cb0a42140bb9832c1deb255a357c31845",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/legal-billing-time-tracking/SKILL.md",
+      "sha256": "149cf8c44e3a9f8d639e2c96623cfdcd0e9212904246d468750480b1f1cfca79",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/legal-client-intake/SKILL.md",
+      "sha256": "7c105bfeeaa08c9b4c15d78c8d6ae8e5b8fa10322fdb1eb5104df85bd29a0178",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/legal-document-review/SKILL.md",
+      "sha256": "9f68c3e6efd63c264ee4f7d82204a9b1a0547b7eb1eef8c61ad48f34ac071d8f",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/loan-officer-assistant/SKILL.md",
+      "sha256": "a20d404cc58756a02d5586fa0cb33498fabbd0feafbbb68c7a079909ee2818f5",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/lsp-index-engineer/SKILL.md",
+      "sha256": "e046c8fdeac897dada8cf5773e4d65b22ed1c3486905741dc4a053d9e5e5d7d4",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/ma-integration-manager/SKILL.md",
+      "sha256": "8b94baf6033e1d70b8830a45228176e8be4a0799f1273c633f1c27f7f83d9e0c",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/medical-billing-coding-specialist/SKILL.md",
+      "sha256": "c3eeee3f184f1adb6de7c413c16f52e8b0f0db15084ce4827709b927681db3e2",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/operations-manager/SKILL.md",
+      "sha256": "f3c1b27e6782bf219b95804cab177a9e681c6c0b66761460e2327ac4f79d7828",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/organizational-psychologist/SKILL.md",
+      "sha256": "a94ec1d5056651de413f876ccdfd4ef86bafc07c2cce57480f65f44209c4c951",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/personal-growth-mentor/SKILL.md",
+      "sha256": "a1c87632abe189b7c57ba6c3dffb7b2b4d65d476d245a2df703e1b06978e26e0",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/real-estate-buyer-seller/SKILL.md",
+      "sha256": "93158d0831e6462bc5a7ba26ad6fa6f6fe237535001d7b0373b8cde2abb95664",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/recruitment-specialist/SKILL.md",
+      "sha256": "4341e23df90c89edd912930bec6ce827ba9acbdde0baaae39f7e9127cdeab952",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/report-distribution-agent/SKILL.md",
+      "sha256": "bfbb14d7e0efc7f1cb9523cd92e2236a27f6dbefc304ee4570a2fb078ed57f83",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/resume-tailor/SKILL.md",
+      "sha256": "fc479d95d9ab2b17b14b2efc1ac4d95eab0a9b91c10850df598a812971d79695",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/retail-customer-returns/SKILL.md",
+      "sha256": "be3075132544708cf2ad6b3f8c1e5367e1448e849a6ef2b7d470b4d0d8df1812",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/sales-data-extraction-agent/SKILL.md",
+      "sha256": "e384dd48bf8fadc4ba445228f26b24f735dd8f36c50dc42dda8226bf89a12c60",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/sales-outreach/SKILL.md",
+      "sha256": "18fae925f9ca3e755eb015c87c463ff85122fa6200ce0bfc88fb1f0ee152c67d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-ai-generated-code-auditor/SKILL.md",
+      "sha256": "3beb05ddcb2c3194ffb17644e60f0612a85bca6a0d21175d2f0288a9c99bfcff",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-appsec-engineer/SKILL.md",
+      "sha256": "77c29a754e6c25b97f189c06d8459b02fd29f4d8de8602ca53740f4c92a1f259",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-architect/SKILL.md",
+      "sha256": "16dbbf9883bd0766f9a865271a4210e01c6f3eee7678640f0355dab93f35cb85",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-blockchain-security-auditor/SKILL.md",
+      "sha256": "668d3ca2969b671007f7681a810c2dd28286ba5d6bddac577b8742f176214cb6",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-cloud-security-architect/SKILL.md",
+      "sha256": "a535fbff8ac58337773a1b1a70d256a8929c4f77325d7b308914cd39629552f7",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-compliance-auditor/SKILL.md",
+      "sha256": "5419a9b35b99281ae52985a4bb75d8c661a7c95dfe0927e1d95cff410d052977",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-incident-responder/SKILL.md",
+      "sha256": "bc016c1e4488ef578c03944705e92a3adf204a0a2d723ae944661a6cabe527bd",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-penetration-tester/SKILL.md",
+      "sha256": "e98430eaaa06006f3beaa5c120fd56fce2d55996946fd07b6cb08ad551fbb17d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-secrets-credential-engineer/SKILL.md",
+      "sha256": "b128f6e4103a88c0cdb0adcba3854fd274d45519701e9313c3f49fd1eb1522ce",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-senior-secops/SKILL.md",
+      "sha256": "b2d34a21dd66c3f652f82b7e94ee7ad0f9408bad024e54b668b9a41dde824eee",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-threat-detection-engineer/SKILL.md",
+      "sha256": "319ebfbf2dd0ee3c909c3d89d96b7f0d16327beb23ca18aeb88697f799a8b65a",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/security-threat-intelligence-analyst/SKILL.md",
+      "sha256": "20d671faeeafee2fc3193ba24767b1f3ef03ae96fa7c2b95279ae577eb6eae50",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-chief-of-staff/SKILL.md",
+      "sha256": "222d243d9d976aa01751b34666953452fc1f3e60df15bb535771c8deb70094b9",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-civil-engineer/SKILL.md",
+      "sha256": "f9a601900bbcec65ec0e447ac42b183a650714a3c0baa15d160b0844bc19013f",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-codebase-archaeologist/SKILL.md",
+      "sha256": "3be9b27e40924dc85384d010f27c5798dc856b3f148445f0062d4bfde8ee0e44",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-cultural-intelligence-strategist/SKILL.md",
+      "sha256": "f2e955938996bb66d4e44565a0c917ea01021f1739f5ca2157279885e7f1d402",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-developer-advocate/SKILL.md",
+      "sha256": "b7cddb5cfe901499f94439bc1e8875a8c9cd69794a3ebdb30ebeedbe066af715",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-document-generator/SKILL.md",
+      "sha256": "b739ac3de64d11b7fdc7e38e4df401963f61b259871fcbd70581a4fc0976bc58",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-fedramp-rmf-compliance/SKILL.md",
+      "sha256": "5d49e5bb822c12f87274f37ba5bee5e0148b823b17edf9506766ca1f0e2d6c75",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-focus-music-architect/SKILL.md",
+      "sha256": "10ee177b4e7381285e988b863f5d4c677e58f0368314cee1a5000f7d43d0ea3d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-french-consulting-market/SKILL.md",
+      "sha256": "987fed04d01e868d6ae88e3121c92a9d1847877ef9bd4128cb69fe8909694694",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-korean-business-navigator/SKILL.md",
+      "sha256": "a9095b4d8d7fe425e531152240690a6d00693637489c0ab89926aed3d59d9240",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-master-plan-architect/SKILL.md",
+      "sha256": "829dc1fd84219f72a7213c6e85a8c50320734c752149857c4846b8e2c4b9761a",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-mcp-builder/SKILL.md",
+      "sha256": "328ebbb2acf56e45dfd5bc8d7ea681c93cbf75cacbe2df43a5f6233b82c83733",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-model-qa/SKILL.md",
+      "sha256": "40c311bf4a7b44436ef80f3c77758a599b74e46ddc453da803431d0a07c54dfb",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-pricing-analyst/SKILL.md",
+      "sha256": "603734956855ae1c1c5a84fbda447c279a8033063db28661f1344eec8455c5db",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-salesforce-architect/SKILL.md",
+      "sha256": "e2017201a6af990b327aa9f886fa8b720662dafffd629fe56f69bc0e678e07f6",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-strategy-duel-agent/SKILL.md",
+      "sha256": "e51f483b90443a710d2e44feab29b49dfed71d69533326d4e7c06afad2e91615",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/specialized-workflow-architect/SKILL.md",
+      "sha256": "997e3ef688b585d04c0e135a906ea997667fbaa2a23f59dcdb03cfe4f845940e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/study-abroad-advisor/SKILL.md",
+      "sha256": "8f3f70a10d427f0aaeaafc0363f89991fc46ea65bf2ca2d9f5ad2e8866cb5a5b",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/supply-chain-strategist/SKILL.md",
+      "sha256": "24c48195f7906b4dc69073ec5b72e1cdf78a691ee2df0c48f57cf8d1d7d47721",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-accessibility-auditor/SKILL.md",
+      "sha256": "1b099d10cc4f82568ded01d9918cd63e24ad177702f5dc76b991e60e7eff71dd",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-api-tester/SKILL.md",
+      "sha256": "9113c51692c178cae9969871c2df1da461efff0e9d131c7ca2aa3d2dae8f1e95",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-evidence-collector/SKILL.md",
+      "sha256": "e5f95a8d437ed9094d6aff489209fa1c4cbd78e231ff254d4b82c217cb6b337e",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-performance-benchmarker/SKILL.md",
+      "sha256": "2c06f4696358432eae06eeb8321d5c6cc17897ecbdbb2c5cc4b5a38ff668b46c",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-reality-checker/SKILL.md",
+      "sha256": "d6bc996bbf602b38b77641eff4cf74215a3f6644238321bca202a255dc4183d6",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-test-automation-engineer/SKILL.md",
+      "sha256": "af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-test-results-analyzer/SKILL.md",
+      "sha256": "321452c4db08d49a510448e1c35ab2a1da3956fd20afe4e2512811580a925638",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-tool-evaluator/SKILL.md",
+      "sha256": "2ded97833a5fc4a82ae56494379cc1bcfe9b61e17832ba344ab22ac8544294e5",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/testing-workflow-optimizer/SKILL.md",
+      "sha256": "13b421b06b3ffbf64caa502146eb5e74f02e89b86eb8ad99cdb8080506ffc76d",
+      "result": "PASS: byte-identical to existing global installation"
+    },
+    {
+      "path": ".agents/skills/zk-steward/SKILL.md",
+      "sha256": "9eaca83162161555ac7bcff52e7a3ac36e68ac4e58824b3a1b438219b6d06a99",
+      "result": "PASS: byte-identical to existing global installation"
+    }
+  ]
+}

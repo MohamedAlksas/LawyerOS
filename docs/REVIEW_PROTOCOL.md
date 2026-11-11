@@ -28,7 +28,7 @@ Branch / upstream / PR URL:
 Local HEAD / independently verified remote pushed SHA:
 Changed files:
 Skills loaded (exact SKILL.md paths and task-specific application):
-Agency Agent evidence (lead/support, actual metadata name, resolved path, SHA-256, applied guidance, supporting findings/actions):
+Agency Agent evidence (distinct native invocation/conversation IDs, definition paths, lead/support, profile names/paths/hashes, ownership, inspected SHAs, findings/actions, lead reconciliation, test exits and evidence references):
 Behavior delivered:
 Requirements and acceptance IDs covered:
 Commands actually run + exit status + short output:
@@ -42,6 +42,8 @@ Unresolved decisions:
 ```
 
 During implementation, save submissions as `docs/reviews/Txx-submission.md`. Codex saves its review as `docs/reviews/Txx-review.md`, stating `ACCEPTED`, `CHANGES_REQUESTED`, or `BLOCKED` and an inspectable reason. Never copy credentials or real data into evidence.
+
+For assignments under the native-agent policy, follow [AGENCY_AGENTS](AGENCY_AGENTS.md). Every routed lead/support needs a distinct observable native invocation and result. Same-session persona passes do not meet this requirement; missing capability is `BLOCKED_NATIVE_AGENTS` before dependent implementation. Portable validation cannot prove runtime execution. This policy is prospective: do not rewrite earlier submission evidence or withdraw an earlier acceptance solely because the policy changed. Native support reviews supplement Codex's independent acceptance rather than replacing it.
 
 ## Finding severity
 
