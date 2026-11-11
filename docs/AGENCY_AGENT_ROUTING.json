@@ -8,6 +8,13 @@
     "effectiveFrom": "Next implementation assignment or correction round after this policy is integrated; no retrospective execution claims",
     "agentRoot": ".agents/agents",
     "invocationTool": "invoke_subagent",
+    "nativeRegistration": {
+      "tool": "define_subagent",
+      "aliasPrefix": "lawoffice-native-",
+      "profilePrefixToStrip": "agency-",
+      "mode": "native-registration-only",
+      "stopOnFailure": true
+    },
     "modelPolicy": "inherit",
     "sequentialPersonaFallback": false,
     "maxActiveChildren": 3,

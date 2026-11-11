@@ -1,0 +1,19 @@
+services:
+  postgres-test:
+    image: postgres:16.8-alpine
+    container_name: lawoffice-postgres-test
+    restart: "no"
+    environment:
+      POSTGRES_USER: lawoffice_user
+      POSTGRES_PASSWORD: lawoffice_dev_secret
+      POSTGRES_DB: lawoffice_test
+    ports:
+      # Bound to separate loopback port to isolate from dev database.
+      - "127.0.0.1:${TEST_PGPORT:-5433}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawoffice_user -d lawoffice_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 5

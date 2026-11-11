@@ -27,6 +27,82 @@ Canonical references live at the repository root and in `docs/`. [outputs](outpu
 
 The documentation is in English. The product remains an Arabic RTL application for an Egyptian law office.
 
+## Local development startup
+
+Follow these steps to run LawOffice OS locally for development and testing:
+
+1. **Prerequisites**:
+   - Node.js 26 Active LTS (`^26.13.0`) and npm 11.x
+   - Docker Desktop with Docker Compose v2+
+   - Git
+
+2. **Environment configuration**:
+   - Copy the synthetic environment template:
+     ```powershell
+     cp .env.example .env.local
+     ```
+   - In `.env.local`, review loopback variables:
+     - Development database URL (default host port `5432` on Linux/CI, or `6432` on Windows to avoid Hyper-V excluded port ranges):
+       ```env
+       DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6432/lawoffice_dev?schema=public"
+       ```
+     - Isolated test database URL (default host port `5433` on Linux/CI, or `6433` on Windows):
+       ```env
+       TEST_DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6433/lawoffice_test?schema=public"
+       ```
+   - **Supported connection string encoding**: Connection URLs must adhere to strict URL syntax without ambiguous raw characters. Raw whitespace and control characters are rejected (spaces must be explicitly percent-encoded, e.g. `%20`), and all percent signs (`%`) must be followed by two hexadecimal digits (`%HH`).
+   - Vitest automatically loads `TEST_DATABASE_URL` from `.env.local` or `.env.test` via `vitest.config.mjs`, or from the active shell environment.
+
+3. **Start local PostgreSQL services**:
+   - **Development database** (persistent volume `lawoffice_pgdata`):
+     ```powershell
+     # On Windows (specifying PGPORT):
+     $env:PGPORT="6432"
+     docker compose -f ops/docker-compose.yml up -d
+     ```
+   - **Isolated test database** (disposable tmpfs storage):
+     ```powershell
+     # On Windows (specifying TEST_PGPORT):
+     $env:TEST_PGPORT="6433"
+     docker compose -f ops/docker-compose.test.yml up -d
+     ```
+   - Verify container health status:
+     ```powershell
+     docker compose -f ops/docker-compose.yml ps
+     docker compose -f ops/docker-compose.test.yml ps
+     ```
+
+4. **Run tests & quality checks**:
+   ```powershell
+   npm ci
+   npm run lint             # ESLint flat configuration check
+   npm run typecheck        # Strict TypeScript typechecking
+   npm run test             # Unit tests (environment, pool lifecycle, and health routes)
+   npm run test:integration # Real PostgreSQL readiness probe & failure mode checks
+   npm run build            # Production compilation
+   ```
+   *Note on `npm run test:e2e`:* E2E browser tests (Playwright) are deferred to Milestones M1 (T04) and M6 (T16) and intentionally exit non-zero (`NOT RUN`) in T02.
+   The startup-process integration suite requires an explicit isolated `TEST_DATABASE_URL`, validates it against the original operational URL before spawning any process, and always builds the current checkout before its HTTP checks. Readiness must return HTTP 200 with the expected body and no-store headers; an unavailable database fails the test. It reports the fresh build ID and uses Turbopack by default. For environments with the documented local Turbopack CSS-worker failure, set `$env:STARTUP_TEST_BUNDLER='webpack'` explicitly to perform a fresh webpack test build; this does not change the application's default build command. Remove that environment variable to return to the default. No cached `.next` directory is accepted as build provenance.
+
+5. **Start development server**:
+   ```powershell
+   npm run dev
+   ```
+   - Placeholder page: `http://localhost:3000` (Arabic RTL, `lang="ar-EG"`)
+   - Liveness probe: `http://localhost:3000/api/health/live` (HTTP 200)
+   - Readiness probe: `http://localhost:3000/api/health/ready` (HTTP 200 when DB is connected, HTTP 503 when down)
+
+6. **Safe teardown**:
+   - To stop the disposable test database:
+     ```powershell
+     docker compose -f ops/docker-compose.test.yml down
+     ```
+   - To stop the development database while preserving persistent data:
+     ```powershell
+     docker compose -f ops/docker-compose.yml down
+     ```
+     *(Note: Do not pass `-v` unless an explicit database reset is intended).*
+
 ## Agency specialists during implementation
 
 Every task card selects one Agency lead and relevant supports alongside its LawOffice skills. [The routing registry](docs/AGENCY_AGENT_ROUTING.json) maps 23 tasks to 14 profiles and native definitions in `.agents/agents/`; profiles are selected from 155 project-local copies. [The complete catalogue](docs/AGENCY_AGENT_CATALOG.md) separates scheduled roles, general/specialized technical roles, and business/professional/creative roles. After this policy is integrated, the next assignment requires actual delegated sessions for the lead and every support, with distinct invocation IDs, checkpoint SHAs, and returned results. Same-session role passes are not a substitute. Read [AGENCY_AGENTS](docs/AGENCY_AGENTS.md); unavailable native execution is `BLOCKED_NATIVE_AGENTS`. Prepared definitions and static validation do not prove execution or Codex acceptance. Preserve extra installed profiles; the managed-skill validator checks only its seven LawOffice skills.
