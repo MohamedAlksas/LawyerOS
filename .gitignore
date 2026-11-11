@@ -1,5 +1,6 @@
 # Local scratch work and historical source snapshots
 /work/
+graphify-out/
 
 # Credentials and private key material
 .env
