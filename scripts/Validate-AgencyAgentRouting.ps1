@@ -14,6 +14,8 @@ if ($manifest.schemaVersion -ne 2) { $errors.Add('Expected schemaVersion 2.') }
 if ($manifest.executionMode -cne 'native-subagents-required') { $errors.Add('Native subagent execution must be required.') }
 if ($manifest.executionPolicy.sequentialPersonaFallback -ne $false) { $errors.Add('Sequential persona fallback must be disabled.') }
 if ($manifest.executionPolicy.agentRoot -cne '.agents/agents' -or $manifest.executionPolicy.invocationTool -cne 'invoke_subagent' -or $manifest.executionPolicy.modelPolicy -cne 'inherit') { $errors.Add('Unexpected native-agent discovery, invocation, or model policy.') }
+$registration = $manifest.executionPolicy.nativeRegistration
+if ($registration.tool -cne 'define_subagent' -or $registration.aliasPrefix -cne 'lawoffice-native-' -or $registration.profilePrefixToStrip -cne 'agency-' -or $registration.mode -cne 'native-registration-only' -or $registration.stopOnFailure -ne $true) { $errors.Add('Unexpected native registration policy; actual native execution and stopping on failure remain required.') }
 if ($profiles -isnot [Collections.IDictionary] -or $profiles.Count -eq 0) { throw 'Expected a nonempty profiles map.' }
 if ($tasks -isnot [Collections.IDictionary]) { throw 'Expected a tasks map.' }
 if ($tasks.Count -ne $taskIds.Count) { $errors.Add('Expected exactly 23 routed tasks.') }
