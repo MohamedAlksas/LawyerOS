@@ -13,7 +13,7 @@ $documents = @(
     'docs/adr/0001-matter-and-proceeding.md',
     'docs/adr/0002-financial-subledger.md',
     'docs/PLAN_REVIEW.md', 'docs/START_HERE.md', 'docs/ANTIGRAVITY.md',
-    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md', 'docs/AGENCY_AGENT_CATALOG.md'
+    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md', 'docs/AGENCY_AGENT_CATALOG.md', 'docs/GRAPHIFY.md'
 )
 $taskDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs/tasks') -Filter '*.md' -File | Sort-Object Name | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
 $skillDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills') -Filter 'SKILL.md' -File -Recurse -Force | Where-Object { $_.Directory.Name -like 'lawoffice-*' } | Sort-Object FullName | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
@@ -29,6 +29,8 @@ $archiveFiles = $documents + @(
     'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json'
 )
 $archiveFiles += $agencyProfileDocuments + @('docs/third-party/agency-agents-LICENSE.txt')
+$graphifyAssets = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills/graphify') -File -Recurse -Force | Sort-Object FullName | ForEach-Object { [IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
+$archiveFiles += $graphifyAssets + @('scripts/Build-CodeGraph.ps1', 'docs/reviews/GRAPHIFY-setup.md', 'docs/third-party/graphify-LICENSE.txt', 'docs/third-party/graphify-LICENSE-MIT.txt', 'docs/third-party/graphify-NOTICE.txt')
 $broken = [System.Collections.Generic.List[string]]::new()
 $linkCount = 0
 $bundle = [System.Text.StringBuilder]::new()
