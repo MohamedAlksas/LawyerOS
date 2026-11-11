@@ -1,6 +1,6 @@
 # T02 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at published head `867b312c8dcec847dc18df7784dc382b5e0c911d`. See [the latest review](T02-review-round5.md) and [the next correction assignment](T02-corrections-round5.md). R21 is resolved and actual three-child native execution is verified. R16 still needs a complete lexical input boundary; earlier reviews remain historical and T03 is unreleased.
+Latest review: **CHANGES_REQUESTED** at published head `673cd6d5e8aa55423dfb0145b593a128b3bf6e88`. See [the latest review](T02-review-round6.md) and [the next correction assignment](T02-corrections-round6.md). R16 and R21 are resolved; current built-server startup/teardown evidence needs correction. Earlier reviews remain historical and T03 is unreleased.
 
 Decision: **CHANGES_REQUESTED**. Keep PR #4 draft. T03 is not released.
 

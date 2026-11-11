@@ -10,6 +10,8 @@ The planning PR must be integrated before T01 normally starts from `origin/main`
 
 ## Reference order
 
+Local test servers and helpers must have recorded, task-owned process IDs and private test ports. Stop only the exact process/tree created by that task. Never stop processes by executable name or enumerate all Node processes for cleanup. A forced test teardown is not an observed application startup exit; record the original command's actual exit status separately from HTTP observations and cleanup results. Use hidden windows for background helpers.
+
 1. The current assignment from the project owner/Codex.
 2. `PRODUCT.md`, `GLOSSARY.md`, and `docs/PRD.md`.
 3. `docs/DATA_MODEL.md` and `docs/WORKFLOWS.md` for business rules; `DESIGN.md` and `docs/SCREENS.md` for user experience.
