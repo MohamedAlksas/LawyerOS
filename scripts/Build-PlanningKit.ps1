@@ -13,7 +13,7 @@ $documents = @(
     'docs/adr/0001-matter-and-proceeding.md',
     'docs/adr/0002-financial-subledger.md',
     'docs/PLAN_REVIEW.md', 'docs/START_HERE.md', 'docs/ANTIGRAVITY.md',
-    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md'
+    'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md', 'docs/AGENCY_AGENT_CATALOG.md'
 )
 $taskDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs/tasks') -Filter '*.md' -File | Sort-Object Name | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
 $skillDocuments = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills') -Filter 'SKILL.md' -File -Recurse -Force | Where-Object { $_.Directory.Name -like 'lawoffice-*' } | Sort-Object FullName | ForEach-Object { [System.IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })

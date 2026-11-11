@@ -2,7 +2,7 @@
 
 Open `D:\Lawyer` as the workspace. These project-specific skills are instruction-only packages maintained alongside the plan. They require no Codex plugin, host-specific binary, account connection, or global installation. Application code, deployment, and real-data migration remain separate tasks.
 
-The task cards additionally require specific Agency profiles from project-local `.agents/skills/` folders. [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) selects 14 specialties from 149 recovered profile copies; [AGENCY_AGENTS](AGENCY_AGENTS.md) defines loading and actual native execution. Project skills, profiles, and native definitions are included in the ZIP. Portable validation checks files and routing, not execution in Antigravity.
+The task cards additionally require specific Agency profiles from project-local `.agents/skills/` folders. [AGENCY_AGENT_ROUTING.json](AGENCY_AGENT_ROUTING.json) selects 14 specialties from 155 project-local profile copies; [the catalogue](AGENCY_AGENT_CATALOG.md) classifies the complete roster. [AGENCY_AGENTS](AGENCY_AGENTS.md) defines loading and actual native execution. Project skills, profiles, and native definitions are included in the ZIP. Portable validation checks files and routing, not execution in Antigravity.
 
 Use `https://github.com/MohamedAlksas/LawyerOS.git` as origin and read `docs/GIT_WORKFLOW.md`. Each task card includes its exact dedicated branch, checkpoint commit/push rules, PR handoff, and remote-SHA verification. The planning baseline must normally be merged into main before T01. Access in a running Antigravity session must still be verified; Codex's GitHub access does not prove that session's credentials are working.
 

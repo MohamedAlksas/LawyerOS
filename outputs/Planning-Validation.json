@@ -2,19 +2,23 @@
   "scope": "Planning documents only; no application tests executed",
   "documentationLanguage": "English",
   "applicationLocale": "Arabic RTL / ar-EG / Africa/Cairo",
-  "sourceDocuments": 69,
+  "sourceDocuments": 70,
   "taskCards": 23,
   "projectSkills": 7,
   "nativeAgentDefinitions": 14,
-  "bundledAgencyProfiles": 149,
+  "bundledAgencyProfiles": 155,
   "agencyProfiles": 14,
-  "localLinksChecked": 100,
+  "localLinksChecked": 259,
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 230,
+  "zipEntries": 237,
   "zipSourceHashes": "All match",
   "outputs": [
+    {
+      "Name": "Agency-Agent-Catalog.json",
+      "Length": 128951
+    },
     {
       "Name": "Agency-Agent-Installed-Validation.json",
       "Length": 15189
@@ -45,15 +49,15 @@
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 447181
+      "Length": 506958
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1231511
+      "Length": 1287426
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
-      "Length": 3851
+      "Length": 3914
     },
     {
       "Name": "Native-Agent-Policy-Validation.json",

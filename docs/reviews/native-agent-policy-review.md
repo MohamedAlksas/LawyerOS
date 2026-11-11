@@ -47,7 +47,7 @@ These records establish that Antigravity issued the deletion commands; this is n
 | Set `subagent: false` | Exit 1 as required; PASS |
 | Override inherited model with `pro` | Exit 1 as required; PASS |
 | Remove T02's native invocation gate | Exit 1 as required; PASS |
-| `Build-PlanningKit.ps1` | Exit 0; 69 reading sources, 230 ZIP entries, all ZIP/source hashes match, zero broken local links |
+| `Build-PlanningKit.ps1` | Initial exit 0: 69 reading sources, 230 ZIP entries, all ZIP/source hashes match, zero broken local links. The later 155-role catalogue update has 70 reading sources and 237 ZIP entries |
 
 Negative scenarios ran against copied fixtures under ignored `work/`; they did not modify global profiles or the active application checkout. `outputs/Native-Agent-Policy-Validation.json` contains their results. The existing earlier Agency negative-check report is historical, not relabeled as a new runtime test.
 
@@ -62,3 +62,9 @@ Runtime discovery, tool compatibility in the owner's installed Antigravity, actu
 Commit the recovered profiles and definitions through this PR before they are used for the next assignment. Normal untracked-file cleanup will then leave those tracked files, but explicit deletion/reset can still remove them; the preservation rule remains essential. Do not restore files into an actively cleaning checkout or discard T02 work. The owner was advised to pause the current Antigravity run before restoration/integration.
 
 The full roster is available as source material, not an instruction to launch every agent. Only the task's lead and at most two routed supports run. Codex continues independent review. Rollback is a scoped Git revert of this documentation/configuration change, preserving any task work; no database migration or real-data operation exists here.
+
+## Reinstalled roster and classification update
+
+After the owner reinstalled the agents, direct inspection found 155 Agency skill files, 155 corresponding Codex definitions, and 155 corresponding OpenCode definitions. These are three formats of the same 155 roles, plus the seven LawOffice skills. The original 149 recovered profile copies match the new installation by SHA-256; six additional installed profile files were copied into this isolated branch without changing the active checkout.
+
+The complete `docs/AGENCY_AGENT_CATALOG.md` and `outputs/Agency-Agent-Catalog.json` classify every role exactly once: 14 scheduled LawOffice roles, 32 broadly reusable technical roles, 61 specialized technical roles, and 48 business/professional/creative roles. Classification uses actual installed descriptions and existing task routing; it does not launch agents, add them to task routing, or authorize new features. Legal domain profiles are distinguished from software implementers, and technology-specific roles remain conditional. No installed agent files were removed or moved.
