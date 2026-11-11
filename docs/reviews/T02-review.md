@@ -1,8 +1,8 @@
 # T02 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at published head `f54d2cd5b92e53c8bec25773dfa753d44c36d3bd`. See [the latest review](T02-review-round7.md) and [the next correction assignment](T02-corrections-round7.md). R24's startup exit is fixed; the remaining correction concerns startup-test readiness assertions, database isolation and artifact provenance. Test Automation leads the next slice. Earlier reviews remain historical and T03 is unreleased.
+Latest review: **ACCEPTED** at inspected/published correction `fd627ecfd603a78eeaaa9ed14e594dc0427be381`. See [the current review and verification](T02-review-round8.md). The owner-authorized Codex fix closes R27–R29; fresh independent Standards/Spec reviews found no actionable defect, and hosted application/planning checks passed. Acceptance grants no merge permission. T03 remains unreleased until T02 is integrated into `origin/main`. The text below and earlier round reports are historical.
 
-Decision: **CHANGES_REQUESTED**. Keep PR #4 draft. T03 is not released.
+Historical initial decision: **CHANGES_REQUESTED**. Superseded by the latest review linked above.
 
 Review date: 11 November 2026, Africa/Cairo.
 
