@@ -1,282 +1,282 @@
 {
-  "scope": "Task instructions, skill metadata/references, prerequisite chain, submission gates; no app execution",
-  "result": "PASS",
-  "taskCards": 23,
-  "skills": 7,
-  "missingSkillFiles": 0,
-  "invalidPredecessors": 0,
-  "unfinishedTemplates": 0,
-  "independentForwardTest": "Read-only: T01 has no predecessor task but requires the integrated planning baseline; T14 stops without accepted T13; T18/T19 do not authorize unknown live targets",
-  "antigravityRuntimeDiscovery": "NOT RUN: no Antigravity session operated",
-  "pythonSkillCreatorValidator": "NOT RUN: WindowsApps Python launcher unavailable; frontmatter, names, references and scoped behavior checked independently",
-  "checks": [
-    {
-      "task": "T01",
-      "predecessor": null,
-      "branch": "feature/t01-toolchain-foundation",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-foundation"
-      ],
-      "submission": "docs/reviews/T01-submission.md"
-    },
-    {
-      "task": "T02",
-      "predecessor": "T01",
-      "branch": "feature/t02-runtime-ci",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-foundation",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T02-submission.md"
-    },
-    {
-      "task": "T03",
-      "predecessor": "T02",
-      "branch": "feature/t03-identity-sessions",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-security-operations",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T03-submission.md"
-    },
-    {
-      "task": "T04",
-      "predecessor": "T03",
-      "branch": "feature/t04-arabic-pwa-shell",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T04-submission.md"
-    },
-    {
-      "task": "T05",
-      "predecessor": "T04",
-      "branch": "feature/t05-parties",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T05-submission.md"
-    },
-    {
-      "task": "T06",
-      "predecessor": "T05",
-      "branch": "feature/t06-matters-proceedings",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T06-submission.md"
-    },
-    {
-      "task": "T07",
-      "predecessor": "T06",
-      "branch": "feature/t07-search-archiving",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T07-submission.md"
-    },
-    {
-      "task": "T08",
-      "predecessor": "T07",
-      "branch": "feature/t08-hearing-results",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T08-submission.md"
-    },
-    {
-      "task": "T09",
-      "predecessor": "T08",
-      "branch": "feature/t09-deadlines-tasks",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T09-submission.md"
-    },
-    {
-      "task": "T10",
-      "predecessor": "T09",
-      "branch": "feature/t10-reminders",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T10-submission.md"
-    },
-    {
-      "task": "T11",
-      "predecessor": "T10",
-      "branch": "feature/t11-private-uploads",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-security-operations",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T11-submission.md"
-    },
-    {
-      "task": "T12",
-      "predecessor": "T11",
-      "branch": "feature/t12-document-versions",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-security-operations",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T12-submission.md"
-    },
-    {
-      "task": "T13",
-      "predecessor": "T12",
-      "branch": "feature/t13-fees-collections",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-finance",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T13-submission.md"
-    },
-    {
-      "task": "T14",
-      "predecessor": "T13",
-      "branch": "feature/t14-expenses-advances",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-finance",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T14-submission.md"
-    },
-    {
-      "task": "T15a",
-      "predecessor": "T14",
-      "branch": "feature/t15a-reversals",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-finance",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T15a-submission.md"
-    },
-    {
-      "task": "T15b",
-      "predecessor": "T15a",
-      "branch": "feature/t15b-refunds-adjustments",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-finance",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T15b-submission.md"
-    },
-    {
-      "task": "T15c",
-      "predecessor": "T15b",
-      "branch": "feature/t15c-statements-opening-balances",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-finance",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T15c-submission.md"
-    },
-    {
-      "task": "T16",
-      "predecessor": "T15c",
-      "branch": "feature/t16-print-export",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-security-operations",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T16-submission.md"
-    },
-    {
-      "task": "T17",
-      "predecessor": "T16",
-      "branch": "feature/t17-csv-import",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T17-submission.md"
-    },
-    {
-      "task": "T18",
-      "predecessor": "T17",
-      "branch": "feature/t18-restricted-deployment",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-security-operations",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T18-submission.md"
-    },
-    {
-      "task": "T19",
-      "predecessor": "T18",
-      "branch": "feature/t19-backup-restore",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-security-operations",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T19-submission.md"
-    },
-    {
-      "task": "T20",
-      "predecessor": "T19",
-      "branch": "feature/t20-lawyer-pilot",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-arabic-ui",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T20-submission.md"
-    },
-    {
-      "task": "T21",
-      "predecessor": "T20",
-      "branch": "feature/t21-office-handover",
-      "skills": [
-        "lawoffice-delivery",
-        "lawoffice-domain",
-        "lawoffice-security-operations",
-        "lawoffice-testing"
-      ],
-      "submission": "docs/reviews/T21-submission.md"
-    }
-  ]
+    "scope":  "Task instructions, skill metadata/references, prerequisite chain, submission gates; no app execution",
+    "result":  "PASS",
+    "taskCards":  23,
+    "skills":  7,
+    "missingSkillFiles":  0,
+    "invalidPredecessors":  0,
+    "unfinishedTemplates":  0,
+    "independentForwardTest":  "Read-only: T01 has no predecessor task but requires the integrated planning baseline; T14 stops without accepted T13; T18/T19 do not authorize unknown live targets",
+    "antigravityRuntimeDiscovery":  "NOT RUN: no Antigravity session operated",
+    "pythonSkillCreatorValidator":  "NOT RUN: WindowsApps Python launcher unavailable; frontmatter, names, references and scoped behavior checked independently",
+    "checks":  [
+                   {
+                       "task":  "T01",
+                       "predecessor":  null,
+                       "branch":  "feature/t01-toolchain-foundation",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-foundation"
+                                  ],
+                       "submission":  "docs/reviews/T01-submission.md"
+                   },
+                   {
+                       "task":  "T02",
+                       "predecessor":  "T01",
+                       "branch":  "feature/t02-runtime-ci",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-foundation",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T02-submission.md"
+                   },
+                   {
+                       "task":  "T03",
+                       "predecessor":  "T02",
+                       "branch":  "feature/t03-identity-sessions",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T03-submission.md"
+                   },
+                   {
+                       "task":  "T04",
+                       "predecessor":  "T03",
+                       "branch":  "feature/t04-arabic-pwa-shell",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T04-submission.md"
+                   },
+                   {
+                       "task":  "T05",
+                       "predecessor":  "T04",
+                       "branch":  "feature/t05-parties",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T05-submission.md"
+                   },
+                   {
+                       "task":  "T06",
+                       "predecessor":  "T05",
+                       "branch":  "feature/t06-matters-proceedings",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T06-submission.md"
+                   },
+                   {
+                       "task":  "T07",
+                       "predecessor":  "T06",
+                       "branch":  "feature/t07-search-archiving",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T07-submission.md"
+                   },
+                   {
+                       "task":  "T08",
+                       "predecessor":  "T07",
+                       "branch":  "feature/t08-hearing-results",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T08-submission.md"
+                   },
+                   {
+                       "task":  "T09",
+                       "predecessor":  "T08",
+                       "branch":  "feature/t09-deadlines-tasks",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T09-submission.md"
+                   },
+                   {
+                       "task":  "T10",
+                       "predecessor":  "T09",
+                       "branch":  "feature/t10-reminders",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T10-submission.md"
+                   },
+                   {
+                       "task":  "T11",
+                       "predecessor":  "T10",
+                       "branch":  "feature/t11-private-uploads",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T11-submission.md"
+                   },
+                   {
+                       "task":  "T12",
+                       "predecessor":  "T11",
+                       "branch":  "feature/t12-document-versions",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T12-submission.md"
+                   },
+                   {
+                       "task":  "T13",
+                       "predecessor":  "T12",
+                       "branch":  "feature/t13-fees-collections",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-finance",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T13-submission.md"
+                   },
+                   {
+                       "task":  "T14",
+                       "predecessor":  "T13",
+                       "branch":  "feature/t14-expenses-advances",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-finance",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T14-submission.md"
+                   },
+                   {
+                       "task":  "T15a",
+                       "predecessor":  "T14",
+                       "branch":  "feature/t15a-reversals",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-finance",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T15a-submission.md"
+                   },
+                   {
+                       "task":  "T15b",
+                       "predecessor":  "T15a",
+                       "branch":  "feature/t15b-refunds-adjustments",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-finance",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T15b-submission.md"
+                   },
+                   {
+                       "task":  "T15c",
+                       "predecessor":  "T15b",
+                       "branch":  "feature/t15c-statements-opening-balances",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-finance",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T15c-submission.md"
+                   },
+                   {
+                       "task":  "T16",
+                       "predecessor":  "T15c",
+                       "branch":  "feature/t16-print-export",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T16-submission.md"
+                   },
+                   {
+                       "task":  "T17",
+                       "predecessor":  "T16",
+                       "branch":  "feature/t17-csv-import",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T17-submission.md"
+                   },
+                   {
+                       "task":  "T18",
+                       "predecessor":  "T17",
+                       "branch":  "feature/t18-restricted-deployment",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T18-submission.md"
+                   },
+                   {
+                       "task":  "T19",
+                       "predecessor":  "T18",
+                       "branch":  "feature/t19-backup-restore",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T19-submission.md"
+                   },
+                   {
+                       "task":  "T20",
+                       "predecessor":  "T19",
+                       "branch":  "feature/t20-lawyer-pilot",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-arabic-ui",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T20-submission.md"
+                   },
+                   {
+                       "task":  "T21",
+                       "predecessor":  "T20",
+                       "branch":  "feature/t21-office-handover",
+                       "skills":  [
+                                      "lawoffice-delivery",
+                                      "lawoffice-domain",
+                                      "lawoffice-security-operations",
+                                      "lawoffice-testing"
+                                  ],
+                       "submission":  "docs/reviews/T21-submission.md"
+                   }
+               ]
 }
