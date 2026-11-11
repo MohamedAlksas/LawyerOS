@@ -27,6 +27,55 @@ Canonical references live at the repository root and in `docs/`. [outputs](outpu
 
 The documentation is in English. The product remains an Arabic RTL application for an Egyptian law office.
 
+## Local development startup
+
+Follow these steps to run LawOffice OS locally for development and testing:
+
+1. **Prerequisites**:
+   - Node.js 26 Active LTS (`^26.13.0`) and npm 11.x
+   - Docker Desktop with Docker Compose v2+
+   - Git
+
+2. **Environment configuration**:
+   - Copy the synthetic environment template:
+     ```powershell
+     cp .env.example .env.local
+     ```
+   - In `.env.local`, review loopback variables. On Linux and CI, PostgreSQL binds to `127.0.0.1:5432`. On Windows hosts where Hyper-V port exclusion ranges reserve port 5432, specify an alternate host port such as `PGPORT=6432` in the environment and connection string:
+     ```env
+     DATABASE_URL="postgresql://lawoffice_user:lawoffice_dev_secret@127.0.0.1:6432/lawoffice_dev?schema=public"
+     ```
+
+3. **Start local PostgreSQL**:
+   - Start the development PostgreSQL container with persistent volume:
+     ```powershell
+     # If on Windows using PGPORT 6432:
+     $env:PGPORT="6432"
+     docker compose -f ops/docker-compose.yml up -d
+     ```
+   - Verify container health:
+     ```powershell
+     docker compose -f ops/docker-compose.yml ps
+     ```
+
+4. **Run tests & quality checks**:
+   ```powershell
+   npm ci
+   npm run lint
+   npm run typecheck
+   npm run test             # Unit tests (environment & health routes)
+   npm run test:integration # Database readiness & timeout handling
+   npm run build            # Production build
+   ```
+
+5. **Start development server**:
+   ```powershell
+   npm run dev
+   ```
+   - Placeholder page: `http://localhost:3000` (Arabic RTL, `lang="ar-EG"`)
+   - Liveness probe: `http://localhost:3000/api/health/live` (HTTP 200)
+   - Readiness probe: `http://localhost:3000/api/health/ready` (HTTP 200 when DB is connected, HTTP 503 when down)
+
 ## Agency specialists during implementation
 
 Every task card explicitly selects one installed Agency Agent lead and the relevant supporting profiles, in addition to its LawOffice skills. Read [AGENCY_AGENTS](docs/AGENCY_AGENTS.md); [the routing registry](docs/AGENCY_AGENT_ROUTING.json) maps all 23 tasks to 14 locally verified Agency profiles. T01 uses `agency-software-architect` with `agency-devops-automator`; frontend, identity, backend, and recovery tasks have their own appropriate leads. Supporting profiles are scoped role passes, not an unsupported claim of spawned agents or Codex approval. Missing required profiles are reported before dependent implementation.

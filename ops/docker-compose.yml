@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16.8-alpine
+    container_name: lawoffice-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lawoffice_user
+      POSTGRES_PASSWORD: lawoffice_dev_secret
+      POSTGRES_DB: lawoffice_dev
+    ports:
+      # Strictly bound to loopback interface to prevent public exposure.
+      # Default host port is 5432 (configurable via PGPORT for Windows Hyper-V port exclusion ranges).
+      - "127.0.0.1:${PGPORT:-5432}:5432"
+    volumes:
+      - lawoffice_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawoffice_user -d lawoffice_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lawoffice_pgdata:
+    name: lawoffice_pgdata
