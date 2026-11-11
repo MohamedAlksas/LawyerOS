@@ -217,6 +217,14 @@ const baseEnvSchema = z.object({
     })
     .optional(),
   CI: z.string().optional(),
+  BETTER_AUTH_SECRET: z
+    .string()
+    .min(32, 'BETTER_AUTH_SECRET must be at least 32 characters')
+    .default('synthetic_development_secret_32_bytes_minimum_length_required'),
+  BETTER_AUTH_URL: z
+    .string()
+    .url('BETTER_AUTH_URL must be a valid URL')
+    .default('http://127.0.0.1:3000'),
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;
@@ -264,6 +272,7 @@ export function validateEnv(
       );
     }
   }
+
 
   // Validate operational DATABASE_URL structure upfront if provided (before comparison or test-mode replacement)
   if (effectiveSource.DATABASE_URL) {

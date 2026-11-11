@@ -46,9 +46,9 @@ Canonical package manager: `npm` (single lockfile: `package-lock.json`)
 
 ---
 
-## 3. Pinned scaffold packages (installed in T01 and T02)
+## 3. Pinned scaffold and authentication packages (installed in T01, T02, and T03)
 
-These packages provide the minimum foundation for building, linting, typechecking, serving the Arabic project placeholder (`lang="ar-EG"`, `dir="rtl"`), environment schema validation, local database connection pooling, and health probes. No business domain models or authentication sessions are active in T02.
+These packages provide the minimum foundation for building, linting, typechecking, serving the Arabic project placeholder (`lang="ar-EG"`, `dir="rtl"`), environment schema validation, local database connection pooling, health probes, authentication sessions, and end-to-end browser verification.
 
 | Package | Pinned version | Type | Purpose & verification source |
 |---|---|---|---|
@@ -59,6 +59,8 @@ These packages provide the minimum foundation for building, linting, typecheckin
 | `pg` | `8.23.1` | `dependency` | Node PostgreSQL connection pooling driver for database readiness probes and server queries. Source: [node-postgres Docs](https://node-postgres.com). |
 | `@prisma/client` | `7.10.1` | `dependency` | Prisma 7 Client. Pinned exact for Better Auth compatibility. |
 | `@prisma/adapter-pg` | `7.10.1` | `dependency` | PostgreSQL driver adapter for Prisma 7 connection pooling. |
+| `better-auth` | `1.7.20` | `dependency` | Authentication framework with email/password, TOTP MFA, backup recovery codes, and server session management. Pinned exact in T03. |
+| `@better-auth/prisma-adapter` | `1.7.20` | `dependency` | Prisma adapter for Better Auth. Compatible with Prisma 7.10.1. Pinned exact in T03. |
 | `typescript` | `5.8.3` | `devDependency` | Static typing in strict mode. Selected for compatibility with `typescript-eslint@8.72.2` (`>=4.8.4 <6.0.0`). Source: [TypeScript Docs](https://www.typescriptlang.org). |
 | `@types/node` | `26.6.6` | `devDependency` | Type definitions matching Node.js 26 LTS. Source: [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped). |
 | `@types/react` | `19.3.0` | `devDependency` | Type definitions matching React 19.3. Source: [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped). |
@@ -66,6 +68,7 @@ These packages provide the minimum foundation for building, linting, typecheckin
 | `@types/pg` | `8.23.1` | `devDependency` | Type definitions matching `pg@8.23.1`. |
 | `prisma` | `7.10.1` | `devDependency` | Prisma 7 CLI for migration and schema management. Pinned exact. |
 | `vitest` | `5.1.0` | `devDependency` | Fast unit and integration test runner for Node environment and health checks. Source: [Vitest Docs](https://vitest.dev). |
+| `@playwright/test` | `1.65.0` | `devDependency` | End-to-end browser test automation for multi-context auth flows, session revocation, and responsive Arabic RTL verification. Introduced in T03 per explicit Codex authorization. |
 | `tailwindcss` | `4.3.5` | `devDependency` | Utility-first styling framework supporting RTL layout and CSS tokens. Source: [Tailwind CSS Docs](https://tailwindcss.com/docs). |
 | `@tailwindcss/postcss` | `4.3.5` | `devDependency` | PostCSS plugin for Tailwind CSS v4 integration with Next.js. |
 | `postcss` | `8.5.23` | `devDependency` | CSS transformation pipeline required by Tailwind. |
@@ -76,14 +79,11 @@ These packages provide the minimum foundation for building, linting, typecheckin
 
 ## 4. Planned later-task dependencies (Milestones M1–M8)
 
-These dependencies are verified for compatibility with the T01/T02 foundation and will be introduced in their respective assigned task cards. They are **not** installed in T02 to keep the runtime minimal and free of unapproved modules.
+These dependencies are verified for compatibility with the T01/T02/T03 foundation and will be introduced in their respective assigned task cards.
 
 | Domain / Milestone | Package | Target version | Assigned task | Notes & compatibility status |
 |---|---|---|---|---|
-| **Authentication** | `better-auth` | `1.7.20` | T03 | Session management, password hashing, TOTP MFA, recovery codes. Compatible with Next.js 16 and React 19. |
-| **Authentication** | `@better-auth/prisma-adapter` | `1.7.20` | T03 | Verified compatible with Prisma 7.10.1. |
-| **E2E Browser Testing** | `@playwright/test` | `1.65.0` | T04 | Headless browser testing for operational journeys (M1+). Source: [Playwright Docs](https://playwright.dev). |
-| **Arabic PDF Printing** | `@playwright/test` | `1.65.0` | T16 | Server-side Arabic PDF document compilation. |
+| **Arabic PDF Printing** | `@playwright/test` | `1.65.0` | T16 | Server-side Arabic PDF document compilation (reusing test runner browser binary). |
 | **Icons** | `lucide-react` | `1.16.0` | T04 | UI icons adaptable for RTL direction. |
 
 ---
