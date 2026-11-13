@@ -37,6 +37,17 @@ export function createValidatedTestPool(
   overrides: Record<string, string | undefined> = {},
   poolConfig: Partial<PoolConfig> = {}
 ): { pool: Pool; env: AppEnv } {
+  // If connectionString was explicitly provided in poolConfig, it must not be undefined or empty (Phase A)
+  if ('connectionString' in poolConfig) {
+    if (typeof poolConfig.connectionString !== 'string' || poolConfig.connectionString.trim().length === 0) {
+      throw new EnvironmentValidationError(
+        'Environment validation failed.\nInvalid connectionString provided in poolConfig: must be a non-empty string.\nConsult .env.example for required configuration. Secret values are redacted.',
+        ['TEST_DATABASE_URL'],
+        []
+      );
+    }
+  }
+
   // Compose effective target URL to prevent poolConfig overrides from bypassing destination validation (R07)
   let candidateUrl = poolConfig.connectionString || overrides.TEST_DATABASE_URL || process.env.TEST_DATABASE_URL;
 
@@ -60,10 +71,20 @@ export function createValidatedTestPool(
     TEST_DATABASE_URL: candidateUrl,
   });
 
+  // Strip all routing parameters from poolConfig so pg driver defaults (e.g. PGDATABASE, PGPORT)
+  // cannot be resolved or override the validated destination (Phase A)
+  const safePoolConfig: Partial<PoolConfig> = { ...poolConfig };
+  delete safePoolConfig.connectionString;
+  delete safePoolConfig.host;
+  delete safePoolConfig.port;
+  delete safePoolConfig.database;
+  delete safePoolConfig.user;
+  delete safePoolConfig.password;
+
   const pool = new Pool({
-    connectionString: env.TEST_DATABASE_URL,
     connectionTimeoutMillis: 5000,
-    ...poolConfig,
+    ...safePoolConfig,
+    connectionString: env.TEST_DATABASE_URL,
   });
 
   return { pool, env };
@@ -136,14 +157,28 @@ export async function createDedicatedTestDatabase(
     dbName ||
     `lawoffice_test_${Date.now()}_${crypto.randomBytes(4).toString('hex')}_test`;
 
-  if (!targetName.endsWith('_test')) {
-    throw new Error(`Dedicated test database name must end with '_test', got: ${targetName}`);
+  // 1. Strict identifier syntax validation: alphanumeric and underscores only, ending in _test (Phase A)
+  if (!/^[a-zA-Z0-9_]+_test$/.test(targetName)) {
+    throw new Error(
+      `Dedicated test database name must be alphanumeric and underscores ending in '_test', got: ${targetName}`
+    );
   }
 
+  // 2. Validate base environment and construct dedicated database URL
   const baseEnv = validateTestEnvironment(overrides);
   const testDbUrl = baseEnv.TEST_DATABASE_URL!;
 
-  // Connect to base server to check collision and execute CREATE DATABASE
+  const dedicatedParsed = new URL(testDbUrl);
+  dedicatedParsed.pathname = `/${targetName}`;
+  const dedicatedUrl = dedicatedParsed.toString();
+
+  // 3. Strictly validate dedicated URL through the shared isolation guard BEFORE executing CREATE DATABASE (Phase A)
+  validateTestEnvironment({
+    ...overrides,
+    TEST_DATABASE_URL: dedicatedUrl,
+  });
+
+  // 4. Connect to base server to check collision and execute CREATE DATABASE
   const adminPool = new Pool({
     connectionString: testDbUrl,
     connectionTimeoutMillis: 5000,
@@ -172,45 +207,57 @@ export async function createDedicatedTestDatabase(
     await adminPool.end();
   }
 
-  // Construct dedicated database URL
-  const dedicatedParsed = new URL(testDbUrl);
-  dedicatedParsed.pathname = `/${targetName}`;
-  const dedicatedUrl = dedicatedParsed.toString();
-
-  // Validate the dedicated test URL through the shared isolation guard
-  validateTestEnvironment({
-    ...overrides,
-    TEST_DATABASE_URL: dedicatedUrl,
-  });
-
-  const dedicatedPool = new Pool({
-    connectionString: dedicatedUrl,
-    connectionTimeoutMillis: 5000,
-  });
-
-  const drop = async () => {
-    // Teardown drops ONLY the exact database created and owned by this run
-    if (!createdAndOwned) return;
-
-    await dedicatedPool.end().catch(() => {});
-    const cleanupPool = new Pool({
-      connectionString: testDbUrl,
+  // 5. Subsequent pool creation and teardown registration protected against catalog leaks (Phase A)
+  try {
+    const dedicatedPool = new Pool({
+      connectionString: dedicatedUrl,
       connectionTimeoutMillis: 5000,
     });
-    const cleanupClient = await cleanupPool.connect();
-    try {
-      await cleanupClient.query(`DROP DATABASE IF EXISTS ${quotedName} WITH (FORCE);`);
-      createdAndOwned = false;
-    } finally {
-      cleanupClient.release();
-      await cleanupPool.end();
-    }
-  };
 
-  return {
-    url: dedicatedUrl,
-    pool: dedicatedPool,
-    drop,
-  };
+    const drop = async () => {
+      // Teardown drops ONLY the exact database created and owned by this run
+      if (!createdAndOwned) return;
+
+      await dedicatedPool.end().catch(() => {});
+      const cleanupPool = new Pool({
+        connectionString: testDbUrl,
+        connectionTimeoutMillis: 5000,
+      });
+      const cleanupClient = await cleanupPool.connect();
+      try {
+        await cleanupClient.query(`DROP DATABASE IF EXISTS ${quotedName} WITH (FORCE);`);
+        createdAndOwned = false;
+      } finally {
+        cleanupClient.release();
+        await cleanupPool.end();
+      }
+    };
+
+    return {
+      url: dedicatedUrl,
+      pool: dedicatedPool,
+      drop,
+    };
+  } catch (err) {
+    if (createdAndOwned) {
+      const cleanupPool = new Pool({
+        connectionString: testDbUrl,
+        connectionTimeoutMillis: 5000,
+      });
+      try {
+        const cleanupClient = await cleanupPool.connect();
+        try {
+          await cleanupClient.query(`DROP DATABASE IF EXISTS ${quotedName} WITH (FORCE);`);
+        } finally {
+          cleanupClient.release();
+        }
+      } catch {
+        // preserve original error
+      } finally {
+        await cleanupPool.end().catch(() => {});
+      }
+    }
+    throw err;
+  }
 }
 

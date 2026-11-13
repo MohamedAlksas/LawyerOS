@@ -1360,4 +1360,26 @@ describe('Test Target Validation & Isolation Guard (R07)', () => {
       });
     }).toThrowError(EnvironmentValidationError);
   });
+
+  it('rejects malformed database identifier codex_bad%_test and verifies zero database leaked in catalog (Phase A)', async () => {
+    const malformedName = 'codex_bad%_test';
+
+    await expect(createDedicatedTestDatabase(malformedName)).rejects.toThrow(
+      /alphanumeric and underscores/
+    );
+
+    // Verify in PostgreSQL catalog that no database containing codex_bad% was created or leaked
+    const { pool: verifyPool } = createValidatedTestPool();
+    const vClient = await verifyPool.connect();
+    try {
+      const res = await vClient.query(
+        'SELECT datname FROM pg_database WHERE datname LIKE $1;',
+        ['%codex_bad%']
+      );
+      expect(res.rows.length).toBe(0);
+    } finally {
+      vClient.release();
+      await verifyPool.end();
+    }
+  });
 });
