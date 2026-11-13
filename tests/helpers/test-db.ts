@@ -33,7 +33,10 @@ export function canonicalizePostgresUrl(urlStr: string): string {
 export function validateTestEnvironment(
   overrides: Record<string, string | undefined> = {}
 ): AppEnv {
-  const rawTestDbUrl = overrides.TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
+  const rawTestDbUrl =
+    'TEST_DATABASE_URL' in overrides
+      ? overrides.TEST_DATABASE_URL
+      : process.env.TEST_DATABASE_URL;
   if (!rawTestDbUrl || rawTestDbUrl.trim().length === 0) {
     throw new EnvironmentValidationError(
       'Environment validation failed.\nMissing required environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL is strictly required for test execution. Fails closed without fallback.\nConsult .env.example for required configuration. Secret values are redacted.',
