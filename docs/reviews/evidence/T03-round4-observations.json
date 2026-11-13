@@ -1,0 +1,132 @@
+{
+  "review": "T03 round 4",
+  "date": "2026-11-13",
+  "sourceCommit": "1facc21992d105ab1c74a8258dd18ad260339252",
+  "frozenApplication": "f973d5cf2a5c73d11482d6c37dc957b43cbb63f2",
+  "fixedPoint": "4e7d733215ea71f00030b85cc1630a6cd5c5e315",
+  "method": "Independent actual-route/Module, pinned-provider, real PostgreSQL trigger-fault and CLI probes. Synthetic data only. Observational assertions include demonstrated defects and are not application acceptance tests.",
+  "scope": "New ownership-labelled disposable PostgreSQL container, separate browser server. No operational database contacted. Driver-default override probe opened no socket.",
+  "policyAndOwnership": {
+    "ordinaryProvisioning": {
+      "proofSubmitted": false,
+      "verified": false,
+      "bootstrapClosed": false
+    },
+    "uriTotp": {
+      "http": 200,
+      "protectedActorAccepted": true
+    },
+    "httpsCookieDecoy": {
+      "idleMinutes": 31,
+      "http": 401,
+      "protectedActorAccepted": false,
+      "sessionStillPresent": false
+    },
+    "legacyTrust": {
+      "fixture": "Actual pinned-provider historical 30-day cookie and verification record",
+      "http": 200,
+      "newChallengeRequired": true,
+      "protectedActorAccepted": false
+    },
+    "revocationFailure": {
+      "injected": "Actual PostgreSQL delete-trigger error",
+      "http": 500,
+      "passwordHashUnchanged": true,
+      "secondSessionAccepted": true
+    },
+    "specialEmailProvisioning": {
+      "proofSubmitted": false,
+      "verified": true,
+      "bootstrapClosed": true
+    },
+    "databaseCollision": {
+      "rejected": true,
+      "sentinelRetained": true
+    },
+    "poolFallback": [
+      {
+        "override": "undefined",
+        "validatedName": "/lawoffice_test",
+        "driverName": "codex_unvalidated_dev",
+        "driverPort": 65432,
+        "connectionAttempted": false
+      },
+      {
+        "override": "empty",
+        "validatedName": "/lawoffice_test",
+        "driverName": "codex_unvalidated_dev",
+        "driverPort": 65432,
+        "connectionAttempted": false
+      }
+    ],
+    "invalidDedicatedName": {
+      "requestRejected": true,
+      "databaseCreatedBeforeRejection": true
+    }
+  },
+  "cli": {
+    "firstWithoutProof": {
+      "exit": 1,
+      "timedOut": false,
+      "printsSeed": false,
+      "printsRecovery": false
+    },
+    "retryWithCorrectProof": {
+      "exit": 0,
+      "timedOut": false,
+      "printsSeed": false,
+      "printsRecovery": false
+    },
+    "validProofSuppliedOnRetry": true,
+    "afterFirst": {
+      "verified": false,
+      "bootstrapClosed": false
+    },
+    "afterRetry": {
+      "verified": true,
+      "isClosed": true
+    }
+  },
+  "migration": {
+    "source": "1facc21992d105ab1c74a8258dd18ad260339252",
+    "fixture": "T02 has no Prisma migration history; nonempty synthetic sentinel fixture, no authentication tables",
+    "command": "prisma migrate deploy",
+    "exit": 1,
+    "p3005": true,
+    "sentinelRetained": true
+  },
+  "checks": {
+    "cleanInstall": "exit 0; client generated",
+    "freshMigration": "exit 0",
+    "lint": "exit 0",
+    "typecheck": "exit 0",
+    "localUnits": "53/53; exit 0",
+    "integration": "40/40; exit 0",
+    "browser": "30/30; exit 0; last-run passed; zero retries, non-reused server, test-only webpack build",
+    "observationalProbes": "2/2; exit 0 after fixing review-harness parsing of empty HTTP500 body",
+    "cliObserver": "exit 0; actual CLI children exit 1 then 0",
+    "migrationObserver": "exit 0; actual migrate deploy exit 1 P3005",
+    "hostedApplication": "43360520345; success including default build",
+    "hostedPlanning": "43360522068; success"
+  },
+  "graph": {
+    "sourceCommit": "1facc21992d105ab1c74a8258dd18ad260339252",
+    "snapshot": "work/graphify/1facc21992d1-799e5f0f",
+    "nodes": 225,
+    "edges": 505,
+    "communities": 11,
+    "mode": "local-code-only-no-label",
+    "query": "provisionOwner",
+    "displayedNodes": 59,
+    "foundNodes": 62,
+    "tokenBudget": 1600
+  },
+  "limits": [
+    "Interactive TTY echo capture NOT RUN by Codex.",
+    "R09 source unchanged; prior independently established concurrency fix retained, not rerun this round.",
+    "Source-review findings and actual runtime observations are distinguished in the review.",
+    "Initial empty-response JSON parser failure was in the review harness, subsequently corrected.",
+    "Raw CLI observer output flag rejectsExisting was not used: its regex also matches a successful closure message; actual exits and database states determine retry outcome."
+  ],
+  "cleanup": "Full review container ID and ownership label verified before stop/removal; original owner container at5433 preserved; review browser listener14692 absent."
+}

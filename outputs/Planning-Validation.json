@@ -12,7 +12,7 @@
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 284,
+  "zipEntries": 288,
   "zipSourceHashes": "All match",
   "outputs": [
     {
@@ -53,7 +53,7 @@
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1500471
+      "Length": 1522737
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
