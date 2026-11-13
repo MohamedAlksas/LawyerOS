@@ -20,7 +20,7 @@ The desktop is used to enter files, review accounts, and print. The mobile is us
 
 ## Capabilities and Constraints
 
-- Planning documents and implementation instructions are in English. The intended application remains in simple Egyptian Arabic with an RTL interface, with technical terms and codes isolated in LTR direction.
+- Planning documents and implementation instructions are in English. The application uses clear Modern Standard Arabic suitable for an Egyptian law office, without colloquial wording, with an RTL interface and technical terms and codes isolated in LTR direction.
 - One matter may involve multiple clients and opponents, as well as multiple court instances and court case numbers.
 - Legal deadlines are entered or reviewed by the lawyer; the application does not determine them independently.
 - Paper remains in use during the transition, and its location is part of the matter's data.

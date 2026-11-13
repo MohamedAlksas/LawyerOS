@@ -50,7 +50,7 @@ Outside V1: calculating appeal periods from general rules, automatic submissions
 2. I add first instance and appeal to the same matter and identify which case number each hearing belongs to.
 3. On mobile, I record "تأجيل لتقديم مذكرة" (adjourned for submission of a memorandum) and enter the next hearing and preparation task on the same screen.
 4. I photograph a document and check its legibility and association before accepting it into the archive.
-5. I see separate amounts answering the UI questions "الموكل عليه كام أتعاب؟ عليه كام مصروفات؟ لسه معايا كام من فلوسه للصرف؟" (what fees does the client owe, what expenses do they owe, and how much client money do I still hold for spending?).
+5. I see separate amounts answering the UI questions "ما الأتعاب المستحقة على الموكل؟ ما المصروفات المستحقة؟ ما رصيد أمواله المحتفظ بها للصرف؟" (what fees does the client owe, what expenses do they owe, and how much client money do I still hold for spending?).
 6. I produce the week's hearing list and identify the location of each paper file I need to take.
 7. After a device problem, I restore a consistent backup and verify that the documents linked to its data are present.
 

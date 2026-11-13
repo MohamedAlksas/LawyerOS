@@ -21,7 +21,7 @@ From the matter, select the UI action “إضافة قيد مرتبط” (add a 
 
 ## 3. Daily agenda before court
 
-- The home screen starts with the UI section “النهارده” (today), followed by overdue work and upcoming hearings, rather than only general metrics. Show the hearing, client, court, registration number, required preparation, and physical file location.
+- The home screen starts with the UI section “لوحة المتابعة” (dashboard), followed by overdue work and upcoming hearings, rather than only general metrics. Show the hearing, client, court, registration number, required preparation, and physical file location.
 - The UI action “قائمة تجهيز الجلسة” (hearing preparation checklist) shows designated tasks and documents. Opening a matter or downloading a document does not imply task completion.
 - Print the daily/weekly agenda in Arabic on A4 with a clear generation timestamp. A hearing without a time displays “الساعة غير محددة” (time unspecified). Conflicts involving two courts produce a warning.
 - If connectivity fails, show the offline state. Version one does not confirm local persistence or deferred financial synchronization. The printed daily agenda is a practical fallback until connectivity returns, followed by entering and reviewing changes.
@@ -50,7 +50,7 @@ A hearing cancelled without a replacement becomes `CANCELLED` with a reason and 
 
 ## 6. Legal deadline or follow-up task
 
-**Task:** title, optional due day, priority, and links; it can be completed directly. **Legal deadline:** action description, date entered/reviewed by the lawyer, source, basis notes, then the explicit UI confirmation “راجعت الموعد واعتمدته” (I reviewed and approved the deadline). The system does not calculate appeal deadlines from general rules, nor extract a date through OCR and approve it automatically.
+**Task:** title, optional due day, priority, and links; it can be completed directly. **Legal deadline:** action description, date entered/reviewed by the lawyer, source, basis notes, then the explicit UI confirmation “راجعت الموعد وأعتمده” (I reviewed and approve the deadline). The system does not calculate appeal deadlines from general rules, nor extract a date through OCR and approve it automatically.
 
 A `DRAFT` deadline appears under the UI section “مواعيد تحتاج مراجعة” (deadlines requiring review). Confirmed deadlines produce reminders before their dates and remain marked overdue afterward if open. Acknowledging a reminder is not completing the legal action. Completion requires an execution date and optional note/document. Changing a confirmed deadline records a reason, returns it to `DRAFT`, and cancels old reminders until reapproval; the previous confirmation does not survive a date change.
 
