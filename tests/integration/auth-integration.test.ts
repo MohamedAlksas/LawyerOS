@@ -37,6 +37,14 @@ function signSessionTokenCookie(token: string, secret: string): string {
   return encodeURIComponent(`${token}.${signature}`);
 }
 
+function makeSessionHeaders(token: string): Headers {
+  const env = getEnv();
+  const signed = signSessionTokenCookie(token, env.BETTER_AUTH_SECRET);
+  return new Headers({
+    cookie: `better-auth.session_token=${signed}`,
+  });
+}
+
 async function generateTotpCode(secret: string): Promise<string> {
   const secretBytes = base32.decode(secret.toUpperCase());
   const otpHelper = createOTP(secretBytes, { period: 30, digits: 6 });
@@ -185,16 +193,23 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       backupCodes: result.backupCodes,
     };
 
-    // Verify database record has encrypted secrets, never plain text
+    // Initial reservation universally starts pending/unverified with bootstrap open (R06)
     const prisma = getPrismaClient();
     const twoFactorRecord = await prisma.twoFactor.findFirst({
       where: { userId: result.user.id },
     });
     expect(twoFactorRecord).toBeDefined();
-    expect(twoFactorRecord?.verified).toBe(true);
+    expect(twoFactorRecord?.verified).toBe(false);
     // Secret in DB must NOT match plain text totpSecret
     expect(twoFactorRecord?.secret).not.toBe(result.totpSecret);
     expect(twoFactorRecord?.backupCodes).not.toBe(JSON.stringify(result.backupCodes));
+
+    const bootstrapBefore = await prisma.officeBootstrap.findUnique({
+      where: { id: 'singleton' },
+    });
+    expect(bootstrapBefore).toBeDefined();
+    expect(bootstrapBefore?.isClosed).toBe(false);
+    expect(await isBootstrapClosed()).toBe(false);
 
     // Verify decryption with BETTER_AUTH_SECRET yields base32: prefixed secret (R01)
     const env = getEnv();
@@ -204,13 +219,22 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     expect(decryptedSecret).toBe(`base32:${result.totpSecret}`);
 
-    // Verify OfficeBootstrap singleton record is created and closed (R06)
-    const bootstrap = await prisma.officeBootstrap.findUnique({
+    // Confirm initial owner provisioning using RFC 6238 code derived from issued totpURI
+    const validCode = await generateTotpCode(result.totpSecret);
+    await confirmOwnerProvisioning(result.user.id, validCode);
+
+    const twoFactorRecordConfirmed = await prisma.twoFactor.findFirst({
+      where: { userId: result.user.id },
+    });
+    expect(twoFactorRecordConfirmed?.verified).toBe(true);
+
+    // Verify OfficeBootstrap singleton record is now closed (R06)
+    const bootstrapConfirmed = await prisma.officeBootstrap.findUnique({
       where: { id: 'singleton' },
     });
-    expect(bootstrap).toBeDefined();
-    expect(bootstrap?.isClosed).toBe(true);
-    expect(bootstrap?.ownerId).toBe(result.user.id);
+    expect(bootstrapConfirmed).toBeDefined();
+    expect(bootstrapConfirmed?.isClosed).toBe(true);
+    expect(bootstrapConfirmed?.ownerId).toBe(result.user.id);
     expect(await isBootstrapClosed()).toBe(true);
   });
 
@@ -331,7 +355,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     activeSessionId = session.id;
     expect(activeSessionId).toBe(session.id);
 
-    const actor = await requireActor({ sessionToken });
+    const actor = await requireActor({ headers: makeSessionHeaders(sessionToken) });
     expect(actor.id).toBe(provisionedOwner.userId);
     expect(actor.email).toBe(provisionedOwner.email);
     expect(actor.role).toBe('OWNER');
@@ -418,14 +442,18 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
   it('fails closed and returns sanitized non-success if pre-handler guard encounters database error (R03)', async () => {
     const prisma = getPrismaClient();
-    const spy = vi.spyOn(prisma.session, 'findUnique').mockRejectedValueOnce(
+    const spyFirst = vi.spyOn(prisma.session, 'findFirst').mockRejectedValueOnce(
+      new Error('Transient PostgreSQL connection error')
+    );
+    const spyUnique = vi.spyOn(prisma.session, 'findUnique').mockRejectedValueOnce(
       new Error('Transient PostgreSQL connection error')
     );
 
     try {
+      const env = getEnv();
       const req = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
         headers: {
-          cookie: `better-auth.session_token=${activeSessionToken}`,
+          cookie: `better-auth.session_token=${signSessionTokenCookie(activeSessionToken, env.BETTER_AUTH_SECRET)}`,
         },
       });
 
@@ -434,7 +462,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       expect(res.status).not.toBe(200);
       expect([500, 503]).toContain(res.status);
     } finally {
-      spy.mockRestore();
+      spyFirst.mockRestore();
+      spyUnique.mockRestore();
     }
   });
 
@@ -518,7 +547,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       // Safe state requirement (R04):
       // If revocation failed, pre-change other sessions must NOT remain usable as authorized actors
       await expect(
-        requireActor({ sessionToken: sessionBToken })
+        requireActor({ headers: makeSessionHeaders(sessionBToken) })
       ).rejects.toThrow();
     } finally {
       deleteManySpy.mockRestore();
@@ -577,7 +606,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     try {
-      await requireActor({ sessionToken: inactiveToken });
+      await requireActor({ headers: makeSessionHeaders(inactiveToken) });
       expect.unreachable('Should have rejected inactive session');
     } catch (err) {
       expect(err).toBeInstanceOf(AuthenticationError);
@@ -609,7 +638,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     try {
-      await requireActor({ sessionToken: expiredToken });
+      await requireActor({ headers: makeSessionHeaders(expiredToken) });
       expect.unreachable('Should have rejected session exceeding maximum lifetime');
     } catch (err) {
       expect(err).toBeInstanceOf(AuthenticationError);
@@ -642,7 +671,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       },
     });
 
-    const actorA = await requireActor({ sessionToken: activeSessionToken });
+    const actorA = await requireActor({ headers: makeSessionHeaders(activeSessionToken) });
     const sessionsList = await listActiveSessions(provisionedOwner.userId, actorA.sessionId);
     expect(sessionsList.length).toBeGreaterThanOrEqual(2);
 
@@ -654,7 +683,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await revokeSession(sessionB.id, actorA);
 
     // Verify Session B cannot be used anymore
-    await expect(requireActor({ sessionToken: sessionBToken })).rejects.toThrowError(
+    await expect(requireActor({ headers: makeSessionHeaders(sessionBToken) })).rejects.toThrowError(
       AuthenticationError
     );
 
@@ -700,11 +729,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       },
     });
 
-    await expect(requireActor({ sessionToken: token })).rejects.toThrowError(
+    await expect(requireActor({ headers: makeSessionHeaders(token) })).rejects.toThrowError(
       AuthenticationError
     );
     try {
-      await requireActor({ sessionToken: token });
+      await requireActor({ headers: makeSessionHeaders(token) });
     } catch (err) {
       const authErr = err as AuthenticationError;
       expect(authErr.code).toBe('MFA_REQUIRED');
@@ -728,9 +757,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       },
     });
 
+    const env = getEnv();
     const inactiveReq = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
       headers: {
-        cookie: `better-auth.session_token=${inactiveToken}`,
+        cookie: `better-auth.session_token=${signSessionTokenCookie(inactiveToken, env.BETTER_AUTH_SECRET)}`,
       },
     });
 
@@ -760,7 +790,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     const maxLifeReq = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
       headers: {
-        cookie: `better-auth.session_token=${maxLifeToken}`,
+        cookie: `better-auth.session_token=${signSessionTokenCookie(maxLifeToken, env.BETTER_AUTH_SECRET)}`,
       },
     });
 
@@ -790,9 +820,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     // Request over HTTPS with decoy plain cookie + idle __Secure cookie
+    const env = getEnv();
     const req = new NextRequest('https://office.lawoffice.internal/api/auth/get-session', {
       headers: {
-        cookie: `better-auth.session_token=decoy-invalid-token; __Secure-better-auth.session_token=${idleToken}`,
+        cookie: `better-auth.session_token=decoy-invalid-token; __Secure-better-auth.session_token=${signSessionTokenCookie(idleToken, env.BETTER_AUTH_SECRET)}`,
       },
     });
 
@@ -955,7 +986,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
       // requireActor must reject unverified/pending 2FA with MFA_REQUIRED
       await expect(
-        requireActor({ sessionToken: pendingSession.token })
+        requireActor({ headers: makeSessionHeaders(pendingSession.token) })
       ).rejects.toThrowError(AuthenticationError);
 
       // Interrupted CLI setup resumption:
@@ -990,6 +1021,166 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     }
   }, 30000);
 
+  it('enforces persistent bounded attempts and lockout on pending-setup password and TOTP confirmation (R06 / B4)', async () => {
+    const freshDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    await clearGlobalSingletons();
+    process.env.TEST_DATABASE_URL = freshDb.url;
+    getEnv(true);
+
+    try {
+      // Migrate fresh database
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const client = await freshDb.pool.connect();
+      try {
+        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+        for (const s of statements) {
+          await client.query(s).catch(() => {});
+        }
+        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;').catch(() => {});
+        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);').catch(() => {});
+      } finally {
+        client.release();
+      }
+
+      // 1. Formerly exempt email 'adel.lawyer@office.eg' also universally begins unverified with bootstrap open
+      const initial = await provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'adel.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      });
+
+      const prismaFresh = getPrismaClient();
+      const tfInitial = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfInitial?.verified).toBe(false);
+      expect(tfInitial?.failedVerificationCount).toBe(0);
+      expect(tfInitial?.lockedUntil).toBeNull();
+
+      const bsInitial = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bsInitial?.isClosed).toBe(false);
+
+      // 2. Pending password verification attempt throttling and lockout
+      for (let i = 1; i <= 4; i++) {
+        await expect(
+          provisionOwner({
+            name: 'الأستاذ عادل المالك',
+            email: 'adel.lawyer@office.eg',
+            password: 'WrongPassword!',
+          })
+        ).rejects.toThrowError(ProvisioningError);
+
+        const tf = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+        expect(tf?.failedVerificationCount).toBe(i);
+        expect(tf?.lockedUntil).toBeNull();
+      }
+
+      // 5th failed password attempt triggers ACCOUNT_LOCKED and sets lockedUntil for 15 minutes
+      try {
+        await provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'adel.lawyer@office.eg',
+          password: 'WrongPassword!',
+        });
+        expect.unreachable('Should have failed with ACCOUNT_LOCKED');
+      } catch (err) {
+        const provErr = err as ProvisioningError;
+        expect(provErr.code).toBe('ACCOUNT_LOCKED');
+        expect(provErr.message).toContain('تم تجاوز الحد الأقصى');
+      }
+
+      const tfLocked = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfLocked?.failedVerificationCount).toBe(5);
+      expect(tfLocked?.lockedUntil).toBeDefined();
+      expect(tfLocked!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+
+      // While locked, even correct password is rejected
+      await expect(
+        provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'adel.lawyer@office.eg',
+          password: 'OriginalPassword2026!',
+        })
+      ).rejects.toThrowError(ProvisioningError);
+
+      // Simulate lock expiry (reset lockedUntil into the past)
+      await prismaFresh.twoFactor.update({
+        where: { id: tfLocked!.id },
+        data: { lockedUntil: new Date(Date.now() - 1000) },
+      });
+
+      // Legitimate continuation after lock expiry succeeds and resets failure counter
+      const resumed = await provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'adel.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      });
+      expect(resumed.user.id).toBe(initial.user.id);
+
+      const tfResumed = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfResumed?.failedVerificationCount).toBe(0);
+      expect(tfResumed?.lockedUntil).toBeNull();
+
+      // 3. Pending TOTP confirmation attempt throttling and lockout
+      for (let i = 1; i <= 4; i++) {
+        await expect(
+          confirmOwnerProvisioning(resumed.user.id, '000000')
+        ).rejects.toThrowError(AuthenticationError);
+
+        const tf = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+        expect(tf?.failedVerificationCount).toBe(i);
+        expect(tf?.lockedUntil).toBeNull();
+      }
+
+      // 5th failed TOTP attempt triggers ACCOUNT_LOCKED
+      try {
+        await confirmOwnerProvisioning(resumed.user.id, '000000');
+        expect.unreachable('Should have failed with ACCOUNT_LOCKED');
+      } catch (err) {
+        const authErr = err as AuthenticationError;
+        expect(authErr.code).toBe('ACCOUNT_LOCKED');
+      }
+
+      const tfTotpLocked = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfTotpLocked?.failedVerificationCount).toBe(5);
+      expect(tfTotpLocked?.lockedUntil).toBeDefined();
+
+      // While locked, even valid TOTP code is rejected
+      const validCode = await generateTotpCode(resumed.totpSecret);
+      await expect(
+        confirmOwnerProvisioning(resumed.user.id, validCode)
+      ).rejects.toThrowError(AuthenticationError);
+
+      // Simulate lock expiry
+      await prismaFresh.twoFactor.update({
+        where: { id: tfTotpLocked!.id },
+        data: { lockedUntil: new Date(Date.now() - 1000) },
+      });
+
+      // Valid TOTP confirmation after lock expiry completes enrollment and closes bootstrap
+      await confirmOwnerProvisioning(resumed.user.id, validCode);
+
+      const tfFinal = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfFinal?.verified).toBe(true);
+      expect(tfFinal?.failedVerificationCount).toBe(0);
+      expect(tfFinal?.lockedUntil).toBeNull();
+
+      const bsFinal = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bsFinal?.isClosed).toBe(true);
+      expect(bsFinal?.ownerId).toBe(initial.user.id);
+    } finally {
+      await clearGlobalSingletons();
+      await freshDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  }, 45000);
+
   it('regenerates recovery codes through identity command with attempt throttling and lockout (R09)', async () => {
     const prisma = getPrismaClient();
     const testSessionToken = `sess-r09-${Date.now()}`;
@@ -1001,7 +1192,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
       },
     });
-    const actorA = await requireActor({ sessionToken: testSessionToken });
+    const actorA = await requireActor({ headers: makeSessionHeaders(testSessionToken) });
 
     // 1. Invalid input check
     await expect(regenerateRecoveryCodes(actorA, '')).rejects.toThrowError(AuthenticationError);
@@ -1063,7 +1254,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
       },
     });
-    const actor = await requireActor({ sessionToken: testSessionToken });
+    const actor = await requireActor({ headers: makeSessionHeaders(testSessionToken) });
 
     // Fire 8 simultaneous wrong-password attempts concurrently
     const attempts = await Promise.allSettled(

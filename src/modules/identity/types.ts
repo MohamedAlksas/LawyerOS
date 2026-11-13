@@ -27,7 +27,8 @@ export type AuthErrorCode =
   | 'SESSION_EXPIRED'
   | 'SESSION_INACTIVE'
   | 'INVALID_CREDENTIALS'
-  | 'RATE_LIMITED';
+  | 'RATE_LIMITED'
+  | 'ACCOUNT_LOCKED';
 
 export class AuthenticationError extends Error {
   public readonly code: AuthErrorCode;
@@ -49,13 +50,16 @@ export class AuthorizationError extends Error {
   }
 }
 
-export class ProvisioningError extends Error {
-  public readonly code: 'OWNER_ALREADY_EXISTS' | 'BOOTSTRAP_ALREADY_CLOSED' | 'INVALID_INPUT';
+export type ProvisioningErrorCode =
+  | 'OWNER_ALREADY_EXISTS'
+  | 'BOOTSTRAP_ALREADY_CLOSED'
+  | 'INVALID_INPUT'
+  | 'ACCOUNT_LOCKED';
 
-  constructor(
-    code: 'OWNER_ALREADY_EXISTS' | 'BOOTSTRAP_ALREADY_CLOSED' | 'INVALID_INPUT',
-    message: string
-  ) {
+export class ProvisioningError extends Error {
+  public readonly code: ProvisioningErrorCode;
+
+  constructor(code: ProvisioningErrorCode, message: string) {
     super(message);
     this.name = 'ProvisioningError';
     this.code = code;

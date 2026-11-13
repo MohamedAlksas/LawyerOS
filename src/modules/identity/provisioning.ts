@@ -6,6 +6,19 @@ import { createOTP } from '@better-auth/utils/otp';
 import { randomBytes, randomUUID } from 'crypto';
 import { AuthenticationError, ProvisioningError } from './types';
 
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+interface TwoFactorRow {
+  id: string;
+  userId: string;
+  secret: string;
+  backupCodes: string;
+  failedVerificationCount: number;
+  lockedUntil: Date | null;
+  verified: boolean;
+}
+
 export interface ProvisionOwnerInput {
   name: string;
   email: string;
@@ -117,55 +130,127 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
       );
     }
 
-    const isPasswordValid = await verifyPassword({
-      hash: credentialAccount.password,
-      password,
+    type ResumeTxResult =
+      | { status: 'LOCKED' }
+      | { status: 'NO_RECORD' }
+      | { status: 'INVALID_PASSWORD'; shouldLock: boolean; remainingAttempts: number }
+      | { status: 'SUCCESS'; result: ProvisionOwnerResult };
+
+    const outcome = await prisma.$transaction(async (tx): Promise<ResumeTxResult> => {
+      // Row lock on twoFactor record to serialize concurrent resumption attempts
+      const rows = await tx.$queryRawUnsafe<TwoFactorRow[]>(
+        `SELECT id, "userId", secret, "backupCodes", "failedVerificationCount", "lockedUntil", verified
+         FROM "twoFactor"
+         WHERE "userId" = $1
+         FOR UPDATE`,
+        existingOwner.id
+      );
+
+      const twoFactorRecord = rows[0];
+      if (!twoFactorRecord || !twoFactorRecord.secret) {
+        return { status: 'NO_RECORD' };
+      }
+
+      const now = new Date();
+      if (twoFactorRecord.lockedUntil && new Date(twoFactorRecord.lockedUntil) > now) {
+        return { status: 'LOCKED' };
+      }
+
+      const isPasswordValid = await verifyPassword({
+        hash: credentialAccount.password!,
+        password,
+      });
+
+      if (!isPasswordValid) {
+        const currentCount = Number(twoFactorRecord.failedVerificationCount) || 0;
+        const newCount = currentCount + 1;
+        const shouldLock = newCount >= MAX_FAILED_ATTEMPTS;
+        const lockUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
+
+        await tx.twoFactor.update({
+          where: { id: twoFactorRecord.id },
+          data: {
+            failedVerificationCount: newCount,
+            lockedUntil: lockUntil,
+          },
+        });
+
+        return {
+          status: 'INVALID_PASSWORD',
+          shouldLock,
+          remainingAttempts: MAX_FAILED_ATTEMPTS - newCount,
+        };
+      }
+
+      // Valid password: reset failure counter if previously elevated
+      if (twoFactorRecord.failedVerificationCount > 0 || twoFactorRecord.lockedUntil) {
+        await tx.twoFactor.update({
+          where: { id: twoFactorRecord.id },
+          data: {
+            failedVerificationCount: 0,
+            lockedUntil: null,
+          },
+        });
+      }
+
+      const decryptedSecret = await symmetricDecrypt({
+        key: env.BETTER_AUTH_SECRET,
+        data: twoFactorRecord.secret,
+      });
+      const rawBase32 = decryptedSecret.startsWith('base32:')
+        ? decryptedSecret.slice(7)
+        : decryptedSecret;
+      const totpURI = `otpauth://totp/LawOffice%20OS:${encodeURIComponent(email)}?secret=${rawBase32}&issuer=LawOffice%20OS&digits=6&period=30`;
+
+      let backupCodes: string[] = [];
+      if (twoFactorRecord.backupCodes) {
+        const decryptedBackup = await symmetricDecrypt({
+          key: env.BETTER_AUTH_SECRET,
+          data: twoFactorRecord.backupCodes,
+        });
+        backupCodes = JSON.parse(decryptedBackup);
+      }
+
+      return {
+        status: 'SUCCESS',
+        result: {
+          user: {
+            id: existingOwner.id,
+            name: existingOwner.name,
+            email: existingOwner.email,
+            role: 'OWNER',
+          },
+          totpSecret: rawBase32,
+          totpURI,
+          backupCodes,
+        },
+      };
     });
 
-    if (!isPasswordValid) {
+    if (outcome.status === 'LOCKED') {
       throw new ProvisioningError(
-        'INVALID_INPUT',
-        'كلمة المرور غير صحيحة لاستئناف إعداد حساب المالك المعلق.'
+        'ACCOUNT_LOCKED',
+        'تم قفل محاولات استئناف الإعداد مؤقتاً لتجاوز الحد الأقصى للمحاولات الخاطئة (5 محاولات). يرجى المحاولة بعد انتهاء مدة الحظر.'
       );
     }
 
-    const twoFactorRecord = existingOwner.twoFactors[0];
-    if (!twoFactorRecord?.secret) {
+    if (outcome.status === 'NO_RECORD') {
       throw new ProvisioningError(
         'INVALID_INPUT',
         'سجل المصادقة الثنائية غير موجود لحساب المالك المعلق.'
       );
     }
 
-    const decryptedSecret = await symmetricDecrypt({
-      key: env.BETTER_AUTH_SECRET,
-      data: twoFactorRecord.secret,
-    });
-    const rawBase32 = decryptedSecret.startsWith('base32:')
-      ? decryptedSecret.slice(7)
-      : decryptedSecret;
-    const totpURI = `otpauth://totp/LawOffice%20OS:${encodeURIComponent(email)}?secret=${rawBase32}&issuer=LawOffice%20OS&digits=6&period=30`;
-
-    let backupCodes: string[] = [];
-    if (twoFactorRecord.backupCodes) {
-      const decryptedBackup = await symmetricDecrypt({
-        key: env.BETTER_AUTH_SECRET,
-        data: twoFactorRecord.backupCodes,
-      });
-      backupCodes = JSON.parse(decryptedBackup);
+    if (outcome.status === 'INVALID_PASSWORD') {
+      throw new ProvisioningError(
+        outcome.shouldLock ? 'ACCOUNT_LOCKED' : 'INVALID_INPUT',
+        outcome.shouldLock
+          ? 'تم تجاوز الحد الأقصى لمحاولات كلمة المرور الخاطئة (5 محاولات). تم قفل الحساب لمدة 15 دقيقة.'
+          : `كلمة المرور غير صحيحة لاستئناف إعداد حساب المالك المعلق. المحاولات المتبقية: ${outcome.remainingAttempts}.`
+      );
     }
 
-    return {
-      user: {
-        id: existingOwner.id,
-        name: existingOwner.name,
-        email: existingOwner.email,
-        role: 'OWNER',
-      },
-      totpSecret: rawBase32,
-      totpURI,
-      backupCodes,
-    };
+    return outcome.result;
   }
 
   const existingUser = await prisma.user.findUnique({
@@ -206,10 +291,9 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
 
   const userId = randomUUID();
 
-  // Production enrollment is always proof-gated (isVerified = false).
-  // Suite test fixture owner exemption for adel.lawyer@office.eg allows the shared test suite to run without re-verifying bootstrap.
-  const isSuiteOwner = email === 'adel.lawyer@office.eg';
-  const isVerified = isSuiteOwner;
+  // Every single owner reservation universally starts unverified with bootstrap open.
+  // Genuine proof of possession via valid RFC 6238 TOTP code is strictly required to complete enrollment.
+  const isVerified = false;
 
   // Execute inside transaction with advisory lock for strict atomicity and race prevention (R06)
   const createdUser = await prisma.$transaction(async (tx) => {
@@ -309,39 +393,78 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
     throw new AuthenticationError('INVALID_CREDENTIALS', 'رمز التحقق يجب أن يتكون من 6 أرقام.');
   }
 
-  const tfRecord = await prisma.twoFactor.findFirst({
-    where: { userId },
-  });
+  type ConfirmTxResult =
+    | { status: 'LOCKED' }
+    | { status: 'NO_RECORD' }
+    | { status: 'DECRYPT_FAIL' }
+    | { status: 'INVALID_TOTP'; shouldLock: boolean; remainingAttempts: number }
+    | { status: 'SUCCESS' };
 
-  if (!tfRecord) {
-    throw new AuthenticationError('UNAUTHENTICATED', 'سجل المصادقة الثنائية غير موجود للمستخدم.');
-  }
+  const outcome = await prisma.$transaction(async (tx): Promise<ConfirmTxResult> => {
+    // Row lock on twoFactor record to serialize concurrent confirmation attempts
+    const rows = await tx.$queryRawUnsafe<TwoFactorRow[]>(
+      `SELECT id, "userId", secret, "backupCodes", "failedVerificationCount", "lockedUntil", verified
+       FROM "twoFactor"
+       WHERE "userId" = $1
+       FOR UPDATE`,
+      userId
+    );
 
-  let decryptedSecret: string;
-  try {
-    decryptedSecret = await symmetricDecrypt({
-      key: env.BETTER_AUTH_SECRET,
-      data: tfRecord.secret,
-    });
-  } catch {
-    throw new AuthenticationError('UNAUTHENTICATED', 'فشل في فك تشفير مفتاح المصادقة.');
-  }
+    const tfRecord = rows[0];
+    if (!tfRecord) {
+      return { status: 'NO_RECORD' };
+    }
 
-  const rawBase32 = decryptedSecret.startsWith('base32:')
-    ? decryptedSecret.slice(7)
-    : decryptedSecret;
-  const secretBytes = base32.decode(rawBase32.toUpperCase());
-  const verifier = createOTP(secretBytes, { period: 30, digits: 6 });
+    const now = new Date();
+    if (tfRecord.lockedUntil && new Date(tfRecord.lockedUntil) > now) {
+      return { status: 'LOCKED' };
+    }
 
-  const isValid = await verifier.verify(code);
-  if (!isValid) {
-    throw new AuthenticationError('INVALID_CREDENTIALS', 'رمز التحقق غير صحيح أو انتهت صلاحيته.');
-  }
+    let decryptedSecret: string;
+    try {
+      decryptedSecret = await symmetricDecrypt({
+        key: env.BETTER_AUTH_SECRET,
+        data: tfRecord.secret,
+      });
+    } catch {
+      return { status: 'DECRYPT_FAIL' };
+    }
 
-  await prisma.$transaction(async (tx) => {
+    const rawBase32 = decryptedSecret.startsWith('base32:')
+      ? decryptedSecret.slice(7)
+      : decryptedSecret;
+    const secretBytes = base32.decode(rawBase32.toUpperCase());
+    const verifier = createOTP(secretBytes, { period: 30, digits: 6 });
+
+    const isValid = await verifier.verify(code);
+    if (!isValid) {
+      const currentCount = Number(tfRecord.failedVerificationCount) || 0;
+      const newCount = currentCount + 1;
+      const shouldLock = newCount >= MAX_FAILED_ATTEMPTS;
+      const lockUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
+
+      await tx.twoFactor.update({
+        where: { id: tfRecord.id },
+        data: {
+          failedVerificationCount: newCount,
+          lockedUntil: lockUntil,
+        },
+      });
+
+      return {
+        status: 'INVALID_TOTP',
+        shouldLock,
+        remainingAttempts: MAX_FAILED_ATTEMPTS - newCount,
+      };
+    }
+
     await tx.twoFactor.update({
       where: { id: tfRecord.id },
-      data: { verified: true },
+      data: {
+        verified: true,
+        failedVerificationCount: 0,
+        lockedUntil: null,
+      },
     });
 
     await tx.officeBootstrap.upsert({
@@ -358,5 +481,31 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
         ownerId: userId,
       },
     });
+
+    return { status: 'SUCCESS' };
   });
+
+  if (outcome.status === 'LOCKED') {
+    throw new AuthenticationError(
+      'ACCOUNT_LOCKED',
+      'تم قفل تأكيد المصادقة مؤقتاً لتجاوز الحد الأقصى للمحاولات الخاطئة (5 محاولات). يرجى المحاولة بعد انتهاء مدة الحظر.'
+    );
+  }
+
+  if (outcome.status === 'NO_RECORD') {
+    throw new AuthenticationError('UNAUTHENTICATED', 'سجل المصادقة الثنائية غير موجود للمستخدم.');
+  }
+
+  if (outcome.status === 'DECRYPT_FAIL') {
+    throw new AuthenticationError('UNAUTHENTICATED', 'فشل في فك تشفير مفتاح المصادقة.');
+  }
+
+  if (outcome.status === 'INVALID_TOTP') {
+    throw new AuthenticationError(
+      outcome.shouldLock ? 'ACCOUNT_LOCKED' : 'INVALID_CREDENTIALS',
+      outcome.shouldLock
+        ? 'تم تجاوز الحد الأقصى لمحاولات رمز التحقق الخاطئة (5 محاولات). تم قفل الحساب لمدة 15 دقيقة.'
+        : `رمز التحقق غير صحيح أو انتهت صلاحيته. المحاولات المتبقية: ${outcome.remainingAttempts}.`
+    );
+  }
 }

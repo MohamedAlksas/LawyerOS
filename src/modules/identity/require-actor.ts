@@ -1,12 +1,9 @@
 import { getAuth, getPrismaClient } from '@/lib/auth';
-import { getEnv } from '@/lib/env';
-import crypto from 'crypto';
 import { Actor, AuthenticationError, Permission, UserRole } from './types';
 import { assertAuthorized } from './authorize';
 
 export interface RequireActorOptions {
   headers?: Headers | null;
-  sessionToken?: string;
   allowIncompleteMfa?: boolean;
   requiredPermission?: Permission;
 }
@@ -33,23 +30,11 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
   let headers = options.headers;
 
   if (!headers) {
-    if (options.sessionToken) {
-      const env = getEnv();
-      const signature = crypto
-        .createHmac('sha256', env.BETTER_AUTH_SECRET)
-        .update(options.sessionToken)
-        .digest('base64');
-      const cookieValue = encodeURIComponent(`${options.sessionToken}.${signature}`);
-      headers = new Headers({
-        cookie: `better-auth.session_token=${cookieValue}`,
-      });
-    } else {
-      try {
-        const { headers: nextHeaders } = await import('next/headers');
-        headers = await nextHeaders();
-      } catch {
-        // Not in Next.js request context (e.g. testing)
-      }
+    try {
+      const { headers: nextHeaders } = await import('next/headers');
+      headers = await nextHeaders();
+    } catch {
+      // Not in Next.js request context (e.g. testing)
     }
   }
 
