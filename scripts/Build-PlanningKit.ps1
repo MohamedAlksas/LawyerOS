@@ -26,7 +26,7 @@ $archiveFiles = $documents + @(
     '.gitignore', '.gitattributes', '.githooks/pre-push', '.github/workflows/planning-validation.yml',
     'scripts/Add-TaskGitInstructions.ps1', 'scripts/Build-TaskPromptIndex.ps1',
     'scripts/Validate-AntigravityKit.ps1', 'scripts/Build-PlanningKit.ps1',
-    'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json'
+    'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json', 'docs/DEPENDENCIES.md'
 )
 $archiveFiles += $agencyProfileDocuments + @('docs/third-party/agency-agents-LICENSE.txt')
 $graphifyAssets = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills/graphify') -File -Recurse -Force | Sort-Object FullName | ForEach-Object { [IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })

@@ -1,0 +1,112 @@
+{
+  "review": "T03 round 6",
+  "date": "2026-11-13",
+  "sourceCommit": "a5b84917aa3eca60eece75464ce30e6ad59d88e1",
+  "frozenApplication": "1dbd73488b452fdc2cccf5f4104d007a17b6c2f4",
+  "fixedPoint": "6558180a9eb72b6d53f697625e125874a796ef9a",
+  "method": "Independent actual-route/provider and PostgreSQL observed-waiter interleaving probes; driver-parameter comparisons without connections; PowerShell expansion and actual psql current_database query on owned synthetic fixtures.",
+  "scope": "Owned disposable PostgreSQL container and non-reused browser server. No operational database contacted; no migration DDL applied to the unintended-target fixture.",
+  "authAndRouting": {
+    "formerlyExemptEmail": {
+      "proofSubmitted": false,
+      "verified": false,
+      "bootstrapClosed": false
+    },
+    "concurrentResumeAfterClosure": {
+      "confirmed": {
+        "ok": true
+      },
+      "resumed": {
+        "ok": false,
+        "code": "BOOTSTRAP_ALREADY_CLOSED"
+      },
+      "bootstrapClosed": true,
+      "ordering": "Actual PostgreSQL row lock; confirmation queued before resumption; both prechecks observe pending state"
+    },
+    "httpSecureDecoy": {
+      "configuredProvider": "http/plain cookie",
+      "sessionAgeMinutes": 40,
+      "idleMinutesBefore": 31,
+      "secureDecoyHasValidSignature": false,
+      "http": 401,
+      "authenticatedSessionReturned": false,
+      "activityRefreshed": false,
+      "protectedActorAccepted": false
+    },
+    "providerIssuedHistoricalTrust": {
+      "fixture": "Pinned prior 30-day provider; actual MFA/trusted issuance/sign-out with retained cookie",
+      "cookieRetainedAfterSignOut": true,
+      "currentRouteHttp": 200,
+      "freshChallengeRequired": true,
+      "protectedActorAccepted": false
+    },
+    "omittedTestPort": {
+      "validationAccepted": true,
+      "validatorDefaultPort": 5432,
+      "operationalPort": 65432,
+      "driverPort": 5432,
+      "driverDatabase": "shared_test",
+      "connectionAttempted": false
+    },
+    "omittedOperationalPort": {
+      "validationAccepted": true,
+      "validatorAssumedOperationalPort": 5432,
+      "actualOperationalPort": 65432,
+      "actualTestPort": 65432,
+      "sameDriverDatabase": true,
+      "sameDriverHost": true,
+      "connectionAttempted": false
+    },
+    "emptyConnectionOverrides": {
+      "submitted": 2,
+      "rejectedBeforeConnection": 2
+    },
+    "malformedDedicatedName": {
+      "rejected": true,
+      "created": false
+    }
+  },
+  "powershellTarget": {
+    "environmentDatabaseUrlConfigured": true,
+    "powershellScriptVariableAssigned": false,
+    "documentedDatabaseArgumentEmpty": true,
+    "psqlExit": 0,
+    "selectedDatabase": "codex_psql_ambient_test",
+    "intendedDatabase": "codex_psql_intended_test",
+    "connectionScope": "Two newly created synthetic databases inside the owned review container; query only, no DDL from canonical recipe executed"
+  },
+  "checks": {
+    "cleanInstall": "exit 0; pinned client generated",
+    "freshMigration": "exit 0",
+    "units": "63/63; exit 0",
+    "lint": "exit 0",
+    "typecheck": "exit 0",
+    "integration": "48/48; exit 0",
+    "browser": "30/30; exit 0; last-run passed; zero retries, non-reused server, test-only webpack build",
+    "targetedObserver": "2/2; exit 0",
+    "powershellObserver": "exit 0; SELECT only on owned fixtures",
+    "hostedApplication": "43451072829; success including default build",
+    "hostedPlanning": "43451073242; success"
+  },
+  "graph": {
+    "sourceCommit": "a5b84917aa3eca60eece75464ce30e6ad59d88e1",
+    "snapshot": "work/graphify/a5b84917aa3e-e7030c2d",
+    "nodes": 239,
+    "edges": 553,
+    "communities": 11,
+    "mode": "local-code-only-no-label",
+    "query": "provisionOwner",
+    "foundNodes": 73,
+    "displayedNodes": 61,
+    "tokenBudget": 1700
+  },
+  "limits": [
+    "Physical interactive TTY capture NOT RUN; committed MutableStdout component tests are real.",
+    "Driver-target comparison opens no socket.",
+    "Canonical PowerShell argument expansion and SELECT fallback were verified; no migration DDL executed on unintended fixture.",
+    "Leading-zero-port source concern disproved by actual Node URL normalization and withdrawn.",
+    "Independent prior-provider issued trust proof passes; committed test still uses handcrafted credential/lifecycle.",
+    "Parent closure proof observes PostgreSQL waiters; committed regression still uses two60ms sleeps."
+  ],
+  "cleanup": "Full owned container ID/label verified before stop/removal; review browser listener14712 absent; no existing container, installed asset or operational data modified."
+}

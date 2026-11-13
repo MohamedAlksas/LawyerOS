@@ -1,6 +1,6 @@
 # T03 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at inspected submission head `352030df52cc4828cee66d2312428234141d91f0`. Read [the current review](T03-review-round5.md) and [correction round 5](T03-corrections-round5.md). Production fixture exemptions and earlier empty-override/catalog-leak cases are fixed; real protocol/fault and nonempty migration evidence improved. Configured HTTP-cookie selection, omitted-port routing, setup closure/resume concurrency, baseline error handling and specific regression gaps remain open. The text below records the initial review and is historical.
+Latest review: **CHANGES_REQUESTED** at inspected submission head `a5b84917aa3eca60eece75464ce30e6ad59d88e1`. Read [the current review](T03-review-round6.md) and [focused correction round 6](T03-corrections-round6.md). Original-header session policy, locked setup closure and the omitted-test-port fix pass independent reproductions. Remaining safety cases are the reversed omitted-operational-port comparison and canonical PowerShell migration target, with specific regression/verification gaps. The text below records the initial review and is historical.
 
 Decision: **CHANGES_REQUESTED**. Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, T04, deployment or real-data operation. Review date: 11 November 2026, Africa/Cairo. [Correction assignment](T03-corrections-round1.md).
 
