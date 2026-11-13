@@ -48,6 +48,7 @@ export default defineConfig({
     include: ['tests/**/*.{test,spec}.ts'],
     testTimeout: 10000,
     hookTimeout: 10000,
+    fileParallelism: false,
     env: {
       ...localEnv,
       // Force test mode unconditionally after local files are loaded (R08)

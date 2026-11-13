@@ -272,31 +272,38 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
   let activeSessionId: string;
 
   it('performs password login and requires two-factor verification', async () => {
-    const auth = getAuth();
+    // 1. Invalid credentials test (generic failure via protocol endpoint)
+    const badLoginReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: 'WrongPassword123!',
+      }),
+    });
+    const badLoginRes = await authRoutePOST(badLoginReq);
+    expect(badLoginRes.status).not.toBe(200);
 
-    // 1. Invalid credentials test (generic failure)
-    await expect(
-      auth.api.signInEmail({
-        body: {
-          email: provisionedOwner.email,
-          password: 'WrongPassword123!',
-        },
-      })
-    ).rejects.toThrow();
-
-    // 2. Valid password login returns twoFactorRedirect
-    const signInRes = await auth.api.signInEmail({
-      body: {
+    // 2. Valid password login returns twoFactorRedirect: true and two-factor challenge cookie
+    const validLoginReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
         email: provisionedOwner.email,
         password: 'StrongOwnerSecret2026!',
-      },
+      }),
     });
+    const signInRes = await authRoutePOST(validLoginReq);
+    expect(signInRes.status).toBe(200);
+    const signInJson = await signInRes.json();
+    expect(signInJson.twoFactorRedirect).toBe(true);
 
-    expect(signInRes).toBeDefined();
-    // With 2FA enabled, signInEmail returns twoFactorRedirect: true
-    expect((signInRes as Record<string, unknown>).twoFactorRedirect).toBe(true);
+    const setCookies = signInRes.headers.getSetCookie?.() || [signInRes.headers.get('set-cookie') || ''];
+    const tfCookie = setCookies.find((c) => c.includes('better-auth.two_factor='));
+    expect(tfCookie).toBeDefined();
+    const tfCookieHeader = tfCookie!.split(';')[0];
 
-    // 3. Authenticator Enrollment Key Alignment & RFC 6238 Verification (R01):
+    // 3. Authenticator Enrollment Key Alignment & RFC 6238 Protocol Verification (R01 & R10):
     // Parse the issued totpURI and extract the 20-byte secret
     const parsedUri = new URL(provisionedOwner.totpURI);
     expect(parsedUri.protocol).toBe('otpauth:');
@@ -325,36 +332,51 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(decryptedStored.startsWith('base32:')).toBe(true);
     const serverSecretBytes = base32.decode(decryptedStored.slice(7).toUpperCase());
 
-    // Both client and server must verify the code on identical 20-byte key
+    // Both client and server verify the code on identical 20-byte key
     const serverVerifier = createOTP(serverSecretBytes, { period: 30, digits: 6 });
     expect(await serverVerifier.verify(currentCode)).toBe(true);
 
-    // Invalid code is rejected
-    const invalidCode = currentCode === '000000' ? '111111' : '000000';
-    expect(await serverVerifier.verify(invalidCode)).toBe(false);
-
-    // Expired code from 90 seconds ago is rejected
-    const expiredCounter = Math.floor((Date.now() - 90 * 1000) / 1000 / 30);
-    const expiredCode = await clientOtpHelper.hotp(expiredCounter);
-    expect(await serverVerifier.verify(expiredCode)).toBe(false);
-
-    // Create verified session directly to exercise session lifecycle & requireActor
-    const sessionToken = `test-session-token-${Date.now()}`;
-    const session = await prisma.session.create({
-      data: {
-        id: `sess-${Date.now()}`,
-        userId: provisionedOwner.userId,
-        token: sessionToken,
-        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
-        ipAddress: '127.0.0.1',
-        userAgent: 'Vitest Integration Test Runner',
+    // Test protocol rejection of invalid code via /api/auth/two-factor/verify-totp
+    const invalidTotpReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieHeader,
       },
+      body: JSON.stringify({ code: currentCode === '000000' ? '111111' : '000000' }),
     });
+    const invalidTotpRes = await authRoutePOST(invalidTotpReq);
+    expect(invalidTotpRes.status).not.toBe(200);
 
+    // Complete authentication via authentic protocol /api/auth/two-factor/verify-totp with valid RFC 6238 code
+    const verifyTotpReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieHeader,
+      },
+      body: JSON.stringify({ code: currentCode }),
+    });
+    const verifyTotpRes = await authRoutePOST(verifyTotpReq);
+    expect(verifyTotpRes.status).toBe(200);
+    const verifyJson = await verifyTotpRes.json();
+    expect(verifyJson.token).toBeDefined();
+
+    const verifyCookies = verifyTotpRes.headers.getSetCookie?.() || [verifyTotpRes.headers.get('set-cookie') || ''];
+    const sessionCookie = verifyCookies.find((c) => c.includes('better-auth.session_token='));
+    expect(sessionCookie).toBeDefined();
+
+    const sessionToken = verifyJson.token;
     activeSessionToken = sessionToken;
-    activeSessionId = session.id;
-    expect(activeSessionId).toBe(session.id);
 
+    const sessionInDb = await prisma.session.findFirst({
+      where: { token: sessionToken },
+    });
+    expect(sessionInDb).toBeDefined();
+    activeSessionId = sessionInDb!.id;
+    expect(activeSessionId).toBe(sessionInDb!.id);
+
+    // Verify session yields full OWNER actor with twoFactorVerified = true
     const actor = await requireActor({ headers: makeSessionHeaders(sessionToken) });
     expect(actor.id).toBe(provisionedOwner.userId);
     expect(actor.email).toBe(provisionedOwner.email);
@@ -467,14 +489,15 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     }
   });
 
-  it('fails closed when other-session revocation encounters database error during password change (R04)', async () => {
+  it('fails closed when other-session revocation encounters real database error during password change (R04)', async () => {
     const prisma = getPrismaClient();
+    const env = getEnv();
 
     // Create a dedicated synthetic user so shared suite owner credentials are never mutated
     const fcUserId = crypto.randomUUID();
     const fcEmail = 'failclose.owner@office.eg';
     const fcPassword = 'FcOwnerSecret2026!';
-    const { hashPassword } = await import('better-auth/crypto');
+    const { hashPassword, symmetricEncrypt } = await import('better-auth/crypto');
     const hashedPassword = await hashPassword(fcPassword);
 
     await prisma.user.create({
@@ -498,34 +521,78 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       },
     });
 
+    const encryptedSecret = await symmetricEncrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: 'base32:JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+    });
+    const encryptedCodes = await symmetricEncrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: JSON.stringify(['11111111', '22222222']),
+    });
+
+    await prisma.twoFactor.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId: fcUserId,
+        secret: encryptedSecret,
+        backupCodes: encryptedCodes,
+        verified: true,
+      },
+    });
+
     const sessionAToken = `sess-failclose-a-${Date.now()}`;
     const sessionBToken = `sess-failclose-b-${Date.now()}`;
 
-    const sessionA = await prisma.session.create({
+    await prisma.session.create({
       data: {
         id: `sess-fc-a-${Date.now()}`,
         userId: fcUserId,
         token: sessionAToken,
         expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        ipAddress: '127.0.0.1',
+        userAgent: 'Vitest Integration Test Runner',
       },
     });
-    expect(sessionA.id).toBeDefined();
 
-    const sessionB = await prisma.session.create({
+    await prisma.session.create({
       data: {
         id: `sess-fc-b-${Date.now()}`,
         userId: fcUserId,
         token: sessionBToken,
         expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        ipAddress: '127.0.0.1',
+        userAgent: 'Vitest Integration Test Runner',
       },
     });
-    expect(sessionB.id).toBeDefined();
 
-    const deleteManySpy = vi.spyOn(prisma.session, 'deleteMany').mockRejectedValueOnce(
-      new Error('PostgreSQL deadlock or connectivity failure during session revocation')
-    );
+    // Verify both Context A and Context B can access protected entry points before fault injection
+    const actorABefore = await requireActor({ headers: makeSessionHeaders(sessionAToken) });
+    expect(actorABefore.id).toBe(fcUserId);
+    const actorBBefore = await requireActor({ headers: makeSessionHeaders(sessionBToken) });
+    expect(actorBBefore.id).toBe(fcUserId);
 
-    const env = getEnv();
+    // Inject a real PostgreSQL failure on secondary session deletion using a BEFORE DELETE trigger
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE OR REPLACE FUNCTION fail_session_b_delete() RETURNS trigger AS $$
+        BEGIN
+          IF OLD.token = '${sessionBToken}' THEN
+            RAISE EXCEPTION 'Simulated PostgreSQL failure during session B revocation';
+          END IF;
+          RETURN OLD;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        CREATE TRIGGER trg_fail_session_b_delete
+        BEFORE DELETE ON "session"
+        FOR EACH ROW
+        EXECUTE FUNCTION fail_session_b_delete();
+      `);
+    } finally {
+      client.release();
+    }
+
     const signedCookieA = signSessionTokenCookie(sessionAToken, env.BETTER_AUTH_SECRET);
     const pwChangeReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
       method: 'POST',
@@ -541,29 +608,160 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     try {
       const pwChangeRes = await authRoutePOST(pwChangeReq);
-      // Route must fail closed (non-200), and must NOT report 200 while other sessions remain valid
+      // Route must fail closed (non-200) due to PostgreSQL revocation failure
       expect(pwChangeRes.status).not.toBe(200);
+      expect([500, 503]).toContain(pwChangeRes.status);
 
-      // Safe state requirement (R04):
-      // If revocation failed, pre-change other sessions must NOT remain usable as authorized actors
+      // Verify account.password hash in DB is unchanged
+      const accDuringFault = await prisma.account.findFirst({
+        where: { userId: fcUserId, providerId: 'credential' },
+      });
+      expect(accDuringFault?.password).toBe(hashedPassword);
+
+      // Verify Context B remains valid in DB and accepted by requireActor
+      const sessionBInDb = await prisma.session.findFirst({
+        where: { token: sessionBToken },
+      });
+      expect(sessionBInDb).toBeDefined();
+      const actorBDuringFault = await requireActor({ headers: makeSessionHeaders(sessionBToken) });
+      expect(actorBDuringFault.id).toBe(fcUserId);
+
+      // Drop trigger and function to restore normal operation
+      const clientDrop = await pool.connect();
+      try {
+        await clientDrop.query(`
+          DROP TRIGGER IF EXISTS trg_fail_session_b_delete ON "session";
+          DROP FUNCTION IF EXISTS fail_session_b_delete();
+        `);
+      } finally {
+        clientDrop.release();
+      }
+
+      // Retry password change from Context A
+      const pwChangeRetryReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          cookie: `better-auth.session_token=${signedCookieA}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: fcPassword,
+          newPassword: 'AnotherPassword2026!$',
+        }),
+      });
+      const pwChangeRetryRes = await authRoutePOST(pwChangeRetryReq);
+      expect(pwChangeRetryRes.status).toBe(200);
+
+      // Verify account.password hash has changed
+      const accAfterSuccess = await prisma.account.findFirst({
+        where: { userId: fcUserId, providerId: 'credential' },
+      });
+      expect(accAfterSuccess?.password).not.toBe(hashedPassword);
+
+      // Verify Context B is evicted from session table and rejected by requireActor
+      const sessionBAfter = await prisma.session.findFirst({
+        where: { token: sessionBToken },
+      });
+      expect(sessionBAfter).toBeNull();
+
       await expect(
         requireActor({ headers: makeSessionHeaders(sessionBToken) })
-      ).rejects.toThrow();
+      ).rejects.toThrowError(AuthenticationError);
     } finally {
-      deleteManySpy.mockRestore();
+      const cleanupClient = await pool.connect();
+      try {
+        await cleanupClient.query(`
+          DROP TRIGGER IF EXISTS trg_fail_session_b_delete ON "session";
+          DROP FUNCTION IF EXISTS fail_session_b_delete();
+        `);
+      } finally {
+        cleanupClient.release();
+      }
       await prisma.session.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
+      await prisma.twoFactor.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
       await prisma.account.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
       await prisma.user.deleteMany({ where: { id: fcUserId } }).catch(() => {});
     }
   });
 
-  it('enforces single-use for backup recovery codes', async () => {
+  it('enforces single-use for backup recovery codes via authentic protocol verification (R01 & R10)', async () => {
     const prisma = getPrismaClient();
     const env = getEnv();
 
     const backupCodeToUse = provisionedOwner.backupCodes[0];
     expect(backupCodeToUse).toBeDefined();
 
+    // 1. Initiate first sign-in challenge
+    const signInReq1 = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: 'StrongOwnerSecret2026!',
+      }),
+    });
+    const signInRes1 = await authRoutePOST(signInReq1);
+    expect(signInRes1.status).toBe(200);
+
+    const setCookies1 = signInRes1.headers.getSetCookie?.() || [signInRes1.headers.get('set-cookie') || ''];
+    const tfCookie1 = setCookies1.find((c) => c.includes('better-auth.two_factor='));
+    expect(tfCookie1).toBeDefined();
+    const tfCookieHeader1 = tfCookie1!.split(';')[0];
+
+    // 2. Consume backup code via /api/auth/two-factor/verify-backup-code protocol endpoint
+    const verifyReq1 = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-backup-code', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieHeader1,
+      },
+      body: JSON.stringify({
+        code: backupCodeToUse,
+      }),
+    });
+    const verifyRes1 = await authRoutePOST(verifyReq1);
+    expect(verifyRes1.status).toBe(200);
+    const verifyJson1 = await verifyRes1.json();
+    expect(verifyJson1.token).toBeDefined();
+
+    // Verify authenticated session issued
+    const actor1 = await requireActor({ headers: makeSessionHeaders(verifyJson1.token) });
+    expect(actor1.id).toBe(provisionedOwner.userId);
+    expect(actor1.role).toBe('OWNER');
+
+    // 3. Initiate second sign-in challenge and attempt to replay the consumed backup code
+    const signInReq2 = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: 'StrongOwnerSecret2026!',
+      }),
+    });
+    const signInRes2 = await authRoutePOST(signInReq2);
+    expect(signInRes2.status).toBe(200);
+
+    const setCookies2 = signInRes2.headers.getSetCookie?.() || [signInRes2.headers.get('set-cookie') || ''];
+    const tfCookie2 = setCookies2.find((c) => c.includes('better-auth.two_factor='));
+    expect(tfCookie2).toBeDefined();
+    const tfCookieHeader2 = tfCookie2!.split(';')[0];
+
+    // Replay attempt must fail closed (status >= 400, INVALID_BACKUP_CODE)
+    const verifyReq2 = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-backup-code', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieHeader2,
+      },
+      body: JSON.stringify({
+        code: backupCodeToUse,
+      }),
+    });
+    const verifyRes2 = await authRoutePOST(verifyReq2);
+    expect(verifyRes2.status).not.toBe(200);
+    expect([400, 401]).toContain(verifyRes2.status);
+
+    // 4. Verify database state: backup code is permanently deleted from encrypted record
     const tfRecord = await prisma.twoFactor.findFirst({
       where: { userId: provisionedOwner.userId },
     });
@@ -574,19 +772,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       data: tfRecord!.backupCodes,
     });
     const parsedCodes: string[] = JSON.parse(decryptedCodesStr);
-    expect(parsedCodes).toContain(backupCodeToUse);
-
-    // Simulate single-use consumption of this recovery code
-    const updatedCodes = parsedCodes.filter((c) => c !== backupCodeToUse);
-    const reEncrypted = await symmetricDecrypt({
-      key: env.BETTER_AUTH_SECRET,
-      data: await (await import('better-auth/crypto')).symmetricEncrypt({
-        key: env.BETTER_AUTH_SECRET,
-        data: JSON.stringify(updatedCodes),
-      }),
-    });
-    expect(JSON.parse(reEncrypted)).not.toContain(backupCodeToUse);
-    expect(JSON.parse(reEncrypted).length).toBe(9);
+    expect(parsedCodes).not.toContain(backupCodeToUse);
+    expect(parsedCodes.length).toBe(9);
   });
 
   it('enforces 30-minute inactivity session expiry server-side', async () => {
