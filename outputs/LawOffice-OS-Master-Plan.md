@@ -2390,7 +2390,7 @@ Read GEMINI.md and explicitly apply these project skills:
 - D:/Lawyer/.agents/skills/lawoffice-testing/SKILL.md
 - D:/Lawyer/.agents/skills/lawoffice-arabic-ui/SKILL.md
 
-Current Codex correction assignment (13 November 2026): read docs/reviews/T03-review-round4.md and docs/reviews/T03-corrections-round4.md in full before editing. The correction addendum refines per-slice native ownership and acceptance on the existing feature/t03-identity-sessions branch and PR #8. It supersedes earlier correction instructions; preserve fixed behaviors and do not restart T03 or start T04. Auth-only Playwright tooling remains authorized in T03. Execute the addendum's actual Graphify/native/checkpoint requirements and submit docs/reviews/T03-submission-round4.md.
+Current Codex correction assignment (13 November 2026): read docs/reviews/T03-review-round5.md and docs/reviews/T03-corrections-round5.md in full before editing. The correction addendum refines per-slice native ownership and acceptance on the existing feature/t03-identity-sessions branch and PR #8. It supersedes earlier correction instructions; preserve fixed behaviors and do not restart T03 or start T04. Auth-only Playwright tooling remains authorized in T03. Execute the addendum's actual Graphify/native/checkpoint requirements and submit docs/reviews/T03-submission-round5.md.
 
 Before editing, inspect docs/reviews/T02-review.md and its referenced implementation baseline. Continue only if it actually states ACCEPTED for the current predecessor. Missing or conflicting evidence means report the blocker; do not execute T02 yourself.
 

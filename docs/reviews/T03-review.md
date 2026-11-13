@@ -1,6 +1,6 @@
 # T03 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at inspected submission head `1facc21992d105ab1c74a8258dd18ad260339252`. Read [the current review](T03-review-round4.md) and [correction round 4](T03-corrections-round4.md). The prior HTTPS revival, historical trust-cookie bypass, CLI retry dead end and destructive database collision are fixed in independent probes; a fixture-specific production verification exception, a remaining test-target fallback, policy-boundary and evidence gaps still prevent acceptance. The text below records the initial review and is historical.
+Latest review: **CHANGES_REQUESTED** at inspected submission head `352030df52cc4828cee66d2312428234141d91f0`. Read [the current review](T03-review-round5.md) and [correction round 5](T03-corrections-round5.md). Production fixture exemptions and earlier empty-override/catalog-leak cases are fixed; real protocol/fault and nonempty migration evidence improved. Configured HTTP-cookie selection, omitted-port routing, setup closure/resume concurrency, baseline error handling and specific regression gaps remain open. The text below records the initial review and is historical.
 
 Decision: **CHANGES_REQUESTED**. Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, T04, deployment or real-data operation. Review date: 11 November 2026, Africa/Cairo. [Correction assignment](T03-corrections-round1.md).
 
