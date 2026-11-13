@@ -24,8 +24,6 @@ test.beforeEach(async () => {
       data: JSON.stringify([BACKUP_CODE, 'bkp02-code3', 'bkp03-code4']),
     });
 
-    await client.query('DELETE FROM "office_bootstrap";').catch(() => {});
-
     const existing = await client.query('SELECT id FROM "user" WHERE email = $1', [TEST_EMAIL]);
     let userId: string;
     if (existing.rows.length === 0) {
@@ -64,7 +62,6 @@ test.afterAll(async () => {
   const { pool } = createValidatedTestPool();
   const client = await pool.connect();
   try {
-    await client.query('DELETE FROM "office_bootstrap";').catch(() => {});
     const existing = await client.query('SELECT id FROM "user" WHERE email = $1', [TEST_EMAIL]);
     if (existing.rows.length > 0) {
       const userId = existing.rows[0].id;
@@ -105,7 +102,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await expect(page.locator('h1')).toContainText('تسجيل الدخول');
   });
 
-  test('responsive layout verification across mobile, tablet, and desktop viewports', async ({ page }) => {
+  test('responsive reflow verification across mobile, tablet, and desktop viewports', async ({ page }) => {
     const viewports = [
       { width: 390, height: 844 },
       { width: 768, height: 1024 },
@@ -355,9 +352,28 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await expect(page.locator('h1')).toContainText('التحقق الثنائي');
   });
 
-  test('200% zoom (viewport 720x450 simulation) renders without horizontal scroll overflow', async ({ page }) => {
+  test('accessibility reflow and text scaling: 200% font zoom renders without horizontal scroll overflow (R10)', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 450 });
     await page.goto('/login');
+
+    // Baseline font size inspection
+    const baselineHeadingSize = await page.evaluate(() => {
+      const h1 = document.querySelector('h1');
+      return h1 ? parseFloat(window.getComputedStyle(h1).fontSize) : 24;
+    });
+
+    // Apply 200% text scaling via root style
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = '200%';
+    });
+
+    const scaledHeadingSize = await page.evaluate(() => {
+      const h1 = document.querySelector('h1');
+      return h1 ? parseFloat(window.getComputedStyle(h1).fontSize) : 48;
+    });
+
+    // Verify actual font size scaling occurred (at least 1.8x baseline to accommodate rounding)
+    expect(scaledHeadingSize).toBeGreaterThanOrEqual(baselineHeadingSize * 1.8);
 
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();

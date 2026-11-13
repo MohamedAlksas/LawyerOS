@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
@@ -25,8 +25,7 @@ import { NextRequest } from 'next/server';
 import crypto from 'crypto';
 import { GET as authRouteGET, POST as authRoutePOST } from '@/app/api/auth/[...all]/route';
 import {
-  createValidatedTestPool,
-  cleanupSyntheticTestData,
+  createDedicatedTestDatabase,
   validateTestEnvironment,
 } from '../helpers/test-db';
 
@@ -35,13 +34,29 @@ function signSessionTokenCookie(token: string, secret: string): string {
   return encodeURIComponent(`${token}.${signature}`);
 }
 
+async function clearGlobalSingletons(): Promise<void> {
+  await closeDbPool().catch(() => {});
+  const g = globalThis as Record<string, unknown>;
+  delete g.__lawoffice_pg_pool;
+  delete g.__lawoffice_prisma;
+  delete g.__lawoffice_auth;
+}
+
 describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
+  let dedicated: { url: string; pool: Pool; drop: () => Promise<void> };
   let pool: Pool;
+  let originalTestDatabaseUrl: string | undefined;
 
   beforeAll(async () => {
-    // 1. Strictly validate test environment before opening any pool or socket (R07)
-    const validated = createValidatedTestPool();
-    pool = validated.pool;
+    // 1. Create isolated dedicated test database so sentinel data and bootstrap in lawoffice_test remain untouched (R07)
+    originalTestDatabaseUrl = process.env.TEST_DATABASE_URL;
+    dedicated = await createDedicatedTestDatabase('lawoffice_auth_suite_test');
+    pool = dedicated.pool;
+
+    // Switch environment to dedicated test database for Prisma and Better Auth singletons
+    process.env.TEST_DATABASE_URL = dedicated.url;
+    getEnv(true);
+    await clearGlobalSingletons();
 
     // 2. Schema installation / migration check from T02
     // Run the migration SQL idempotently or create tables if they do not exist
@@ -84,32 +99,18 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     } finally {
       client.release();
     }
-
-    // 3. Scoped cleanup of synthetic test data created by this suite (preserving sentinel/pre-existing data)
-    await cleanupSyntheticTestData(pool);
-    const cleanupClient = await pool.connect();
-    try {
-      await cleanupClient.query('DELETE FROM "office_bootstrap";').catch(() => {});
-    } finally {
-      cleanupClient.release();
-    }
-  });
+  }, 30000);
 
   afterAll(async () => {
-    if (pool) {
-      await cleanupSyntheticTestData(pool).catch(() => {});
-      const cleanupClient = await pool.connect();
-      try {
-        await cleanupClient.query('DELETE FROM "office_bootstrap";').catch(() => {});
-      } finally {
-        cleanupClient.release();
-      }
+    await clearGlobalSingletons();
+    if (dedicated) {
+      await dedicated.drop().catch(() => {});
     }
-    await closeDbPool().catch(() => {});
-    if (pool) {
-      await pool.end().catch(() => {});
+    if (originalTestDatabaseUrl) {
+      process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      getEnv(true);
     }
-  });
+  }, 30000);
 
   it('proves schema migration created required Better Auth tables and UserRole enum', async () => {
     const client = await pool.connect();
@@ -327,6 +328,150 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(actor.role).toBe('OWNER');
     expect(actor.twoFactorVerified).toBe(true);
     expect(authorize(actor, 'READ_CLIENT_DATA')).toBe(true);
+  });
+
+  it('rejects missing, unsigned, and corrupted-signature session cookies in requireActor (R02)', async () => {
+    // 1. Missing cookie throws UNAUTHENTICATED
+    await expect(requireActor({ headers: new Headers() })).rejects.toThrowError(AuthenticationError);
+
+    // 2. Unsigned cookie (raw token with no signature) must fail signature verification and throw UNAUTHENTICATED
+    const unsignedCookie = `better-auth.session_token=${activeSessionToken}`;
+    await expect(
+      requireActor({ headers: new Headers({ cookie: unsignedCookie }) })
+    ).rejects.toThrowError(AuthenticationError);
+
+    // 3. Corrupted-signature cookie (valid token with forged/tampered signature) must fail signature verification
+    const corruptedCookie = `better-auth.session_token=${activeSessionToken}.invalidsignature1234567890`;
+    await expect(
+      requireActor({ headers: new Headers({ cookie: corruptedCookie }) })
+    ).rejects.toThrowError(AuthenticationError);
+
+    // 4. Properly signed cookie succeeds
+    const env = getEnv();
+    const validSignedCookie = `better-auth.session_token=${signSessionTokenCookie(activeSessionToken, env.BETTER_AUTH_SECRET)}`;
+    const actor = await requireActor({ headers: new Headers({ cookie: validSignedCookie }) });
+    expect(actor.id).toBe(provisionedOwner.userId);
+  });
+
+  it('enforces fresh 2FA challenge even when trustDevice is supplied on login (R02)', async () => {
+    const auth = getAuth();
+    const signInRes = await auth.api.signInEmail({
+      body: {
+        email: provisionedOwner.email,
+        password: 'StrongOwnerSecret2026!',
+        trustDevice: true,
+      } as unknown as { email: string; password: string },
+    });
+
+    expect(signInRes).toBeDefined();
+    // With 2FA enabled, trustDevice must not bypass the twoFactorRedirect challenge for owner
+    expect((signInRes as Record<string, unknown>).twoFactorRedirect).toBe(true);
+  });
+
+  it('fails closed and returns sanitized non-success if pre-handler guard encounters database error (R03)', async () => {
+    const prisma = getPrismaClient();
+    const spy = vi.spyOn(prisma.session, 'findUnique').mockRejectedValueOnce(
+      new Error('Transient PostgreSQL connection error')
+    );
+
+    try {
+      const req = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
+        headers: {
+          cookie: `better-auth.session_token=${activeSessionToken}`,
+        },
+      });
+
+      const res = await authRouteGET(req);
+      // Pre-handler guard must fail closed (non-200), NOT delegate to auth.handler (which would refresh idle session)
+      expect(res.status).not.toBe(200);
+      expect([500, 503]).toContain(res.status);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('fails closed when other-session revocation encounters database error during password change (R04)', async () => {
+    const prisma = getPrismaClient();
+
+    // Create a dedicated synthetic user so shared suite owner credentials are never mutated
+    const fcUserId = crypto.randomUUID();
+    const fcEmail = 'failclose.owner@office.eg';
+    const fcPassword = 'FcOwnerSecret2026!';
+    const { hashPassword } = await import('better-auth/crypto');
+    const hashedPassword = await hashPassword(fcPassword);
+
+    await prisma.user.create({
+      data: {
+        id: fcUserId,
+        name: 'مالك اختبار الفشل',
+        email: fcEmail,
+        emailVerified: true,
+        role: 'OWNER',
+        twoFactorEnabled: true,
+      },
+    });
+
+    await prisma.account.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId: fcUserId,
+        providerId: 'credential',
+        accountId: fcUserId,
+        password: hashedPassword,
+      },
+    });
+
+    const sessionAToken = `sess-failclose-a-${Date.now()}`;
+    const sessionBToken = `sess-failclose-b-${Date.now()}`;
+
+    const sessionA = await prisma.session.create({
+      data: {
+        id: `sess-fc-a-${Date.now()}`,
+        userId: fcUserId,
+        token: sessionAToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+      },
+    });
+    expect(sessionA.id).toBeDefined();
+
+    const sessionB = await prisma.session.create({
+      data: {
+        id: `sess-fc-b-${Date.now()}`,
+        userId: fcUserId,
+        token: sessionBToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+      },
+    });
+    expect(sessionB.id).toBeDefined();
+
+    const deleteManySpy = vi.spyOn(prisma.session, 'deleteMany').mockRejectedValueOnce(
+      new Error('PostgreSQL deadlock or connectivity failure during session revocation')
+    );
+
+    const env = getEnv();
+    const signedCookieA = signSessionTokenCookie(sessionAToken, env.BETTER_AUTH_SECRET);
+    const pwChangeReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        cookie: `better-auth.session_token=${signedCookieA}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        currentPassword: fcPassword,
+        newPassword: 'AnotherPassword2026!$',
+      }),
+    });
+
+    try {
+      const pwChangeRes = await authRoutePOST(pwChangeReq);
+      // Route must fail closed (non-200), and must NOT report 200 while other sessions remain valid
+      expect(pwChangeRes.status).not.toBe(200);
+    } finally {
+      deleteManySpy.mockRestore();
+      await prisma.session.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
+      await prisma.account.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
+      await prisma.user.deleteMany({ where: { id: fcUserId } }).catch(() => {});
+    }
   });
 
   it('enforces single-use for backup recovery codes', async () => {
@@ -666,6 +811,80 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(concurrentAttempts[1].status).toBe('rejected');
   });
 
+  it('distinguishes incomplete setup from completed enrollment and requires TOTP proof (R06)', async () => {
+    // Create dedicated disposable database for fresh bootstrap test so existing suite owner is untouched
+    const freshBootstrapDb = await createDedicatedTestDatabase('lawoffice_fresh_bootstrap_test');
+
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    await clearGlobalSingletons();
+    process.env.TEST_DATABASE_URL = freshBootstrapDb.url;
+    getEnv(true);
+
+    try {
+      // Migrate fresh bootstrap database
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const client = await freshBootstrapDb.pool.connect();
+      try {
+        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+        for (const s of statements) {
+          await client.query(s).catch(() => {});
+        }
+        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;').catch(() => {});
+        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);').catch(() => {});
+      } finally {
+        client.release();
+      }
+
+      // Initial provisioning of fresh owner
+      const setupResult = await provisionOwner({
+        name: 'مالك قيد الإعداد',
+        email: 'pending.owner@office.eg',
+        password: 'PendingSecret2026!',
+      });
+
+      const prismaFresh = getPrismaClient();
+
+      // R06 Acceptance: Before submitting valid TOTP code, setup is pending/unverified
+      const tfRecord = await prismaFresh.twoFactor.findFirst({
+        where: { userId: setupResult.user.id },
+      });
+      // The twoFactor record must NOT be marked verified before client proves possession
+      expect(tfRecord?.verified).toBe(false);
+
+      // The bootstrap singleton must NOT be permanently closed before authenticator proof
+      const bootstrap = await prismaFresh.officeBootstrap.findUnique({
+        where: { id: 'singleton' },
+      });
+      expect(bootstrap?.isClosed).toBe(false);
+
+      // A pending owner session cannot act as verified owner
+      const pendingSession = await prismaFresh.session.create({
+        data: {
+          id: `sess-pending-${Date.now()}`,
+          userId: setupResult.user.id,
+          token: `token-pending-${Date.now()}`,
+          expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        },
+      });
+
+      // requireActor must reject unverified/pending 2FA with MFA_REQUIRED
+      await expect(
+        requireActor({ sessionToken: pendingSession.token })
+      ).rejects.toThrowError(AuthenticationError);
+    } finally {
+      await clearGlobalSingletons();
+      await freshBootstrapDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  }, 30000);
+
   it('regenerates recovery codes through identity command with attempt throttling and lockout (R09)', async () => {
     const prisma = getPrismaClient();
     const testSessionToken = `sess-r09-${Date.now()}`;
@@ -719,6 +938,55 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await expect(
       regenerateRecoveryCodes(actorA, 'BrandNewPassword2026!#')
     ).rejects.toThrowError(AuthenticationError);
+  });
+
+  it('enforces atomic PostgreSQL concurrency control across 8 simultaneous wrong recovery attempts (R09)', async () => {
+    const prisma = getPrismaClient();
+
+    // Reset failed count and lock for test isolation
+    await prisma.twoFactor.updateMany({
+      where: { userId: provisionedOwner.userId },
+      data: { failedVerificationCount: 0, lockedUntil: null },
+    });
+
+    const testSessionToken = `sess-r09-race-${Date.now()}`;
+    await prisma.session.create({
+      data: {
+        id: `sess-r09-race-id-${Date.now()}`,
+        userId: provisionedOwner.userId,
+        token: testSessionToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+      },
+    });
+    const actor = await requireActor({ sessionToken: testSessionToken });
+
+    // Fire 8 simultaneous wrong-password attempts concurrently
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 8 }).map(() =>
+        regenerateRecoveryCodes(actor, 'WrongPasswordSimultaneous!')
+      )
+    );
+
+    // All attempts must be rejected
+    for (const attempt of attempts) {
+      expect(attempt.status).toBe('rejected');
+    }
+
+    const rejectionReasons = attempts.map(
+      (a) => (a as PromiseRejectedResult).reason as AuthenticationError
+    );
+    const rateLimitedCount = rejectionReasons.filter((r) => r.code === 'RATE_LIMITED').length;
+
+    // With a limit of 5 attempts, at least 3 of the 8 simultaneous requests must be RATE_LIMITED
+    expect(rateLimitedCount).toBeGreaterThanOrEqual(3);
+
+    // Check DB state: account must be locked and failedVerificationCount must be at least 5
+    const tfRecord = await prisma.twoFactor.findFirst({
+      where: { userId: provisionedOwner.userId },
+    });
+    expect(tfRecord?.lockedUntil).not.toBeNull();
+    expect(tfRecord!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+    expect(tfRecord?.failedVerificationCount).toBeGreaterThanOrEqual(5);
   });
 });
 

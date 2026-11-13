@@ -34,7 +34,7 @@ jobs:
     env:
       NODE_ENV: test
       CI: 'true'
-      DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_test?schema=public
+      DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_dev?schema=public
       TEST_DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_test?schema=public
       BETTER_AUTH_SECRET: synthetic_development_secret_32_bytes_minimum_length_required
       BETTER_AUTH_URL: http://127.0.0.1:3100
@@ -60,6 +60,9 @@ jobs:
 
       - name: Deploy Prisma database migrations
         run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_test?schema=public
+
 
       - name: Lint check
         run: npm run lint
