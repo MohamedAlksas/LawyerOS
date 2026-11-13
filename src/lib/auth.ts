@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from '@better-auth/prisma-adapter';
 import { twoFactor } from 'better-auth/plugins';
+import { createAuthMiddleware } from 'better-auth/api';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { getDbPool } from './db';
@@ -81,6 +82,35 @@ function createAuthInstance() {
       },
     },
     plugins: [
+      {
+        id: 'lawoffice-security-policy',
+        hooks: {
+          before: [
+            {
+              matcher(context) {
+                return Boolean(context.path?.includes('/sign-in'));
+              },
+              handler: createAuthMiddleware(async (ctx) => {
+                const cookieHeader = ctx.headers?.get('cookie');
+                if (cookieHeader) {
+                  const cleaned = cookieHeader
+                    .split(';')
+                    .map((c) => c.trim())
+                    .filter(
+                      (c) =>
+                        !c.startsWith('better-auth.trust_device=') &&
+                        !c.startsWith('__Secure-better-auth.trust_device=') &&
+                        !c.startsWith('better-auth.dont_remember_device=') &&
+                        !c.startsWith('__Secure-better-auth.dont_remember_device=')
+                    )
+                    .join('; ');
+                  ctx.headers?.set('cookie', cleaned);
+                }
+              }),
+            },
+          ],
+        },
+      },
       twoFactor({
         issuer: 'LawOffice OS',
         trustDeviceMaxAge: 0,
@@ -93,20 +123,17 @@ function createAuthInstance() {
   });
 }
 
-let cachedAuth: ReturnType<typeof createAuthInstance> | undefined;
-
 /**
  * Lazy singleton Better Auth server instance.
  * Defers database pool acquisition and environment validation until an auth endpoint or query is executed.
  */
 export function getAuth(): ReturnType<typeof createAuthInstance> {
-  const cached = global.__lawoffice_auth ?? cachedAuth;
+  const cached = global.__lawoffice_auth;
   if (cached) {
     return cached;
   }
 
   const instance = createAuthInstance();
-  cachedAuth = instance;
   global.__lawoffice_auth = instance;
   return instance;
 }

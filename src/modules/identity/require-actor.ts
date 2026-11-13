@@ -1,4 +1,4 @@
-import { getPrismaClient } from '@/lib/auth';
+import { getAuth, getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import crypto from 'crypto';
 import { Actor, AuthenticationError, Permission, UserRole } from './types';
@@ -14,128 +14,94 @@ export interface RequireActorOptions {
 const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
 
-function verifyAndExtractCookieToken(rawCookieValue: string): string {
-  const decoded = decodeURIComponent(rawCookieValue);
-  const lastDot = decoded.lastIndexOf('.');
-  if (lastDot < 1) {
-    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
-  }
-
-  const token = decoded.substring(0, lastDot);
-  const signature = decoded.substring(lastDot + 1);
-
-  if (signature.length !== 44 || !signature.endsWith('=')) {
-    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
-  }
-
-  const env = getEnv();
-  const expectedSignature = crypto
-    .createHmac('sha256', env.BETTER_AUTH_SECRET)
-    .update(token)
-    .digest('base64');
-
-  if (
-    expectedSignature.length !== signature.length ||
-    !crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature))
-  ) {
-    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
-  }
-
-  return token;
-}
-
-function extractCookieToken(cookieHeader: string | null): string | null {
-  if (!cookieHeader) return null;
-
-  const cookies = cookieHeader.split(';').map((c) => c.trim());
-  for (const cookie of cookies) {
-    // Matches both plain and __Secure- prefixed Better Auth session cookies
-    if (cookie.startsWith('better-auth.session_token=')) {
-      const val = cookie.substring('better-auth.session_token='.length);
-      return verifyAndExtractCookieToken(val);
-    }
-    if (cookie.startsWith('__Secure-better-auth.session_token=')) {
-      const val = cookie.substring('__Secure-better-auth.session_token='.length);
-      return verifyAndExtractCookieToken(val);
-    }
-  }
-
-  return null;
-}
-
 /**
  * Server-side extraction and authoritative validation of current verified session and actor.
- * Enforces:
- * 1. Valid non-revoked session record in database.
- * 2. 12-hour maximum lifetime bound (from creation time).
- * 3. 30-minute inactivity timeout (from last activity update).
+ * Uses Better Auth's supported verification facility (auth.api.getSession) with:
+ * - disableRefresh: true
+ * - disableCookieCache: true
+ *
+ * Then applies application-level policy checks:
+ * 1. 12-hour maximum lifetime bound (from creation time).
+ * 2. 30-minute inactivity timeout (from last activity update).
+ * 3. Mandatory MFA for OWNER role.
  * 4. Completed Two-Factor Authentication (incomplete MFA rejected with MFA_REQUIRED).
- * 5. Optional granular permission authorization.
+ * 5. Credential invalidation (session.createdAt < account.updatedAt).
+ * 6. Slide inactivity window ONLY after all checks pass.
+ * 7. Optional granular permission authorization.
  */
 export async function requireActor(options: RequireActorOptions = {}): Promise<Actor> {
-  let token = options.sessionToken;
+  let headers = options.headers;
 
-  if (!token) {
-    let cookieHeader: string | null = null;
-    if (options.headers) {
-      cookieHeader = options.headers.get('cookie');
+  if (!headers) {
+    if (options.sessionToken) {
+      const env = getEnv();
+      const signature = crypto
+        .createHmac('sha256', env.BETTER_AUTH_SECRET)
+        .update(options.sessionToken)
+        .digest('base64');
+      const cookieValue = encodeURIComponent(`${options.sessionToken}.${signature}`);
+      headers = new Headers({
+        cookie: `better-auth.session_token=${cookieValue}`,
+      });
     } else {
       try {
-        // Dynamic import next/headers so the module can still run in standalone test environments
-        const { cookies } = await import('next/headers');
-        const cookieStore = await cookies();
-        const rawToken =
-          cookieStore.get('better-auth.session_token')?.value ||
-          cookieStore.get('__Secure-better-auth.session_token')?.value;
-        if (rawToken) {
-          token = verifyAndExtractCookieToken(rawToken);
-        }
-      } catch (err) {
-        if (err instanceof AuthenticationError) {
-          throw err;
-        }
+        const { headers: nextHeaders } = await import('next/headers');
+        headers = await nextHeaders();
+      } catch {
         // Not in Next.js request context (e.g. testing)
       }
     }
-
-    if (!token && cookieHeader) {
-      token = extractCookieToken(cookieHeader) || undefined;
-    }
   }
 
-  if (!token) {
+  if (!headers) {
     throw new AuthenticationError('UNAUTHENTICATED', 'يجب تسجيل الدخول للوصول إلى هذه الشاشة.');
   }
 
-  const prisma = getPrismaClient();
-  const session = await prisma.session.findUnique({
-    where: { token },
-    include: {
-      user: {
-        include: {
-          twoFactors: true,
-        },
+  const auth = getAuth();
+  let sessionData;
+  try {
+    sessionData = await auth.api.getSession({
+      headers,
+      query: {
+        disableRefresh: true,
+        disableCookieCache: true,
       },
-    },
-  });
-
-  if (!session || !session.user) {
+    });
+  } catch {
     throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
   }
 
-  const { user } = session;
+  if (!sessionData || !sessionData.session || !sessionData.user) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
+  }
+
+  const { session } = sessionData;
+  const prisma = getPrismaClient();
+
+  const user = await prisma.user.findUnique({
+    where: { id: sessionData.user.id },
+    include: {
+      twoFactors: true,
+    },
+  });
+
+  if (!user) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'المستخدم المرتبط بهذه الجلسة غير موجود.');
+  }
 
   const now = Date.now();
+  const sessionCreatedAt = new Date(session.createdAt).getTime();
+  const sessionUpdatedAt = new Date(session.updatedAt).getTime();
+  const sessionExpiresAt = new Date(session.expiresAt).getTime();
 
-  // Expiration check from database
-  if (session.expiresAt.getTime() <= now) {
+  // Expiration check
+  if (sessionExpiresAt <= now) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     throw new AuthenticationError('SESSION_EXPIRED', 'انتهت صلاحية الجلسة. برجاء تسجيل الدخول مجدداً.');
   }
 
   // Maximum lifetime check (12 hours)
-  const sessionAgeMs = now - session.createdAt.getTime();
-  if (sessionAgeMs > MAX_SESSION_LIFETIME_MS) {
+  if (now - sessionCreatedAt > MAX_SESSION_LIFETIME_MS) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     throw new AuthenticationError(
       'SESSION_EXPIRED',
@@ -144,8 +110,7 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
   }
 
   // Inactivity timeout check (30 minutes)
-  const inactivityMs = now - session.updatedAt.getTime();
-  if (inactivityMs > INACTIVITY_TIMEOUT_MS) {
+  if (now - sessionUpdatedAt > INACTIVITY_TIMEOUT_MS) {
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     throw new AuthenticationError(
       'SESSION_INACTIVE',
@@ -153,7 +118,7 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     );
   }
 
-  // Mandatory MFA enforcement check (R02):
+  // Mandatory MFA enforcement check:
   // For OWNER role, Two-Factor Authentication is non-negotiable and strictly mandatory.
   if (user.role === 'OWNER' && user.twoFactorEnabled !== true) {
     throw new AuthenticationError(
@@ -166,13 +131,25 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
   const twoFactorRecord = user.twoFactors?.[0];
 
   if (is2faEnabled && !options.allowIncompleteMfa) {
-    // If twoFactor is enabled on user but not verified, or no valid 2FA setup, reject
     if (!twoFactorRecord || twoFactorRecord.verified === false) {
       throw new AuthenticationError('MFA_REQUIRED', 'يلزم استكمال التحقق الثنائي (TOTP) للوصول.');
     }
   }
 
-  // Update session updatedAt to slide the inactivity window
+  // Check if credentials were changed after session creation (B3)
+  const account = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: 'credential' },
+  });
+
+  if (account && sessionCreatedAt < new Date(account.updatedAt).getTime()) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+    throw new AuthenticationError(
+      'SESSION_EXPIRED',
+      'تم تغيير كلمة المرور الخاصة بالحساب. يلزم إعادة تسجيل الدخول.'
+    );
+  }
+
+  // Update session updatedAt to slide the inactivity window ONLY after all checks pass
   await prisma.session.update({
     where: { id: session.id },
     data: { updatedAt: new Date() },

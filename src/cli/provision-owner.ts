@@ -1,6 +1,12 @@
 import readline from 'readline';
 import { Writable } from 'stream';
-import { provisionOwner, confirmOwnerProvisioning, hasAnyOwner } from '../modules/identity/provisioning';
+import {
+  provisionOwner,
+  confirmOwnerProvisioning,
+  isBootstrapClosed,
+  ProvisionOwnerResult,
+} from '../modules/identity/provisioning';
+import { getPrismaClient } from '../lib/auth';
 import { closeDbPool } from '../lib/db';
 
 class MutableStdout extends Writable {
@@ -61,31 +67,69 @@ async function main() {
   console.log('====================================================\n');
 
   try {
-    const alreadyExists = await hasAnyOwner();
-    if (alreadyExists) {
+    const bootstrapClosed = await isBootstrapClosed();
+    if (bootstrapClosed) {
       console.error('[خطأ أمني]: حساب المالك مهيأ بالفعل أو تم إغلاق مسار التهيئة الأولية بشكل دائم.');
       console.error('تم إغلاق مسار التهيئة تلقائياً لمنع إضافة حسابات مالك إضافية.');
       process.exit(1);
     }
 
-    const isInteractive = Boolean(process.stdin.isTTY);
+    const prisma = getPrismaClient();
+    const existingOwner = await prisma.user.findFirst({
+      where: { role: 'OWNER' },
+      include: {
+        twoFactors: true,
+      },
+    });
 
-    const name =
-      process.env.OWNER_NAME || (isInteractive ? await prompt('أدخل الاسم الكامل للمالك: ') : '');
-    const email =
-      process.env.OWNER_EMAIL || (isInteractive ? await prompt('أدخل البريد الإلكتروني للمالك: ') : '');
-    const password =
-      process.env.OWNER_PASSWORD ||
-      (isInteractive ? await prompt('أدخل كلمة المرور (8 أحرف على الأقل): ', true) : '');
-
-    if (!name || !email || !password) {
-      console.error('[خطأ]: جميع الحقول (الاسم، البريد الإلكتروني، كلمة المرور) مطلوبة.');
+    if (existingOwner && existingOwner.twoFactors[0]?.verified === true) {
+      console.error('[خطأ أمني]: حساب المالك مهيأ ومكتمل بالفعل في النظام.');
       process.exit(1);
     }
 
-    console.log('\nجارٍ إنشاء الحساب وتوليد مفاتيح المصادقة الثنائية...\n');
+    const isInteractive = Boolean(process.stdin.isTTY);
+    let result: ProvisionOwnerResult;
 
-    const result = await provisionOwner({ name, email, password, verified: false });
+    if (existingOwner && existingOwner.twoFactors[0]?.verified === false) {
+      // Pending owner setup detected - resume setup
+      console.log('تنبيه: تم العثور على حساب مالك معلق لم يكتمل إعداده بعد.');
+      console.log(`البريد الإلكتروني المسجل: ${existingOwner.email}\n`);
+
+      const password =
+        process.env.OWNER_PASSWORD ||
+        (isInteractive
+          ? await prompt('أدخل كلمة المرور لاستئناف إعداد حساب المالك المعلق: ', true)
+          : '');
+
+      if (!password) {
+        console.error('[خطأ]: كلمة المرور مطلوبة لاستئناف إعداد الحساب المعلق.');
+        process.exit(1);
+      }
+
+      console.log('\nجارٍ استئناف إعداد الحساب واسترجاع مفاتيح المصادقة الثنائية...\n');
+      result = await provisionOwner({
+        name: existingOwner.name,
+        email: existingOwner.email,
+        password,
+      });
+    } else {
+      // Fresh owner provisioning
+      const name =
+        process.env.OWNER_NAME || (isInteractive ? await prompt('أدخل الاسم الكامل للمالك: ') : '');
+      const email =
+        process.env.OWNER_EMAIL || (isInteractive ? await prompt('أدخل البريد الإلكتروني للمالك: ') : '');
+      const password =
+        process.env.OWNER_PASSWORD ||
+        (isInteractive ? await prompt('أدخل كلمة المرور (8 أحرف على الأقل): ', true) : '');
+
+      if (!name || !email || !password) {
+        console.error('[خطأ]: جميع الحقول (الاسم، البريد الإلكتروني، كلمة المرور) مطلوبة.');
+        process.exit(1);
+      }
+
+      console.log('\nجارٍ إنشاء الحساب وتوليد مفاتيح المصادقة الثنائية...\n');
+      result = await provisionOwner({ name, email, password });
+    }
 
     if (isInteractive) {
       console.log('----------------------------------------------------');

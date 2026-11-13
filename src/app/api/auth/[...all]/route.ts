@@ -4,12 +4,29 @@ import { NextRequest, NextResponse } from 'next/server';
 const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
 
-function extractSessionToken(request: NextRequest): string | null {
-  const raw =
-    request.cookies.get('better-auth.session_token')?.value ||
-    request.cookies.get('__Secure-better-auth.session_token')?.value;
-  if (!raw) return null;
-  return decodeURIComponent(raw.split('.')[0]);
+function extractSessionTokens(request: NextRequest): string[] {
+  const tokens: string[] = [];
+  const secureCookie = request.cookies.get('__Secure-better-auth.session_token')?.value;
+  const plainCookie = request.cookies.get('better-auth.session_token')?.value;
+
+  const isHttps =
+    request.url.startsWith('https://') ||
+    request.headers.get('x-forwarded-proto') === 'https';
+
+  const orderedValues = isHttps
+    ? [secureCookie, plainCookie]
+    : [plainCookie, secureCookie];
+
+  for (const raw of orderedValues) {
+    if (raw) {
+      const decoded = decodeURIComponent(raw.split('.')[0]);
+      if (decoded && !tokens.includes(decoded)) {
+        tokens.push(decoded);
+      }
+    }
+  }
+
+  return tokens;
 }
 
 async function handleAuthSecurityGuards(request: NextRequest): Promise<NextResponse | null> {
@@ -31,37 +48,69 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
     );
   }
 
-  // R03: Intercept session cookie before library handlers touch it
-  const token = extractSessionToken(request);
-  if (token) {
+  // R02: Strip trusted device cookies on sign-in
+  if (pathname.includes('/sign-in')) {
+    const cookieHeader = request.headers.get('cookie');
+    if (cookieHeader) {
+      const cleaned = cookieHeader
+        .split(';')
+        .map((c) => c.trim())
+        .filter(
+          (c) =>
+            !c.startsWith('better-auth.trust_device=') &&
+            !c.startsWith('__Secure-better-auth.trust_device=') &&
+            !c.startsWith('better-auth.dont_remember_device=') &&
+            !c.startsWith('__Secure-better-auth.dont_remember_device=')
+        )
+        .join('; ');
+      request.headers.set('cookie', cleaned);
+    }
+  }
+
+  // R03: Intercept session cookies before library handlers touch them
+  const tokens = extractSessionTokens(request);
+  if (tokens.length > 0) {
     try {
       const prisma = getPrismaClient();
-      const session = await prisma.session.findUnique({
-        where: { token },
-      });
+      for (const token of tokens) {
+        const session = await prisma.session.findUnique({
+          where: { token },
+        });
 
-      if (session) {
-        const now = Date.now();
-        const isExpired =
-          session.expiresAt.getTime() <= now ||
-          now - session.createdAt.getTime() > MAX_SESSION_LIFETIME_MS;
-        const isInactive = now - session.updatedAt.getTime() > INACTIVITY_TIMEOUT_MS;
+        if (session) {
+          const now = Date.now();
+          const isExpired =
+            session.expiresAt.getTime() <= now ||
+            now - session.createdAt.getTime() > MAX_SESSION_LIFETIME_MS;
+          const isInactive = now - session.updatedAt.getTime() > INACTIVITY_TIMEOUT_MS;
 
-        if (isExpired || isInactive) {
-          // Immediately evict session from database so library handlers cannot revive it
-          await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+          // Check if credential was changed after session creation (B3)
+          let isCredentialInvalidated = false;
+          const account = await prisma.account.findFirst({
+            where: { userId: session.userId, providerId: 'credential' },
+          });
+          if (account && session.createdAt.getTime() < account.updatedAt.getTime()) {
+            isCredentialInvalidated = true;
+          }
 
-          const response = NextResponse.json(
-            {
-              error: isInactive
-                ? 'تم قفل الجلسة لعدم النشاط لمدة تتجاوز 30 دقيقة.'
-                : 'انتهت مدة صلاحية الجلسة (الحد الأقصى 12 ساعة).',
-            },
-            { status: 401 }
-          );
-          response.cookies.delete('better-auth.session_token');
-          response.cookies.delete('__Secure-better-auth.session_token');
-          return response;
+          if (isExpired || isInactive || isCredentialInvalidated) {
+            // Immediately evict session from database so library handlers cannot revive it
+            await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+
+            const response = NextResponse.json(
+              {
+                error: isInactive
+                  ? 'تم قفل الجلسة لعدم النشاط لمدة تتجاوز 30 دقيقة.'
+                  : isCredentialInvalidated
+                    ? 'تم تغيير كلمة المرور الخاصة بالحساب. يلزم إعادة تسجيل الدخول.'
+                    : 'انتهت مدة صلاحية الجلسة (الحد الأقصى 12 ساعة).',
+              },
+              { status: 401 }
+            );
+            response.cookies.delete('better-auth.session_token');
+            response.cookies.delete('__Secure-better-auth.session_token');
+            return response;
+          }
         }
       }
     } catch {
@@ -87,16 +136,32 @@ export async function POST(request: NextRequest) {
   if (blocked) return blocked;
 
   const pathname = request.nextUrl.pathname;
-  const token = extractSessionToken(request);
+  const tokens = extractSessionTokens(request);
+  const currentToken = tokens[0];
 
-  const response = await auth.handler(request);
+  let reqToExecute = request;
+  if (pathname.includes('/change-password')) {
+    try {
+      const body = await request.clone().json();
+      body.revokeOtherSessions = true;
+      reqToExecute = new NextRequest(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // Pass original request if not JSON
+    }
+  }
+
+  const response = await auth.handler(reqToExecute);
 
   // R04: When password change succeeds, revoke all other sessions for this user server-side
-  if (pathname.includes('/change-password') && response.status === 200 && token) {
+  if (pathname.includes('/change-password') && response.status === 200 && currentToken) {
     try {
       const prisma = getPrismaClient();
       const currentSession = await prisma.session.findUnique({
-        where: { token },
+        where: { token: currentToken },
       });
       if (currentSession) {
         await prisma.session.deleteMany({

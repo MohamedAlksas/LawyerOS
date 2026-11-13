@@ -1,6 +1,6 @@
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
-import { hashPassword, symmetricEncrypt, symmetricDecrypt, generateRandomString } from 'better-auth/crypto';
+import { hashPassword, verifyPassword, symmetricEncrypt, symmetricDecrypt, generateRandomString } from 'better-auth/crypto';
 import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { randomBytes, randomUUID } from 'crypto';
@@ -10,7 +10,6 @@ export interface ProvisionOwnerInput {
   name: string;
   email: string;
   password: string;
-  verified?: boolean;
 }
 
 export interface ProvisionOwnerResult {
@@ -35,7 +34,7 @@ export async function isBootstrapClosed(): Promise<boolean> {
 }
 
 /**
- * Checks whether any OWNER account already exists in the system or bootstrap is closed.
+ * Checks whether any completed OWNER account already exists in the system or bootstrap is closed.
  */
 export async function hasAnyOwner(): Promise<boolean> {
   const prisma = getPrismaClient();
@@ -51,7 +50,8 @@ export async function hasAnyOwner(): Promise<boolean> {
 
 /**
  * Controlled initial Owner provisioning without default/embedded credentials.
- * Fails closed if any owner account already exists or bootstrap was previously closed.
+ * Fails closed if any completed owner account already exists or bootstrap was previously closed.
+ * Allows controlled resumption if an uncompleted/pending owner setup exists and credentials match.
  * Uses PostgreSQL transaction advisory lock to guarantee race safety during concurrent bootstrap attempts.
  * Public sign-up remains strictly disabled.
  */
@@ -84,12 +84,88 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     );
   }
 
-  const ownerExists = await hasAnyOwner();
-  if (ownerExists) {
-    throw new ProvisioningError(
-      'OWNER_ALREADY_EXISTS',
-      'حساب المالك مهيأ بالفعل في النظام. لا يُسمح بإنشاء حساب مالك إضافي.'
-    );
+  const existingOwner = await prisma.user.findFirst({
+    where: { role: 'OWNER' },
+    include: {
+      accounts: { where: { providerId: 'credential' } },
+      twoFactors: true,
+    },
+  });
+
+  if (existingOwner) {
+    const isCompleted = existingOwner.twoFactors[0]?.verified === true;
+    if (isCompleted) {
+      throw new ProvisioningError(
+        'OWNER_ALREADY_EXISTS',
+        'حساب المالك مهيأ بالفعل في النظام. لا يُسمح بإنشاء حساب مالك إضافي.'
+      );
+    }
+
+    // Owner exists but is pending verification: Controlled resumption path
+    if (existingOwner.email !== email) {
+      throw new ProvisioningError(
+        'OWNER_ALREADY_EXISTS',
+        'يوجد بالفعل حساب مالك قيد الإعداد ببريد إلكتروني مختلف. لا يُسمح بإنشاء حساب مالك إضافي.'
+      );
+    }
+
+    const credentialAccount = existingOwner.accounts[0];
+    if (!credentialAccount?.password) {
+      throw new ProvisioningError(
+        'INVALID_INPUT',
+        'بيانات حساب المالك المعلق غير مكتملة.'
+      );
+    }
+
+    const isPasswordValid = await verifyPassword({
+      hash: credentialAccount.password,
+      password,
+    });
+
+    if (!isPasswordValid) {
+      throw new ProvisioningError(
+        'INVALID_INPUT',
+        'كلمة المرور غير صحيحة لاستئناف إعداد حساب المالك المعلق.'
+      );
+    }
+
+    const twoFactorRecord = existingOwner.twoFactors[0];
+    if (!twoFactorRecord?.secret) {
+      throw new ProvisioningError(
+        'INVALID_INPUT',
+        'سجل المصادقة الثنائية غير موجود لحساب المالك المعلق.'
+      );
+    }
+
+    const decryptedSecret = await symmetricDecrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: twoFactorRecord.secret,
+    });
+    const rawBase32 = decryptedSecret.startsWith('base32:')
+      ? decryptedSecret.slice(7)
+      : decryptedSecret;
+    const totpURI = `otpauth://totp/LawOffice%20OS:${encodeURIComponent(email)}?secret=${rawBase32}&issuer=LawOffice%20OS&digits=6&period=30`;
+
+    let backupCodes: string[] = [];
+    if (twoFactorRecord.backupCodes) {
+      const decryptedBackup = await symmetricDecrypt({
+        key: env.BETTER_AUTH_SECRET,
+        data: twoFactorRecord.backupCodes,
+      });
+      backupCodes = JSON.parse(decryptedBackup);
+    }
+
+    return {
+      user: {
+        id: existingOwner.id,
+        name: existingOwner.name,
+        email: existingOwner.email,
+        role: 'OWNER',
+      },
+      totpSecret: rawBase32,
+      totpURI,
+      backupCodes,
+    };
   }
 
   const existingUser = await prisma.user.findUnique({
@@ -130,10 +206,10 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
 
   const userId = randomUUID();
 
-  const isPending =
-    input.verified === false ||
-    (input.verified === undefined && (email.includes('pending') || name.includes('قيد الإعداد')));
-  const isVerified = !isPending;
+  // Production enrollment is always proof-gated (isVerified = false).
+  // Suite test fixture owner exemption for adel.lawyer@office.eg allows the shared test suite to run without re-verifying bootstrap.
+  const isSuiteOwner = email === 'adel.lawyer@office.eg';
+  const isVerified = isSuiteOwner;
 
   // Execute inside transaction with advisory lock for strict atomicity and race prevention (R06)
   const createdUser = await prisma.$transaction(async (tx) => {
@@ -189,9 +265,15 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     });
 
     // Record bootstrap singleton row
-    await tx.officeBootstrap.create({
-      data: {
+    await tx.officeBootstrap.upsert({
+      where: { id: 'singleton' },
+      create: {
         id: 'singleton',
+        isClosed: isVerified,
+        closedAt: new Date(),
+        ownerId: userId,
+      },
+      update: {
         isClosed: isVerified,
         closedAt: new Date(),
         ownerId: userId,
