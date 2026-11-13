@@ -120,46 +120,51 @@ npm run test:e2e
 
 ## 6. Canonical Identity Migration Baseline Procedure (T03 / R08)
 
-To safely baseline the initial Identity and Better Auth schema on an existing non-empty PostgreSQL database without data loss, follow this canonical, fail-fast procedure:
+To safely baseline the initial Identity and Better Auth schema on an existing non-empty PostgreSQL database without data loss, follow this canonical, fail-fast procedure via the dedicated baseline tool:
 
-### 6.1 Preflight & Environment
-Ensure the target database is reachable via `$DATABASE_URL` and that pre-existing data (e.g. sentinel records) is confirmed intact.
-
-### 6.2 Fail-Fast Single-Transaction SQL Execution
-Execute the entire migration script in a single transaction with `ON_ERROR_STOP=1` so that any naming conflict or syntax failure immediately rolls back the transaction and stops with a non-zero exit code:
+### 6.1 Single Executable Baseline Command
+Execute the canonical baseline CLI script with an explicit target database URL:
 ```powershell
-# Execute whole-file SQL with fail-fast transaction semantics
-psql -v ON_ERROR_STOP=1 --single-transaction -f prisma/migrations/20261111000000_init_auth/migration.sql "$DATABASE_URL"
+# PowerShell: Explicit target URL binding
+npx tsx src/cli/baseline-identity.ts --target-url "$env:DATABASE_URL"
 ```
 
-### 6.3 Pre-Baseline Schema & Column Verification
-Verify in PostgreSQL that all expected tables and columns exist **before** marking the migration as applied in Prisma:
-```sql
--- Verify all tables exist
-SELECT table_name FROM information_schema.tables 
-WHERE table_schema = 'public' 
-  AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
-
--- Verify critical security columns exist on twoFactor
-SELECT column_name FROM information_schema.columns 
-WHERE table_schema = 'public' 
-  AND table_name = 'twoFactor' 
-  AND column_name IN ('failedVerificationCount', 'lockedUntil');
+```bash
+# POSIX / Bash:
+npx tsx src/cli/baseline-identity.ts --target-url "$DATABASE_URL"
 ```
 
-### 6.4 Record Applied Migration in Prisma History
-Only after PostgreSQL schema verification succeeds, record the migration as applied in the Prisma migration table:
-```powershell
-npx prisma migrate resolve --applied 20261111000000_init_auth
-```
+### 6.2 Procedure Architecture & Execution Safeguards
+The `baseline-identity` entry point enforces strict execution guarantees in sequence:
 
-### 6.5 Verify Migration Status and Deploy
-Confirm that Prisma reports no drift or pending migrations:
+1. **Explicit Target Requirement & Ambient Prevention**:
+   - Rejects empty target URLs fail-closed (exit code 1).
+   - Extracts explicit connection parameters (`host`, `port`, `database`, `user`, `password`, `ssl`), preventing ambient driver fallback variables (`PGDATABASE`, `PGPORT`) from redirecting the connection.
+   - Executes `SELECT current_database()` and asserts that the connected database matches the intended target database before executing any statements.
+
+2. **Fail-Fast Whole-File Transaction**:
+   - Executes `prisma/migrations/20261111000000_init_auth/migration.sql` in a single transaction (`BEGIN ... COMMIT`).
+   - Any SQL error or collision triggers immediate `ROLLBACK`, leaving pre-existing data (e.g. sentinel records) completely undamaged.
+
+3. **Deep Catalog & Schema Verification Before History Recording**:
+   - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema equivalence or check for missing columns.
+   - For this reason, `baseline-identity.ts` performs direct PostgreSQL catalog verification in `information_schema` and `pg_indexes` **before** marking the migration as applied in Prisma:
+     - Verifies all required tables exist: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
+     - Verifies all critical columns exist: including `twoFactor.failedVerificationCount`, `twoFactor.lockedUntil`, and `office_bootstrap.isClosed`.
+     - Verifies primary keys (`user_pkey`, `session_pkey`, etc.) and foreign key constraints (`session_userId_fkey`, etc.).
+     - Verifies required unique and lookup indexes (`user_email_key`, `session_token_key`, etc.).
+     - Verifies custom enum types (`UserRole`).
+
+4. **Scoped Migration History Recording**:
+   - Only after physical schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the explicit target database URL.
+   - Executes `npx prisma migrate status` passing the explicit target URL to confirm migration history is clean.
+
+### 6.3 Post-Baseline Verification
+Confirm that Prisma reports no pending migrations:
 ```powershell
-npx prisma migrate status
 npx prisma migrate deploy
 ```
-Expected output from deploy: `No pending migrations to apply`.
+Expected output: `No pending migrations to apply`.
 
-### 6.6 Failure & Conflict Safety Guarantee
-If an incompatible conflicting table exists (e.g. conflicting `user` table), `psql` aborts the transaction immediately due to `ON_ERROR_STOP=1`. The script fails with a non-zero exit code, `_prisma_migrations` does not record the migration as applied, and pre-existing data remains undamaged. Once the conflict is resolved (e.g. dropping the conflicting entity), the procedure can be retried cleanly.
+### 6.4 Failure & Conflict Safety Guarantee
+If an incompatible conflicting entity exists (e.g. pre-existing `user` table with different structure), the transaction aborts and rolls back immediately. The script exits with code 1, `_prisma_migrations` does not record the migration, and pre-existing data remains intact. Once the collision is resolved, re-running `baseline-identity.ts` completes cleanly.
