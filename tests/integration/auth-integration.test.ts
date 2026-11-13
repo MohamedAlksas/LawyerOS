@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import {
   provisionOwner,
+  confirmOwnerProvisioning,
   hasAnyOwner,
   isBootstrapClosed,
   requireActor,
@@ -26,12 +27,20 @@ import crypto from 'crypto';
 import { GET as authRouteGET, POST as authRoutePOST } from '@/app/api/auth/[...all]/route';
 import {
   createDedicatedTestDatabase,
+  createValidatedTestPool,
+  cleanupTrackedFixtures,
   validateTestEnvironment,
 } from '../helpers/test-db';
 
 function signSessionTokenCookie(token: string, secret: string): string {
   const signature = crypto.createHmac('sha256', secret).update(token).digest('base64');
   return encodeURIComponent(`${token}.${signature}`);
+}
+
+async function generateTotpCode(secret: string): Promise<string> {
+  const secretBytes = base32.decode(secret.toUpperCase());
+  const otpHelper = createOTP(secretBytes, { period: 30, digits: 6 });
+  return otpHelper.totp();
 }
 
 async function clearGlobalSingletons(): Promise<void> {
@@ -48,9 +57,9 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
   let originalTestDatabaseUrl: string | undefined;
 
   beforeAll(async () => {
-    // 1. Create isolated dedicated test database so sentinel data and bootstrap in lawoffice_test remain untouched (R07)
+    // 1. Create unique isolated dedicated test database so sentinel data and bootstrap in lawoffice_test remain untouched (R07)
     originalTestDatabaseUrl = process.env.TEST_DATABASE_URL;
-    dedicated = await createDedicatedTestDatabase('lawoffice_auth_suite_test');
+    dedicated = await createDedicatedTestDatabase();
     pool = dedicated.pool;
 
     // Switch environment to dedicated test database for Prisma and Better Auth singletons
@@ -368,6 +377,45 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect((signInRes as Record<string, unknown>).twoFactorRedirect).toBe(true);
   });
 
+  it('rejects historical trusted-device cookie and requires fresh 2FA challenge on sign-in (R02)', async () => {
+    const prisma = getPrismaClient();
+    const auth = getAuth();
+
+    // Seed a historical trusted-device verification record in the database
+    const trustToken = `trust-${Date.now()}`;
+    await prisma.verification.create({
+      data: {
+        id: `verif-trust-${Date.now()}`,
+        identifier: `device-trust:${provisionedOwner.userId}`,
+        value: trustToken,
+        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000), // 30-day unexpired historical trust
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+
+    try {
+      // Client presents historical trusted-device cookie or header
+      const signInRes = await auth.api.signInEmail({
+        body: {
+          email: provisionedOwner.email,
+          password: 'StrongOwnerSecret2026!',
+        },
+        headers: new Headers({
+          cookie: `better-auth.dont_remember_device=${trustToken}`,
+        }),
+      });
+
+      // Must demand a fresh 2FA challenge (twoFactorRedirect: true) and NOT grant session immediately
+      expect(signInRes).toBeDefined();
+      expect((signInRes as Record<string, unknown>).twoFactorRedirect).toBe(true);
+    } finally {
+      await prisma.verification.deleteMany({
+        where: { identifier: `device-trust:${provisionedOwner.userId}` },
+      }).catch(() => {});
+    }
+  });
+
   it('fails closed and returns sanitized non-success if pre-handler guard encounters database error (R03)', async () => {
     const prisma = getPrismaClient();
     const spy = vi.spyOn(prisma.session, 'findUnique').mockRejectedValueOnce(
@@ -466,6 +514,12 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       const pwChangeRes = await authRoutePOST(pwChangeReq);
       // Route must fail closed (non-200), and must NOT report 200 while other sessions remain valid
       expect(pwChangeRes.status).not.toBe(200);
+
+      // Safe state requirement (R04):
+      // If revocation failed, pre-change other sessions must NOT remain usable as authorized actors
+      await expect(
+        requireActor({ sessionToken: sessionBToken })
+      ).rejects.toThrow();
     } finally {
       deleteManySpy.mockRestore();
       await prisma.session.deleteMany({ where: { userId: fcUserId } }).catch(() => {});
@@ -719,6 +773,34 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(checkMaxLifeDb).toBeNull();
   });
 
+  it('rejects HTTPS request with idle __Secure session token even when accompanied by invalid decoy plain cookie (R03)', async () => {
+    const prisma = getPrismaClient();
+
+    // Create an idle session (> 30 mins)
+    const idleToken = `secure-idle-${Date.now()}`;
+    await prisma.session.create({
+      data: {
+        id: `sess-sec-idle-${Date.now()}`,
+        userId: provisionedOwner.userId,
+        token: idleToken,
+        createdAt: new Date(Date.now() - 40 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 32 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 10 * 3600 * 1000),
+      },
+    });
+
+    // Request over HTTPS with decoy plain cookie + idle __Secure cookie
+    const req = new NextRequest('https://office.lawoffice.internal/api/auth/get-session', {
+      headers: {
+        cookie: `better-auth.session_token=decoy-invalid-token; __Secure-better-auth.session_token=${idleToken}`,
+      },
+    });
+
+    const res = await authRouteGET(req);
+    // Must be rejected as 401 (inactivity timeout), NOT refreshed or allowed to pass
+    expect(res.status).toBe(401);
+  });
+
   it('revokes all other sessions upon password change (R04)', async () => {
     const prisma = getPrismaClient();
 
@@ -813,7 +895,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
   it('distinguishes incomplete setup from completed enrollment and requires TOTP proof (R06)', async () => {
     // Create dedicated disposable database for fresh bootstrap test so existing suite owner is untouched
-    const freshBootstrapDb = await createDedicatedTestDatabase('lawoffice_fresh_bootstrap_test');
+    const freshBootstrapDb = await createDedicatedTestDatabase();
 
     const prevUrl = process.env.TEST_DATABASE_URL;
     await clearGlobalSingletons();
@@ -839,10 +921,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         client.release();
       }
 
-      // Initial provisioning of fresh owner
+      // Initial provisioning of fresh owner with ordinary Arabic name and normal email (NO magic string heuristics)
       const setupResult = await provisionOwner({
-        name: 'مالك قيد الإعداد',
-        email: 'pending.owner@office.eg',
+        name: 'الأستاذ أحمد فؤاد المحامي',
+        email: 'ahmed.fouad@office.eg',
         password: 'PendingSecret2026!',
       });
 
@@ -875,6 +957,29 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       await expect(
         requireActor({ sessionToken: pendingSession.token })
       ).rejects.toThrowError(AuthenticationError);
+
+      // Interrupted CLI setup resumption:
+      // Re-invoking provisionOwner with identical credentials when setup is pending resumes setup rather than failing
+      const resumedResult = await provisionOwner({
+        name: 'الأستاذ أحمد فؤاد المحامي',
+        email: 'ahmed.fouad@office.eg',
+        password: 'PendingSecret2026!',
+      });
+      expect(resumedResult.user.id).toBe(setupResult.user.id);
+
+      // Confirm owner provisioning with valid TOTP code to complete enrollment
+      const validCode = await generateTotpCode(resumedResult.totpSecret);
+      await confirmOwnerProvisioning(resumedResult.user.id, validCode);
+
+      const tfRecordAfter = await prismaFresh.twoFactor.findFirst({
+        where: { userId: setupResult.user.id },
+      });
+      expect(tfRecordAfter?.verified).toBe(true);
+
+      const bootstrapAfter = await prismaFresh.officeBootstrap.findUnique({
+        where: { id: 'singleton' },
+      });
+      expect(bootstrapAfter?.isClosed).toBe(true);
     } finally {
       await clearGlobalSingletons();
       await freshBootstrapDb.drop().catch(() => {});
@@ -988,6 +1093,17 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(tfRecord!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
     expect(tfRecord?.failedVerificationCount).toBeGreaterThanOrEqual(5);
   });
+
+  afterAll(async () => {
+    await clearGlobalSingletons();
+    if (dedicated) {
+      await dedicated.drop().catch(() => {});
+    }
+    if (originalTestDatabaseUrl) {
+      process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      getEnv(true);
+    }
+  });
 });
 
 describe('Test Target Validation & Isolation Guard (R07)', () => {
@@ -1098,5 +1214,150 @@ describe('Test Target Validation & Isolation Guard (R07)', () => {
       expect(envErr.invalidKeys).toContain('TEST_DATABASE_URL');
       expect(envErr.message).toContain('must point to a dedicated test database (e.g. ending in _test');
     }
+  });
+
+  it('refuses collision on existing database and preserves sentinel data without dropping or disconnecting (R07)', async () => {
+    // 1. Manually create a sentinel database with unique name
+    const sentinelDbName = `lawoffice_sentinel_${Date.now()}_test`;
+    const { pool: adminPool } = createValidatedTestPool();
+    const adminClient = await adminPool.connect();
+    try {
+      await adminClient.query(`CREATE DATABASE "${sentinelDbName}";`);
+    } finally {
+      adminClient.release();
+      await adminPool.end();
+    }
+
+    // 2. Put sentinel data into the sentinel database
+    const rawTarget = process.env.TEST_DATABASE_URL!;
+    const sentinelUrl = new URL(rawTarget);
+    sentinelUrl.pathname = `/${sentinelDbName}`;
+    const { pool: sentinelPool } = createValidatedTestPool({ TEST_DATABASE_URL: sentinelUrl.toString() });
+    const sClient = await sentinelPool.connect();
+    try {
+      await sClient.query('CREATE TABLE sentinel_table (id SERIAL PRIMARY KEY, marker TEXT);');
+      await sClient.query("INSERT INTO sentinel_table (marker) VALUES ('DO_NOT_DESTROY');");
+    } finally {
+      sClient.release();
+      await sentinelPool.end();
+    }
+
+    try {
+      // 3. Attempt to create dedicated test database with the SAME existing name
+      await expect(createDedicatedTestDatabase(sentinelDbName)).rejects.toThrow(
+        `Refusing to overwrite existing database '${sentinelDbName}'. Collision detected.`
+      );
+
+      // 4. Verify sentinel database still exists and data is untouched
+      const { pool: verifyPool } = createValidatedTestPool({ TEST_DATABASE_URL: sentinelUrl.toString() });
+      const vClient = await verifyPool.connect();
+      try {
+        const res = await vClient.query("SELECT marker FROM sentinel_table WHERE marker = 'DO_NOT_DESTROY';");
+        expect(res.rows.length).toBe(1);
+        expect(res.rows[0].marker).toBe('DO_NOT_DESTROY');
+      } finally {
+        vClient.release();
+        await verifyPool.end();
+      }
+    } finally {
+      // Clean up our manual sentinel database
+      const { pool: cleanupPool } = createValidatedTestPool();
+      const cClient = await cleanupPool.connect();
+      try {
+        await cClient.query(`DROP DATABASE IF EXISTS "${sentinelDbName}" WITH (FORCE);`);
+      } finally {
+        cClient.release();
+        await cleanupPool.end();
+      }
+    }
+  });
+
+  it('preserves unrelated sentinel user when cleaning up tracked fixtures by userIds (R07)', async () => {
+    const sentinelDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    process.env.TEST_DATABASE_URL = sentinelDb.url;
+    getEnv(true);
+    await clearGlobalSingletons();
+
+    try {
+      // Migrate sentinelDb
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const client = await sentinelDb.pool.connect();
+      try {
+        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
+        for (const s of statements) {
+          await client.query(s).catch(() => {});
+        }
+      } finally {
+        client.release();
+      }
+
+      const prisma = getPrismaClient();
+
+      // 1. Create a sentinel user record that is NOT tracked by the suite fixture set
+      const sentinelUser = await prisma.user.create({
+        data: {
+          id: `sentinel-${Date.now()}`,
+          name: 'حساب مراقبة دائم',
+          email: `sentinel.${Date.now()}@office.eg`,
+          role: 'MAINTAINER',
+        },
+      });
+
+      // 2. Create a test fixture user record with a distinct ID
+      const fixtureUser = await prisma.user.create({
+        data: {
+          id: `fixture-${Date.now()}`,
+          name: 'مستخدم تجريبي مؤقت',
+          email: `fixture.${Date.now()}@office.eg`,
+          role: 'OWNER',
+        },
+      });
+
+      // 3. Run cleanupTrackedFixtures strictly tracking the fixture ID only
+      await cleanupTrackedFixtures(sentinelDb.pool, { userIds: [fixtureUser.id] });
+
+      // 4. Assert fixture user was deleted, but sentinel user survives
+      const foundFixture = await prisma.user.findUnique({ where: { id: fixtureUser.id } });
+      expect(foundFixture).toBeNull();
+
+      const foundSentinel = await prisma.user.findUnique({ where: { id: sentinelUser.id } });
+      expect(foundSentinel).not.toBeNull();
+      expect(foundSentinel?.id).toBe(sentinelUser.id);
+    } finally {
+      await clearGlobalSingletons();
+      await sentinelDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  });
+
+  it('fails closed when createValidatedTestPool poolConfig attempts to target operational development or non-test database (R07)', () => {
+    // 1. Connection string override targeting lawoffice_dev
+    expect(() => {
+      createValidatedTestPool({}, {
+        connectionString: 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_dev',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    // 2. Database name override targeting lawoffice_dev
+    expect(() => {
+      createValidatedTestPool({}, {
+        database: 'lawoffice_dev',
+      });
+    }).toThrowError(EnvironmentValidationError);
+
+    // 3. Database name override targeting non-test database
+    expect(() => {
+      createValidatedTestPool({}, {
+        database: 'lawoffice_production',
+      });
+    }).toThrowError(EnvironmentValidationError);
   });
 });

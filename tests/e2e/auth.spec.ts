@@ -3,12 +3,16 @@ import { hashPassword, symmetricEncrypt } from 'better-auth/crypto';
 import { createOTP } from '@better-auth/utils/otp';
 import { base32 } from '@better-auth/utils/base32';
 import { randomUUID } from 'crypto';
-import { createValidatedTestPool } from '../helpers/test-db';
+import { createValidatedTestPool, cleanupTrackedFixtures } from '../helpers/test-db';
 
-const TEST_EMAIL = 'lawyer.e2e@office.eg';
+const runId = `${Date.now()}.${randomUUID().slice(0, 8)}`;
+const TEST_EMAIL = `lawyer.e2e.${runId}@office.eg`;
 const TEST_PASSWORD = 'E2EPassword2026!';
 const TOTP_SECRET = 'SZ7CE4ZHNWC37XUUQ5S4HNQLL6SNJ6XT';
 const BACKUP_CODE = 'bkp01-code2';
+
+const trackedFixtureUserIds: string[] = [];
+let testUserId: string | null = null;
 
 test.beforeEach(async () => {
   // 1. Strictly validate test environment before connecting (R07)
@@ -24,31 +28,29 @@ test.beforeEach(async () => {
       data: JSON.stringify([BACKUP_CODE, 'bkp02-code3', 'bkp03-code4']),
     });
 
-    const existing = await client.query('SELECT id FROM "user" WHERE email = $1', [TEST_EMAIL]);
-    let userId: string;
-    if (existing.rows.length === 0) {
-      userId = randomUUID();
+    if (!testUserId) {
+      testUserId = randomUUID();
+      trackedFixtureUserIds.push(testUserId);
       await client.query(
         'INSERT INTO "user" (id, name, email, "emailVerified", role, "twoFactorEnabled", "createdAt", "updatedAt") VALUES ($1, $2, $3, true, $4, true, NOW(), NOW())',
-        [userId, 'المحامي التجريبي', TEST_EMAIL, 'OWNER']
+        [testUserId, 'المحامي التجريبي', TEST_EMAIL, 'OWNER']
       );
       await client.query(
         'INSERT INTO "account" (id, "userId", "providerId", "accountId", password, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, NOW(), NOW())',
-        [randomUUID(), userId, 'credential', userId, hashedPassword]
+        [randomUUID(), testUserId, 'credential', testUserId, hashedPassword]
       );
       await client.query(
         'INSERT INTO "twoFactor" (id, "userId", secret, "backupCodes", verified) VALUES ($1, $2, $3, $4, true)',
-        [randomUUID(), userId, encryptedSecret, encryptedBackupCodes]
+        [randomUUID(), testUserId, encryptedSecret, encryptedBackupCodes]
       );
     } else {
-      userId = existing.rows[0].id;
       await client.query('UPDATE "account" SET password = $1 WHERE "userId" = $2', [
         hashedPassword,
-        userId,
+        testUserId,
       ]);
       await client.query(
         'UPDATE "twoFactor" SET secret = $1, "backupCodes" = $2, verified = true WHERE "userId" = $3',
-        [encryptedSecret, encryptedBackupCodes, userId]
+        [encryptedSecret, encryptedBackupCodes, testUserId]
       );
     }
   } finally {
@@ -58,20 +60,10 @@ test.beforeEach(async () => {
 });
 
 test.afterAll(async () => {
-  // Scoped cleanup of owned synthetic E2E test data only (R07)
-  const { pool } = createValidatedTestPool();
-  const client = await pool.connect();
-  try {
-    const existing = await client.query('SELECT id FROM "user" WHERE email = $1', [TEST_EMAIL]);
-    if (existing.rows.length > 0) {
-      const userId = existing.rows[0].id;
-      await client.query('DELETE FROM "twoFactor" WHERE "userId" = $1', [userId]);
-      await client.query('DELETE FROM "session" WHERE "userId" = $1', [userId]);
-      await client.query('DELETE FROM "account" WHERE "userId" = $1', [userId]);
-      await client.query('DELETE FROM "user" WHERE id = $1', [userId]);
-    }
-  } finally {
-    client.release();
+  // Scoped cleanup of strictly owned synthetic E2E test data by ID (R07)
+  if (trackedFixtureUserIds.length > 0) {
+    const { pool } = createValidatedTestPool();
+    await cleanupTrackedFixtures(pool, { userIds: trackedFixtureUserIds });
     await pool.end();
   }
 });
@@ -292,8 +284,9 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
   test('direct navigation to /settings/security by MAINTAINER user renders access denied', async ({ page }) => {
     const { pool } = createValidatedTestPool();
     const client = await pool.connect();
-    const maintainerEmail = 'maintainer.e2e@office.eg';
+    const maintainerEmail = `maintainer.e2e.${runId}@office.eg`;
     const maintainerId = randomUUID();
+    trackedFixtureUserIds.push(maintainerId);
     const hashedPassword = await hashPassword(TEST_PASSWORD);
     try {
       await client.query(
@@ -324,15 +317,8 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
       await expect(page.locator('text=لا تمتلك الصلاحيات الكافية لإدارة إعدادات الأمان والجلسات')).toBeVisible();
     } finally {
       const { pool: p2 } = createValidatedTestPool();
-      const c2 = await p2.connect();
-      try {
-        await c2.query('DELETE FROM "session" WHERE "userId" = $1', [maintainerId]);
-        await c2.query('DELETE FROM "account" WHERE "userId" = $1', [maintainerId]);
-        await c2.query('DELETE FROM "user" WHERE id = $1', [maintainerId]);
-      } finally {
-        c2.release();
-        await p2.end();
-      }
+      await cleanupTrackedFixtures(p2, { userIds: [maintainerId] });
+      await p2.end();
     }
   });
 
