@@ -1,23 +1,40 @@
 import { Pool, PoolConfig } from 'pg';
 import crypto from 'crypto';
-import { validateEnv, EnvironmentValidationError, AppEnv } from '@/lib/env';
+import { validateEnv, EnvironmentValidationError, AppEnv, validatePostgresUrlStructure } from '@/lib/env';
+
+/**
+ * Resolves and canonicalizes effective PostgreSQL routing parameters.
+ * Explicitly assigns canonical default port 5432 when omitted, preventing
+ * the pg driver from falling back to ambient PGPORT or other environment defaults.
+ */
+export function canonicalizePostgresUrl(urlStr: string): string {
+  const structure = validatePostgresUrlStructure(urlStr);
+  if (!structure.valid) {
+    return urlStr; // Let validateTestEnvironment handle structural errors fail-closed
+  }
+
+  try {
+    const parsed = new URL(urlStr);
+    if (!parsed.port || parsed.port.trim().length === 0) {
+      parsed.port = '5432';
+    }
+    return parsed.toString();
+  } catch {
+    return urlStr;
+  }
+}
 
 /**
  * Validates the test environment strictly through the shared isolation guard.
  * Refuses fallback strings, requiring an explicit TEST_DATABASE_URL.
  * Ensures rejection happens before any network socket is opened.
+ * Canonicalizes destination parameters so ambient driver fallbacks cannot cause drift.
  */
 export function validateTestEnvironment(
   overrides: Record<string, string | undefined> = {}
 ): AppEnv {
-  const envSource: Record<string, string | undefined> = {
-    ...process.env,
-    ...overrides,
-    NODE_ENV: 'test',
-  };
-
-  const testDbUrl = envSource.TEST_DATABASE_URL;
-  if (!testDbUrl || testDbUrl.trim().length === 0) {
+  const rawTestDbUrl = overrides.TEST_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
+  if (!rawTestDbUrl || rawTestDbUrl.trim().length === 0) {
     throw new EnvironmentValidationError(
       'Environment validation failed.\nMissing required environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL is strictly required for test execution. Fails closed without fallback.\nConsult .env.example for required configuration. Secret values are redacted.',
       ['TEST_DATABASE_URL'],
@@ -25,13 +42,24 @@ export function validateTestEnvironment(
     );
   }
 
+  const canonicalTestUrl = canonicalizePostgresUrl(rawTestDbUrl);
+
+  const envSource: Record<string, string | undefined> = {
+    ...process.env,
+    ...overrides,
+    TEST_DATABASE_URL: canonicalTestUrl,
+    NODE_ENV: 'test',
+  };
+
   return validateEnv(envSource);
 }
 
 /**
  * Creates a PostgreSQL pool only after passing the shared test environment validator.
  * Guaranteed: No network socket or connection pool is initialized if the target fails isolation validation.
- * Composes the effective destination from poolConfig overrides before validation.
+ * Composes the effective destination from poolConfig overrides before validation,
+ * canonicalizes routing parameters to eliminate ambient driver fallback, and strips
+ * individual routing fields so the driver adheres strictly to the validated URL.
  */
 export function createValidatedTestPool(
   overrides: Record<string, string | undefined> = {},
@@ -64,6 +92,10 @@ export function createValidatedTestPool(
     } catch {
       // Keep candidateUrl as-is; validateTestEnvironment will fail closed
     }
+  }
+
+  if (candidateUrl) {
+    candidateUrl = canonicalizePostgresUrl(candidateUrl);
   }
 
   const env = validateTestEnvironment({
@@ -157,10 +189,10 @@ export async function createDedicatedTestDatabase(
     dbName ||
     `lawoffice_test_${Date.now()}_${crypto.randomBytes(4).toString('hex')}_test`;
 
-  // 1. Strict identifier syntax validation: alphanumeric and underscores only, ending in _test (Phase A)
-  if (!/^[a-zA-Z0-9_]+_test$/.test(targetName)) {
+  // 1. Strict identifier syntax validation: alphanumeric and underscores only, ending in _test, bounded to 63 chars (PostgreSQL NAMEDATALEN - 1)
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]{0,57}_test$/.test(targetName) || targetName.length > 63) {
     throw new Error(
-      `Dedicated test database name must be alphanumeric and underscores ending in '_test', got: ${targetName}`
+      `Dedicated test database name must be alphanumeric and underscores ending in '_test' (at most 63 characters), got: ${targetName}`
     );
   }
 

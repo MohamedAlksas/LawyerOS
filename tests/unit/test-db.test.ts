@@ -1,5 +1,6 @@
 ﻿import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createValidatedTestPool, createDedicatedTestDatabase } from '../helpers/test-db';
+import { Client } from 'pg';
+import { createValidatedTestPool, createDedicatedTestDatabase, validateTestEnvironment } from '../helpers/test-db';
 import { EnvironmentValidationError } from '@/lib/env';
 
 describe('Test Database Isolation & Pool Construction Helpers (Phase A)', () => {
@@ -7,7 +8,12 @@ describe('Test Database Isolation & Pool Construction Helpers (Phase A)', () => 
 
   beforeEach(() => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+    process.env.DATABASE_URL = 'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_dev';
     process.env.TEST_DATABASE_URL = 'postgresql://lawoffice_user:synthetic@127.0.0.1:5433/lawoffice_test?schema=public';
+    delete process.env.PGPORT;
+    delete process.env.PGDATABASE;
+    delete process.env.PGHOST;
+    delete process.env.PGUSER;
   });
 
   afterEach(() => {
@@ -47,9 +53,105 @@ describe('Test Database Isolation & Pool Construction Helpers (Phase A)', () => 
     expect(opts.port).toBeUndefined();
   });
 
-  it('rejects malformed database identifiers like codex_bad%_test without executing CREATE DATABASE (Phase A)', async () => {
+  it('connection-free check: canonicalizes omitted port to 5432 so Client.connectionParameters ignores ambient PGPORT (R07)', () => {
+    process.env.PGPORT = '65432';
+    process.env.PGDATABASE = 'ambient_dev_db';
+
+    // Test URL with omitted port
+    const { pool, env } = createValidatedTestPool({
+      TEST_DATABASE_URL: 'postgresql://synthetic_user:synthetic_pw@127.0.0.1/omitted_port_test',
+    });
+
+    expect(env.TEST_DATABASE_URL).toContain(':5432/');
+
+    // Instantiate Client connection-free without connecting/opening socket
+    const client = new Client(pool.options);
+    const params = (client as unknown as { connectionParameters: { port: number; database: string; user?: string } }).connectionParameters;
+    expect(params.port).toBe(5432);
+    expect(params.database).toBe('omitted_port_test');
+    expect(params.user).toBe('synthetic_user');
+  });
+
+  it('connection-free check: preserves explicit default port 5432 in Client.connectionParameters (R07)', () => {
+    process.env.PGPORT = '65432';
+
+    const { pool, env } = createValidatedTestPool({
+      TEST_DATABASE_URL: 'postgresql://synthetic_user:synthetic_pw@127.0.0.1:5432/explicit_5432_test',
+    });
+
+    expect(env.TEST_DATABASE_URL).toContain(':5432/');
+    const client = new Client(pool.options);
+    const params = (client as unknown as { connectionParameters: { port: number; database: string } }).connectionParameters;
+    expect(params.port).toBe(5432);
+    expect(params.database).toBe('explicit_5432_test');
+  });
+
+  it('connection-free check: preserves legitimate explicit non-default port in Client.connectionParameters (R07)', () => {
+    process.env.PGPORT = '65432';
+
+    const { pool, env } = createValidatedTestPool({
+      TEST_DATABASE_URL: 'postgresql://synthetic_user:synthetic_pw@127.0.0.1:5433/explicit_5433_test',
+    });
+
+    expect(env.TEST_DATABASE_URL).toContain(':5433/');
+    const client = new Client(pool.options);
+    const params = (client as unknown as { connectionParameters: { port: number; database: string } }).connectionParameters;
+    expect(params.port).toBe(5433);
+    expect(params.database).toBe('explicit_5433_test');
+  });
+
+  it('connection-free check: rejects same-target separation violation when operational and test match (R07)', () => {
+    process.env.PGPORT = '65432';
+    process.env.DATABASE_URL = 'postgresql://synthetic:synthetic@127.0.0.1:65432/shared_test';
+
+    // 1. Explicit matching port
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:65432/shared_test',
+      });
+    }).toThrow(EnvironmentValidationError);
+
+    // 2. Omitted port canonicalized to 5432 vs operational on 5432
+    expect(() => {
+      validateTestEnvironment({
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/shared_test',
+        TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1/shared_test',
+      });
+    }).toThrow(EnvironmentValidationError);
+  });
+
+  it('connection-free check: rejects malformed URLs fail-closed before connection (R07)', () => {
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'not-a-valid-url',
+      });
+    }).toThrow(EnvironmentValidationError);
+
+    expect(() => {
+      validateTestEnvironment({
+        TEST_DATABASE_URL: 'postgresql://127.0.0.1:99999/bad_port_test',
+      });
+    }).toThrow(EnvironmentValidationError);
+  });
+
+  it('rejects malformed database identifiers and lengths > 63 characters without executing CREATE DATABASE (Phase A)', async () => {
+    // 1. Invalid characters
     await expect(createDedicatedTestDatabase('codex_bad%_test')).rejects.toThrow(
       /Dedicated test database name must be alphanumeric and underscores/
     );
+
+    // 2. Length exceeding 63 characters (PostgreSQL NAMEDATALEN - 1)
+    const tooLong = `${'a'.repeat(60)}_test`; // 65 chars
+    await expect(createDedicatedTestDatabase(tooLong)).rejects.toThrow(
+      /at most 63 characters/
+    );
+
+    // 3. Valid bounded name (<= 63 chars) passes regex validation
+    // (createDedicatedTestDatabase will attempt connection to testDbUrl, confirming syntax check passed)
+    const validBounded = `${'a'.repeat(30)}_test`; // 35 chars
+    // Syntax validation passes, error thrown only at connection attempt
+    await expect(createDedicatedTestDatabase(validBounded, {
+      TEST_DATABASE_URL: 'postgresql://invalid_host:5432/test?connect_timeout=1',
+    })).rejects.not.toThrow(/Dedicated test database name must be alphanumeric/);
   });
 });
