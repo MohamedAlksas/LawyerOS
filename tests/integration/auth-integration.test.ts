@@ -990,15 +990,156 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(checkMaxLifeDb).toBeNull();
   });
 
+  it('rejects HTTP request with idle session token even when accompanied by invalid secure decoy cookie in any order (R02, R03)', async () => {
+    const prisma = getPrismaClient();
+    const env = getEnv();
+
+    let targetUserId = provisionedOwner?.userId;
+    if (!targetUserId) {
+      const ownerUser = await prisma.user.findFirst({ where: { role: 'OWNER' } });
+      if (ownerUser) {
+        targetUserId = ownerUser.id;
+      } else {
+        const testUser = await prisma.user.create({
+          data: {
+            id: `test-user-${Date.now()}`,
+            name: 'مالك الاختبار',
+            email: `test-owner-${Date.now()}@office.eg`,
+            role: 'OWNER',
+            twoFactorEnabled: true,
+          },
+        });
+        await prisma.twoFactor.create({
+          data: {
+            id: `tf-test-${Date.now()}`,
+            userId: testUser.id,
+            secret: 'base32:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+            backupCodes: '[]',
+            verified: true,
+          },
+        });
+        targetUserId = testUser.id;
+      }
+    }
+
+    // 1. Create a consistently aged session: 40 mins old, 31 mins idle (inactive), credentials predate login, 11h remaining
+    const idlePlainToken = `plain-idle-${Date.now()}`;
+    const idlePlainSession = await prisma.session.create({
+      data: {
+        id: `sess-plain-idle-${Date.now()}`,
+        userId: targetUserId,
+        token: idlePlainToken,
+        createdAt: new Date(Date.now() - 40 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 31 * 60 * 1000), // 31 mins idle (> 30m timeout)
+        expiresAt: new Date(Date.now() + 11 * 3600 * 1000),
+      },
+    });
+
+    const signedPlainCookie = signSessionTokenCookie(idlePlainToken, env.BETTER_AUTH_SECRET);
+
+    // Request over HTTP with invalid secure decoy before plain cookie
+    const req1 = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
+      headers: {
+        cookie: `__Secure-better-auth.session_token=decoy-invalid-token; better-auth.session_token=${signedPlainCookie}`,
+      },
+    });
+
+    const res1 = await authRouteGET(req1);
+    expect(res1.status).toBe(401);
+
+    // Verify session was deleted from database
+    const inDb1 = await prisma.session.findUnique({ where: { id: idlePlainSession.id } });
+    expect(inDb1).toBeNull();
+
+    // Subsequent requireActor fails closed
+    await expect(requireActor({ headers: makeSessionHeaders(idlePlainToken) })).rejects.toThrowError(
+      AuthenticationError
+    );
+
+    // 2. Test reverse cookie order (plain cookie before invalid secure decoy)
+    const idlePlainToken2 = `plain-idle-2-${Date.now()}`;
+    const idlePlainSession2 = await prisma.session.create({
+      data: {
+        id: `sess-plain-idle-2-${Date.now()}`,
+        userId: targetUserId,
+        token: idlePlainToken2,
+        createdAt: new Date(Date.now() - 40 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 31 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 11 * 3600 * 1000),
+      },
+    });
+
+    const signedPlainCookie2 = signSessionTokenCookie(idlePlainToken2, env.BETTER_AUTH_SECRET);
+    const req2 = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
+      headers: {
+        cookie: `better-auth.session_token=${signedPlainCookie2}; __Secure-better-auth.session_token=decoy-invalid-token`,
+      },
+    });
+
+    const res2 = await authRouteGET(req2);
+    expect(res2.status).toBe(401);
+    const inDb2 = await prisma.session.findUnique({ where: { id: idlePlainSession2.id } });
+    expect(inDb2).toBeNull();
+
+    // 3. Test active session (5 mins idle) with invalid secure decoy: must NOT be rejected or deleted
+    // Ensure account credentials predate session creation so credential-invalidation is not falsely triggered
+    await prisma.account.updateMany({
+      where: { userId: targetUserId, providerId: 'credential' },
+      data: { updatedAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    const activePlainToken = `plain-active-${Date.now()}`;
+    const activePlainSession = await prisma.session.create({
+      data: {
+        id: `sess-plain-active-${Date.now()}`,
+        userId: targetUserId,
+        token: activePlainToken,
+        createdAt: new Date(Date.now() - 10 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 5 * 60 * 1000), // 5 mins idle (active)
+        expiresAt: new Date(Date.now() + 11 * 3600 * 1000),
+      },
+    });
+
+    const signedActiveCookie = signSessionTokenCookie(activePlainToken, env.BETTER_AUTH_SECRET);
+    const req3 = new NextRequest('http://127.0.0.1:3000/api/auth/get-session', {
+      headers: {
+        cookie: `__Secure-better-auth.session_token=decoy-invalid-token; better-auth.session_token=${signedActiveCookie}`,
+      },
+    });
+
+    const res3 = await authRouteGET(req3);
+    expect(res3.status).toBe(200);
+
+    const actorActive = await requireActor({ headers: makeSessionHeaders(activePlainToken) });
+    expect(actorActive.id).toBe(targetUserId);
+
+    // Clean up
+    await prisma.session.delete({ where: { id: activePlainSession.id } }).catch(() => {});
+  });
+
   it('rejects HTTPS request with idle __Secure session token even when accompanied by invalid decoy plain cookie (R03)', async () => {
     const prisma = getPrismaClient();
+
+    let targetUserId = provisionedOwner?.userId;
+    if (!targetUserId) {
+      const ownerUser = await prisma.user.findFirst({ where: { role: 'OWNER' } });
+      targetUserId = ownerUser ? ownerUser.id : (await prisma.user.create({
+        data: {
+          id: `test-https-user-${Date.now()}`,
+          name: 'مالك الاختبار آمن',
+          email: `test-https-${Date.now()}@office.eg`,
+          role: 'OWNER',
+          twoFactorEnabled: true,
+        },
+      })).id;
+    }
 
     // Create an idle session (> 30 mins)
     const idleToken = `secure-idle-${Date.now()}`;
     await prisma.session.create({
       data: {
         id: `sess-sec-idle-${Date.now()}`,
-        userId: provisionedOwner.userId,
+        userId: targetUserId,
         token: idleToken,
         createdAt: new Date(Date.now() - 40 * 60 * 1000),
         updatedAt: new Date(Date.now() - 32 * 60 * 1000),
@@ -1006,17 +1147,32 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       },
     });
 
-    // Request over HTTPS with decoy plain cookie + idle __Secure cookie
-    const env = getEnv();
-    const req = new NextRequest('https://office.lawoffice.internal/api/auth/get-session', {
-      headers: {
-        cookie: `better-auth.session_token=decoy-invalid-token; __Secure-better-auth.session_token=${signSessionTokenCookie(idleToken, env.BETTER_AUTH_SECRET)}`,
-      },
-    });
+    // Configure provider for HTTPS
+    const prevAuthUrl = process.env.BETTER_AUTH_URL;
+    process.env.BETTER_AUTH_URL = 'https://office.lawoffice.internal:3000';
+    getEnv(true);
+    global.__lawoffice_auth = undefined;
 
-    const res = await authRouteGET(req);
-    // Must be rejected as 401 (inactivity timeout), NOT refreshed or allowed to pass
-    expect(res.status).toBe(401);
+    try {
+      const env = getEnv();
+      const req = new NextRequest('https://office.lawoffice.internal:3000/api/auth/get-session', {
+        headers: {
+          cookie: `better-auth.session_token=decoy-invalid-token; __Secure-better-auth.session_token=${signSessionTokenCookie(idleToken, env.BETTER_AUTH_SECRET)}`,
+        },
+      });
+
+      const res = await authRouteGET(req);
+      // Must be rejected as 401 (inactivity timeout), NOT refreshed or allowed to pass
+      expect(res.status).toBe(401);
+
+      // Verify idle session was deleted from database
+      const inDb = await prisma.session.findUnique({ where: { token: idleToken } });
+      expect(inDb).toBeNull();
+    } finally {
+      process.env.BETTER_AUTH_URL = prevAuthUrl || 'http://127.0.0.1:3000';
+      getEnv(true);
+      global.__lawoffice_auth = undefined;
+    }
   });
 
   it('revokes all other sessions upon password change (R04)', async () => {
@@ -1358,6 +1514,105 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       const bsFinal = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
       expect(bsFinal?.isClosed).toBe(true);
       expect(bsFinal?.ownerId).toBe(initial.user.id);
+    } finally {
+      await clearGlobalSingletons();
+      await freshDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  }, 45000);
+
+  it('rechecks authoritative state under FOR UPDATE lock: queued resume rejects after confirmation commits (R06)', async () => {
+    // 1. Fresh dedicated unbootstrapped database
+    const freshDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    process.env.TEST_DATABASE_URL = freshDb.url;
+    getEnv(true);
+    await clearGlobalSingletons();
+
+    try {
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const initClient = await freshDb.pool.connect();
+      try {
+        await initClient.query(migrationSql);
+      } finally {
+        initClient.release();
+      }
+      const prismaFresh = getPrismaClient();
+
+      // Start fresh reservation for an owner
+      const initial = await provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'adel.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      });
+      expect(initial.user.id).toBeDefined();
+
+      // Acquire an external row lock on twoFactor record using a dedicated PostgreSQL client from the pool
+      const blockerClient = await freshDb.pool.connect();
+      await blockerClient.query('BEGIN;');
+      await blockerClient.query('SELECT id, "userId", verified FROM "twoFactor" WHERE "userId" = $1 FOR UPDATE;', [initial.user.id]);
+
+      // Both confirm and resume will now queue behind blockerClient's FOR UPDATE row lock
+      const validCode = await generateTotpCode(initial.totpSecret);
+
+      let confirmFinished = false;
+      let resumeFinished = false;
+      let resumeError: unknown = null;
+      let resumeResult: unknown = null;
+
+      const confirmPromise = confirmOwnerProvisioning(initial.user.id, validCode).then(() => {
+        confirmFinished = true;
+      });
+
+      // Brief delay to ensure confirmation enqueues first on PostgreSQL lock queue
+      await new Promise((r) => setTimeout(r, 60));
+
+      const resumePromise = provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'adel.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      })
+        .then((res) => {
+          resumeFinished = true;
+          resumeResult = res;
+        })
+        .catch((err) => {
+          resumeFinished = true;
+          resumeError = err;
+        });
+
+      // Give resume time to block on the FOR UPDATE lock
+      await new Promise((r) => setTimeout(r, 60));
+
+      // Release blocker lock: COMMIT
+      await blockerClient.query('COMMIT;');
+      blockerClient.release();
+
+      // Wait for both concurrent operations to resolve
+      await Promise.all([confirmPromise, resumePromise]);
+
+      // Confirmation committed first and closed setup
+      expect(confirmFinished).toBe(true);
+
+      // Queued resume must have rejected under the row lock without returning setup material
+      expect(resumeFinished).toBe(true);
+      expect(resumeResult).toBeNull();
+      expect(resumeError).toBeDefined();
+      expect((resumeError as ProvisioningError).code).toBe('BOOTSTRAP_ALREADY_CLOSED');
+
+      // Verify authoritative database state: verified remains true, bootstrap remains closed
+      const tfFinal = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfFinal?.verified).toBe(true);
+
+      const bsFinal = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bsFinal?.isClosed).toBe(true);
     } finally {
       await clearGlobalSingletons();
       await freshDb.drop().catch(() => {});

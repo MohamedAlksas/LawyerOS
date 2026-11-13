@@ -133,6 +133,8 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     type ResumeTxResult =
       | { status: 'LOCKED' }
       | { status: 'NO_RECORD' }
+      | { status: 'ALREADY_COMPLETED' }
+      | { status: 'BOOTSTRAP_CLOSED' }
       | { status: 'INVALID_PASSWORD'; shouldLock: boolean; remainingAttempts: number }
       | { status: 'SUCCESS'; result: ProvisionOwnerResult };
 
@@ -149,6 +151,17 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
       const twoFactorRecord = rows[0];
       if (!twoFactorRecord || !twoFactorRecord.secret) {
         return { status: 'NO_RECORD' };
+      }
+
+      // Recheck authoritative completion under the shared lock (R06)
+      if (twoFactorRecord.verified === true) {
+        return { status: 'ALREADY_COMPLETED' };
+      }
+
+      // Recheck bootstrap closure under the lock (R06)
+      const lockedBootstrap = await tx.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      if (lockedBootstrap?.isClosed) {
+        return { status: 'BOOTSTRAP_CLOSED' };
       }
 
       const now = new Date();
@@ -226,6 +239,13 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
         },
       };
     });
+
+    if (outcome.status === 'ALREADY_COMPLETED' || outcome.status === 'BOOTSTRAP_CLOSED') {
+      throw new ProvisioningError(
+        'BOOTSTRAP_ALREADY_CLOSED',
+        'تم إغلاق مرحلة التهيئة الأولية للنظام مسبقاً وبشكل دائم. لا يمكن إعادة تهيئة المالك أو استئناف إعداده.'
+      );
+    }
 
     if (outcome.status === 'LOCKED') {
       throw new ProvisioningError(

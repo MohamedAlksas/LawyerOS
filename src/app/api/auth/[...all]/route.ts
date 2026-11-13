@@ -49,30 +49,11 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
     (cookieHeader.includes('better-auth.session_token') ||
       cookieHeader.includes('__Secure-better-auth.session_token'))
   ) {
-    const isHttps =
-      request.url.startsWith('https://') ||
-      request.headers.get('x-forwarded-proto') === 'https';
-
-    let guardHeaders = request.headers;
-    const secureCookie = request.cookies.get('__Secure-better-auth.session_token')?.value;
-    if ((isHttps || secureCookie) && secureCookie) {
-      const otherCookies = cookieHeader
-        .split(';')
-        .map((c) => c.trim())
-        .filter(
-          (c) =>
-            !c.startsWith('better-auth.session_token=') &&
-            !c.startsWith('__Secure-better-auth.session_token=')
-        );
-      otherCookies.unshift(`better-auth.session_token=${secureCookie}`);
-      otherCookies.unshift(`__Secure-better-auth.session_token=${secureCookie}`);
-      guardHeaders = new Headers(request.headers);
-      guardHeaders.set('cookie', otherCookies.join('; '));
-    }
-
     try {
+      // Evaluate session using original request headers without synthetic cookie rewriting (R02, R03)
+      // The guard and downstream provider handler must evaluate the exact same provider-configured session.
       const sessionData = await auth.api.getSession({
-        headers: guardHeaders,
+        headers: request.headers,
         query: {
           disableRefresh: true,
           disableCookieCache: true,
