@@ -4,7 +4,9 @@ Shared language for planning, implementation, and review. The Arabic term shown 
 
 ## Language
 
-**Matter — “ملف الشغل”**:
+Owner decision, 13 November 2026: all interface titles, navigation, labels, actions, messages, placeholders, and print copy use clear Modern Standard Arabic. This supersedes earlier colloquial examples. Use “لوحة المتابعة” for the dashboard and “ملفات المكتب” for internal matters; “القضايا القضائية” remain separate. This changes wording only, preserving domain rules, stack, and V1 scope. Preserve entered names and legal quotations verbatim.
+
+**Matter — “ملف المكتب”**:
 The internal file bringing together the office's work on one subject, including its parties, documents, finances, and related court proceedings.
 _Avoid_: Using “case” to cover every instance of litigation without distinction.
 

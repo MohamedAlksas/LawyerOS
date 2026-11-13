@@ -162,7 +162,7 @@ The desktop is used to enter files, review accounts, and print. The mobile is us
 
 ## Capabilities and Constraints
 
-- Planning documents and implementation instructions are in English. The intended application remains in simple Egyptian Arabic with an RTL interface, with technical terms and codes isolated in LTR direction.
+- Planning documents and implementation instructions are in English. The application uses clear Modern Standard Arabic suitable for an Egyptian law office, without colloquial wording, with an RTL interface and technical terms and codes isolated in LTR direction.
 - One matter may involve multiple clients and opponents, as well as multiple court instances and court case numbers.
 - Legal deadlines are entered or reviewed by the lawyer; the application does not determine them independently.
 - Paper remains in use during the transition, and its location is part of the matter's data.
@@ -199,7 +199,9 @@ Shared language for planning, implementation, and review. The Arabic term shown 
 
 ## Language
 
-**Matter — “ملف الشغل”**:
+Owner decision, 13 November 2026: all interface titles, navigation, labels, actions, messages, placeholders, and print copy use clear Modern Standard Arabic. This supersedes earlier colloquial examples. Use “لوحة المتابعة” for the dashboard and “ملفات المكتب” for internal matters; “القضايا القضائية” remain separate. This changes wording only, preserving domain rules, stack, and V1 scope. Preserve entered names and legal quotations verbatim.
+
+**Matter — “ملف المكتب”**:
 The internal file bringing together the office's work on one subject, including its parties, documents, finances, and related court proceedings.
 _Avoid_: Using “case” to cover every instance of litigation without distinction.
 
@@ -315,7 +317,7 @@ Outside V1: calculating appeal periods from general rules, automatic submissions
 2. I add first instance and appeal to the same matter and identify which case number each hearing belongs to.
 3. On mobile, I record "تأجيل لتقديم مذكرة" (adjourned for submission of a memorandum) and enter the next hearing and preparation task on the same screen.
 4. I photograph a document and check its legibility and association before accepting it into the archive.
-5. I see separate amounts answering the UI questions "الموكل عليه كام أتعاب؟ عليه كام مصروفات؟ لسه معايا كام من فلوسه للصرف؟" (what fees does the client owe, what expenses do they owe, and how much client money do I still hold for spending?).
+5. I see separate amounts answering the UI questions "ما الأتعاب المستحقة على الموكل؟ ما المصروفات المستحقة؟ ما رصيد أمواله المحتفظ بها للصرف؟" (what fees does the client owe, what expenses do they owe, and how much client money do I still hold for spending?).
 6. I produce the week's hearing list and identify the location of each paper file I need to take.
 7. After a device problem, I restore a consistent backup and verify that the documents linked to its data are present.
 
@@ -348,7 +350,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 
 | Journey | Steps | Success evidence |
 |---|---|---|
-| Start of the day | Login → "النهارده" (today) → today's hearings → open matter → document checklist → print agenda | Hearings without a specified time are visible, and confirmed legal deadlines are separate from tasks |
+| Start of the day | Login → "لوحة المتابعة" (dashboard) → today's hearings → open matter → document checklist → print agenda | Hearings without a specified time are visible, and confirmed legal deadlines are separate from tasks |
 | New client and matter | Search for an existing person → add/select client → matter → court proceeding if available → specify paper location | Stable internal code, multiple clients supported, and a matter may begin as a consultation before any court case number exists |
 | After court | Hearing → "تسجيل النتيجة" (record result) → decision → optional next hearing → optional tasks → review and save | The result, new hearing, and tasks all appear together, or none are saved |
 | Mobile upload | Matter → "رفع مستند" (upload document) → photograph/select → preview image legibility → brief metadata → send | Scan status is clear, and the file is unavailable before upload and scanning finish |
@@ -361,7 +363,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 | ID | Title and proposed route | Content and primary action |
 |---|---|---|
 | S01 | Login `/login` and `/verify` | Login, additional verification, recovery |
-| S02 | Today `/today` | Hearings, confirmed deadlines, tasks, operating alerts |
+| S02 | Dashboard `/today` | Hearings, confirmed deadlines, tasks, operating alerts |
 | S03 | Matters `/matters` and `/matters/new` | Search, filters, and matter creation |
 | S04 | Matter file `/matters/:id` | Summary and tabs for all related work |
 | S05 | Court proceeding `/proceedings/:id` | One court case number, its instance, and hearings |
@@ -380,7 +382,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 
 Login fields: registered email **required** `email`, password **required** `password`. There is no public registration; the office owner is set up through a defined bootstrap process. Additional verification: **required** `TOTP` code or a single-use recovery code; active device names, last use, and a terminate-device action. Failed-login messages do not reveal whether an email exists. Account recovery follows a documented operations procedure, with no backdoor button that bypasses MFA. Settings explain how to keep recovery codes outside the server and phone before accepting the account setup.
 
-## S02 — Today
+## S02 — Dashboard
 
 Order: today's date, today's hearings, legal deadlines needing confirmation or approaching, overdue tasks, then a weekly summary. Each hearing shows the matter name, court case number/year, court and circuit, time or "غير محددة" (not specified), required work and preparation, and a record-result action. Overlapping hearing times generate a warning for review but do not prevent saving. The owner sees a late-backup alert. Pressing "تمت" (done) does not close a legal deadline; each item type has its own explicit action.
 
@@ -418,7 +420,7 @@ Actions: add hearing, upload a document for this proceeding, add an appeal/linke
 
 **Record result:** decision/result **required**; summary of what happened **optional**; is there a new date? **required**, with yes/no/not yet determined choices; new date **required if yes**, with optional time; required-work list **optional**, each task having a title and a due date if known; decision document **optional**; proceeding-status update **explicit and optional**. A new date before the current hearing date is a potential error requiring correction, while the appropriate path still allows documenting a historical date correction. Do not calculate an appeal deadline from the decision.
 
-Before saving, show the literal summary "هتسجل النتيجة، وتضيف جلسة بتاريخ…، و… مهام" (you will record the result, add a hearing on…, and… tasks). Correcting a saved result shows the previous version and reason. Changing an appointment for a hearing that has not taken place is labeled "تعديل الموعد" (change appointment), not "إثبات انعقاد" (record that the hearing took place). Preserve the previous appointment reference and create the replacement according to WORKFLOWS without deleting change history. Cancelling a hearing records the reason and updates its reminders.
+Before saving, show the literal summary "سيتم تسجيل النتيجة وإضافة جلسة بتاريخ… وإضافة… مهام" (you will record the result, add a hearing on…, and… tasks). Correcting a saved result shows the previous version and reason. Changing an appointment for a hearing that has not taken place is labeled "تعديل الموعد" (change appointment), not "إثبات انعقاد" (record that the hearing took place). Preserve the previous appointment reference and create the replacement according to WORKFLOWS without deleting change history. Cancelling a hearing records the reason and updates its reminders.
 
 ## S07 and S08 — Agenda, tasks, and legal deadlines
 
@@ -426,7 +428,7 @@ The agenda begins with a simple mobile list, with week/month as alternatives. Pr
 
 **Task:** title **required**; linked matter/proceeding **optional**; description **optional**; priority **required**, default normal; due date **optional**; status **required**, default open; checklist **optional**; reminder **optional**. It does not automatically create a legal deadline.
 
-**Legal deadline:** title **required**; matter **required**; proceeding **optional**; final date **required for approval**; time **optional**; source of the deadline/review notes **required for approval**; source document **optional**; status **required**, using "مسودة تحتاج مراجعة/مؤكد/تم الإجراء/ألغي" (draft requiring review/confirmed/action completed/cancelled). Approval requires the explicit action "راجعت الموعد واعتمده" (I reviewed and approve the deadline), with the approver's name and timestamp. Changing the date after approval invalidates the previous confirmation and requires a new review with a reason. Completion requires a description of what was done and optional evidence; a reminder is not proof of execution.
+**Legal deadline:** title **required**; matter **required**; proceeding **optional**; final date **required for approval**; time **optional**; source of the deadline/review notes **required for approval**; source document **optional**; status **required**, using "مسودة تحتاج مراجعة/مؤكد/تم الإجراء/ألغي" (draft requiring review/confirmed/action completed/cancelled). Approval requires the explicit action "راجعت الموعد وأعتمده" (I reviewed and approve the deadline), with the approver's name and timestamp. Changing the date after approval invalidates the previous confirmation and requires a new review with a reason. Completion requires a description of what was done and optional evidence; a reminder is not proof of execution.
 
 ## S09 — Parties and client profile
 
@@ -438,11 +440,11 @@ Party tabs: details, matters, powers of attorney, general documents, communicati
 
 Digital file **required**; title **required**, suggested from the filename; type **required**; link to a matter or party **required**, with proceeding/hearing **optional** and consistent with the matter; document date **optional**; paper-original location **optional**; is the original in the office? **optional**, with yes/no/unknown choices; description **optional**; sensitivity **required**, default confidential.
 
-Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Literal states: "بيترفع، جاري الفحص، جاهز، مرفوض، الرفع غير مكتمل" (uploading, scanning, ready, rejected, incomplete upload). A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
+Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Literal states: "جارٍ الرفع، جارٍ الفحص، جاهز، مرفوض، الرفع غير مكتمل" (uploading, scanning, ready, rejected, incomplete upload). A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
 
 ## S11 — Accounts
 
-The interface has four clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل، مصاريف المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
+The interface has four clear literal sections: "الأتعاب، مصروفات القضايا، أموال الموكل، مصروفات المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
 
 | Form | Core fields |
 |---|---|
@@ -466,11 +468,82 @@ Reports: hearings within a period, matter summary, client statement showing each
 
 Settings: office name **required**; contact information **optional**; EGP currency and Cairo timezone for display; reminder policies; management of courts, circuits, types, and paper locations; security-session management; backup status and latest restore test. Reference entries already in use are disabled rather than deleted in a way that breaks earlier matters. Server restoration belongs in operations, not a dangerous button in the daily interface.
 
-Migration: select CSV template → upload → map columns → preview and review errors → approve valid rows → report what was recorded. Source fields: row code/identifier, matter title, parties, case number/year/court where available, next hearing, paper location, review source. Ambiguous dates stop for review rather than being guessed. Replaying the same batch does not duplicate matters. The incomplete-data screen shows "البيانات لسه محتاجة مراجعة" (the data still needs review), who reviewed it and when. Upcoming cases are checked against paper with the project owner's father before approval.
+Migration: select CSV template → upload → map columns → preview and review errors → approve valid rows → report what was recorded. Source fields: row code/identifier, matter title, parties, case number/year/court where available, next hearing, paper location, review source. Ambiguous dates stop for review rather than being guessed. Replaying the same batch does not duplicate matters. The incomplete-data screen shows "البيانات تحتاج إلى مراجعة" (the data still needs review), who reviewed it and when. Upcoming cases are checked against paper with the project owner's father before approval.
 
 ## Pilot acceptance scenario with the project owner's father
 
 Use synthetic data: one client with two matters, one matter with two clients, first instance and appeal, a hearing without a time, a 20-page document, a long title, and an allocated payment. The father opens the matter, records a result and adjournment, uploads an image, and records a payment without continual help. Test loss of connectivity during saving, opening the same matter on two devices, and navigating away from an unsaved form. Speed targets in DESIGN.md are provisional; actual acceptance requires accurate data, clear failure handling, and no duplication before speed.
+
+---
+
+Source: `docs/STITCH_UI.md`
+
+# Stitch UI design collection
+
+Owner assignment: 13 November 2026. Complete the V1 screen collection in the existing Stitch project and replace colloquial wording with clear Modern Standard Arabic. This is design work, not application implementation, deployment, or real-data authorization.
+
+Project: [LawOffice OS — Arabic Office UI](https://stitch.withgoogle.com/projects/10964447413466098333). Original screen: `05beab390fca4bf29826ed4ac95e7a91`. Design system: `assets/1c1fc42f736348249ea9538d8f09514d`.
+
+## Scope and acceptance
+
+- Cover S01–S15 from [SCREENS](../docs/SCREENS.md), including primary forms and review flows; include mobile dashboard, matter, hearing-result, upload, and receipt designs.
+- Use formal Arabic in all visible text, including navigation, messages, empty/error states, placeholders, and print previews. Use the current [GLOSSARY](../GLOSSARY.md) and [DESIGN](../DESIGN.md).
+- Preserve the existing petrol/white visual direction, Arabic RTL, readable typography, 44px touch controls, and 390px mobile reflow.
+- Preserve matter/proceeding distinctions, manual deadline review, separate financial categories, immutable posted entries, private documents, and explicit save states.
+- Use synthetic records visibly marked as test data. Exclude V1-deferred features.
+- Verify actual saved screen IDs and inspect resulting HTML and screenshots. Generation requests alone are not completion evidence. Interactive, accessibility, and operational acceptance remain separate implementation checks.
+
+## Execution record
+
+Read: `PRODUCT.md`, `GLOSSARY.md`, `docs/PRD.md`, `DESIGN.md`, `docs/SCREENS.md`, `docs/WORKFLOWS.md`, `docs/GIT_WORKFLOW.md`, `docs/REVIEW_PROTOCOL.md`, `.agents/skills/lawoffice-arabic-ui/SKILL.md`, and `C:/Users/Alksas/.codex/skills/frontend-design/SKILL.md`. Graphify guidance was consulted; a code graph was not needed for this design-only assignment.
+
+Both Stitch MCP `edit_screens` and collection `generate_screen_from_text` requests reached the connector's 300-second timeout. Subsequent MCP reads still showed only the original colloquial screen. A design-system update was rejected with an invalid-argument response. No successful remote change is inferred from these requests.
+
+The signed-in browser's Stitch history also showed neither timed-out request. The complete collection brief was therefore submitted through the existing signed-in project tab as a fallback; the observed UI confirmed that its agent was processing it. The requested generation brief is preserved in [STITCH_UI_BRIEF](../docs/STITCH_UI_BRIEF.md).
+
+## Verified outcome and remaining work
+
+Status: **INCOMPLETE — GENERATION BLOCKED**. This is not acceptance of the complete screen collection.
+
+The existing dashboard's rendered accessibility tree showed the formal headings `لوحة المتابعة`, `ملفات المكتب`, and `جلسات اليوم`, and the explicit deadline state `مسودة غير معتمدة`. Its saved HTML was downloaded through Stitch MCP and inspected: the tested colloquial phrases were absent from visible copy. A subsequent direct MCP HTML update separated deadline review from completion of the legal action, removed an invented requirement that every task must have an official procedure number, and standardized `رفع مستند`.
+
+The actual saved screen list and canvas instances still contained only the original screen ID. Stitch's browser response claimed additional S01–S06 screens, but those claims contradicted the actual inventory and were rejected as completion evidence. A bounded five-screen browser request remained in processing; browser status retrieval then repeatedly timed out. No additional screens or mobile variants were verified.
+
+The project canvas label was separately updated through MCP and a subsequent `get_project` confirmed `لوحة المتابعة`. The screen's source title and thumbnail may retain older text; the saved HTML and verified canvas label are the delivered copy artifacts. Full screenshot inspection after the final HTML correction, responsive interaction, keyboard/zoom checks, and complete screen coverage are **NOT RUN / NOT COMPLETE**. Do not infer accessibility or production acceptance from the wording inspection.
+
+Next action: inspect the project's actual saved inventory after Stitch recovers before sending new generation requests; avoid creating duplicates of any delayed results. Continue with missing desktop and mobile screens from the brief, inspect every saved output, and replace this status only when coverage is evidenced.
+
+---
+
+Source: `docs/STITCH_UI_BRIEF.md`
+
+# Stitch collection generation brief
+
+Design-only handoff for the owner's 13 November 2026 request. Canonical acceptance scope: [STITCH_UI](../docs/STITCH_UI.md). This text records requested output, not evidence of generation.
+
+LawOffice OS, a private operational workspace for one Egyptian lawyer. Continue the existing project design, no redesign. All visible UI text MUST be clear formal Modern Standard Arabic, NEVER Egyptian colloquial. lang ar-EG dir rtl. Terminology: لوحة المتابعة (home), ملفات المكتب (internal Matters), ملف المكتب (Matter), القضايا القضائية (Proceedings), الأطراف, الموكل, الخصم, الجلسات, المهام, المواعيد القانونية, المستندات, الأتعاب, مصروفات القضايا, أموال الموكلين, مصروفات المكتب. Matter is separate from a court proceeding and may contain first instance and appeal. Roles belong to each matter; legal capacities belong to each proceeding. NO النهارده/النهاردة/ملفات الشغل/فلوس/لسه/مافيش/الجاية/محتاجة/هتسجل/بيترفع/كام/معانا. Use اليوم/القادمة/تحتاج إلى مراجعة/جارٍ الرفع/لا توجد/الرصيد. Consistent Noto Sans Arabic, 16px body, minimum 14px supporting labels, 44px buttons. Palette #14566B petrol primary, #F4F6F7 background, white surfaces, #172A35 ink, #4D606A secondary, #D5DFE3 rules, #176449 green, #7A4A00 warning, #A4262C danger. 6px corners, flat legible tables, restrained accents, no gradients or decorative illustrations. Desktop persistent 232px right sidebar, search topbar; mobile actual 390px reflow, bottom navigation لوحة المتابعة، الملفات، البحث، المزيد, full-screen forms. Always show بيانات تجريبية; all names/values synthetic. Unambiguous Arabic Gregorian dates Africa/Cairo, bdi/LTR codes. No legal deadline auto-calculation; require manual source/review. No OCR/AI/client portal/SaaS/offline sync. No local-save promises. Private documents, no public links. Display loading/empty/errors honestly; static design examples, never claim real operations. Reuse design system assets/1c1fc42f736348249ea9538d8f09514d.
+Create the COMPLETE remaining V1 screen collection as MULTIPLE SEPARATE SCREENS on this project's canvas, not one composite and not one dashboard with tabs pretending to be screens. All visible text formal Arabic. Use a consistent synthetic matter LO-2026-001 (مطالبة مالية — ملف تجريبي), party موكل تجريبي ١, court محكمة الجيزة الابتدائية, proceeding 1234 / 2026 and linked appeal. Render ALL of these screen deliverables:
+S01a تسجيل الدخول (email/password, no public signup); S01b التحقق من الهوية (TOTP or recovery code, secure recovery instruction).
+S03a ملفات المكتب (search and filters, active/archived, next hearing, paper shelf); S03b إنشاء ملف مكتب (title, type litigation/consultation/contract/other, multiple clients, opponents, paper location, date, optional summary; no court number required).
+S04 ملف المكتب (summary and tabs overview, court proceedings, hearings, documents, tasks/deadlines, accounts, history; multiple proceedings separate; first instance + appeal).
+S05 القضية القضائية (own number/year/court/type/instance/circuit/parent, legal capacities, hearing timeline, draft missing-number notice; add hearing/link appeal).
+S06a بيانات الجلسة (appointment, unknown time, purpose/preparation, result history, edit appointment/cancel with reason); S06b تسجيل نتيجة الجلسة (required decision, next date yes/no/not determined, optional new date/time, optional tasks, document; review summary before saving).
+S07 جدول الجلسات والمواعيد (week/list/month, court filters, distinct hearing/task/deadline categories, unknown times separate, print).
+S08a المهام (list, create/edit task panel, priority/due date optional, explicit completion); S08b المواعيد القانونية (separate drafts/confirmed/completed; detail form title/matter/proceeding/date/source/review notes/source doc; explicit راجعت الموعد وأعتمده; completing action needs description/evidence; no legal calculation).
+S09a الأطراف (person/organization list, search, no global client/opponent role); S09b بيانات الطرف (contact, multiple matter-scoped roles, powers of attorney, communication log, account; optional sensitive IDs masked).
+S10a المستندات (metadata list, status, matter/proceeding, private); S10b رفع مستند (PDF/JPEG/PNG <=25 MB, preview, title/type/link/original location/is original held yes/no/unknown, scanning/incomplete/error states); S10c معاينة المستند (page preview, versions, private download, physical original metadata).
+S11a الحسابات (four separate sections الأتعاب، مصروفات القضايا، أموال الموكلين، مصروفات المكتب; distinguish due/collected/cash, cash not profit).
+S11b اتفاق الأتعاب (matter/client/description/amount/date, optional installments).
+S11c تسجيل مقبوضات (payer/date/amount/method/account/classification/allocations; fee vs reimbursable expense vs client funds, allocation sum equals receipt; review before posting, administrative receipt).
+S11d تسجيل مصروف (matter or office expense selector, amount/date/category/description/funding source/reimbursable flag; office expenses never charged to client).
+S11e تصحيح عملية مالية (read-only posted original, full reversal reason+effects distinct from actual partial refund beneficiary/amount/method/reason/limit; no editing posted amounts).
+S12 البحث الشامل (grouped matters/parties/proceedings/documents, filters, metadata only).
+S13 التقارير والطباعة (report picker hearing list/matter summary/client statement/period financial report/incomplete records, filters and A4 RTL preview with totals and generation date).
+S14a إعدادات المكتب (office/contact/currency EGP/Cairo, reminders, courts/circuits/paper locations, backup status and latest restore test; no one-click production restore).
+S14b الأمان والجلسات (MFA setup, offline-held recovery codes warning, active sessions and revoke controls; maintenance access doesn't expose client content).
+S15 استيراد الملفات (CSV upload/map/preview/review/approve/results; ambiguous dates blocked, valid vs rejected rows, replay no duplicates).
+Also create distinct 390px MOBILE screens: M02 لوحة المتابعة; M04 ملف المكتب; M06 تسجيل نتيجة الجلسة; M10 رفع مستند; M11 تسجيل مقبوضات. Full-screen mobile forms, big readable touch targets, no desktop sidebar.
+Prioritize completing every named separate screen in the same visual system. Do not ask follow-up questions.
 
 ---
 
@@ -488,7 +561,7 @@ The core concept is the office agenda and case file: the first screen starts wit
 
 ## Language and direction
 
-- The application document uses `lang="ar-EG"` and `dir="rtl"` throughout. The interface uses clear, approachable Arabic, with literal labels such as "تسجيل نتيجة الجلسة" (record hearing result), "حفظ" (save), "المطلوب قبل الجلسة" (required before the hearing), and "فلوس معانا للموكل" (client money held by us), with the financial term explained. Do not expose table names or database errors.
+- The application document uses `lang="ar-EG"` and `dir="rtl"` throughout. The interface uses clear, approachable Modern Standard Arabic without colloquial wording, with literal labels such as "تسجيل نتيجة الجلسة" (record hearing result), "حفظ" (save), "المطلوب قبل الجلسة" (required before the hearing), and "أموال الموكل المحتفظ بها للصرف" (client money held by us), with the financial term explained. Do not expose table names or database errors.
 - Arabic names and text follow natural RTL flow. Phone numbers, email addresses, links, the file code `LO-2026-001`, and mixed numbers belong in `bdi`; a number/year group has explicit `ltr` direction. Do not reverse the text itself or add arbitrary spaces to repair direction.
 - Use one consistent number format for display, accepting both `٠١٢٣٤٥٦٧٨٩` and `0123456789` on input. The currency label is "ج.م"; pound amounts have at most two decimal places, giving precision of one piastre. Court case and power-of-attorney numbers are reference text, not numeric values that lose leading zeros.
 - All displayed dates follow `Africa/Cairo`, and a date without a time stays date-only. For example, display "الثلاثاء، 10 نوفمبر 2026" (Tuesday, 10 November 2026) instead of an ambiguous numeric date. An unknown optional hearing time displays "الساعة غير محددة" (time not specified); never insert 9 a.m. independently.
@@ -522,18 +595,18 @@ Measure contrast during implementation against WCAG AA; color names or visual in
 
 **Tablet 768px:** navigation becomes a drawer, and forms use one or two columns depending on field width. Tables reduce their columns in favor of important information and a details action. Names, case numbers, and hearing details must not be truncated without a way to read the full text.
 
-**Mobile 390px:** bottom navigation uses the literal labels "النهارده، الملفات، البحث، المزيد" (today, files, search, more). An "إضافة" (add) button opens clear creation options. Creation forms are full screens rather than a small dialog over another dialog. Lists become cards or rows showing the name, number, court, next hearing, and required action. Matter tabs become a section selector when space is limited, rather than disappearing offscreen. A sticky save button is allowed if it does not cover a field or its error message when the keyboard is open.
+**Mobile 390px:** bottom navigation uses the literal labels "لوحة المتابعة، الملفات، البحث، المزيد" (dashboard, files, search, more). An "إضافة" (add) button opens clear creation options. Creation forms are full screens rather than a small dialog over another dialog. Lists become cards or rows showing the name, number, court, next hearing, and required action. Matter tabs become a section selector when space is limited, rather than disappearing offscreen. A sticky save button is allowed if it does not cover a field or its error message when the keyboard is open.
 
 Quick actions use "نتيجة جلسة" (hearing result), "رفع مستند" (upload document), "تسجيل دفعة" (record payment), and "مهمة جديدة" (new task). They appear inside the matter with its details preselected, or from the home screen with matter selection first. Use one primary action per context, keeping delete/cancel away from save.
 
 ## States and interaction
 
-- **Loading:** use a skeleton matching the content structure; do not show a zero balance or "مافيش جلسات" (no hearings) before the request completes.
-- **Empty:** show "لسه مافيش ملفات. أضف أول ملف شغل" (no files yet; add your first matter) with a clear action. Empty filtered results offer "غيّر الفلاتر" (change the filters), rather than encouraging accidental creation of new data.
-- **Saving:** the button shows "جارٍ الحفظ" (saving) and prevents duplicate submission; final confirmation appears only after the server responds. A lost connection after submission shows "بنتأكد إذا العملية اتسجلت" (checking whether the operation was recorded) and queries with the same operation key. Pressing again must not create another hearing or receipt.
+- **Loading:** use a skeleton matching the content structure; do not show a zero balance or "لا توجد جلسات" (no hearings) before the request completes.
+- **Empty:** show "لا توجد ملفات. أضف أول ملف للمكتب" (no files yet; add your first matter) with a clear action. Empty filtered results offer "تعديل عوامل التصفية" (change the filters), rather than encouraging accidental creation of new data.
+- **Saving:** the button shows "جارٍ الحفظ" (saving) and prevents duplicate submission; final confirmation appears only after the server responds. A lost connection after submission shows "جارٍ التحقق من تسجيل العملية" (checking whether the operation was recorded) and queries with the same operation key. Pressing again must not create another hearing or receipt.
 - **Error:** provide a summary above the form and a message beside each field, moving focus to the first error. Valid entries remain in page memory for the duration of the session. They are not automatically stored in `localStorage` or `IndexedDB`.
-- **Disconnected:** a persistent banner says "النت مقطوع. التعديلات مش محفوظة" (connection lost; changes are not saved). The MVP requires connectivity, and PWA means home-screen installation; do not promise synchronization, document access, or a confidential agenda without a connection. An open page may remain visible in memory until closed; this is not a supported offline mode.
-- **Edit conflict:** show "البيانات اتعدلت من شاشة تانية" (the data was changed from another screen), compare the newer version, and allow the edit to be reapplied. Do not silently overwrite the newer data.
+- **Disconnected:** a persistent banner says "انقطع الاتصال بالإنترنت. التعديلات غير محفوظة" (connection lost; changes are not saved). The MVP requires connectivity, and PWA means home-screen installation; do not promise synchronization, document access, or a confidential agenda without a connection. An open page may remain visible in memory until closed; this is not a supported offline mode.
+- **Edit conflict:** show "عُدّلت البيانات من شاشة أخرى" (the data was changed from another screen), compare the newer version, and allow the edit to be reapplied. Do not silently overwrite the newer data.
 - **Permission/session expiry:** show a clear login screen, then return to the requested page. Check a sensitive operation's status before resubmitting it. Locking the view clears sensitive data from the screen and requires reauthentication.
 - **Archiving:** explain the effects and prevent hiding a future hearing or an open confirmed legal deadline; explicitly resolve the appointment first. Only receivables and noncritical tasks may continue with a reason and ongoing visibility in their reports. Posted financial operations offer "عكس العملية" (reverse operation) with a reason; there is no edit-value action for a posted entry.
 
@@ -722,7 +795,7 @@ From the matter, select the UI action “إضافة قيد مرتبط” (add a 
 
 ## 3. Daily agenda before court
 
-- The home screen starts with the UI section “النهارده” (today), followed by overdue work and upcoming hearings, rather than only general metrics. Show the hearing, client, court, registration number, required preparation, and physical file location.
+- The home screen starts with the UI section “لوحة المتابعة” (dashboard), followed by overdue work and upcoming hearings, rather than only general metrics. Show the hearing, client, court, registration number, required preparation, and physical file location.
 - The UI action “قائمة تجهيز الجلسة” (hearing preparation checklist) shows designated tasks and documents. Opening a matter or downloading a document does not imply task completion.
 - Print the daily/weekly agenda in Arabic on A4 with a clear generation timestamp. A hearing without a time displays “الساعة غير محددة” (time unspecified). Conflicts involving two courts produce a warning.
 - If connectivity fails, show the offline state. Version one does not confirm local persistence or deferred financial synchronization. The printed daily agenda is a practical fallback until connectivity returns, followed by entering and reviewing changes.
@@ -751,7 +824,7 @@ A hearing cancelled without a replacement becomes `CANCELLED` with a reason and 
 
 ## 6. Legal deadline or follow-up task
 
-**Task:** title, optional due day, priority, and links; it can be completed directly. **Legal deadline:** action description, date entered/reviewed by the lawyer, source, basis notes, then the explicit UI confirmation “راجعت الموعد واعتمدته” (I reviewed and approved the deadline). The system does not calculate appeal deadlines from general rules, nor extract a date through OCR and approve it automatically.
+**Task:** title, optional due day, priority, and links; it can be completed directly. **Legal deadline:** action description, date entered/reviewed by the lawyer, source, basis notes, then the explicit UI confirmation “راجعت الموعد وأعتمده” (I reviewed and approve the deadline). The system does not calculate appeal deadlines from general rules, nor extract a date through OCR and approve it automatically.
 
 A `DRAFT` deadline appears under the UI section “مواعيد تحتاج مراجعة” (deadlines requiring review). Confirmed deadlines produce reminders before their dates and remain marked overdue afterward if open. Acknowledging a reminder is not completing the legal action. Completion requires an execution date and optional note/document. Changing a confirmed deadline records a reason, returns it to `DRAFT`, and cancels old reminders until reapproval; the previous confirmation does not survive a date change.
 

@@ -5,7 +5,7 @@ $outputRoot = Join-Path $projectRoot 'outputs'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $documents = @(
     'README.md', 'PRODUCT.md', 'GLOSSARY.md', 'docs/PRD.md',
-    'docs/SCREENS.md', 'DESIGN.md', 'docs/DATA_MODEL.md',
+    'docs/SCREENS.md', 'docs/STITCH_UI.md', 'docs/STITCH_UI_BRIEF.md', 'DESIGN.md', 'docs/DATA_MODEL.md',
     'docs/WORKFLOWS.md', 'docs/ARCHITECTURE.md',
     'docs/SECURITY_OPERATIONS.md', 'docs/DATA_LIFECYCLE.md',
     'docs/MIGRATION.md', 'docs/ROADMAP.md', 'docs/REVIEW_PROTOCOL.md',

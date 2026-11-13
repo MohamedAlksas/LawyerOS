@@ -6,7 +6,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 
 | Journey | Steps | Success evidence |
 |---|---|---|
-| Start of the day | Login → "النهارده" (today) → today's hearings → open matter → document checklist → print agenda | Hearings without a specified time are visible, and confirmed legal deadlines are separate from tasks |
+| Start of the day | Login → "لوحة المتابعة" (dashboard) → today's hearings → open matter → document checklist → print agenda | Hearings without a specified time are visible, and confirmed legal deadlines are separate from tasks |
 | New client and matter | Search for an existing person → add/select client → matter → court proceeding if available → specify paper location | Stable internal code, multiple clients supported, and a matter may begin as a consultation before any court case number exists |
 | After court | Hearing → "تسجيل النتيجة" (record result) → decision → optional next hearing → optional tasks → review and save | The result, new hearing, and tasks all appear together, or none are saved |
 | Mobile upload | Matter → "رفع مستند" (upload document) → photograph/select → preview image legibility → brief metadata → send | Scan status is clear, and the file is unavailable before upload and scanning finish |
@@ -19,7 +19,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 | ID | Title and proposed route | Content and primary action |
 |---|---|---|
 | S01 | Login `/login` and `/verify` | Login, additional verification, recovery |
-| S02 | Today `/today` | Hearings, confirmed deadlines, tasks, operating alerts |
+| S02 | Dashboard `/today` | Hearings, confirmed deadlines, tasks, operating alerts |
 | S03 | Matters `/matters` and `/matters/new` | Search, filters, and matter creation |
 | S04 | Matter file `/matters/:id` | Summary and tabs for all related work |
 | S05 | Court proceeding `/proceedings/:id` | One court case number, its instance, and hearings |
@@ -38,7 +38,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 
 Login fields: registered email **required** `email`, password **required** `password`. There is no public registration; the office owner is set up through a defined bootstrap process. Additional verification: **required** `TOTP` code or a single-use recovery code; active device names, last use, and a terminate-device action. Failed-login messages do not reveal whether an email exists. Account recovery follows a documented operations procedure, with no backdoor button that bypasses MFA. Settings explain how to keep recovery codes outside the server and phone before accepting the account setup.
 
-## S02 — Today
+## S02 — Dashboard
 
 Order: today's date, today's hearings, legal deadlines needing confirmation or approaching, overdue tasks, then a weekly summary. Each hearing shows the matter name, court case number/year, court and circuit, time or "غير محددة" (not specified), required work and preparation, and a record-result action. Overlapping hearing times generate a warning for review but do not prevent saving. The owner sees a late-backup alert. Pressing "تمت" (done) does not close a legal deadline; each item type has its own explicit action.
 
@@ -76,7 +76,7 @@ Actions: add hearing, upload a document for this proceeding, add an appeal/linke
 
 **Record result:** decision/result **required**; summary of what happened **optional**; is there a new date? **required**, with yes/no/not yet determined choices; new date **required if yes**, with optional time; required-work list **optional**, each task having a title and a due date if known; decision document **optional**; proceeding-status update **explicit and optional**. A new date before the current hearing date is a potential error requiring correction, while the appropriate path still allows documenting a historical date correction. Do not calculate an appeal deadline from the decision.
 
-Before saving, show the literal summary "هتسجل النتيجة، وتضيف جلسة بتاريخ…، و… مهام" (you will record the result, add a hearing on…, and… tasks). Correcting a saved result shows the previous version and reason. Changing an appointment for a hearing that has not taken place is labeled "تعديل الموعد" (change appointment), not "إثبات انعقاد" (record that the hearing took place). Preserve the previous appointment reference and create the replacement according to WORKFLOWS without deleting change history. Cancelling a hearing records the reason and updates its reminders.
+Before saving, show the literal summary "سيتم تسجيل النتيجة وإضافة جلسة بتاريخ… وإضافة… مهام" (you will record the result, add a hearing on…, and… tasks). Correcting a saved result shows the previous version and reason. Changing an appointment for a hearing that has not taken place is labeled "تعديل الموعد" (change appointment), not "إثبات انعقاد" (record that the hearing took place). Preserve the previous appointment reference and create the replacement according to WORKFLOWS without deleting change history. Cancelling a hearing records the reason and updates its reminders.
 
 ## S07 and S08 — Agenda, tasks, and legal deadlines
 
@@ -84,7 +84,7 @@ The agenda begins with a simple mobile list, with week/month as alternatives. Pr
 
 **Task:** title **required**; linked matter/proceeding **optional**; description **optional**; priority **required**, default normal; due date **optional**; status **required**, default open; checklist **optional**; reminder **optional**. It does not automatically create a legal deadline.
 
-**Legal deadline:** title **required**; matter **required**; proceeding **optional**; final date **required for approval**; time **optional**; source of the deadline/review notes **required for approval**; source document **optional**; status **required**, using "مسودة تحتاج مراجعة/مؤكد/تم الإجراء/ألغي" (draft requiring review/confirmed/action completed/cancelled). Approval requires the explicit action "راجعت الموعد واعتمده" (I reviewed and approve the deadline), with the approver's name and timestamp. Changing the date after approval invalidates the previous confirmation and requires a new review with a reason. Completion requires a description of what was done and optional evidence; a reminder is not proof of execution.
+**Legal deadline:** title **required**; matter **required**; proceeding **optional**; final date **required for approval**; time **optional**; source of the deadline/review notes **required for approval**; source document **optional**; status **required**, using "مسودة تحتاج مراجعة/مؤكد/تم الإجراء/ألغي" (draft requiring review/confirmed/action completed/cancelled). Approval requires the explicit action "راجعت الموعد وأعتمده" (I reviewed and approve the deadline), with the approver's name and timestamp. Changing the date after approval invalidates the previous confirmation and requires a new review with a reason. Completion requires a description of what was done and optional evidence; a reminder is not proof of execution.
 
 ## S09 — Parties and client profile
 
@@ -96,11 +96,11 @@ Party tabs: details, matters, powers of attorney, general documents, communicati
 
 Digital file **required**; title **required**, suggested from the filename; type **required**; link to a matter or party **required**, with proceeding/hearing **optional** and consistent with the matter; document date **optional**; paper-original location **optional**; is the original in the office? **optional**, with yes/no/unknown choices; description **optional**; sensitivity **required**, default confidential.
 
-Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Literal states: "بيترفع، جاري الفحص، جاهز، مرفوض، الرفع غير مكتمل" (uploading, scanning, ready, rejected, incomplete upload). A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
+Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Literal states: "جارٍ الرفع، جارٍ الفحص، جاهز، مرفوض، الرفع غير مكتمل" (uploading, scanning, ready, rejected, incomplete upload). A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
 
 ## S11 — Accounts
 
-The interface has four clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل، مصاريف المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
+The interface has four clear literal sections: "الأتعاب، مصروفات القضايا، أموال الموكل، مصروفات المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
 
 | Form | Core fields |
 |---|---|
@@ -124,7 +124,7 @@ Reports: hearings within a period, matter summary, client statement showing each
 
 Settings: office name **required**; contact information **optional**; EGP currency and Cairo timezone for display; reminder policies; management of courts, circuits, types, and paper locations; security-session management; backup status and latest restore test. Reference entries already in use are disabled rather than deleted in a way that breaks earlier matters. Server restoration belongs in operations, not a dangerous button in the daily interface.
 
-Migration: select CSV template → upload → map columns → preview and review errors → approve valid rows → report what was recorded. Source fields: row code/identifier, matter title, parties, case number/year/court where available, next hearing, paper location, review source. Ambiguous dates stop for review rather than being guessed. Replaying the same batch does not duplicate matters. The incomplete-data screen shows "البيانات لسه محتاجة مراجعة" (the data still needs review), who reviewed it and when. Upcoming cases are checked against paper with the project owner's father before approval.
+Migration: select CSV template → upload → map columns → preview and review errors → approve valid rows → report what was recorded. Source fields: row code/identifier, matter title, parties, case number/year/court where available, next hearing, paper location, review source. Ambiguous dates stop for review rather than being guessed. Replaying the same batch does not duplicate matters. The incomplete-data screen shows "البيانات تحتاج إلى مراجعة" (the data still needs review), who reviewed it and when. Upcoming cases are checked against paper with the project owner's father before approval.
 
 ## Pilot acceptance scenario with the project owner's father
 
