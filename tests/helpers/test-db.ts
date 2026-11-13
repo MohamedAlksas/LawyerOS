@@ -1,4 +1,4 @@
-import { Pool, PoolConfig } from 'pg';
+import { Pool, PoolConfig, Client } from 'pg';
 import crypto from 'crypto';
 import { validateEnv, EnvironmentValidationError, AppEnv, validatePostgresUrlStructure } from '@/lib/env';
 
@@ -24,6 +24,15 @@ export function canonicalizePostgresUrl(urlStr: string): string {
   }
 }
 
+interface ClientWithParameters {
+  connectionParameters: {
+    host?: string;
+    port?: number | string;
+    database?: string;
+    user?: string;
+  };
+}
+
 /**
  * Validates the test environment strictly through the shared isolation guard.
  * Refuses fallback strings, requiring an explicit TEST_DATABASE_URL.
@@ -43,6 +52,73 @@ export function validateTestEnvironment(
       ['TEST_DATABASE_URL'],
       []
     );
+  }
+
+  const rawOpDbUrl =
+    'DATABASE_URL' in overrides
+      ? overrides.DATABASE_URL
+      : process.env.DATABASE_URL;
+
+  // Connection-free driver destination separation check (Phase A / R07)
+  // Ensure that operational and test targets do not coincide under effective pg driver parameters
+  // (taking ambient PGPORT, omitted ports, and loopback aliases into account)
+  if (rawOpDbUrl && rawOpDbUrl.trim().length > 0) {
+    const testStructure = validatePostgresUrlStructure(rawTestDbUrl);
+    const opStructure = validatePostgresUrlStructure(rawOpDbUrl);
+
+    if (testStructure.valid && opStructure.valid) {
+      const originalPgPort = process.env.PGPORT;
+      const hasPgPortOverride = 'PGPORT' in overrides;
+      try {
+        if (hasPgPortOverride) {
+          if (overrides.PGPORT === undefined) {
+            delete process.env.PGPORT;
+          } else {
+            process.env.PGPORT = overrides.PGPORT;
+          }
+        }
+
+        const opClient = new Client({ connectionString: rawOpDbUrl }) as unknown as ClientWithParameters;
+        const opParams = opClient.connectionParameters;
+
+        const rawTestClient = new Client({ connectionString: rawTestDbUrl }) as unknown as ClientWithParameters;
+        const rawTestParams = rawTestClient.connectionParameters;
+
+        const canonicalTestUrl = canonicalizePostgresUrl(rawTestDbUrl);
+        const canonicalTestClient = new Client({ connectionString: canonicalTestUrl }) as unknown as ClientWithParameters;
+        const canonicalTestParams = canonicalTestClient.connectionParameters;
+
+        const opHost = decodeURIComponent((opParams.host || '').replace(/^\[(.+)\]$/, '$1')).toLowerCase();
+        const opPort = Number(opParams.port);
+        const opDb = decodeURIComponent(opParams.database || '');
+
+        const testHost = decodeURIComponent((rawTestParams.host || '').replace(/^\[(.+)\]$/, '$1')).toLowerCase();
+        const rawTestPort = Number(rawTestParams.port);
+        const canonicalTestPort = Number(canonicalTestParams.port);
+        const testDb = decodeURIComponent(rawTestParams.database || '');
+
+        const loopbacks = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+        const hostsCoincide = opHost === testHost || (loopbacks.has(opHost) && loopbacks.has(testHost));
+        const dbsCoincide = opDb === testDb;
+        const portsCoincide = opPort === rawTestPort || opPort === canonicalTestPort;
+
+        if (hostsCoincide && dbsCoincide && portsCoincide) {
+          throw new EnvironmentValidationError(
+            `Environment validation failed.\nInvalid environment variable(s): TEST_DATABASE_URL\nTEST_DATABASE_URL must not target the operational/development database ('${testDb || 'unknown'}').\nConsult .env.example for required configuration. Secret values are redacted.`,
+            [],
+            ['TEST_DATABASE_URL']
+          );
+        }
+      } finally {
+        if (hasPgPortOverride) {
+          if (originalPgPort === undefined) {
+            delete process.env.PGPORT;
+          } else {
+            process.env.PGPORT = originalPgPort;
+          }
+        }
+      }
+    }
   }
 
   const canonicalTestUrl = canonicalizePostgresUrl(rawTestDbUrl);

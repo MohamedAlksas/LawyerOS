@@ -120,6 +120,152 @@ describe('Test Database Isolation & Pool Construction Helpers (Phase A)', () => 
     }).toThrow(EnvironmentValidationError);
   });
 
+  describe('Connection-Free Driver Destination Regressions (R07 Reversed Omitted-Port Matrix)', () => {
+    it('1. Operational omitted port + Test explicit matching port with ambient PGPORT (defect reproduction case) -> throws', () => {
+      process.env.PGPORT = '65432';
+      const opUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+      const testUrl = 'postgresql://synthetic:synthetic@127.0.0.1:65432/shared_test';
+
+      // Verify connection-free Client.connectionParameters resolution:
+      // pg resolves omitted port in opUrl to PGPORT=65432
+      const opClient = new Client({ connectionString: opUrl });
+      const opParams = (opClient as unknown as { connectionParameters: { port: number; database: string } }).connectionParameters;
+      expect(opParams.port).toBe(65432);
+      expect(opParams.database).toBe('shared_test');
+
+      const testClient = new Client({ connectionString: testUrl });
+      const testParams = (testClient as unknown as { connectionParameters: { port: number; database: string } }).connectionParameters;
+      expect(testParams.port).toBe(65432);
+      expect(testParams.database).toBe('shared_test');
+
+      // Assert fail-closed validation rejection
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: opUrl,
+          TEST_DATABASE_URL: testUrl,
+        });
+      }).toThrow(EnvironmentValidationError);
+    });
+
+    it('2. Test omitted port + Operational explicit matching port with ambient PGPORT -> throws', () => {
+      process.env.PGPORT = '65432';
+      const opUrl = 'postgresql://synthetic:synthetic@127.0.0.1:65432/shared_test';
+      const testUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+
+      // Verify connection-free Client.connectionParameters resolution:
+      // pg resolves omitted port in testUrl to PGPORT=65432
+      const testClient = new Client({ connectionString: testUrl });
+      const testParams = (testClient as unknown as { connectionParameters: { port: number; database: string } }).connectionParameters;
+      expect(testParams.port).toBe(65432);
+
+      // Assert fail-closed validation rejection
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: opUrl,
+          TEST_DATABASE_URL: testUrl,
+        });
+      }).toThrow(EnvironmentValidationError);
+    });
+
+    it('3. Both omitted port + ambient PGPORT -> throws if db matches', () => {
+      process.env.PGPORT = '65432';
+      const opUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+      const testUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+
+      // Both URLs resolve to effective port 65432 under ambient PGPORT
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: opUrl,
+          TEST_DATABASE_URL: testUrl,
+        });
+      }).toThrow(EnvironmentValidationError);
+    });
+
+    it('4. Both omitted port without ambient PGPORT -> throws if db matches (defaults to 5432)', () => {
+      delete process.env.PGPORT;
+      const opUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+      const testUrl = 'postgresql://synthetic:synthetic@127.0.0.1/shared_test';
+
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: opUrl,
+          TEST_DATABASE_URL: testUrl,
+        });
+      }).toThrow(EnvironmentValidationError);
+    });
+
+    it('5. Loopback equivalence (localhost vs 127.0.0.1, ::1) -> throws', () => {
+      // 5a. localhost vs 127.0.0.1 with explicit matching ports
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: 'postgresql://synthetic:synthetic@localhost:5432/shared_test',
+          TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/shared_test',
+        });
+      }).toThrow(EnvironmentValidationError);
+
+      // 5b. 127.0.0.1 vs localhost with ambient PGPORT and omitted port
+      process.env.PGPORT = '65432';
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1/shared_test',
+          TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@localhost:65432/shared_test',
+        });
+      }).toThrow(EnvironmentValidationError);
+
+      // 5c. [::1] IPv6 loopback vs 127.0.0.1
+      expect(() => {
+        validateTestEnvironment({
+          DATABASE_URL: 'postgresql://synthetic:synthetic@[::1]:5432/shared_test',
+          TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/shared_test',
+        });
+      }).toThrow(EnvironmentValidationError);
+    });
+
+    it('6. Port mismatch -> passes separation check', () => {
+      // 6a. Operational explicit 5432 vs Test explicit 5433
+      process.env.PGPORT = '65432';
+      const env1 = validateTestEnvironment({
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/shared_test',
+        TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5433/shared_test',
+      });
+      expect(env1.TEST_DATABASE_URL).toContain(':5433/');
+
+      // 6b. Operational explicit 65432 vs Test explicit 5432
+      const env2 = validateTestEnvironment({
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:65432/shared_test',
+        TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:5432/shared_test',
+      });
+      expect(env2.TEST_DATABASE_URL).toContain(':5432/');
+    });
+
+    it('7. DB name mismatch -> passes separation check', () => {
+      process.env.PGPORT = '65432';
+      // Same host, same effective port (65432), different databases
+      const env = validateTestEnvironment({
+        DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:65432/lawoffice_dev',
+        TEST_DATABASE_URL: 'postgresql://synthetic:synthetic@127.0.0.1:65432/different_db_test',
+      });
+      expect(env.TEST_DATABASE_URL).toContain('different_db_test');
+    });
+
+    it('8. Explicit undefined or empty overrides in validateTestEnvironment -> rejects', () => {
+      // 8a. Explicit undefined TEST_DATABASE_URL override
+      expect(() => {
+        validateTestEnvironment({ TEST_DATABASE_URL: undefined });
+      }).toThrow(EnvironmentValidationError);
+
+      // 8b. Explicit empty string TEST_DATABASE_URL override
+      expect(() => {
+        validateTestEnvironment({ TEST_DATABASE_URL: '' });
+      }).toThrow(EnvironmentValidationError);
+
+      // 8c. Explicit whitespace-only TEST_DATABASE_URL override
+      expect(() => {
+        validateTestEnvironment({ TEST_DATABASE_URL: '   ' });
+      }).toThrow(EnvironmentValidationError);
+    });
+  });
+
   it('connection-free check: rejects malformed URLs fail-closed before connection (R07)', () => {
     expect(() => {
       validateTestEnvironment({
