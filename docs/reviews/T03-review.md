@@ -1,6 +1,6 @@
 # T03 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at inspected/published head `eb2199eef2fd5175072e13ecc1e6b50d4d0df6ac`. Read [the current review](T03-review-round2.md) and [correction round 2](T03-corrections-round2.md). R01 and R05 are fixed; the remaining findings are partial/open. The text below records the initial review and is historical.
+Latest review: **CHANGES_REQUESTED** at inspected submission head `cd60a6a0f66bcdf6554c9b986c5e058921ab8412`. Read [the current review](T03-review-round3.md) and [correction round 3](T03-corrections-round3.md). R01, R05 and R09 are fixed; CI is green, while the remaining session, bootstrap, fixture-ownership and evidence findings are partial/open. The text below records the initial review and is historical.
 
 Decision: **CHANGES_REQUESTED**. Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, T04, deployment or real-data operation. Review date: 11 November 2026, Africa/Cairo. [Correction assignment](T03-corrections-round1.md).
 
