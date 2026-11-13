@@ -1,0 +1,100 @@
+{
+  "reviewedHead": "eb2199eef2fd5175072e13ecc1e6b50d4d0df6ac",
+  "implementationHead": "3504ffc009f369db3dfcf263ea61aa3030142b89",
+  "reviewDate": "2026-11-13",
+  "scope": "Synthetic data in a Codex-owned disposable PostgreSQL container; no operational database",
+  "policy": {
+    "unconfirmedEnrollment": {
+      "verified": true,
+      "bootstrapClosed": true,
+      "authenticatorProofSubmitted": false
+    },
+    "uriTotp": {
+      "keyBytes": 20,
+      "http": 200,
+      "protectedActorAccepted": true
+    },
+    "disableHttp": 403,
+    "invalidSignature": {
+      "libraryHttp": 200,
+      "librarySession": null,
+      "applicationAccepted": true
+    },
+    "normalIdleRejection": 401,
+    "trustedDevice": {
+      "loginHttp": 200,
+      "newChallengeRequired": false,
+      "protectedActorAccepted": true
+    },
+    "concurrentRecovery": {
+      "submitted": 8,
+      "rejected": 8,
+      "recordedFailures": 1,
+      "locked": false
+    },
+    "revocationFailure": {
+      "injected": "PostgreSQL DELETE trigger error on second session",
+      "passwordChangeHttp": 200,
+      "secondSessionAccepted": true
+    },
+    "cleanup": {
+      "unrelatedSentinelBefore": true,
+      "unrelatedSentinelAfter": false
+    },
+    "guardReadFailure": {
+      "injectedReadErrors": 1,
+      "beforeIdleMinutes": 31,
+      "http": 200,
+      "protectedActorAccepted": true
+    }
+  },
+  "setup": {
+    "upgradeFromT02Fixture": {
+      "sentinelRetained": true,
+      "deploySucceeded": false,
+      "errorCode": "P3005"
+    },
+    "firstCli": {
+      "exit": 0,
+      "signal": null,
+      "timedOut": false,
+      "printsTotpSeed": true,
+      "printsRecoveryCodes": true,
+      "printsPassword": false,
+      "rejectsRepeated": true
+    },
+    "repeatedCli": {
+      "exit": 1,
+      "signal": null,
+      "timedOut": false,
+      "printsTotpSeed": false,
+      "printsRecoveryCodes": false,
+      "printsPassword": false,
+      "rejectsRepeated": true
+    },
+    "unconfirmedBootstrapState": {
+      "twoFactorEnabled": true,
+      "verified": true,
+      "isClosed": true
+    },
+    "authenticatorProofSubmitted": false
+  },
+  "freshRace": {
+    "freshCompetitors": 2,
+    "successfulOwners": 1,
+    "ownerRows": 1,
+    "closedAfterOwnerRemoval": true,
+    "laterProvisioningRejected": true
+  },
+  "afterBrowserCleanup": {
+    "bootstrapMarkersAfterBrowserSuite": 0,
+    "remainingUsers": 1
+  },
+  "checks": {
+    "configuredUnitsLocal": 53,
+    "configuredUnitsCI": 53,
+    "integration": 29,
+    "browser": 30,
+    "browserRetries": 0
+  }
+}

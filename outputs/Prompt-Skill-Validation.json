@@ -38,7 +38,8 @@
       "skills": [
         "lawoffice-delivery",
         "lawoffice-security-operations",
-        "lawoffice-testing"
+        "lawoffice-testing",
+        "lawoffice-arabic-ui"
       ],
       "submission": "docs/reviews/T03-submission.md"
     },

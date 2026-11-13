@@ -1490,7 +1490,7 @@ Every task loads `lawoffice-delivery`. Additional skills are listed below; every
 |---|---|---|---|---|---|
 | T01 | [T01](../docs/tasks/T01.md) | None — first task | `agency-software-architect` | `agency-devops-automator` | `lawoffice-foundation` |
 | T02 | [T02](../docs/tasks/T02.md) | T01 | `agency-devops-automator` | `agency-backend-architect`, `agency-test-automation-engineer` | `lawoffice-foundation`, `lawoffice-testing` |
-| T03 | [T03](../docs/tasks/T03.md) | T02 | `agency-identity-access-engineer` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing` |
+| T03 | [T03](../docs/tasks/T03.md) | T02 | `agency-identity-access-engineer` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-security-operations`, `lawoffice-testing`, `lawoffice-arabic-ui` |
 | T04 | [T04](../docs/tasks/T04.md) | T03 | `agency-frontend-developer` | `agency-accessibility-auditor`, `agency-test-automation-engineer` | `lawoffice-arabic-ui`, `lawoffice-testing` |
 | T05 | [T05](../docs/tasks/T05.md) | T04 | `agency-backend-architect` | `agency-application-security-engineer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
 | T06 | [T06](../docs/tasks/T06.md) | T05 | `agency-backend-architect` | `agency-database-optimizer`, `agency-test-automation-engineer` | `lawoffice-domain`, `lawoffice-arabic-ui`, `lawoffice-testing` |
@@ -2388,6 +2388,9 @@ Read GEMINI.md and explicitly apply these project skills:
 - D:/Lawyer/.agents/skills/lawoffice-delivery/SKILL.md
 - D:/Lawyer/.agents/skills/lawoffice-security-operations/SKILL.md
 - D:/Lawyer/.agents/skills/lawoffice-testing/SKILL.md
+- D:/Lawyer/.agents/skills/lawoffice-arabic-ui/SKILL.md
+
+Current Codex correction assignment (13 November 2026): read docs/reviews/T03-review-round2.md and docs/reviews/T03-corrections-round2.md in full before editing. The correction addendum refines per-slice native ownership and acceptance on the existing feature/t03-identity-sessions branch and PR #8. It supersedes earlier correction instructions; preserve fixed behaviors and do not restart T03 or start T04. Auth-only Playwright tooling remains authorized in T03. Execute the addendum's actual Graphify/native/checkpoint requirements and submit docs/reviews/T03-submission-round2.md.
 
 Before editing, inspect docs/reviews/T02-review.md and its referenced implementation baseline. Continue only if it actually states ACCEPTED for the current predecessor. Missing or conflicting evidence means report the blocker; do not execute T02 yourself.
 
