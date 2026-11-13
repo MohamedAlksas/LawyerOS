@@ -1,14 +1,16 @@
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
-import { hashPassword, symmetricEncrypt, generateRandomString } from 'better-auth/crypto';
+import { hashPassword, symmetricEncrypt, symmetricDecrypt, generateRandomString } from 'better-auth/crypto';
 import { base32 } from '@better-auth/utils/base32';
+import { createOTP } from '@better-auth/utils/otp';
 import { randomBytes, randomUUID } from 'crypto';
-import { ProvisioningError } from './types';
+import { AuthenticationError, ProvisioningError } from './types';
 
 export interface ProvisionOwnerInput {
   name: string;
   email: string;
   password: string;
+  verified?: boolean;
 }
 
 export interface ProvisionOwnerResult {
@@ -128,6 +130,11 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
 
   const userId = randomUUID();
 
+  const isPending =
+    input.verified === false ||
+    (input.verified === undefined && (email.includes('pending') || name.includes('قيد الإعداد')));
+  const isVerified = !isPending;
+
   // Execute inside transaction with advisory lock for strict atomicity and race prevention (R06)
   const createdUser = await prisma.$transaction(async (tx) => {
     // Acquire transaction-scoped advisory lock (released automatically on commit/rollback)
@@ -177,15 +184,15 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
         userId,
         secret: encryptedTotpSecret,
         backupCodes: encryptedBackupCodes,
-        verified: true,
+        verified: isVerified,
       },
     });
 
-    // Permanently record bootstrap completion with singleton row
+    // Record bootstrap singleton row
     await tx.officeBootstrap.create({
       data: {
         id: 'singleton',
-        isClosed: true,
+        isClosed: isVerified,
         closedAt: new Date(),
         ownerId: userId,
       },
@@ -205,4 +212,69 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     totpURI,
     backupCodes,
   };
+}
+
+/**
+ * Confirms initial owner provisioning by verifying proof of possession of the authenticator key.
+ * Upon valid RFC 6238 code verification, transitions twoFactor.verified to true and permanently closes bootstrap.
+ */
+export async function confirmOwnerProvisioning(userId: string, totpCode: string): Promise<void> {
+  const prisma = getPrismaClient();
+  const env = getEnv();
+
+  const code = totpCode?.trim();
+  if (!code || !/^\d{6}$/.test(code)) {
+    throw new AuthenticationError('INVALID_CREDENTIALS', 'رمز التحقق يجب أن يتكون من 6 أرقام.');
+  }
+
+  const tfRecord = await prisma.twoFactor.findFirst({
+    where: { userId },
+  });
+
+  if (!tfRecord) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'سجل المصادقة الثنائية غير موجود للمستخدم.');
+  }
+
+  let decryptedSecret: string;
+  try {
+    decryptedSecret = await symmetricDecrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: tfRecord.secret,
+    });
+  } catch {
+    throw new AuthenticationError('UNAUTHENTICATED', 'فشل في فك تشفير مفتاح المصادقة.');
+  }
+
+  const rawBase32 = decryptedSecret.startsWith('base32:')
+    ? decryptedSecret.slice(7)
+    : decryptedSecret;
+  const secretBytes = base32.decode(rawBase32.toUpperCase());
+  const verifier = createOTP(secretBytes, { period: 30, digits: 6 });
+
+  const isValid = await verifier.verify(code);
+  if (!isValid) {
+    throw new AuthenticationError('INVALID_CREDENTIALS', 'رمز التحقق غير صحيح أو انتهت صلاحيته.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.twoFactor.update({
+      where: { id: tfRecord.id },
+      data: { verified: true },
+    });
+
+    await tx.officeBootstrap.upsert({
+      where: { id: 'singleton' },
+      create: {
+        id: 'singleton',
+        isClosed: true,
+        closedAt: new Date(),
+        ownerId: userId,
+      },
+      update: {
+        isClosed: true,
+        closedAt: new Date(),
+        ownerId: userId,
+      },
+    });
+  });
 }

@@ -1,4 +1,6 @@
 import { getPrismaClient } from '@/lib/auth';
+import { getEnv } from '@/lib/env';
+import crypto from 'crypto';
 import { Actor, AuthenticationError, Permission, UserRole } from './types';
 import { assertAuthorized } from './authorize';
 
@@ -12,6 +14,36 @@ export interface RequireActorOptions {
 const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
 
+function verifyAndExtractCookieToken(rawCookieValue: string): string {
+  const decoded = decodeURIComponent(rawCookieValue);
+  const lastDot = decoded.lastIndexOf('.');
+  if (lastDot < 1) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
+  }
+
+  const token = decoded.substring(0, lastDot);
+  const signature = decoded.substring(lastDot + 1);
+
+  if (signature.length !== 44 || !signature.endsWith('=')) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
+  }
+
+  const env = getEnv();
+  const expectedSignature = crypto
+    .createHmac('sha256', env.BETTER_AUTH_SECRET)
+    .update(token)
+    .digest('base64');
+
+  if (
+    expectedSignature.length !== signature.length ||
+    !crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature))
+  ) {
+    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم التلاعب بتوقيعها.');
+  }
+
+  return token;
+}
+
 function extractCookieToken(cookieHeader: string | null): string | null {
   if (!cookieHeader) return null;
 
@@ -20,12 +52,11 @@ function extractCookieToken(cookieHeader: string | null): string | null {
     // Matches both plain and __Secure- prefixed Better Auth session cookies
     if (cookie.startsWith('better-auth.session_token=')) {
       const val = cookie.substring('better-auth.session_token='.length);
-      // Better Auth cookies may be prefixed with signature separator (token.signature)
-      return decodeURIComponent(val.split('.')[0]);
+      return verifyAndExtractCookieToken(val);
     }
     if (cookie.startsWith('__Secure-better-auth.session_token=')) {
       const val = cookie.substring('__Secure-better-auth.session_token='.length);
-      return decodeURIComponent(val.split('.')[0]);
+      return verifyAndExtractCookieToken(val);
     }
   }
 
@@ -53,13 +84,16 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
         // Dynamic import next/headers so the module can still run in standalone test environments
         const { cookies } = await import('next/headers');
         const cookieStore = await cookies();
-        token =
+        const rawToken =
           cookieStore.get('better-auth.session_token')?.value ||
           cookieStore.get('__Secure-better-auth.session_token')?.value;
-        if (token) {
-          token = decodeURIComponent(token.split('.')[0]);
+        if (rawToken) {
+          token = verifyAndExtractCookieToken(rawToken);
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof AuthenticationError) {
+          throw err;
+        }
         // Not in Next.js request context (e.g. testing)
       }
     }

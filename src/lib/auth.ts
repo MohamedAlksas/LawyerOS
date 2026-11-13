@@ -83,6 +83,7 @@ function createAuthInstance() {
     plugins: [
       twoFactor({
         issuer: 'LawOffice OS',
+        trustDeviceMaxAge: 0,
         otpOptions: {
           period: 30,
           digits: 6,

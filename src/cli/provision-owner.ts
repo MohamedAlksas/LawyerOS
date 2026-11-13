@@ -1,55 +1,57 @@
 import readline from 'readline';
-import { provisionOwner, hasAnyOwner } from '../modules/identity/provisioning';
+import { Writable } from 'stream';
+import { provisionOwner, confirmOwnerProvisioning, hasAnyOwner } from '../modules/identity/provisioning';
 import { closeDbPool } from '../lib/db';
 
+class MutableStdout extends Writable {
+  public muted = false;
+
+  override _write(
+    chunk: Buffer | string,
+    encoding: BufferEncoding,
+    callback: (error?: Error | null) => void
+  ): void {
+    if (!this.muted) {
+      process.stdout.write(chunk, encoding);
+    }
+    callback();
+  }
+}
+
 async function prompt(question: string, hidden = false): Promise<string> {
+  const isInteractive = Boolean(process.stdin.isTTY);
+
+  if (hidden && isInteractive) {
+    const mutableStdout = new MutableStdout();
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: mutableStdout,
+      terminal: true,
+    });
+
+    return new Promise((resolve) => {
+      process.stdout.write(question);
+      mutableStdout.muted = true;
+      rl.question('', (answer) => {
+        mutableStdout.muted = false;
+        process.stdout.write('\n');
+        rl.close();
+        resolve(answer.trim());
+      });
+    });
+  }
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   return new Promise((resolve) => {
-    if (hidden && process.stdin.isTTY) {
-      // In interactive terminal, hide typed password
-      process.stdout.write(question);
-      const stdin = process.stdin;
-      let input = '';
-
-      const onData = (char: Buffer) => {
-        const str = char.toString('utf-8');
-        switch (str) {
-          case '\n':
-          case '\r':
-          case '\u0004':
-            stdin.removeListener('data', onData);
-            process.stdout.write('\n');
-            rl.close();
-            resolve(input);
-            break;
-          case '\u0003':
-            process.exit(1);
-            break;
-          case '\u007f':
-          case '\b':
-            if (input.length > 0) {
-              input = input.slice(0, -1);
-              process.stdout.write('\b \b');
-            }
-            break;
-          default:
-            input += str;
-            process.stdout.write('*');
-            break;
-        }
-      };
-
-      stdin.on('data', onData);
-    } else {
-      rl.question(question, (answer) => {
-        rl.close();
-        resolve(answer.trim());
-      });
-    }
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
   });
 }
 
@@ -66,40 +68,64 @@ async function main() {
       process.exit(1);
     }
 
+    const isInteractive = Boolean(process.stdin.isTTY);
+
     const name =
-      process.env.OWNER_NAME || (await prompt('أدخل الاسم الكامل للمالك: '));
+      process.env.OWNER_NAME || (isInteractive ? await prompt('أدخل الاسم الكامل للمالك: ') : '');
     const email =
-      process.env.OWNER_EMAIL || (await prompt('أدخل البريد الإلكتروني للمالك: '));
+      process.env.OWNER_EMAIL || (isInteractive ? await prompt('أدخل البريد الإلكتروني للمالك: ') : '');
     const password =
-      process.env.OWNER_PASSWORD || (await prompt('أدخل كلمة المرور (8 أحرف على الأقل): ', true));
+      process.env.OWNER_PASSWORD ||
+      (isInteractive ? await prompt('أدخل كلمة المرور (8 أحرف على الأقل): ', true) : '');
 
     if (!name || !email || !password) {
       console.error('[خطأ]: جميع الحقول (الاسم، البريد الإلكتروني، كلمة المرور) مطلوبة.');
       process.exit(1);
     }
 
-    console.log('\nجارٍ إنشاء الحساب وتوليد مفاتيح المصادقة الثنائية ورموز الاسترداد...\n');
+    console.log('\nجارٍ إنشاء الحساب وتوليد مفاتيح المصادقة الثنائية...\n');
 
-    const result = await provisionOwner({ name, email, password });
+    const result = await provisionOwner({ name, email, password, verified: false });
+
+    if (isInteractive) {
+      console.log('----------------------------------------------------');
+      console.log('مفتاح تطبيق المصادقة الثنائية (TOTP Secret):');
+      console.log(`  ${result.totpSecret}`);
+      console.log('\nرابط إعداد المصادقة (TOTP URI):');
+      console.log(`  ${result.totpURI}`);
+      console.log('----------------------------------------------------');
+    }
+
+    const totpCode =
+      process.env.OWNER_TOTP_CODE ||
+      (isInteractive
+        ? await prompt('أدخل رمز التحقق المكون من 6 أرقام من تطبيق المصادقة لتأكيد الحيازة: ')
+        : '');
+
+    if (!totpCode) {
+      console.error('[خطأ أمني]: رمز التحقق (TOTP Code) مطلوب لتأكيد حيازة المفتاح وإتمام التهيئة.');
+      process.exit(1);
+    }
+
+    await confirmOwnerProvisioning(result.user.id, totpCode);
 
     console.log('====================================================');
-    console.log('✓ تم إنشاء وتأمين حساب المالك بنجاح!');
+    console.log('✓ تم تأكيد حيازة المفتاح وإغلاق مسار التهيئة الأولية بنجاح!');
     console.log('====================================================');
     console.log(`الاسم:             ${result.user.name}`);
     console.log(`البريد الإلكتروني: ${result.user.email}`);
     console.log(`الدور:             ${result.user.role}`);
-    console.log('----------------------------------------------------');
-    console.log('مفتاح تطبيق المصادقة الثنائية (TOTP Secret):');
-    console.log(`  ${result.totpSecret}`);
-    console.log('\nرابط إعداد المصادقة (TOTP URI):');
-    console.log(`  ${result.totpURI}`);
-    console.log('----------------------------------------------------');
-    console.log('رموز الاسترداد للطوارئ (Single-Use Recovery Codes):');
-    console.log('تنبيه: احتفظ بهذه الرموز مطبوعة في مكان آمن ومنفصل خارج الخادم:');
-    result.backupCodes.forEach((code, idx) => {
-      console.log(`  ${idx + 1}. ${code}`);
-    });
-    console.log('====================================================');
+
+    if (isInteractive) {
+      console.log('----------------------------------------------------');
+      console.log('رموز الاسترداد للطوارئ (Single-Use Recovery Codes):');
+      console.log('تنبيه: احتفظ بهذه الرموز مطبوعة في مكان آمن ومنفصل خارج الخادم:');
+      result.backupCodes.forEach((code, idx) => {
+        console.log(`  ${idx + 1}. ${code}`);
+      });
+      console.log('====================================================');
+    }
+
     console.log('تم إغلاق مسار الإعداد بنجاح.');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'خطأ غير متوقع';

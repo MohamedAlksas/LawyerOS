@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { signOut } from '@/lib/auth-client';
 import {
   revokeSessionAction,
   revokeOtherSessionsAction,
@@ -106,6 +107,27 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
 
   return (
     <div className="space-y-6">
+      {!actor.twoFactorVerified && (
+        <div
+          role="alert"
+          className="p-4 bg-amber-50 border border-amber-200 text-[#7A4100] rounded-lg flex flex-wrap items-center justify-between gap-3 shadow-sm"
+        >
+          <div>
+            <div className="font-bold text-sm">تنبيه أمني: إعداد المصادقة الثنائية غير مكتمل</div>
+            <div className="text-xs text-[#7A4100]/80">
+              حسابك في وضع الإعداد المعلق. يلزم إدخال رمز التحقق من تطبيق المصادقة لإتمام تأكيد الحيازة.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push('/verify')}
+            className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#7A4100] hover:bg-[#623400] rounded transition-colors"
+          >
+            استكمال التحقق الآن
+          </button>
+        </div>
+      )}
+
       {actionMessage && (
         <div
           role="status"
@@ -131,11 +153,21 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
 
         <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-[#F4F6F7] rounded border border-[#D5DFE3]">
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-100 text-[#176449]">
-              ✓
+            <span
+              className={`inline-flex items-center justify-center w-8 h-8 rounded-full ${
+                actor.twoFactorVerified
+                  ? 'bg-green-100 text-[#176449]'
+                  : 'bg-amber-100 text-[#7A4100]'
+              }`}
+            >
+              {actor.twoFactorVerified ? '✓' : '!'}
             </span>
             <div>
-              <div className="text-sm font-semibold text-[#172A35]">حالة الحماية: مفعلة ومحمية ({actor.name})</div>
+              <div className="text-sm font-semibold text-[#172A35]">
+                {actor.twoFactorVerified
+                  ? `حالة الحماية: مفعلة ومحمية (${actor.name})`
+                  : `حالة الحماية: قيد الإعداد (${actor.name})`}
+              </div>
               <div className="text-xs text-[#4D606A]">
                 الحساب: <bdi dir="ltr">{actor.email}</bdi> • تطبيق المصادقة (TOTP) + رموز الاسترداد
               </div>
@@ -212,7 +244,26 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 </div>
               </div>
 
-              {!session.isCurrent && (
+              {session.isCurrent ? (
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={async () => {
+                    if (confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
+                      setIsProcessing(true);
+                      try {
+                        await signOut();
+                        router.push('/login');
+                      } catch {
+                        router.push('/login');
+                      }
+                    }
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium text-[#A4262C] hover:bg-red-50 border border-[#D5DFE3] hover:border-red-300 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
+                >
+                  تسجيل الخروج
+                </button>
+              ) : (
                 <button
                   type="button"
                   disabled={isProcessing}

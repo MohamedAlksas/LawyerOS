@@ -65,7 +65,11 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
         }
       }
     } catch {
-      // Database not reachable or in standalone test mode without DB
+      // Database not reachable or transient error: fail closed!
+      return NextResponse.json(
+        { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
+        { status: 500 }
+      );
     }
   }
 
@@ -103,7 +107,11 @@ export async function POST(request: NextRequest) {
         });
       }
     } catch {
-      // Non-fatal if session already revoked or during mock
+      // Must fail closed (non-200) if other session revocation fails
+      return NextResponse.json(
+        { error: 'فشل في إنهاء الجلسات الأخرى للمستخدم بعد تغيير كلمة المرور.' },
+        { status: 500 }
+      );
     }
   }
 
