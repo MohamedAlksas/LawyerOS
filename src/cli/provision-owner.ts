@@ -9,8 +9,14 @@ import {
 import { getPrismaClient } from '../lib/auth';
 import { closeDbPool } from '../lib/db';
 
-class MutableStdout extends Writable {
+export class MutableStdout extends Writable {
   public muted = false;
+  private target: NodeJS.WritableStream;
+
+  constructor(target: NodeJS.WritableStream = process.stdout) {
+    super();
+    this.target = target;
+  }
 
   override _write(
     chunk: Buffer | string,
@@ -18,7 +24,11 @@ class MutableStdout extends Writable {
     callback: (error?: Error | null) => void
   ): void {
     if (!this.muted) {
-      process.stdout.write(chunk, encoding);
+      if (typeof chunk === 'string') {
+        this.target.write(chunk, encoding);
+      } else {
+        this.target.write(chunk);
+      }
     }
     callback();
   }

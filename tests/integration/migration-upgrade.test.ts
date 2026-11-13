@@ -119,7 +119,7 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
   }, 60000);
 
   it('executes documented supported non-destructive baseline procedure', async () => {
-    // Step 1: Apply initial migration SQL script directly
+    // Step 1: Execute whole-file migration SQL script in a single transaction with fail-fast semantics
     const migrationSqlPath = path.resolve(
       process.cwd(),
       'prisma/migrations/20261111000000_init_auth/migration.sql'
@@ -128,52 +128,22 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
 
     const client = await pool.connect();
     try {
-      const statements = migrationSql
-        .split(';')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      for (const statement of statements) {
-        await client.query(statement);
-      }
-
-      // Add T03 columns to twoFactor if not part of initial migration
-      await client.query(`
-        ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);
-      `);
+      await client.query('BEGIN');
+      await client.query(migrationSql);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
     } finally {
       client.release();
     }
 
-    // Step 2: Baseline the applied migration in Prisma migration history table
-    const resolveResult = runPrismaCli(
-      ['migrate', 'resolve', '--applied', '20261111000000_init_auth'],
-      dedicated.url
-    );
-    expect(resolveResult.status).toBe(0);
-
-    // Step 3: Verify migration status reports clean state
-    const statusResult = runPrismaCli(['migrate', 'status'], dedicated.url);
-    expect(statusResult.status).toBe(0);
-
-    // Step 4: Verify subsequent prisma migrate deploy exits with 0 ("No pending migrations to apply")
-    const deployResult = runPrismaCli(['migrate', 'deploy'], dedicated.url);
-    expect(deployResult.status).toBe(0);
-    const deployOutput = `${deployResult.stdout || ''}\n${deployResult.stderr || ''}`;
-    expect(deployOutput).toContain('No pending migrations to apply');
-
-    // Step 5: Verify pre-existing sentinel rows remain intact (non-destructive guarantee)
-    const sentinelRes = await pool.query('SELECT * FROM sentinel_audit_log');
-    expect(sentinelRes.rows.length).toBe(1);
-    expect(sentinelRes.rows[0].action).toBe('T02_PRE_EXISTING_AUDIT_ENTRY');
-
-    // Step 6: Verify all schema tables exist
+    // Step 2: Verify PostgreSQL schema, tables, and columns BEFORE recording migration history
     const tablesRes = await pool.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
-        AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap', '_prisma_migrations', 'sentinel_audit_log');
+        AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
     `);
     const tableNames = tablesRes.rows.map((r) => r.table_name);
     expect(tableNames).toContain('user');
@@ -182,8 +152,155 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     expect(tableNames).toContain('verification');
     expect(tableNames).toContain('twoFactor');
     expect(tableNames).toContain('office_bootstrap');
-    expect(tableNames).toContain('_prisma_migrations');
-    expect(tableNames).toContain('sentinel_audit_log');
+
+    // Verify critical columns on twoFactor
+    const twoFactorCols = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_schema = 'public' AND table_name = 'twoFactor';
+    `);
+    const tfColNames = twoFactorCols.rows.map((r) => r.column_name);
+    expect(tfColNames).toContain('failedVerificationCount');
+    expect(tfColNames).toContain('lockedUntil');
+
+    // Step 3: Baseline the verified migration in Prisma migration history table
+    const resolveResult = runPrismaCli(
+      ['migrate', 'resolve', '--applied', '20261111000000_init_auth'],
+      dedicated.url
+    );
+    expect(resolveResult.status).toBe(0);
+
+    // Step 4: Verify migration status reports clean state
+    const statusResult = runPrismaCli(['migrate', 'status'], dedicated.url);
+    expect(statusResult.status).toBe(0);
+
+    // Step 5: Verify subsequent prisma migrate deploy exits with 0 ("No pending migrations to apply")
+    const deployResult = runPrismaCli(['migrate', 'deploy'], dedicated.url);
+    expect(deployResult.status).toBe(0);
+    const deployOutput = `${deployResult.stdout || ''}\n${deployResult.stderr || ''}`;
+    expect(deployOutput).toContain('No pending migrations to apply');
+
+    // Step 6: Verify pre-existing sentinel rows remain intact (non-destructive guarantee)
+    const sentinelRes = await pool.query('SELECT * FROM sentinel_audit_log');
+    expect(sentinelRes.rows.length).toBe(1);
+    expect(sentinelRes.rows[0].action).toBe('T02_PRE_EXISTING_AUDIT_ENTRY');
+  }, 60000);
+
+  it('fails fast on conflicting pre-existing schema: refuses to baseline, does not record history, and recovers safely upon resolution', async () => {
+    // 1. Create a fresh dedicated database with pre-existing sentinel data
+    const conflictDb = await createDedicatedTestDatabase();
+
+    const client = await conflictDb.pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE sentinel_pre_existing (
+          id SERIAL PRIMARY KEY,
+          data TEXT NOT NULL
+        );
+        INSERT INTO sentinel_pre_existing (data) VALUES ('PRE_EXISTING_DATA_RETAINED');
+      `);
+
+      // 2. Pre-create a conflicting table that clashes with migration schema
+      await client.query(`
+        CREATE TABLE "user" (
+          id SERIAL PRIMARY KEY,
+          conflicting_column TEXT NOT NULL
+        );
+      `);
+    } finally {
+      client.release();
+    }
+
+    const migrationSqlPath = path.resolve(
+      process.cwd(),
+      'prisma/migrations/20261111000000_init_auth/migration.sql'
+    );
+    const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+    // 3. Attempt fail-fast execution of baseline migration SQL inside transaction
+    const attemptClient = await conflictDb.pool.connect();
+    let migrationError: unknown = null;
+    try {
+      await attemptClient.query('BEGIN');
+      await attemptClient.query(migrationSql);
+      await attemptClient.query('COMMIT');
+    } catch (err) {
+      await attemptClient.query('ROLLBACK').catch(() => {});
+      migrationError = err;
+    } finally {
+      attemptClient.release();
+    }
+
+    // Must fail fast with relation already exists error
+    expect(migrationError).toBeDefined();
+
+    // 4. Verify baseline history was NOT recorded in Prisma history table
+    const migTableRes = await conflictDb.pool.query(`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+    `);
+    if (migTableRes.rows.length > 0) {
+      const historyRows = await conflictDb.pool.query(
+        'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+        ['20261111000000_init_auth']
+      );
+      expect(historyRows.rows.length).toBe(0);
+    }
+
+    // 5. Verify pre-existing sentinel data was NOT damaged or lost
+    const sentinelCheck = await conflictDb.pool.query('SELECT * FROM sentinel_pre_existing');
+    expect(sentinelCheck.rows.length).toBe(1);
+    expect(sentinelCheck.rows[0].data).toBe('PRE_EXISTING_DATA_RETAINED');
+
+    // 6. Recovery: Resolve the conflict by dropping the conflicting incompatible table
+    const resolveClient = await conflictDb.pool.connect();
+    try {
+      await resolveClient.query('DROP TABLE "user";');
+    } finally {
+      resolveClient.release();
+    }
+
+    // 7. Re-execute fail-fast whole-file migration SQL in transaction
+    const retryClient = await conflictDb.pool.connect();
+    try {
+      await retryClient.query('BEGIN');
+      await retryClient.query(migrationSql);
+      await retryClient.query('COMMIT');
+    } finally {
+      retryClient.release();
+    }
+
+    // Verify PostgreSQL schema before baseline
+    const verifiedTables = await conflictDb.pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+    `);
+    expect(verifiedTables.rows.map((r) => r.table_name)).toContain('user');
+    expect(verifiedTables.rows.map((r) => r.table_name)).toContain('twoFactor');
+
+    // Baseline in Prisma migration history table
+    const recResolveResult = runPrismaCli(
+      ['migrate', 'resolve', '--applied', '20261111000000_init_auth'],
+      conflictDb.url
+    );
+    expect(recResolveResult.status).toBe(0);
+
+    // Verify status & deploy
+    const recStatus = runPrismaCli(['migrate', 'status'], conflictDb.url);
+    expect(recStatus.status).toBe(0);
+
+    const recDeploy = runPrismaCli(['migrate', 'deploy'], conflictDb.url);
+    expect(recDeploy.status).toBe(0);
+    expect(recDeploy.stdout).toContain('No pending migrations to apply');
+
+    // Sentinel data intact after recovery
+    const sentinelFinal = await conflictDb.pool.query('SELECT * FROM sentinel_pre_existing');
+    expect(sentinelFinal.rows.length).toBe(1);
+    expect(sentinelFinal.rows[0].data).toBe('PRE_EXISTING_DATA_RETAINED');
+
+    await conflictDb.drop();
   }, 60000);
 
   it('proves database is fully operational after upgrade: provisions owner, completes 2FA, and issues verified session', async () => {

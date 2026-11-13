@@ -115,3 +115,51 @@ npm run build
 # 7. Deferred E2E command convention (exits 1 with NOT RUN message in T02)
 npm run test:e2e
 ```
+
+---
+
+## 6. Canonical Identity Migration Baseline Procedure (T03 / R08)
+
+To safely baseline the initial Identity and Better Auth schema on an existing non-empty PostgreSQL database without data loss, follow this canonical, fail-fast procedure:
+
+### 6.1 Preflight & Environment
+Ensure the target database is reachable via `$DATABASE_URL` and that pre-existing data (e.g. sentinel records) is confirmed intact.
+
+### 6.2 Fail-Fast Single-Transaction SQL Execution
+Execute the entire migration script in a single transaction with `ON_ERROR_STOP=1` so that any naming conflict or syntax failure immediately rolls back the transaction and stops with a non-zero exit code:
+```powershell
+# Execute whole-file SQL with fail-fast transaction semantics
+psql -v ON_ERROR_STOP=1 --single-transaction -f prisma/migrations/20261111000000_init_auth/migration.sql "$DATABASE_URL"
+```
+
+### 6.3 Pre-Baseline Schema & Column Verification
+Verify in PostgreSQL that all expected tables and columns exist **before** marking the migration as applied in Prisma:
+```sql
+-- Verify all tables exist
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema = 'public' 
+  AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+
+-- Verify critical security columns exist on twoFactor
+SELECT column_name FROM information_schema.columns 
+WHERE table_schema = 'public' 
+  AND table_name = 'twoFactor' 
+  AND column_name IN ('failedVerificationCount', 'lockedUntil');
+```
+
+### 6.4 Record Applied Migration in Prisma History
+Only after PostgreSQL schema verification succeeds, record the migration as applied in the Prisma migration table:
+```powershell
+npx prisma migrate resolve --applied 20261111000000_init_auth
+```
+
+### 6.5 Verify Migration Status and Deploy
+Confirm that Prisma reports no drift or pending migrations:
+```powershell
+npx prisma migrate status
+npx prisma migrate deploy
+```
+Expected output from deploy: `No pending migrations to apply`.
+
+### 6.6 Failure & Conflict Safety Guarantee
+If an incompatible conflicting table exists (e.g. conflicting `user` table), `psql` aborts the transaction immediately due to `ON_ERROR_STOP=1`. The script fails with a non-zero exit code, `_prisma_migrations` does not record the migration as applied, and pre-existing data remains undamaged. Once the conflict is resolved (e.g. dropping the conflicting entity), the procedure can be retried cleanly.
