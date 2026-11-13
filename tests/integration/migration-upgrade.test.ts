@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
-import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import crypto from 'crypto';
@@ -10,6 +9,7 @@ import {
   requireActor,
   authorize,
 } from '@/modules/identity';
+import { runIdentityBaseline } from '@/cli/baseline-identity';
 import { closeDbPool } from '@/lib/db';
 import { getEnv } from '@/lib/env';
 import { createOTP } from '@better-auth/utils/otp';
@@ -119,68 +119,21 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
   }, 60000);
 
   it('executes documented supported non-destructive baseline procedure', async () => {
-    // Step 1: Execute whole-file migration SQL script in a single transaction with fail-fast semantics
-    const migrationSqlPath = path.resolve(
-      process.cwd(),
-      'prisma/migrations/20261111000000_init_auth/migration.sql'
-    );
-    const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+    // Execute canonical executable baseline entry point
+    const baselineResult = await runIdentityBaseline({
+      targetUrl: dedicated.url,
+      silent: true,
+    });
+    expect(baselineResult.success).toBe(true);
+    expect(baselineResult.appliedMigration).toBe('20261111000000_init_auth');
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(migrationSql);
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    // Step 2: Verify PostgreSQL schema, tables, and columns BEFORE recording migration history
-    const tablesRes = await pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-        AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
-    `);
-    const tableNames = tablesRes.rows.map((r) => r.table_name);
-    expect(tableNames).toContain('user');
-    expect(tableNames).toContain('session');
-    expect(tableNames).toContain('account');
-    expect(tableNames).toContain('verification');
-    expect(tableNames).toContain('twoFactor');
-    expect(tableNames).toContain('office_bootstrap');
-
-    // Verify critical columns on twoFactor
-    const twoFactorCols = await pool.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_schema = 'public' AND table_name = 'twoFactor';
-    `);
-    const tfColNames = twoFactorCols.rows.map((r) => r.column_name);
-    expect(tfColNames).toContain('failedVerificationCount');
-    expect(tfColNames).toContain('lockedUntil');
-
-    // Step 3: Baseline the verified migration in Prisma migration history table
-    const resolveResult = runPrismaCli(
-      ['migrate', 'resolve', '--applied', '20261111000000_init_auth'],
-      dedicated.url
-    );
-    expect(resolveResult.status).toBe(0);
-
-    // Step 4: Verify migration status reports clean state
-    const statusResult = runPrismaCli(['migrate', 'status'], dedicated.url);
-    expect(statusResult.status).toBe(0);
-
-    // Step 5: Verify subsequent prisma migrate deploy exits with 0 ("No pending migrations to apply")
+    // Verify subsequent prisma migrate deploy exits with 0 ("No pending migrations to apply")
     const deployResult = runPrismaCli(['migrate', 'deploy'], dedicated.url);
     expect(deployResult.status).toBe(0);
     const deployOutput = `${deployResult.stdout || ''}\n${deployResult.stderr || ''}`;
     expect(deployOutput).toContain('No pending migrations to apply');
 
-    // Step 6: Verify pre-existing sentinel rows remain intact (non-destructive guarantee)
+    // Verify pre-existing sentinel rows remain intact (non-destructive guarantee)
     const sentinelRes = await pool.query('SELECT * FROM sentinel_audit_log');
     expect(sentinelRes.rows.length).toBe(1);
     expect(sentinelRes.rows[0].action).toBe('T02_PRE_EXISTING_AUDIT_ENTRY');
@@ -211,28 +164,10 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       client.release();
     }
 
-    const migrationSqlPath = path.resolve(
-      process.cwd(),
-      'prisma/migrations/20261111000000_init_auth/migration.sql'
-    );
-    const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-
-    // 3. Attempt fail-fast execution of baseline migration SQL inside transaction
-    const attemptClient = await conflictDb.pool.connect();
-    let migrationError: unknown = null;
-    try {
-      await attemptClient.query('BEGIN');
-      await attemptClient.query(migrationSql);
-      await attemptClient.query('COMMIT');
-    } catch (err) {
-      await attemptClient.query('ROLLBACK').catch(() => {});
-      migrationError = err;
-    } finally {
-      attemptClient.release();
-    }
-
-    // Must fail fast with relation already exists error
-    expect(migrationError).toBeDefined();
+    // 3. Attempt execution of canonical baseline entry point; must fail fast
+    await expect(
+      runIdentityBaseline({ targetUrl: conflictDb.url, silent: true })
+    ).rejects.toThrow();
 
     // 4. Verify baseline history was NOT recorded in Prisma history table
     const migTableRes = await conflictDb.pool.query(`
@@ -260,36 +195,12 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       resolveClient.release();
     }
 
-    // 7. Re-execute fail-fast whole-file migration SQL in transaction
-    const retryClient = await conflictDb.pool.connect();
-    try {
-      await retryClient.query('BEGIN');
-      await retryClient.query(migrationSql);
-      await retryClient.query('COMMIT');
-    } finally {
-      retryClient.release();
-    }
-
-    // Verify PostgreSQL schema before baseline
-    const verifiedTables = await conflictDb.pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-        AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
-    `);
-    expect(verifiedTables.rows.map((r) => r.table_name)).toContain('user');
-    expect(verifiedTables.rows.map((r) => r.table_name)).toContain('twoFactor');
-
-    // Baseline in Prisma migration history table
-    const recResolveResult = runPrismaCli(
-      ['migrate', 'resolve', '--applied', '20261111000000_init_auth'],
-      conflictDb.url
-    );
-    expect(recResolveResult.status).toBe(0);
-
-    // Verify status & deploy
-    const recStatus = runPrismaCli(['migrate', 'status'], conflictDb.url);
-    expect(recStatus.status).toBe(0);
+    // 7. Re-execute canonical baseline entry point; must succeed
+    const recoveryResult = await runIdentityBaseline({
+      targetUrl: conflictDb.url,
+      silent: true,
+    });
+    expect(recoveryResult.success).toBe(true);
 
     const recDeploy = runPrismaCli(['migrate', 'deploy'], conflictDb.url);
     expect(recDeploy.status).toBe(0);
@@ -368,6 +279,81 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     const sentinelFinal = await pool.query('SELECT * FROM sentinel_audit_log');
     expect(sentinelFinal.rows.length).toBe(1);
     expect(sentinelFinal.rows[0].action).toBe('T02_PRE_EXISTING_AUDIT_ENTRY');
+  }, 60000);
+
+  it('rejects missing or empty target URL without executing DDL or mutating database', async () => {
+    // 1. Invoking runIdentityBaseline without a target URL must throw
+    await expect(runIdentityBaseline({ targetUrl: '', silent: true })).rejects.toThrow(
+      'Target database URL is required'
+    );
+
+    // 2. Invoking CLI with missing target argument exits non-zero (1)
+    const cliJs = path.resolve(process.cwd(), 'src/cli/baseline-identity.ts');
+    const cliRes = spawnSync(process.execPath, [
+      path.resolve(process.cwd(), 'node_modules/tsx/dist/cli.mjs'),
+      cliJs,
+    ], {
+      env: { ...process.env, DATABASE_URL: '' },
+      encoding: 'utf-8',
+    });
+    expect(cliRes.status).toBe(1);
+    expect(cliRes.stderr).toContain('Missing required argument: --target-url <database_url>');
+  });
+
+  it('executes baseline against explicit target and does not mutate ambient PGDATABASE fixture', async () => {
+    // 1. Create two isolated dedicated test databases
+    const targetDb = await createDedicatedTestDatabase();
+    const ambientFixtureDb = await createDedicatedTestDatabase();
+
+    try {
+      // 2. Insert sentinel in ambient fixture
+      await ambientFixtureDb.pool.query(`
+        CREATE TABLE ambient_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO ambient_sentinel (note) VALUES ('SHOULD_REMAIN_UNMUTATED');
+      `);
+
+      // 3. Execute baseline targeting targetDb while environment has PGDATABASE pointing to ambientFixtureDb
+      const ambientDbParsed = new URL(ambientFixtureDb.url);
+      const ambientDbName = decodeURIComponent(ambientDbParsed.pathname.replace(/^\//, ''));
+
+      const cliJs = path.resolve(process.cwd(), 'src/cli/baseline-identity.ts');
+      const cliRes = spawnSync(process.execPath, [
+        path.resolve(process.cwd(), 'node_modules/tsx/dist/cli.mjs'),
+        cliJs,
+        '--target-url',
+        targetDb.url,
+      ], {
+        env: {
+          ...process.env,
+          PGDATABASE: ambientDbName, // ambient PGDATABASE set to other database
+        },
+        encoding: 'utf-8',
+      });
+      expect(cliRes.status).toBe(0);
+
+      // 4. Verify targetDb received full baseline managed tables
+      const targetTables = await targetDb.pool.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      `);
+      expect(targetTables.rows.length).toBe(6);
+
+      // 5. Verify ambient fixture was NOT mutated (no Identity tables created)
+      const ambientTables = await ambientFixtureDb.pool.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      `);
+      expect(ambientTables.rows.length).toBe(0);
+
+      const ambientSentinel = await ambientFixtureDb.pool.query('SELECT * FROM ambient_sentinel;');
+      expect(ambientSentinel.rows.length).toBe(1);
+      expect(ambientSentinel.rows[0].note).toBe('SHOULD_REMAIN_UNMUTATED');
+    } finally {
+      await targetDb.drop().catch(() => {});
+      await ambientFixtureDb.drop().catch(() => {});
+    }
   }, 60000);
 });
 

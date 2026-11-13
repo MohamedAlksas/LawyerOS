@@ -17,10 +17,12 @@ import {
   ProvisioningError,
 } from '@/modules/identity';
 import { getPrismaClient, getAuth } from '@/lib/auth';
+import { betterAuth } from 'better-auth';
+import { twoFactor } from 'better-auth/plugins';
+import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { closeDbPool } from '@/lib/db';
 import { createOTP } from '@better-auth/utils/otp';
 import { base32 } from '@better-auth/utils/base32';
-import { createHMAC } from '@better-auth/utils/hmac';
 import { symmetricDecrypt } from 'better-auth/crypto';
 import { getEnv, EnvironmentValidationError } from '@/lib/env';
 import { NextRequest } from 'next/server';
@@ -58,6 +60,24 @@ async function clearGlobalSingletons(): Promise<void> {
   delete g.__lawoffice_pg_pool;
   delete g.__lawoffice_prisma;
   delete g.__lawoffice_auth;
+}
+
+async function waitForLockWaiters(pool: Pool, expectedCount: number, timeoutMs = 15000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await pool.query(`
+      SELECT count(*)::int AS count
+      FROM pg_locks l
+      JOIN pg_stat_activity a ON l.pid = a.pid
+      WHERE a.datname = current_database()
+        AND l.granted = false;
+    `);
+    if (res.rows[0].count >= expectedCount) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`Timed out waiting for ${expectedCount} lock waiter(s) in pg_locks`);
 }
 
 describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
@@ -428,35 +448,92 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const prisma = getPrismaClient();
     const env = getEnv();
 
-    // Generate an authentic Better Auth trusted-device verification record and signed cookie
-    // Matching Better Auth's two-factor plugin format:
-    // cookie payload: `${token}!${trustIdentifier}` where token = HMAC_SHA256(secret, `${userId}!${trustIdentifier}`)
-    const trustIdentifier = `trust-device-${crypto.randomUUID().replace(/-/g, '')}`;
-    const token = await createHMAC('SHA-256', 'base64urlnopad').sign(
-      env.BETTER_AUTH_SECRET,
-      `${provisionedOwner.userId}!${trustIdentifier}`
-    );
-    const trustDeviceCookiePayload = `${token}!${trustIdentifier}`;
-    const signedTrustCookie = signSessionTokenCookie(trustDeviceCookiePayload, env.BETTER_AUTH_SECRET);
-
-    await prisma.verification.create({
-      data: {
-        id: `verif-trust-${Date.now()}`,
-        identifier: trustIdentifier,
-        value: provisionedOwner.userId,
-        expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000), // 30-day unexpired historical trust
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
+    // 1. Obtain genuine historical trust cookie through prior 30-day provider configuration
+    const priorAuthHttp = betterAuth({
+      database: prismaAdapter(getPrismaClient(), { provider: 'postgresql' }),
+      secret: env.BETTER_AUTH_SECRET,
+      baseURL: 'http://127.0.0.1:3000',
+      emailAndPassword: { enabled: true },
+      plugins: [
+        twoFactor({
+          issuer: 'LawOffice OS',
+          trustDeviceMaxAge: 30 * 24 * 3600, // 30-day unexpired historical trust
+          otpOptions: {
+            period: 30,
+            digits: 6,
+          },
+        }),
+      ],
     });
 
+    // Step A: Initial password challenge on prior provider
+    const signInPriorReq = new Request('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: 'StrongOwnerSecret2026!',
+      }),
+    });
+    const signInPriorRes = await priorAuthHttp.handler(signInPriorReq);
+    expect(signInPriorRes.status).toBe(200);
+    const signInPriorJson = await signInPriorRes.json();
+    expect(signInPriorJson.twoFactorRedirect).toBe(true);
+
+    const priorSetCookies = signInPriorRes.headers.getSetCookie?.() || [
+      signInPriorRes.headers.get('set-cookie') || '',
+    ];
+    const twoFactorCookie = priorSetCookies.find((c) => c.includes('better-auth.two_factor='));
+    expect(twoFactorCookie).toBeDefined();
+
+    // Step B: Genuine MFA verification with trustDevice: true on prior provider
+    const validTotp = await generateTotpCode(provisionedOwner.totpSecret);
+    const verifyPriorReq = new Request('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: twoFactorCookie!.split(';')[0],
+      },
+      body: JSON.stringify({
+        code: validTotp,
+        trustDevice: true,
+      }),
+    });
+    const verifyPriorRes = await priorAuthHttp.handler(verifyPriorReq);
+    expect(verifyPriorRes.status).toBe(200);
+    const verifyPriorJson = await verifyPriorRes.json();
+    expect(verifyPriorJson.token).toBeDefined();
+
+    // Step C: Extract authentic issued trust_device cookie and verify database record
+    const verifySetCookies = verifyPriorRes.headers.getSetCookie?.() || [
+      verifyPriorRes.headers.get('set-cookie') || '',
+    ];
+    const issuedTrustCookie = verifySetCookies.find((c) => c.includes('better-auth.trust_device='));
+    expect(issuedTrustCookie).toBeDefined();
+    const trustCookieHeader = issuedTrustCookie!.split(';')[0];
+
+    const trustVerifRecord = await prisma.verification.findFirst({
+      where: { value: provisionedOwner.userId },
+    });
+    expect(trustVerifRecord).toBeDefined();
+    expect(trustVerifRecord?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    // Step D: Sign out prior session; client retains issued trust cookie and unexpired DB verification record
+    const signOutReq = new Request('http://127.0.0.1:3000/api/auth/sign-out', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${verifyPriorJson.token}`,
+      },
+    });
+    await priorAuthHttp.handler(signOutReq);
+
     try {
-      // 1. Client presents authentic signed historical trusted-device cookie over HTTP to real route
+      // 1. Client presents authentic signed historical trusted-device cookie over HTTP to CURRENT real route
       const signInReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: `better-auth.trust_device=${signedTrustCookie}`,
+          cookie: trustCookieHeader,
         },
         body: JSON.stringify({
           email: provisionedOwner.email,
@@ -483,12 +560,82 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         requireActor({ headers: signInReq.headers })
       ).rejects.toThrowError(AuthenticationError);
 
-      // 2. Client presents authentic signed historical trusted-device cookie with __Secure- prefix over HTTPS
+      // 2. HTTPS: Obtain authentic historical trust cookie through HTTPS provider configuration
+      const priorAuthHttps = betterAuth({
+        database: prismaAdapter(getPrismaClient(), { provider: 'postgresql' }),
+        secret: env.BETTER_AUTH_SECRET,
+        baseURL: 'https://office.lawoffice.internal:3000',
+        emailAndPassword: { enabled: true },
+        plugins: [
+          twoFactor({
+            issuer: 'LawOffice OS',
+            trustDeviceMaxAge: 30 * 24 * 3600,
+            otpOptions: {
+              period: 30,
+              digits: 6,
+            },
+          }),
+        ],
+      });
+
+      const signInHttpsReq = new Request('https://office.lawoffice.internal:3000/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: 'StrongOwnerSecret2026!',
+        }),
+      });
+      const signInHttpsRes = await priorAuthHttps.handler(signInHttpsReq);
+      expect(signInHttpsRes.status).toBe(200);
+      const signInHttpsSetCookies = signInHttpsRes.headers.getSetCookie?.() || [
+        signInHttpsRes.headers.get('set-cookie') || '',
+      ];
+      const tfCookieHttps = signInHttpsSetCookies.find((c) =>
+        c.includes('better-auth.two_factor=') || c.includes('__Secure-better-auth.two_factor=')
+      );
+      expect(tfCookieHttps).toBeDefined();
+
+      const freshTotpHttps = await generateTotpCode(provisionedOwner.totpSecret);
+      const verifyHttpsReq = new Request('https://office.lawoffice.internal:3000/api/auth/two-factor/verify-totp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: tfCookieHttps!.split(';')[0],
+        },
+        body: JSON.stringify({
+          code: freshTotpHttps,
+          trustDevice: true,
+        }),
+      });
+      const verifyHttpsRes = await priorAuthHttps.handler(verifyHttpsReq);
+      expect(verifyHttpsRes.status).toBe(200);
+      const verifyHttpsJson = await verifyHttpsRes.json();
+
+      const verifyHttpsCookies = verifyHttpsRes.headers.getSetCookie?.() || [
+        verifyHttpsRes.headers.get('set-cookie') || '',
+      ];
+      const issuedSecureTrustCookie = verifyHttpsCookies.find(
+        (c) => c.includes('better-auth.trust_device=') || c.includes('__Secure-better-auth.trust_device=')
+      );
+      expect(issuedSecureTrustCookie).toBeDefined();
+      const secureTrustCookieHeader = issuedSecureTrustCookie!.split(';')[0];
+
+      // Sign out prior HTTPS session
+      const signOutHttpsReq = new Request('https://office.lawoffice.internal:3000/api/auth/sign-out', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${verifyHttpsJson.token}`,
+        },
+      });
+      await priorAuthHttps.handler(signOutHttpsReq);
+
+      // Present authentic __Secure- trust cookie to CURRENT application route over HTTPS
       const signInReqSecure = new NextRequest('https://office.lawoffice.internal:3000/api/auth/sign-in/email', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: `__Secure-better-auth.trust_device=${signedTrustCookie}`,
+          cookie: secureTrustCookieHeader,
         },
         body: JSON.stringify({
           email: provisionedOwner.email,
@@ -515,7 +662,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       ).rejects.toThrowError(AuthenticationError);
     } finally {
       await prisma.verification.deleteMany({
-        where: { identifier: trustIdentifier },
+        where: { value: provisionedOwner.userId },
       }).catch(() => {});
     }
   });
@@ -1795,8 +1942,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         confirmFinished = true;
       });
 
-      // Brief delay to ensure confirmation enqueues first on PostgreSQL lock queue
-      await new Promise((r) => setTimeout(r, 60));
+      // Observable barrier: wait until confirmation physically blocks on the PostgreSQL FOR UPDATE row lock
+      await waitForLockWaiters(freshDb.pool, 1);
 
       const resumePromise = provisionOwner({
         name: 'الأستاذ عادل المالك',
@@ -1812,8 +1959,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
           resumeError = err;
         });
 
-      // Give resume time to block on the FOR UPDATE lock
-      await new Promise((r) => setTimeout(r, 60));
+      // Observable barrier: wait until resume also physically blocks as 2nd waiter on the FOR UPDATE row lock
+      await waitForLockWaiters(freshDb.pool, 2);
 
       // Release blocker lock: COMMIT
       await blockerClient.query('COMMIT;');
@@ -1837,6 +1984,193 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
       const bsFinal = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
       expect(bsFinal?.isClosed).toBe(true);
+    } finally {
+      await clearGlobalSingletons();
+      await freshDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  }, 45000);
+
+  it('rechecks authoritative state under FOR UPDATE lock: reversed ordering allows resume before confirmation (R06)', async () => {
+    // 1. Fresh dedicated unbootstrapped database
+    const freshDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    process.env.TEST_DATABASE_URL = freshDb.url;
+    getEnv(true);
+    await clearGlobalSingletons();
+
+    try {
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const initClient = await freshDb.pool.connect();
+      try {
+        await initClient.query(migrationSql);
+      } finally {
+        initClient.release();
+      }
+      const prismaFresh = getPrismaClient();
+
+      // Start fresh reservation for an owner
+      const initial = await provisionOwner({
+        name: 'الأستاذ كمال المالك',
+        email: 'kamal.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      });
+      expect(initial.user.id).toBeDefined();
+
+      // Acquire an external row lock on twoFactor record using a dedicated PostgreSQL client from the pool
+      const blockerClient = await freshDb.pool.connect();
+      await blockerClient.query('BEGIN;');
+      await blockerClient.query(
+        'SELECT id, "userId", verified FROM "twoFactor" WHERE "userId" = $1 FOR UPDATE;',
+        [initial.user.id]
+      );
+
+      const validCode = await generateTotpCode(initial.totpSecret);
+
+      let resumeFinished = false;
+      let resumeResult: unknown = null;
+      let confirmFinished = false;
+
+      // In reversed ordering: resume enqueues first on PostgreSQL lock queue
+      const resumePromise = provisionOwner({
+        name: 'الأستاذ كمال المالك',
+        email: 'kamal.lawyer@office.eg',
+        password: 'OriginalPassword2026!',
+      }).then((res) => {
+        resumeFinished = true;
+        resumeResult = res;
+      });
+
+      // Observable barrier: wait until resume blocks as 1st waiter
+      await waitForLockWaiters(freshDb.pool, 1);
+
+      // Confirm enqueues second on PostgreSQL lock queue
+      const confirmPromise = confirmOwnerProvisioning(initial.user.id, validCode).then(() => {
+        confirmFinished = true;
+      });
+
+      // Observable barrier: wait until confirm blocks as 2nd waiter
+      await waitForLockWaiters(freshDb.pool, 2);
+
+      // Release blocker lock: COMMIT
+      await blockerClient.query('COMMIT;');
+      blockerClient.release();
+
+      // Wait for both concurrent operations to resolve
+      await Promise.all([resumePromise, confirmPromise]);
+
+      // Both operations succeed in reversed sequence: resume ran before closure committed,
+      // then confirmation ran and closed setup
+      expect(resumeFinished).toBe(true);
+      expect((resumeResult as { user: { id: string } }).user.id).toBe(initial.user.id);
+      expect(confirmFinished).toBe(true);
+
+      // Verify authoritative database state: verified remains true, bootstrap remains closed
+      const tfFinal = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfFinal?.verified).toBe(true);
+
+      const bsFinal = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bsFinal?.isClosed).toBe(true);
+    } finally {
+      await clearGlobalSingletons();
+      await freshDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
+    }
+  }, 45000);
+
+  it('enforces lockout and expiry under serialized FOR UPDATE lock for failed resume attempts (R06)', async () => {
+    const freshDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    process.env.TEST_DATABASE_URL = freshDb.url;
+    getEnv(true);
+    await clearGlobalSingletons();
+
+    try {
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const initClient = await freshDb.pool.connect();
+      try {
+        await initClient.query(migrationSql);
+      } finally {
+        initClient.release();
+      }
+      const prismaFresh = getPrismaClient();
+
+      const initial = await provisionOwner({
+        name: 'الأستاذ سمير المحامي',
+        email: 'samir.lawyer@office.eg',
+        password: 'ValidSecret2026!',
+      });
+      expect(initial.user.id).toBeDefined();
+
+      // Submit 4 incorrect password resume attempts
+      for (let i = 1; i <= 4; i++) {
+        await expect(
+          provisionOwner({
+            name: 'الأستاذ سمير المحامي',
+            email: 'samir.lawyer@office.eg',
+            password: 'WrongPassword!',
+          })
+        ).rejects.toThrow();
+
+        const tf = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+        expect(tf?.failedVerificationCount).toBe(i);
+        expect(tf?.lockedUntil).toBeNull();
+      }
+
+      // 5th attempt triggers lockout
+      await expect(
+        provisionOwner({
+          name: 'الأستاذ سمير المحامي',
+          email: 'samir.lawyer@office.eg',
+          password: 'WrongPassword!',
+        })
+      ).rejects.toThrow();
+
+      const tfLocked = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfLocked?.failedVerificationCount).toBe(5);
+      expect(tfLocked?.lockedUntil).not.toBeNull();
+      expect(tfLocked?.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+
+      // Subsequent attempt while locked throws PROVISIONING_LOCKED_OUT
+      await expect(
+        provisionOwner({
+          name: 'الأستاذ سمير المحامي',
+          email: 'samir.lawyer@office.eg',
+          password: 'ValidSecret2026!',
+        })
+      ).rejects.toThrow();
+
+      // Simulate lock expiry: set lockedUntil to 1 minute in the past
+      await prismaFresh.twoFactor.updateMany({
+        where: { userId: initial.user.id },
+        data: { lockedUntil: new Date(Date.now() - 60000) },
+      });
+
+      // After expiry, valid password clears lockout and succeeds
+      const resumeResult = await provisionOwner({
+        name: 'الأستاذ سمير المحامي',
+        email: 'samir.lawyer@office.eg',
+        password: 'ValidSecret2026!',
+      });
+      expect(resumeResult.user.id).toBe(initial.user.id);
+
+      const tfCleared = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
+      expect(tfCleared?.failedVerificationCount).toBe(0);
+      expect(tfCleared?.lockedUntil).toBeNull();
     } finally {
       await clearGlobalSingletons();
       await freshDb.drop().catch(() => {});

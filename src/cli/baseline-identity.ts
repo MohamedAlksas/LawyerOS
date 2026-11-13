@@ -30,7 +30,7 @@ export function parseTargetUrl(targetUrl: string): {
 } {
   if (!targetUrl || typeof targetUrl !== 'string' || targetUrl.trim().length === 0) {
     throw new Error(
-      'Target database URL must be a non-empty string. Ambient target fallback is refused.'
+      'Target database URL is required. Ambient target fallback is refused.'
     );
   }
 
@@ -335,7 +335,7 @@ async function main() {
 
   if (!targetUrl || targetUrl.trim().length === 0) {
     console.error(
-      'Error: Missing required target database URL.\nAn explicit target URL is strictly required via --target-url <url> or positional argument.\nAmbient defaults are refused.\n\nUsage: npx tsx src/cli/baseline-identity.ts --target-url "$env:DATABASE_URL"'
+      'Error: Missing required argument: --target-url <database_url>.\nAn explicit target URL is strictly required via --target-url <url> or positional argument.\nAmbient defaults are refused.\n\nUsage: npx tsx src/cli/baseline-identity.ts --target-url "$env:DATABASE_URL"'
     );
     process.exit(1);
   }

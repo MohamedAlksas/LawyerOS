@@ -43,8 +43,8 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
     });
 
     it('rejects empty or whitespace-only targetUrl fail-closed', () => {
-      expect(() => parseTargetUrl('')).toThrow(/must be a non-empty string/);
-      expect(() => parseTargetUrl('   ')).toThrow(/must be a non-empty string/);
+      expect(() => parseTargetUrl('')).toThrow(/Target database URL is required/);
+      expect(() => parseTargetUrl('   ')).toThrow(/Target database URL is required/);
     });
 
     it('rejects invalid URL structure', () => {
@@ -65,7 +65,7 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
   describe('runIdentityBaseline entry point validation', () => {
     it('rejects empty targetUrl fail-closed without attempting connection', async () => {
       await expect(runIdentityBaseline({ targetUrl: '' })).rejects.toThrow(
-        /Target database URL must be a non-empty string/
+        /Target database URL is required/
       );
     });
   });
