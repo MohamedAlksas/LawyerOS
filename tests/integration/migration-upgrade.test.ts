@@ -355,5 +355,135 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       await ambientFixtureDb.drop().catch(() => {});
     }
   }, 60000);
+
+  it('handles post-DDL history recording failure and safely recovers upon retry (Correction 3)', async () => {
+    // 1. Create a fresh dedicated database with pre-existing sentinel data
+    const recoveryDb = await createDedicatedTestDatabase();
+
+    try {
+      // Insert sentinel data
+      await recoveryDb.pool.query(`
+        CREATE TABLE sentinel_recovery_test (
+          id SERIAL PRIMARY KEY,
+          note TEXT NOT NULL
+        );
+        INSERT INTO sentinel_recovery_test (note) VALUES ('SENTINEL_SURVIVES_POST_DDL_FAILURE');
+      `);
+
+      // Pre-create _prisma_migrations table with a trigger that raises an exception on insert,
+      // simulating permission failure / connectivity failure during history recording
+      await recoveryDb.pool.query(`
+        CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+          id VARCHAR(36) PRIMARY KEY,
+          checksum VARCHAR(64) NOT NULL,
+          finished_at TIMESTAMPTZ,
+          migration_name VARCHAR(255) NOT NULL,
+          logs TEXT,
+          rolled_back_at TIMESTAMPTZ,
+          started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          applied_steps_count INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE OR REPLACE FUNCTION fail_prisma_history_insert() RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'Simulated PostgreSQL failure during _prisma_migrations recording';
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER trig_fail_history_insert
+          BEFORE INSERT ON "_prisma_migrations"
+          FOR EACH ROW EXECUTE FUNCTION fail_prisma_history_insert();
+      `);
+
+      // 2. Execute baseline: SQL commits, schema is verified, but Prisma history recording fails!
+      await expect(
+        runIdentityBaseline({ targetUrl: recoveryDb.url, silent: true })
+      ).rejects.toThrow();
+
+      // 3. Verify post-DDL state:
+      // a) DDL is committed in PostgreSQL (all 6 managed tables exist)
+      const tablesCheck = await recoveryDb.pool.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      `);
+      expect(tablesCheck.rows.length).toBe(6);
+
+      // b) Zero history in _prisma_migrations
+      const histCheck = await recoveryDb.pool.query('SELECT * FROM "_prisma_migrations";');
+      expect(histCheck.rows.length).toBe(0);
+
+      // c) Sentinel data is completely undamaged
+      const sentCheck = await recoveryDb.pool.query('SELECT * FROM sentinel_recovery_test;');
+      expect(sentCheck.rows.length).toBe(1);
+      expect(sentCheck.rows[0].note).toBe('SENTINEL_SURVIVES_POST_DDL_FAILURE');
+
+      // 4. Recovery: Remove the simulated fault / restore permission
+      await recoveryDb.pool.query('DROP TRIGGER trig_fail_history_insert ON "_prisma_migrations";');
+
+      // 5. Rerun baseline: must detect verified matching schema, safely resume history recording, and succeed!
+      const recoveryResult = await runIdentityBaseline({
+        targetUrl: recoveryDb.url,
+        silent: true,
+      });
+      expect(recoveryResult.success).toBe(true);
+      expect(recoveryResult.recovered).toBe(true);
+      expect(recoveryResult.appliedMigration).toBe('20261111000000_init_auth');
+
+      // 6. Verify migration status reports clean state
+      const deployResult = runPrismaCli(['migrate', 'deploy'], recoveryDb.url);
+      expect(deployResult.status).toBe(0);
+      expect(deployResult.stdout).toContain('No pending migrations to apply');
+
+      // 7. Sentinel data remains intact after recovery
+      const sentFinal = await recoveryDb.pool.query('SELECT * FROM sentinel_recovery_test;');
+      expect(sentFinal.rows.length).toBe(1);
+      expect(sentFinal.rows[0].note).toBe('SENTINEL_SURVIVES_POST_DDL_FAILURE');
+    } finally {
+      await recoveryDb.drop().catch(() => {});
+    }
+  }, 90000);
+
+  it('succeeds idempotently on already-completed baseline with alreadyCompleted: true (Correction 3)', async () => {
+    // dedicated.url was already baselined in earlier test
+    const result = await runIdentityBaseline({
+      targetUrl: dedicated.url,
+      silent: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.alreadyCompleted).toBe(true);
+    expect(result.appliedMigration).toBe('20261111000000_init_auth');
+    expect(result.tables.length).toBe(6);
+  });
+
+  it('fails fast on incompatible partial or mismatched managed schema and refuses to baseline or record history (Correction 3)', async () => {
+    const mismatchedDb = await createDedicatedTestDatabase();
+    try {
+      // Create an incompatible 'user' table missing required columns
+      await mismatchedDb.pool.query(`
+        CREATE TABLE "user" (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+      `);
+
+      await expect(
+        runIdentityBaseline({ targetUrl: mismatchedDb.url, silent: true })
+      ).rejects.toThrow(/Cannot baseline: existing schema contains conflicting or incompatible managed entities/);
+
+      // Zero history recorded in _prisma_migrations
+      const migTableRes = await mismatchedDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await mismatchedDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+    } finally {
+      await mismatchedDb.drop().catch(() => {});
+    }
+  }, 60000);
 });
 

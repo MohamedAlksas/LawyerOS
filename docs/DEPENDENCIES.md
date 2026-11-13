@@ -137,27 +137,48 @@ npx tsx src/cli/baseline-identity.ts --target-url "$DATABASE_URL"
 ### 6.2 Procedure Architecture & Execution Safeguards
 The `baseline-identity` entry point enforces strict execution guarantees in sequence:
 
-1. **Explicit Target Requirement & Ambient Prevention**:
-   - Rejects empty target URLs fail-closed (exit code 1).
-   - Extracts explicit connection parameters (`host`, `port`, `database`, `user`, `password`, `ssl`), preventing ambient driver fallback variables (`PGDATABASE`, `PGPORT`) from redirecting the connection.
-   - Executes `SELECT current_database()` and asserts that the connected database matches the intended target database before executing any statements.
+1. **Explicit Target Requirement & Strict Port Validation (Correction 1)**:
+   - Rejects empty target URLs fail-closed with exit code 1 (`"Target database URL is required. Ambient target fallback is refused."`).
+   - Validates explicit port numbers as integers in the range `1..65535`. Explicit port `0`, negative ports, ports exceeding `65535`, or non-integer port strings are rejected fail-closed before creating any client or opening any socket.
+   - Omitted ports default explicitly to `5432` without consulting ambient driver variables (`PGPORT`).
+   - Rejects ambiguous or unsupported routing query parameters (`search_path`, `options`, or non-public `schema`) fail-closed.
+   - Constructs a canonical validated target URL (`canonicalUrl`) sharing the exact endpoint parameters and connection policy between `pg.Client` and Prisma CLI subprocesses.
 
-2. **Fail-Fast Whole-File Transaction**:
-   - Executes `prisma/migrations/20261111000000_init_auth/migration.sql` in a single transaction (`BEGIN ... COMMIT`).
+2. **Explicit TLS Policy & Credential Protection (Correction 2)**:
+   - Preserves explicit transport encryption:
+     * `sslmode=disable`: sets `ssl: false`.
+     * `sslmode=require`: sets `ssl: { rejectUnauthorized: false }`.
+     * `sslmode=verify-full`: sets `ssl: { rejectUnauthorized: true }`.
+   - Unsupported or unrecognized `sslmode` values (e.g. `prefer`, `allow`) are rejected fail-closed before connecting.
+   - Ambient `PGSSLMODE` cannot override or weaken the explicit target policy.
+   - Sanitizes and redacts credentials in all logs and error messages (`sanitizeTargetUrl`).
+
+3. **Database Assertion & Fail-Fast Transaction**:
+   - Extracts explicit connection parameters (`host`, `port`, `database`, `user`, `password`, `ssl`), preventing ambient driver fallback variables (`PGDATABASE`) from redirecting the connection.
+   - Executes `SELECT current_database()` and asserts that the connected database matches the intended target database before executing any statements.
+   - For unbaselined databases, executes `prisma/migrations/20261111000000_init_auth/migration.sql` in a single transaction (`BEGIN ... COMMIT`).
    - Any SQL error or collision triggers immediate `ROLLBACK`, leaving pre-existing data (e.g. sentinel records) completely undamaged.
 
-3. **Deep Catalog & Schema Verification Before History Recording**:
+4. **Deep Catalog & Schema Verification Before History Recording**:
    - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema equivalence or check for missing columns.
    - For this reason, `baseline-identity.ts` performs direct PostgreSQL catalog verification in `information_schema` and `pg_indexes` **before** marking the migration as applied in Prisma:
      - Verifies all required tables exist: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
-     - Verifies all critical columns exist: including `twoFactor.failedVerificationCount`, `twoFactor.lockedUntil`, and `office_bootstrap.isClosed`.
-     - Verifies primary keys (`user_pkey`, `session_pkey`, etc.) and foreign key constraints (`session_userId_fkey`, etc.).
+     - Verifies all critical columns, types, nullability, and defaults exist: including `twoFactor.failedVerificationCount`, `twoFactor.lockedUntil`, and `office_bootstrap.isClosed`.
+     - Verifies primary keys (`user_pkey`, `session_pkey`, etc.) and foreign key constraints (`session_userId_fkey`, `account_userId_fkey`, `twoFactor_userId_fkey`) with `ON DELETE CASCADE ON UPDATE CASCADE`.
      - Verifies required unique and lookup indexes (`user_email_key`, `session_token_key`, etc.).
-     - Verifies custom enum types (`UserRole`).
+     - Verifies custom enum types (`UserRole` with `OWNER`, `MAINTAINER`).
 
-4. **Scoped Migration History Recording**:
-   - Only after physical schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the explicit target database URL.
-   - Executes `npx prisma migrate status` passing the explicit target URL to confirm migration history is clean.
+5. **Post-DDL Recovery & Idempotent Resume Semantics (Correction 3)**:
+   - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
+     * The tool detects existing managed entities without completed migration history.
+     * Performs deep physical schema equivalence verification across all 6 tables, columns, constraints, and indexes.
+     * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` without re-executing DDL (`recovered: true`).
+     * If conflicting or partial: refuses fail-closed without recording history, dropping tables, or damaging sentinel data.
+   - **Already-Completed State**: If `20261111000000_init_auth` is already recorded as applied in `_prisma_migrations`, verifies schema equivalence and returns cleanly (`alreadyCompleted: true`).
+
+6. **Scoped Migration History Recording**:
+   - Only after physical schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the canonical validated target URL.
+   - Executes `npx prisma migrate status` passing the canonical target URL to confirm migration history is clean.
 
 ### 6.3 Post-Baseline Verification
 Confirm that Prisma reports no pending migrations:
@@ -167,4 +188,4 @@ npx prisma migrate deploy
 Expected output: `No pending migrations to apply`.
 
 ### 6.4 Failure & Conflict Safety Guarantee
-If an incompatible conflicting entity exists (e.g. pre-existing `user` table with different structure), the transaction aborts and rolls back immediately. The script exits with code 1, `_prisma_migrations` does not record the migration, and pre-existing data remains intact. Once the collision is resolved, re-running `baseline-identity.ts` completes cleanly.
+If an incompatible conflicting entity exists (e.g. pre-existing `user` table with different structure), the transaction aborts and rolls back immediately (or schema equivalence check refuses). The script exits with code 1, `_prisma_migrations` does not record the migration, and pre-existing data remains intact. Once the collision is resolved, re-running `baseline-identity.ts` completes cleanly.

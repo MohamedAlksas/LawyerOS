@@ -518,14 +518,41 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(trustVerifRecord).toBeDefined();
     expect(trustVerifRecord?.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
-    // Step D: Sign out prior session; client retains issued trust cookie and unexpired DB verification record
+    // Step D: Extract issued session token cookie and verify session exists in DB
+    const priorSessionCookie = verifySetCookies.find((c) =>
+      c.includes('better-auth.session_token=')
+    );
+    expect(priorSessionCookie).toBeDefined();
+    const sessionCookieHeader = priorSessionCookie!.split(';')[0];
+
+    const sessionInDb = await prisma.session.findUnique({
+      where: { token: verifyPriorJson.token },
+    });
+    expect(sessionInDb).toBeDefined();
+
+    // Sign out prior session using the actual issued session cookie header (not Authorization: Bearer)
     const signOutReq = new Request('http://127.0.0.1:3000/api/auth/sign-out', {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${verifyPriorJson.token}`,
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
       },
     });
-    await priorAuthHttp.handler(signOutReq);
+    const signOutRes = await priorAuthHttp.handler(signOutReq);
+    expect(signOutRes.status).toBe(200);
+
+    // Assert old session is deleted from PostgreSQL
+    const deletedSession = await prisma.session.findUnique({
+      where: { token: verifyPriorJson.token },
+    });
+    expect(deletedSession).toBeNull();
+
+    // Assert better-auth.trust_device cookie and its database verification record remain intact and unexpired
+    const retainedTrustRecord = await prisma.verification.findUnique({
+      where: { id: trustVerifRecord!.id },
+    });
+    expect(retainedTrustRecord).toBeDefined();
+    expect(retainedTrustRecord!.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
     try {
       // 1. Client presents authentic signed historical trusted-device cookie over HTTP to CURRENT real route
@@ -621,14 +648,41 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       expect(issuedSecureTrustCookie).toBeDefined();
       const secureTrustCookieHeader = issuedSecureTrustCookie!.split(';')[0];
 
-      // Sign out prior HTTPS session
+      // Extract issued HTTPS session token cookie and verify session exists in DB
+      const priorSessionCookieHttps = verifyHttpsCookies.find(
+        (c) => c.includes('__Secure-better-auth.session_token=') || c.includes('better-auth.session_token=')
+      );
+      expect(priorSessionCookieHttps).toBeDefined();
+      const sessionCookieHeaderHttps = priorSessionCookieHttps!.split(';')[0];
+
+      const sessionInDbHttps = await prisma.session.findUnique({
+        where: { token: verifyHttpsJson.token },
+      });
+      expect(sessionInDbHttps).toBeDefined();
+
+      // Sign out prior HTTPS session using the actual issued session cookie header (not Authorization: Bearer)
       const signOutHttpsReq = new Request('https://office.lawoffice.internal:3000/api/auth/sign-out', {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${verifyHttpsJson.token}`,
+          'content-type': 'application/json',
+          cookie: sessionCookieHeaderHttps,
         },
       });
-      await priorAuthHttps.handler(signOutHttpsReq);
+      const signOutHttpsRes = await priorAuthHttps.handler(signOutHttpsReq);
+      expect(signOutHttpsRes.status).toBe(200);
+
+      // Assert old HTTPS session is deleted from PostgreSQL
+      const deletedSessionHttps = await prisma.session.findUnique({
+        where: { token: verifyHttpsJson.token },
+      });
+      expect(deletedSessionHttps).toBeNull();
+
+      // Assert trust verification record remains intact and unexpired in DB
+      const secureTrustVerif = await prisma.verification.findFirst({
+        where: { value: provisionedOwner.userId },
+      });
+      expect(secureTrustVerif).toBeDefined();
+      expect(secureTrustVerif!.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
       // Present authentic __Secure- trust cookie to CURRENT application route over HTTPS
       const signInReqSecure = new NextRequest('https://office.lawoffice.internal:3000/api/auth/sign-in/email', {
@@ -2116,43 +2170,55 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       });
       expect(initial.user.id).toBeDefined();
 
-      // Submit 4 incorrect password resume attempts
-      for (let i = 1; i <= 4; i++) {
-        await expect(
-          provisionOwner({
-            name: 'الأستاذ سمير المحامي',
-            email: 'samir.lawyer@office.eg',
-            password: 'WrongPassword!',
-          })
-        ).rejects.toThrow();
-
-        const tf = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
-        expect(tf?.failedVerificationCount).toBe(i);
-        expect(tf?.lockedUntil).toBeNull();
-      }
-
-      // 5th attempt triggers lockout
-      await expect(
+      // Correction 5: Launch 8 genuinely simultaneous failed attempts against one pending reservation using real PostgreSQL
+      const attempts = Array.from({ length: 8 }, () =>
         provisionOwner({
           name: 'الأستاذ سمير المحامي',
           email: 'samir.lawyer@office.eg',
           password: 'WrongPassword!',
         })
-      ).rejects.toThrow();
+      );
+      const results = await Promise.allSettled(attempts);
 
+      // All 8 simultaneous attempts must reject
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+
+      // In PostgreSQL under the FOR UPDATE lock:
+      // Attempts 1..4 increment failure count (1..4) with INVALID_INPUT.
+      // Attempt 5 sets lockedUntil and throws ACCOUNT_LOCKED.
+      // The remaining 3 excess attempts receive ACCOUNT_LOCKED.
+      const rejectedReasons = results.map((r) => (r as PromiseRejectedResult).reason);
+      const lockedOutAttempts = rejectedReasons.filter(
+        (err) => err instanceof ProvisioningError && err.code === 'ACCOUNT_LOCKED'
+      );
+      expect(lockedOutAttempts.length).toBe(4);
+
+      // Assert persisted failure count is strictly bounded at 5
       const tfLocked = await prismaFresh.twoFactor.findFirst({ where: { userId: initial.user.id } });
       expect(tfLocked?.failedVerificationCount).toBe(5);
       expect(tfLocked?.lockedUntil).not.toBeNull();
       expect(tfLocked?.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
 
-      // Subsequent attempt while locked throws PROVISIONING_LOCKED_OUT
+      // Subsequent attempt while locked rejects with ACCOUNT_LOCKED
       await expect(
         provisionOwner({
           name: 'الأستاذ سمير المحامي',
           email: 'samir.lawyer@office.eg',
           password: 'ValidSecret2026!',
         })
-      ).rejects.toThrow();
+      ).rejects.toThrowError(ProvisioningError);
+
+      try {
+        await provisionOwner({
+          name: 'الأستاذ سمير المحامي',
+          email: 'samir.lawyer@office.eg',
+          password: 'ValidSecret2026!',
+        });
+        expect.unreachable('Should have thrown ACCOUNT_LOCKED');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ProvisioningError);
+        expect((err as ProvisioningError).code).toBe('ACCOUNT_LOCKED');
+      }
 
       // Simulate lock expiry: set lockedUntil to 1 minute in the past
       await prismaFresh.twoFactor.updateMany({
