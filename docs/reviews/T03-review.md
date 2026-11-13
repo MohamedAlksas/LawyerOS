@@ -1,6 +1,6 @@
 # T03 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at inspected submission head `a5b84917aa3eca60eece75464ce30e6ad59d88e1`. Read [the current review](T03-review-round6.md) and [focused correction round 6](T03-corrections-round6.md). Original-header session policy, locked setup closure and the omitted-test-port fix pass independent reproductions. Remaining safety cases are the reversed omitted-operational-port comparison and canonical PowerShell migration target, with specific regression/verification gaps. The text below records the initial review and is historical.
+Latest review: **CHANGES_REQUESTED** at inspected submission head `63bdacbb00e5b8cf5e122aaf5b0113290ebcea62`. Read [the current review](T03-review-round7.md). The [self-contained correction](T03-corrections-round7.md) and T03 card specify all remaining work inline. Operational/test separation is fixed; the new baseline CLI still accepts port zero, drops explicit TLS policy and cannot recover from post-DDL history failure. Sign-out and concurrent-pending evidence remain partial. The text below records the initial review and is historical.
 
 Decision: **CHANGES_REQUESTED**. Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, T04, deployment or real-data operation. Review date: 11 November 2026, Africa/Cairo. [Correction assignment](T03-corrections-round1.md).
 

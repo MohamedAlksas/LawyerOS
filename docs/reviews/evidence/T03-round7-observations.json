@@ -1,0 +1,75 @@
+{
+  "review": "T03 round 7",
+  "date": "2026-11-13",
+  "sourceCommit": "63bdacbb00e5b8cf5e122aaf5b0113290ebcea62",
+  "frozenApplication": "fb731dea8ca16a24579ee4c70eb4040dd8d15731",
+  "fixedPoint": "1eeabf92d9ddba51fdd97ea92090c3d025de3ec4",
+  "method": "Independent connection-free pinned-driver inspection plus actual canonical baseline execution with a real PostgreSQL permission fault and restored-permission retry. Synthetic data only; no mocked persistence or child results.",
+  "observations": {
+    "reversedPortIsolation": {
+      "rejectedBeforeConnection": true
+    },
+    "zeroPort": {
+      "parserAccepted": true,
+      "requestedPort": 0,
+      "driverPort": 65432,
+      "connectionAttempted": false
+    },
+    "explicitTls": [
+      {
+        "requestedMode": "require",
+        "driverSslEnabled": false,
+        "connectionAttempted": false
+      },
+      {
+        "requestedMode": "verify-full",
+        "driverSslEnabled": false,
+        "connectionAttempted": false
+      }
+    ],
+    "historyFailureRecovery": {
+      "fault": "Actual PostgreSQL permission revoked after final managed table creation; schema CREATE restored before retry",
+      "firstFailed": true,
+      "failedAtPrismaHistory": true,
+      "managedTablesCommitted": 6,
+      "completedHistory": 0,
+      "retryFailed": true,
+      "retryAlreadyExists": true,
+      "sentinelRetained": true
+    }
+  },
+  "checks": {
+    "cleanInstall": "exit 0; pinned client generated",
+    "freshMigration": "exit 0",
+    "units": "82/82; exit 0",
+    "lint": "exit 0",
+    "typecheck": "exit 0",
+    "integration": "52/52; exit 0",
+    "browser": "30/30; exit 0; last-run passed, zero retries, non-reused server, fresh test-only webpack build",
+    "targetedObserver": "2/2; exit 0; assertions record observed defects",
+    "hostedApplication": "43471121750; success including default build",
+    "hostedPlanning": "43471120804; success"
+  },
+  "graph": {
+    "sourceCommit": "63bdacbb00e5b8cf5e122aaf5b0113290ebcea62",
+    "snapshot": "work/graphify/63bdacbb00e5-1090fab7",
+    "nodes": 249,
+    "edges": 575,
+    "communities": 11,
+    "mode": "local-code-only-no-label",
+    "query": "runIdentityBaseline",
+    "queryNodes": 36,
+    "queryEdges": 63,
+    "complete": true,
+    "requestedBudget": 1700,
+    "approximateReturnedTokens": 3534
+  },
+  "limits": [
+    "Port/TLS cases instantiate Client parameters without opening a connection; no real redirected writes or plaintext traffic claimed.",
+    "Recovery proof uses an owned low-privilege role and event trigger, removes fault and restores permissions before retry.",
+    "Historical sign-out and pending-concurrency coverage findings are source/pinned-library inspection, distinguished from runtime baseline findings.",
+    "Physical interactive TTY capture NOT RUN; real component tests remain.",
+    "External publication SHA independently verified; no self-referential report amendment required."
+  ],
+  "cleanup": "Exact labelled review container removed, including all owned synthetic databases/roles; browser listener14722 absent; no existing container, installed asset or operational/client data modified."
+}
