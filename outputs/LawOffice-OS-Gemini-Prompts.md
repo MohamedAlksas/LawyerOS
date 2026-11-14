@@ -190,78 +190,79 @@ Read GEMINI.md and explicitly apply these project skills:
 - D:/Lawyer/.agents/skills/lawoffice-testing/SKILL.md
 - D:/Lawyer/.agents/skills/lawoffice-arabic-ui/SKILL.md
 
-Current Codex assignment (13 November 2026): the complete correction specification follows inline. It supersedes prior correction prompts; preserve verified behavior and do not restart T03.
+Current Codex assignment (14 November 2026): the entire correction specification follows inline. It supersedes previous correction prompts; preserve verified behavior and do not restart T03.
 
-# T03 — Self-contained correction round 7
+# T03 — Self-contained correction round 8
 
-Implement only the corrections below. All defects, expected behavior and acceptance cases are included here; no review report or task-card lookup is needed to discover the work.
+Implement only the three corrections below. All remaining defects and acceptance cases are included inline; no review-report or task-card lookup is needed to discover the fixes. Preserve completed corrections and do not restart T03.
 
 ## Repository and boundaries
 
-Workspace D:/Lawyer; origin https://github.com/MohamedAlksas/LawyerOS.git; branch feature/t03-identity-sessions; existing draft PR https://github.com/MohamedAlksas/LawyerOS/pull/8. Reviewed submission: 63bdacbb00e5b8cf5e122aaf5b0113290ebcea62; frozen application: fb731dea8ca16a24579ee4c70eb4040dd8d15731. T02 is ACCEPTED and integrated into origin/main at e598c1649b82f34ea94338cda5ef25da32b5299f. Fetch and safely incorporate the latest Codex documentation publication before editing; preserve local/other-agent work.
+Workspace D:/Lawyer; origin https://github.com/MohamedAlksas/LawyerOS.git; existing branch feature/t03-identity-sessions and draft PR https://github.com/MohamedAlksas/LawyerOS/pull/8. Reviewed submission fec77f58c72ef6918d8241862655ac1954a3024a; frozen implementation 4a8d17848b16ebaab17f86e3ae9ac9c495e74ab2. T02 is ACCEPTED and integrated into origin/main at e598c1649b82f34ea94338cda5ef25da32b5299f. Verify origin/branch/HEAD and safely incorporate the latest Codex documentation publication. Preserve other-agent/local work; do not reset, clean, force-push or automatically stash.
 
-Codex plans and independently accepts; Gemini implements using the owner's selected model. Follow AGENTS.md, GEMINI.md, PRODUCT.md, GLOSSARY.md and docs/PRD.md. Documentation stays English; application stays Arabic RTL. Keep dependency pins and scope. No main push/merge, force push, reset/clean, automatic stash, deployment, real data, T04, UI redesign, business modules, SaaS/offline/AI additions or installed-agent deletion.
+Codex plans and independently reviews; Gemini implements using the owner's selected model. The discussion about a possible second model did not change the implementation workflow. Follow AGENTS.md, GEMINI.md, PRODUCT.md, GLOSSARY.md, docs/PRD.md and the applicable Git/review/native-agent contracts. English documentation/identifiers; Arabic RTL application. No dependency/stack changes, merge/main push, deployment, real data, T04, UI redesign, business-module expansion, SaaS/offline/document AI or deletion of installed agent assets.
 
-## Actual native agents and skills
+## Required skills and actual native children
 
-Load and record actual paths/hashes: .agents/skills/lawoffice-delivery/SKILL.md, .agents/skills/lawoffice-security-operations/SKILL.md, .agents/skills/lawoffice-testing/SKILL.md and .agents/skills/graphify/SKILL.md. Retain .agents/skills/lawoffice-arabic-ui/SKILL.md for existing auth UI verification. Project rules govern generic profiles.
+Read and record actual paths/hashes: .agents/skills/lawoffice-delivery/SKILL.md, .agents/skills/lawoffice-security-operations/SKILL.md, .agents/skills/lawoffice-testing/SKILL.md, .agents/skills/graphify/SKILL.md. Retain .agents/skills/lawoffice-arabic-ui/SKILL.md for existing auth UI verification.
 
-Use distinct real native sessions; no coordinator personas, invented IDs, silent substitutions, nested delegation or full-roster launches. Run the supported canonical/registered-alias preflight. If native execution remains unavailable, report BLOCKED_NATIVE_AGENTS before dependent edits.
+- Identity implementation lead: agency-identity-access-engineer; profile .agents/skills/engineering-identity-access-engineer/SKILL.md; definition .agents/agents/agency-identity-access-engineer.md. Owns src/cli/baseline-identity.ts, minimal schema-comparison support if necessary, and docs/DEPENDENCIES.md. Fits connection policy and identity-schema recovery authorization.
+- Test implementation lead: agency-test-automation-engineer; profile .agents/skills/testing-test-automation-engineer/SKILL.md; definition .agents/agents/agency-test-automation-engineer.md. Owns tests/unit/baseline-identity.test.ts, tests/integration/migration-upgrade.test.ts and tests/integration/auth-integration.test.ts. Fits adversarial catalog and actual provider lifecycle evidence.
+- Independent AppSec support: agency-application-security-engineer; profile .agents/skills/security-appsec-engineer/SKILL.md; definition .agents/agents/agency-application-security-engineer.md. Audits the exact frozen endpoint/schema/recovery/provider checkpoint independently of authors.
 
-- Identity implementation lead: .agents/skills/engineering-identity-access-engineer/SKILL.md, name agency-identity-access-engineer, definition .agents/agents/agency-identity-access-engineer.md. Owns src/cli/baseline-identity.ts, necessary baseline state/verification logic and docs/DEPENDENCIES.md.
-- Test implementation lead: .agents/skills/testing-test-automation-engineer/SKILL.md, name agency-test-automation-engineer, definition .agents/agents/agency-test-automation-engineer.md. Owns baseline unit/integration and auth lifecycle/concurrency regressions.
-- Independent AppSec support: .agents/skills/security-appsec-engineer/SKILL.md, name agency-application-security-engineer, definition .agents/agents/agency-application-security-engineer.md. Audits explicit endpoint/TLS, post-failure recovery and exact frozen test behavior.
+Invoke distinct real native sessions after the supported canonical/registered-alias preflight. Unavailable execution is BLOCKED_NATIVE_AGENTS before dependent edits. No coordinator persona fallback, fake IDs, silent substitutions, nested delegation or full-roster launch. Coordinator assigns, freezes and reconciles; serialize overlapping writers and tell each child it shares the codebase and must preserve others' edits. Record real invocation IDs, profile/definition hashes, owned paths, start/inspected SHAs, findings and reconciliation. Author PASS statements are not independent approval. No shared production configuration rewrite is assigned.
 
-The coordinator assigns, freezes checkpoints and reconciles; authors do not independently approve their own work. Serialize overlapping writers. Record real invocation IDs, profile/definition hashes, ownership, start/inspected SHAs, findings and reconciliation. No shared production configuration rewrite is requested; obtain an explicit bounded specialty assignment before expanding into one.
+## A. Verify actual managed-schema equivalence before authorizing recovery
 
-## 1. Reject invalid explicit ports before a client exists
+Current verifySchemaEquivalence checks index/primary-key names, ignores defaults and discards foreign-key source/target definitions. Its result authorizes migration-history recording for incompatible schemas.
 
-Current parseTargetUrl accepts a PostgreSQL URL with explicit port 0. The pinned pg driver treats numeric port:0 as missing and uses PGPORT or default 5432. Parent proof: requested port 0 with PGPORT=65432 produces driver port 65432 without opening a socket.
+Codex reproduced three separate real PostgreSQL cases starting from approved SQL without history:
+1. Replaced user_email_key with a nonunique same-name index. Verifier returned equivalent; baseline returned success/recovered; one completed history record was written; two users with identical email then persisted.
+2. Changed twoFactor.verified default from true to false. Verifier accepted and baseline recorded completed history.
+3. Retargeted session_userId_fkey to unrelated_user_target(id), preserving name and CASCADE actions. Verifier accepted and baseline recorded completed history.
 
-Validate an explicitly supplied port as an integer in 1..65535 before constructing a Client or touching a database. Keep the omitted-port policy explicit and stable; it must not become ambient fallback. Use one canonical accepted endpoint for SQL and Prisma subprocesses. Do not pass the original unvalidated URL to one phase while another uses different parsed parameters. Reject ambiguous/unsupported routing or schema options rather than silently ignoring them.
+All cases retained sentinel data. These must be rejected before any completed history is recorded.
 
-Tests: explicit 0, invalid ranges/syntax, omitted port under controlled PGPORT, legitimate default/nondefault ports, and accepted/rejected routing options. Assert actual connection parameters for accepted inputs and no connection/DDL/history for rejected inputs. Preserve the now-working operational/test separation checks, explicit test URL requirement, identifier bounds and owned-resource protections.
+Implement a bounded semantic comparison tied to the approved migration, covering required tables and columns, relevant exact types/precision/nullability/defaults, enum namespace/values, primary-key columns, foreign-key source columns and referenced schema/table/columns/actions, and index keys/uniqueness/validity/predicates or expressions where relevant. Do not equate a familiar name with a matching definition or repeat the same omission in a larger hardcoded list. Keep unrelated objects/data intact. Names and harmless equivalent SQL representations need a documented policy; only semantic equivalence may authorize recovery.
 
-## 2. Preserve or reject explicitly requested TLS
+Keep the working normal baseline, genuine post-DDL history-failure retry and already-completed paths. Incompatible/partial state refuses without dropping/recreating owner tables, blindly resolving history or silently rewriting an incompatible schema. Verification must gate both recovery and already-completed success. Keep operator documentation accurate; remove unsupported guarantees rather than claiming checks that do not exist.
 
-Current parseTargetUrl recognizes only sslmode=disable. sslmode=require and verify-full become undefined; with PGSSLMODE absent, actual pg selects ssl=false while Prisma receives the original TLS URL.
+Required tests use the documented canonical runIdentityBaseline entry point with real PostgreSQL. Exercise each reproduced drift independently, plus wrong primary-key columns, wrong index keys/uniqueness, wrong FK target/actions, changed/missing defaults, relevant type precision/nullability, wrong enum namespace/value set and incomplete schema. Assert rejection, no newly completed history, no destructive schema/data change and retained sentinels. A correctly matching schema must still resume successfully after a real server-side history fault is removed. Retain SQL rollback, already-completed, and actual post-upgrade authentication coverage. Use independent expected definitions/behavior; assertions that mirror the verifier's name list are insufficient.
 
-For every accepted connection/TLS option, preserve its supported security meaning consistently through SQL, verification and Prisma history. If a mode or certificate configuration is unsupported, reject it before connecting; never silently downgrade requested encryption or verification. Ambient PGSSLMODE must not weaken an explicit target policy. Do not add a new hosting service or change the stack.
+## B. Reject ambiguous or unsupported TLS query forms before connection
 
-Tests: require, verify-full, explicit disable where allowed, unknown modes, contradictory/unsupported options and controlled ambient SSL settings. Inspect the resulting driver policy; use a controlled TLS fixture or prove rejection occurs before connection. A success response from a plaintext fixture cannot count as satisfying require/verify-full. Do not expose credentials in errors or evidence.
+Current parseTargetUrl lowercases keys during allow-list validation but later calls searchParams.get('sslmode'), which is case-sensitive and returns only the first value.
 
-## 3. Recover after SQL succeeds but history recording fails
+Actual connection-free observations:
+- SSLMODE=verify-full is accepted, produces driver ssl=false and disappears from the canonical URL.
+- sslmode=disable&sslmode=verify-full is accepted, produces ssl=false and canonicalizes to sslmode=disable.
 
-Current runIdentityBaseline commits all six managed tables before catalog checks and Prisma migrate resolve. Parent injected a real PostgreSQL permission fault: CREATE permission was revoked after office_bootstrap creation. SQL committed, catalog checks passed, history recording failed with zero completed migration history. After restoring permission, rerunning failed on the existing UserRole type. Sentinel data survived, but the procedure could not recover.
+Define one explicit case/duplicate policy for accepted connection query options. Reject unsupported spellings and duplicate/contradictory TLS instructions before constructing a client, or normalize a deliberately supported unambiguous spelling consistently before validation and canonicalization. Never accept and silently discard an explicit TLS instruction. SQL, schema verification and Prisma must receive the same accepted policy. Keep ordinary lowercase require/verify-full/disable handling and port-zero/ambient-isolation fixes intact.
 
-Implement explicit safe recovery for this partial state. Do not delete/recreate owner tables or blindly mark a migration applied. Move verification into the SQL transaction where appropriate, and handle failures after that commit separately. A verified matching managed schema with missing history needs a controlled resume path tied to the approved migration/schema; incompatible or partial state must refuse safely. Define already-completed behavior and retry after history succeeds but later status verification fails.
+Required tests: the two exact cases above; reversed duplicate order; duplicate invalid/valid modes; mixed-case duplicates; supported or explicitly rejected key casing; unknown options; actual accepted driver parameters and canonical URL; no connection/DDL/history on rejection. Preserve 1..65535 port validation and deterministic omitted-port behavior. Do not count a plaintext connection as TLS proof or expose credentials.
 
-Before recording/resuming history, verify actual managed-schema equivalence: columns and relevant types/nullability/defaults, enum values, primary/foreign-key definitions and targets/actions, required indexes/uniqueness. Names alone are insufficient authorization for recovery. Preserve unrelated tables and data. Do not implement fixture-specific production exceptions or an unrestricted migration-history bypass.
+## C. Exercise the current application under an actual HTTPS provider configuration
 
-Tests must invoke the same canonical entry point documented for operators: normal nonempty retained-data baseline; SQL conflict rollback; controlled post-DDL history failure; corrected permission/connectivity and successful retry; already-completed invocation; incompatible partial/mismatched managed schema; no completed history on rejection; retained sentinel data before/after recovery; actual post-upgrade authentication. Use real PostgreSQL faults and observable state. Keep SQL and Prisma on the same validated target/transport policy.
+Real prior-provider cookie issuance and signed-session cookie sign-out now work. Preserve HTTP/HTTPS prior-provider session deletion assertions and genuine 30-day trust issuance. The remaining issue is the current application: the HTTPS portion only changes NextRequest URL and still uses the HTTP singleton/provider.
 
-## 4. Complete actual historical-trust sign-out
+Codex copied the submitted test under ignored work/, retaining its real issuance/sign-out steps, and inserted a provider assertion immediately before the current HTTPS request. getAuth().options.baseURL was http://127.0.0.1:3000, so expecting https://office.lawoffice.internal:3000 failed. The prerequisite provisioning test and preceding signed-cookie sign-out assertions passed.
 
-Cookie issuance now uses the genuine prior provider and is an improvement. However, the test signs out with Authorization: Bearer against providers configured with only twoFactor. The pinned sign-out endpoint reads the signed session cookie, so those requests do not delete the issued sessions.
+Configure the current application's environment/provider for each protocol, reload the relevant cached environment/auth singleton safely, and assert the effective provider base URL/configuration before invoking the real application route. Restore environment/singletons in finally so later tests remain isolated. Use existing project test configuration patterns; no production provider rewrite is requested.
 
-For HTTP and HTTPS provider configurations: complete actual prior-provider password/MFA with 30-day trust; capture the issued session cookie, trust cookie and matching database state; sign out using the issued session cookie and required request context; assert successful response and persisted old-session removal while trust remains valid. Retain the trust cookie, then call the current application configured for the corresponding protocol. Assert a fresh challenge, no new authenticated session before MFA, and denied protected access. Changing only the request URL is not a provider HTTPS configuration change. Preserve the working production trust restrictions.
+For both HTTP and HTTPS: complete genuine prior-provider password/MFA/trust issuance; assert the issued old session exists; sign out with its actual signed session cookie/request context; assert success and persisted removal; retain the exact issued trust cookie and matching unexpired trust verification record; invoke the correspondingly configured current application; assert fresh MFA challenge, no authenticated session before MFA and denied protected access. Bind retained-record assertions to the issued trust identifier rather than any arbitrary verification row belonging to the user. Preserve the working production trust restrictions.
 
-## 5. Prove concurrent pending-attempt limits
+## Verification, publication and stop
 
-The new pending-failure test still awaits attempts sequentially. Add genuinely simultaneous failed attempts against one pending reservation using real PostgreSQL, asserting persisted failure bounds, lock state, rejected excess attempts and lock-expiry/legitimate recovery. Do not substitute already-closed bootstrap races or recovery-code-regeneration tests. Keep the real waiter barriers, both closure orderings and the fixed no-secret-return-after-closure behavior.
+Preserve the repaired explicit-port rejection, ordinary explicit TLS behavior, history-failure retry, real signed-cookie sign-out, eight simultaneous pending failures/lock expiry, waiter barriers/both closure orderings and all existing auth/security protections. For demonstrated defects, establish meaningful failing regressions, implement minimum fixes and verify incrementally. Use synthetic isolated resources; verify ownership before cleanup. Preserve all tracked/untracked .agents/, .codex/ and .opencode/ assets; validator failures do not authorize deletion.
 
-## Verification and handoff
+Run relevant units, real PostgreSQL mismatch/recovery/auth/concurrency tests, lint/typecheck, attributable fresh default build and existing browser journeys. Record actual commands, exits and positive/negative outcomes; distinguish observational probes, intentional red regressions, fixture/setup errors and passing acceptance tests. Physical TTY is NOT RUN unless actually exercised. Local test-only webpack is not default-build evidence.
 
-Preserve working R01/R03/R04/R05/R07/R09 behavior, all prior secret-handling protections and current CI. For each new defect, observe a meaningful failing behavioral test, implement the minimum fix and verify incrementally. Already-correct cases may receive passing coverage. Use synthetic isolated resources only; remove only verified run-owned resources.
+Use Graphify on a committed local code-only checkpoint; verify full SOURCE.json SHA, query changed boundaries, inspect actual source/tests and record graph limits. No external uploads/labels/keys/upgrades/hooks. Validate Agency routing/planning and regenerate derived deliverables after canonical changes without deleting extra profiles.
 
-Freeze committed implementation checkpoints for independent support audits. Run relevant configured unit tests, real PostgreSQL integration/fault/recovery/concurrency tests, browser journeys, lint/typecheck and an attributable fresh default build. Distinguish local test-only webpack from hosted default evidence. Keep physical TTY capture NOT RUN unless actually performed; stream-unit tests do not establish physical-terminal behavior.
-
-Use local committed code-only Graphify snapshots, verify full SOURCE.json SHAs, query changed boundaries and inspect source/tests. State coverage/output limits. No uploads, external labeling, provider keys, upgrades or hooks. Validate planning/Agency routing and regenerate derived copies; validator errors do not authorize deleting installed assets.
-
-Save docs/reviews/T03-submission-round7.md with behavior/regression/evidence dispositions, actual commands/exits and positive/negative observations, recovery semantics, NOT RUN limits, native ownership/IDs/hashes/findings/reconciliation, Graphify provenance, branch/base/frozen/report/independently verified pushed SHA/PR. Report publication SHA externally after committing; avoid self-referential amendments. Push coherent updates to the same branch/PR and stop for independent Codex review. No self-approval, merge, deployment, real data or T04.
+Save docs/reviews/T03-submission-round8.md with each correction's disposition, meaningful red/green evidence, commands/exits, schema/recovery semantics, NOT RUN limits, actual skills/native IDs/profile and definition hashes/ownership/checkpoints/findings/reconciliation, Graphify provenance, branch/base/frozen/report/independently verified pushed SHA/PR URL. Report the publication SHA externally after committing; no self-referential amendments. Push coherent updates to the same branch/PR and stop for independent Codex review. No self-approval, merge, deployment, real data or T04.
 ```
 
-Historical task-chain metadata: accepted predecessor record `docs/reviews/T02-review.md`; initial submission record `docs/reviews/T03-submission.md`. The current correction output is `docs/reviews/T03-submission-round7.md`. These historical paths add no further correction instructions.
+Historical task-chain metadata: accepted predecessor record `docs/reviews/T02-review.md`; initial submission record `docs/reviews/T03-submission.md`. Current correction output: `docs/reviews/T03-submission-round8.md`. These historical paths add no further correction instructions.
 
 
 ---

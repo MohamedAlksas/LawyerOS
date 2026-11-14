@@ -1,6 +1,6 @@
 # T03 — Independent Codex review
 
-Latest review: **CHANGES_REQUESTED** at inspected submission head `63bdacbb00e5b8cf5e122aaf5b0113290ebcea62`. Read [the current review](T03-review-round7.md). The [self-contained correction](T03-corrections-round7.md) and T03 card specify all remaining work inline. Operational/test separation is fixed; the new baseline CLI still accepts port zero, drops explicit TLS policy and cannot recover from post-DDL history failure. Sign-out and concurrent-pending evidence remain partial. The text below records the initial review and is historical.
+Latest review: **CHANGES_REQUESTED** at inspected submission `fec77f58c72ef6918d8241862655ac1954a3024a`. [Current review](T03-review-round8.md). The [self-contained correction](T03-corrections-round8.md) and T03 card contain the complete remaining assignment inline: real schema equivalence before recovery, ambiguous TLS query rejection and actual current-provider HTTPS evidence. Port-zero handling, ordinary explicit TLS, real cookie sign-out and concurrent pending-attempt evidence improved. Independent Standards/Spec children were unavailable due to usage limits; parent source/runtime findings are explicitly distinguished. The text below is historical.
 
 Decision: **CHANGES_REQUESTED**. Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, T04, deployment or real-data operation. Review date: 11 November 2026, Africa/Cairo. [Correction assignment](T03-corrections-round1.md).
 
