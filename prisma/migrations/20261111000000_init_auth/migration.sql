@@ -12,6 +12,7 @@ CREATE TABLE "user" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "role" "UserRole" NOT NULL DEFAULT 'OWNER',
     "twoFactorEnabled" BOOLEAN DEFAULT false,
+    "credentialVersion" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "user_pkey" PRIMARY KEY ("id")
 );
@@ -26,6 +27,7 @@ CREATE TABLE "session" (
     "ipAddress" TEXT,
     "userAgent" TEXT,
     "userId" TEXT NOT NULL,
+    "credentialVersion" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "session_pkey" PRIMARY KEY ("id")
 );

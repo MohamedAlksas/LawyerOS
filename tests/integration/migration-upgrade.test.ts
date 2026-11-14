@@ -745,6 +745,48 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     }
   }, 60000);
 
+  it('rejects baseline when user.image uses an unapproved domain type codex_image (R11 domain reproduction / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r11_domain_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r11_domain_sentinel (note) VALUES ('SENTINEL_R11_DOMAIN_PRESERVED');
+      `);
+
+      // Create unapproved domain and alter user.image to use it
+      await reproDb.pool.query(`CREATE DOMAIN public.codex_image AS text CHECK (VALUE <> '');`);
+      await reproDb.pool.query(`ALTER TABLE "user" ALTER COLUMN "image" TYPE public.codex_image;`);
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/uses an unapproved domain type 'codex_image'|conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r11_domain_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R11_DOMAIN_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
   it('pins public schema and neutralizes ambient PGOPTIONS search_path routing (F05)', async () => {
     const ambientDb = await createDedicatedTestDatabase();
     const origPgOptions = process.env.PGOPTIONS;

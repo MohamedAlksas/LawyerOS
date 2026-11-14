@@ -1,9 +1,17 @@
-import { auth, getPrismaClient } from '@/lib/auth';
-import { getEnv } from '@/lib/env';
+import { auth, getPrismaClient, getTrustedOrigins } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireActor } from '@/modules/identity/require-actor';
 import { regenerateRecoveryCodes } from '@/modules/identity/recovery-codes';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { randomUUID } from 'crypto';
+import {
+  getUserCredentialVersion,
+  getUserCredentialVersionByEmail,
+  incrementUserCredentialVersion,
+  setSessionCredentialVersion,
+  evictOlderSessions,
+  isSessionCredentialVersionMismatched,
+} from '@/modules/identity/credential-version';
 
 const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
@@ -76,13 +84,22 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
           now - sessionCreatedAt > MAX_SESSION_LIFETIME_MS;
         const isInactive = now - sessionUpdatedAt > INACTIVITY_TIMEOUT_MS;
 
-        // Check if credential was changed after session creation (B3)
+        // Check if credential was changed after session creation (B3 & R11-01)
         let isCredentialInvalidated = false;
         const prisma = getPrismaClient();
         const account = await prisma.account.findFirst({
           where: { userId: session.userId, providerId: 'credential' },
         });
         if (account && sessionCreatedAt < new Date(account.updatedAt).getTime()) {
+          isCredentialInvalidated = true;
+        }
+
+        // R11-01: Enforce session.credentialVersion === user.credentialVersion
+        const isVersionMismatched = await isSessionCredentialVersionMismatched(
+          session.userId,
+          session.id
+        );
+        if (isVersionMismatched) {
           isCredentialInvalidated = true;
         }
 
@@ -129,8 +146,9 @@ export async function POST(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // F06 & R10-03: Intercept raw POST /api/auth/two-factor/generate-backup-codes to enforce
-  // Origin/CSRF validation, identical Identity authorization, password reauthentication, and atomic lockout budget
+  // F06 & R11-03: Intercept raw POST /api/auth/two-factor/generate-backup-codes to enforce
+  // Pinned Provider Trusted-Origin Parity without Host expansion, identical Identity authorization,
+  // password reauthentication, and atomic lockout budget
   if (pathname.includes('/two-factor/generate-backup-codes')) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
@@ -140,47 +158,40 @@ export async function POST(request: NextRequest) {
 
       const origin = request.headers.get('origin');
       const referer = request.headers.get('referer');
-      let originToValidate: string | null = origin;
-      if (!originToValidate && referer) {
-        try {
-          originToValidate = new URL(referer).origin;
-        } catch {
-          originToValidate = null;
-        }
-      }
-      if (!originToValidate && !referer && !request.headers.get('sec-fetch-site')) {
-        originToValidate = request.nextUrl.origin;
-      }
+      const host = request.headers.get('host');
 
-      if (origin === 'null' && request.headers.get('sec-fetch-site') === 'same-origin') {
-        // Allowed (e.g. privacy mode / sandbox with verified same-origin fetch)
-      } else if (!originToValidate || originToValidate === 'null') {
+      // Cookie-bearing requests strictly require Origin or Referer
+      if (!origin && !referer) {
         return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-      } else {
-        const env = getEnv();
-        const baseOrigin = new URL(env.BETTER_AUTH_URL).origin;
-        const allowedOrigins = new Set<string>([baseOrigin]);
-        try {
-          const parsedBase = new URL(env.BETTER_AUTH_URL);
-          const portStr = parsedBase.port ? `:${parsedBase.port}` : '';
-          if (parsedBase.hostname === '127.0.0.1') {
-            allowedOrigins.add(`${parsedBase.protocol}//localhost${portStr}`);
-          } else if (parsedBase.hostname === 'localhost') {
-            allowedOrigins.add(`${parsedBase.protocol}//127.0.0.1${portStr}`);
+      }
+
+      const allowedOrigins = getTrustedOrigins();
+
+      if (origin === 'null') {
+        // If origin === 'null', strictly verify if host header matches a trusted origin
+        const isTrustedHost = Array.from(allowedOrigins).some((to) => {
+          try {
+            return new URL(to).host === host;
+          } catch {
+            return false;
           }
-        } catch {
-          // Ignore URL parsing errors
+        });
+        if (!isTrustedHost || request.headers.get('sec-fetch-site') !== 'same-origin') {
+          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        }
+      } else {
+        let originToValidate: string | null = origin;
+        if (!originToValidate && referer) {
+          try {
+            originToValidate = new URL(referer).origin;
+          } catch {
+            originToValidate = null;
+          }
         }
 
-        const hostHeader = request.headers.get('host');
-        if (hostHeader) {
-          const proto =
-            request.headers.get('x-forwarded-proto') ||
-            (request.url.startsWith('https:') ? 'https' : 'http');
-          allowedOrigins.add(`${proto}://${hostHeader}`);
-        }
-
-        if (!allowedOrigins.has(originToValidate)) {
+        // Do NOT synthesize origin from request.nextUrl.origin
+        // Do NOT add request Host or forwarded headers (x-forwarded-proto) to allowed origins
+        if (!originToValidate || !allowedOrigins.has(originToValidate)) {
           return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
       }
@@ -216,13 +227,32 @@ export async function POST(request: NextRequest) {
       if (err instanceof AuthorizationError) {
         return NextResponse.json({ error: err.message }, { status: 403 });
       }
-      return NextResponse.json({ error: 'حدث خطأ غير متوقع أثناء معالجة رموز الاسترداد.' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'حدث خطأ غير متوقع أثناء معالجة رموز الاسترداد.' },
+        { status: 500 }
+      );
     }
   }
 
-  // F10 & R10-01: Two-factor challenge pre-handler: capture challenge metadata and reject stale challenges
+  // R11-01: In POST /api/auth/sign-in/email:
+  // Capture user's current credentialVersion before Better Auth executes
+  let signInUserCredentialVersion: number | null = null;
+  if (pathname.includes('/sign-in/email')) {
+    try {
+      const body = await request.clone().json().catch(() => ({}));
+      if (body.email && typeof body.email === 'string') {
+        signInUserCredentialVersion = await getUserCredentialVersionByEmail(body.email);
+      }
+    } catch {
+      // Ignore body parsing errors
+    }
+  }
+
+  // F10, R10-01 & R11-01: Two-factor challenge pre-handler: capture challenge metadata and reject stale challenges
   let challengeCreatedAt: Date | null = null;
   let targetUserId: string | null = null;
+  let expectedCredVer: number | null = null;
+  let mfaRawToken: string | null = null;
 
   if (
     pathname.includes('/two-factor/verify-totp') ||
@@ -243,6 +273,7 @@ export async function POST(request: NextRequest) {
         const decodedVal = decodeURIComponent(cookieVal);
         const rawToken = decodedVal.split('.')[0];
         if (rawToken) {
+          mfaRawToken = rawToken;
           const prisma = getPrismaClient();
           const verifRecord = await prisma.verification.findFirst({
             where: {
@@ -258,16 +289,44 @@ export async function POST(request: NextRequest) {
             challengeCreatedAt = new Date(verifRecord.createdAt);
             targetUserId = verifRecord.value;
 
+            // Load companion 2fa-cred-ver-${rawToken}
+            const credVerRecord = await prisma.verification.findFirst({
+              where: { identifier: `2fa-cred-ver-${rawToken}` },
+            });
+
+            const currentCredVer = await getUserCredentialVersion(targetUserId);
+            expectedCredVer = currentCredVer;
+
             const account = await prisma.account.findFirst({
               where: { userId: targetUserId, providerId: 'credential' },
             });
-            if (account && challengeCreatedAt < new Date(account.updatedAt)) {
-              // Stale challenge created under prior password! Delete and reject!
-              await prisma.verification.delete({ where: { id: verifRecord.id } }).catch(() => {});
-              return NextResponse.json(
-                { error: 'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.' },
+
+            const isStaleByAccount =
+              account && challengeCreatedAt < new Date(account.updatedAt);
+            const isStaleByCredVer =
+              credVerRecord && Number(credVerRecord.value) !== currentCredVer;
+
+            if (isStaleByAccount || isStaleByCredVer) {
+              // Stale challenge created under prior password! Delete and reject fail-closed!
+              await prisma.verification.deleteMany({
+                where: {
+                  OR: [
+                    { id: verifRecord.id },
+                    { identifier: `2fa-cred-ver-${rawToken}` },
+                  ],
+                },
+              }).catch(() => {});
+
+              const errRes = NextResponse.json(
+                {
+                  error:
+                    'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+                },
                 { status: 401 }
               );
+              errRes.cookies.delete('better-auth.two_factor');
+              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              return errRes;
             }
           }
         }
@@ -275,7 +334,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // F10 & R10-01: Change password pre-handler: resolve current session before auth.handler modifies it
+  // F10, R10-01 & R11-01: Change password pre-handler: resolve current session before auth.handler modifies it
   let changePasswordUserId: string | null = null;
   let originalSessionId: string | null = null;
   let reqToExecute = request;
@@ -308,8 +367,97 @@ export async function POST(request: NextRequest) {
 
   const response = await auth.handler(reqToExecute);
 
-  // R04, F10 & R10-01: When password change succeeds, delete all sessions for user except replacement session,
-  // and delete all pending verification challenges for that user.
+  // R11-01: In POST /api/auth/sign-in/email:
+  // When Better Auth issues a 2FA challenge cookie, stamp companion record in verification:
+  // identifier: '2fa-cred-ver-' + rawToken, value: String(userCredentialVersion), with matching expiresAt.
+  if (pathname.includes('/sign-in/email') && signInUserCredentialVersion !== null) {
+    try {
+      const setCookies = response.headers.getSetCookie?.() || [
+        response.headers.get('set-cookie') || '',
+      ];
+      const tfCookie = setCookies.find(
+        (c) =>
+          c.startsWith('better-auth.two_factor=') ||
+          c.startsWith('__Secure-better-auth.two_factor=')
+      );
+      if (tfCookie) {
+        const rawCookiePart = tfCookie.split(';')[0];
+        const eqIdx = rawCookiePart.indexOf('=');
+        const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
+        const decodedVal = decodeURIComponent(cookieVal);
+        const rawToken = decodedVal.split('.')[0];
+        if (rawToken) {
+          const prisma = getPrismaClient();
+          const verifRecord = await prisma.verification.findFirst({
+            where: {
+              OR: [
+                { identifier: rawToken },
+                { identifier: decodedVal },
+                { identifier: cookieVal },
+                { identifier: `two-factor-${rawToken}` },
+              ],
+            },
+          });
+          const expiresAt =
+            verifRecord?.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
+
+          await prisma.verification.deleteMany({
+            where: { identifier: `2fa-cred-ver-${rawToken}` },
+          }).catch(() => {});
+
+          await prisma.verification.create({
+            data: {
+              id: randomUUID(),
+              identifier: `2fa-cred-ver-${rawToken}`,
+              value: String(signInUserCredentialVersion),
+              expiresAt,
+            },
+          }).catch(() => {});
+        }
+      }
+
+      // Also if a direct session was issued without 2FA:
+      const sessionCookie = setCookies.find(
+        (c) =>
+          c.startsWith('better-auth.session_token=') ||
+          c.startsWith('__Secure-better-auth.session_token=')
+      );
+      if (sessionCookie) {
+        const rawCookiePart = sessionCookie.split(';')[0];
+        const eqIdx = rawCookiePart.indexOf('=');
+        const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
+        const decodedVal = decodeURIComponent(cookieVal);
+        const rawToken = decodedVal.split('.')[0];
+        if (rawToken) {
+          const prisma = getPrismaClient();
+          const session = await prisma.session.findFirst({
+            where: {
+              OR: [
+                { token: rawToken },
+                { token: decodedVal },
+                { token: cookieVal },
+              ],
+            },
+          });
+          if (session) {
+            await setSessionCredentialVersion(
+              prisma,
+              session.id,
+              signInUserCredentialVersion
+            );
+          }
+        }
+      }
+    } catch {
+      // Best-effort sign-in metadata stamping
+    }
+  }
+
+  // R04, F10, R10-01 & R11-01: When password change succeeds:
+  // In PostgreSQL transaction: increment user.credentialVersion = user.credentialVersion + 1,
+  // evict all sessions for that user with older credentialVersion,
+  // permanently purge all verification records for that user,
+  // set replacement session's credentialVersion = newVersion. Fail closed with HTTP 500 on error.
   if (pathname.includes('/change-password') && response.status === 200) {
     try {
       const prisma = getPrismaClient();
@@ -344,33 +492,55 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const keepSessionId = replacementSessionId || originalSessionId;
-      const targetUid = changePasswordUserId;
-      if (targetUid) {
-        await prisma.session.deleteMany({
-          where: {
-            userId: targetUid,
-            ...(keepSessionId ? { id: { not: keepSessionId } } : {}),
-          },
+      let targetUid = changePasswordUserId;
+      if (!targetUid && replacementSessionId) {
+        const s = await prisma.session.findUnique({
+          where: { id: replacementSessionId },
+          select: { userId: true },
         });
+        targetUid = s?.userId || null;
+      }
 
-        // Invalidate any unfinished MFA challenges created under the prior password (F10)
-        await prisma.verification.deleteMany({
-          where: {
-            value: targetUid,
-          },
+      if (targetUid) {
+        const keepSessionId = replacementSessionId || originalSessionId;
+
+        await prisma.$transaction(async (tx) => {
+          // 1. Increment user.credentialVersion
+          const newVersion = await incrementUserCredentialVersion(tx, targetUid!);
+
+          // 2. Set replacement session's credentialVersion = newVersion
+          if (keepSessionId) {
+            await setSessionCredentialVersion(tx, keepSessionId, newVersion);
+          }
+
+          // 3. Evict all sessions for that user with older credentialVersion
+          await evictOlderSessions(tx, targetUid!, newVersion, keepSessionId);
+
+          // 4. Permanently purge all verification records for that user and companion records
+          await tx.verification.deleteMany({
+            where: {
+              OR: [
+                { value: targetUid! },
+                { identifier: { startsWith: '2fa-cred-ver-' } },
+              ],
+            },
+          });
         });
       }
     } catch {
       return NextResponse.json(
-        { error: 'فشل في إنهاء الجلسات الأخرى للمستخدم بعد تغيير كلمة المرور.' },
+        {
+          error:
+            'فشل في تحديث حالة أمان الاعتماد وإنهاء الجلسات الأخرى بعد تغيير كلمة المرور.',
+        },
         { status: 500 }
       );
     }
   }
 
-  // F10 & R10-01: Two-factor verification post-handler:
-  // Ensure newly created session was not issued against a rotated credential
+  // F10, R10-01 & R11-01: Two-factor verification post-handler:
+  // When MFA succeeds, assert user's version hasn't rotated while completing;
+  // update newly issued session.credentialVersion = user.credentialVersion.
   if (
     (pathname.includes('/two-factor/verify-totp') ||
       pathname.includes('/two-factor/verify-backup-code')) &&
@@ -404,23 +574,37 @@ export async function POST(request: NextRequest) {
           });
           if (newSession) {
             const uid = targetUserId || newSession.userId;
-            const account = await prisma.account.findFirst({
-              where: { userId: uid, providerId: 'credential' },
-            });
-            const accountUpdatedAt = account ? new Date(account.updatedAt).getTime() : 0;
-            const challengeTime = challengeCreatedAt ? challengeCreatedAt.getTime() : new Date(newSession.createdAt).getTime();
+            const postCredVer = await getUserCredentialVersion(uid);
 
-            if (account && challengeTime <= accountUpdatedAt) {
+            if (expectedCredVer !== null && postCredVer !== expectedCredVer) {
+              // Credential was rotated while completing MFA! Evict session and fail closed!
               await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
               const errRes = NextResponse.json(
-                { error: 'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.' },
+                {
+                  error:
+                    'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+                },
                 { status: 401 }
               );
               errRes.cookies.delete('better-auth.session_token');
               errRes.cookies.delete('__Secure-better-auth.session_token');
+              errRes.cookies.delete('better-auth.two_factor');
+              errRes.cookies.delete('__Secure-better-auth.two_factor');
               return errRes;
-            } else if (challengeCreatedAt) {
-              // Valid: update newSession.createdAt = challengeCreatedAt so the session's recorded authentication age matches the proof age
+            }
+
+            // Update newly issued session.credentialVersion = postCredVer
+            await setSessionCredentialVersion(prisma, newSession.id, postCredVer);
+
+            // Clean up companion verification record
+            if (mfaRawToken) {
+              await prisma.verification.deleteMany({
+                where: { identifier: `2fa-cred-ver-${mfaRawToken}` },
+              }).catch(() => {});
+            }
+
+            // Also keep the session's recorded authentication age matching the proof age if challengeCreatedAt is present
+            if (challengeCreatedAt) {
               await prisma.session.update({
                 where: { id: newSession.id },
                 data: { createdAt: challengeCreatedAt },
@@ -436,3 +620,4 @@ export async function POST(request: NextRequest) {
 
   return response;
 }
+

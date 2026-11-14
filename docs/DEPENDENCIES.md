@@ -166,11 +166,16 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
    - Fully qualifies catalog queries (`table_schema = 'public'`, `schemaname = 'public'`, and `typnamespace = 'public'::regnamespace`).
    - Ensures alternate schemas (e.g. `staging`) and pre-existing sentinel data remain completely undamaged and unpolluted.
 
-4. **Semantic Catalog & Schema Verification Before History Authorization (F01)**:
+4. **Semantic Catalog & Schema Verification Before History Authorization (F01 / R11-02)**:
    - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema semantics or detect missing/divergent column definitions.
    - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking the migration as applied in Prisma:
      - **Tables**: verifies all 6 required tables exist in `public`: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
-     - **Columns, Types, Precision, Nullability, Defaults**: verifies all 47 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
+     - **Columns, Types, Namespaces, Precision, Nullability, Defaults**: verifies all 49 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
+       * **Namespace-Qualified Type & Domain Identity**: queries `pg_attribute`, `pg_type`, `pg_namespace`, and `information_schema.columns`:
+         - All standard managed columns must be base types (`t.typtype === 'b'`) in the `pg_catalog` namespace (`nsp.nspname === 'pg_catalog'`).
+         - Domain types (`t.typtype === 'd'`) are strictly rejected fail-closed (e.g. `CREATE DOMAIN public.codex_image AS text CHECK (VALUE <> '')`).
+         - `user.role` must be enum type (`t.typtype === 'e'`) in the `public` namespace (`nsp.nspname === 'public'`).
+         - Base type names must strictly match expected types: `text`, `bool`, `timestamp`, `int4`, and `UserRole`.
        * **Datetime Precision**: queries `information_schema.columns.datetime_precision`. All 14 `TIMESTAMP(3)` columns (`user.createdAt`, `user.updatedAt`, `session.expiresAt`, `session.createdAt`, `session.updatedAt`, `account.accessTokenExpiresAt`, `account.refreshTokenExpiresAt`, `account.createdAt`, `account.updatedAt`, `verification.expiresAt`, `verification.createdAt`, `verification.updatedAt`, `twoFactor.lockedUntil`, `office_bootstrap.closedAt`) must have `datetime_precision = 3`. Truncated precision (e.g. `timestamp(0)`) or untyped timestamps are rejected fail-closed.
        * **Strict Canonical Default Expressions**:
          - Timestamp defaults must strictly match `CURRENT_TIMESTAMP` or `now()`. Any interval additions, arithmetic expressions (such as `+ interval '1 day'`), or arbitrary functions are rejected fail-closed.
@@ -180,11 +185,14 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
          - `office_bootstrap.id`: text NOT NULL, default strictly `'singleton'::text`.
          - `user.role`: UserRole NOT NULL, default strictly `'OWNER'::"UserRole"`.
          - `user.emailVerified` and `user.twoFactorEnabled`: default strictly `false`.
+         - `user.credentialVersion` and `session.credentialVersion`: integer NOT NULL, default strictly `1`.
        * Rejects any missing columns or unexpected extra columns on managed tables.
      - **Primary Keys**: verifies constraint name, table binding, and exact primary key column definitions (`['id']` across all 6 tables).
      - **Foreign Keys**: verifies constraint name, source table/column, referenced schema (`public`), referenced table (`user`), referenced column (`id`), and cascading actions (`ON DELETE CASCADE ON UPDATE CASCADE`). Rejects foreign keys redirected to unrelated tables.
-     - **Structured Index Verification**: queries `pg_index` joined on `pg_class`, `pg_attribute`, and `pg_namespace`:
-       * Verifies index name, table binding, and index validity (`indisvalid = true`).
+     - **Structured Index Verification**: queries `pg_index` joined on `pg_class`, `pg_attribute`, `pg_namespace`, and `pg_am`:
+       * Verifies index name, table binding, access method (`am.amname === 'btree'`), validity (`indisvalid = true`), and readiness (`indisready = true`). Non-btree access methods or unready indexes are rejected fail-closed.
+       * Verifies key attributes and included non-key columns: asserts `indnatts === expected.columns.length` and `indnkeyatts === expected.columns.length`. Indexes with included non-key columns (`INCLUDE (...)`) are rejected fail-closed.
+       * Verifies null distinctness: asserts `indnullsnotdistinct === false`. Unapproved `NULLS NOT DISTINCT` semantics are rejected fail-closed.
        * Verifies index uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`, `false` for foreign key and lookup indexes). Same-name non-unique indexes are rejected fail-closed.
        * Strictly rejects partial indexes: asserts `indpred IS NULL` (`is_partial = false`). Any index definition containing a `WHERE` predicate (such as `UNIQUE (email) WHERE false`) is rejected fail-closed.
        * Strictly rejects expression indexes: asserts `indexprs IS NULL` (`is_expression = false`).
@@ -200,7 +208,7 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
 5. **Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05)**:
    - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
      * Detects existing managed entities without completed migration history.
-     * Performs full semantic schema verification across all 6 tables, 47 columns, constraints, foreign keys, indexes, and enum type.
+     * Performs full semantic schema verification across all 6 tables, 49 columns, constraints, foreign keys, indexes, and enum type.
      * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` without re-executing DDL (`recovered: true`).
      * If conflicting or partial: refuses fail-closed without recording history, dropping tables, or damaging sentinel data.
    - **Already-Completed State**: If `20261111000000_init_auth` is already recorded as applied in `_prisma_migrations`, verifies semantic schema equivalence and returns cleanly (`alreadyCompleted: true`).

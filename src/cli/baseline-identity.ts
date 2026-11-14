@@ -322,7 +322,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 3. Columns, Types, Nullability, Precision, and Defaults
+  // 3. Columns, Types, Nullability, Precision, Base Type, Domain, and Defaults
   const isStrictCurrentTimestamp = (val: string | null) =>
     val !== null && /^(CURRENT_TIMESTAMP|now\(\))$/i.test(val.trim());
   const isStrictFalse = (val: string | null) =>
@@ -330,7 +330,9 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
   const isStrictTrue = (val: string | null) =>
     val !== null && /^true$/i.test(val.trim());
   const isStrictZero = (val: string | null) =>
-    val !== null && /^0$/.test(val.trim());
+    val !== null && /^0(::integer)?$/.test(val.trim());
+  const isStrictOne = (val: string | null) =>
+    val !== null && /^1(::integer)?$/.test(val.trim());
   const isStrictSingleton = (val: string | null) =>
     val !== null && /^'singleton'(::text)?$/i.test(val.trim());
   const isStrictOwnerEnum = (val: string | null) =>
@@ -340,6 +342,9 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     type: string;
     nullable: string;
     udt?: string;
+    baseType: string;
+    typeType: string;
+    typeNamespace: string;
     datetimePrecision?: number;
     hasDefault: boolean;
     defaultValidator?: (defaultVal: string | null) => boolean;
@@ -347,72 +352,87 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
   }
 
   const expectedCols: Record<string, ExpectedColDef> = {
-    'user.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'user.name': { type: 'text', nullable: 'NO', hasDefault: false },
-    'user.email': { type: 'text', nullable: 'NO', hasDefault: false },
-    'user.emailVerified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
-    'user.image': { type: 'text', nullable: 'YES', hasDefault: false },
-    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
-    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole', hasDefault: true, defaultValidator: isStrictOwnerEnum, expectedDefaultDesc: "'OWNER'::\"UserRole\"" },
-    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
+    'user.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'user.name': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'user.email': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'user.emailVerified': { type: 'boolean', nullable: 'NO', baseType: 'bool', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
+    'user.image': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole', baseType: 'UserRole', typeType: 'e', typeNamespace: 'public', hasDefault: true, defaultValidator: isStrictOwnerEnum, expectedDefaultDesc: "'OWNER'::\"UserRole\"" },
+    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES', baseType: 'bool', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
+    'user.credentialVersion': { type: 'integer', nullable: 'NO', baseType: 'int4', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictOne, expectedDefaultDesc: '1' },
 
-    'session.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
-    'session.token': { type: 'text', nullable: 'NO', hasDefault: false },
-    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
-    'session.ipAddress': { type: 'text', nullable: 'YES', hasDefault: false },
-    'session.userAgent': { type: 'text', nullable: 'YES', hasDefault: false },
-    'session.userId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'session.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'session.token': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'session.ipAddress': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'session.userAgent': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'session.userId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'session.credentialVersion': { type: 'integer', nullable: 'NO', baseType: 'int4', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictOne, expectedDefaultDesc: '1' },
 
-    'account.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'account.accountId': { type: 'text', nullable: 'NO', hasDefault: false },
-    'account.providerId': { type: 'text', nullable: 'NO', hasDefault: false },
-    'account.userId': { type: 'text', nullable: 'NO', hasDefault: false },
-    'account.accessToken': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.refreshToken': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.idToken': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
-    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
-    'account.scope': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.password': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
+    'account.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.accountId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.providerId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.userId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.accessToken': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.refreshToken': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.idToken': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'account.scope': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.password': { type: 'text', nullable: 'YES', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
 
-    'verification.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'verification.identifier': { type: 'text', nullable: 'NO', hasDefault: false },
-    'verification.value': { type: 'text', nullable: 'NO', hasDefault: false },
-    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
-    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
+    'verification.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'verification.identifier': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'verification.value': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
+    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
 
-    'twoFactor.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'twoFactor.secret': { type: 'text', nullable: 'NO', hasDefault: false },
-    'twoFactor.backupCodes': { type: 'text', nullable: 'NO', hasDefault: false },
-    'twoFactor.userId': { type: 'text', nullable: 'NO', hasDefault: false },
-    'twoFactor.verified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
-    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO', hasDefault: true, defaultValidator: isStrictZero, expectedDefaultDesc: '0' },
-    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
+    'twoFactor.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'twoFactor.secret': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'twoFactor.backupCodes': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'twoFactor.userId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
+    'twoFactor.verified': { type: 'boolean', nullable: 'NO', baseType: 'bool', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
+    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO', baseType: 'int4', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictZero, expectedDefaultDesc: '0' },
+    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: false },
 
-    'office_bootstrap.id': { type: 'text', nullable: 'NO', hasDefault: true, defaultValidator: isStrictSingleton, expectedDefaultDesc: "'singleton'::text" },
-    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
-    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'office_bootstrap.ownerId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'office_bootstrap.id': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictSingleton, expectedDefaultDesc: "'singleton'::text" },
+    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO', baseType: 'bool', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
+    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO', baseType: 'timestamp', typeType: 'b', typeNamespace: 'pg_catalog', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'office_bootstrap.ownerId': { type: 'text', nullable: 'NO', baseType: 'text', typeType: 'b', typeNamespace: 'pg_catalog', hasDefault: false },
   };
 
   const colsRes = await client.query(`
     SELECT
-      table_name,
-      column_name,
-      data_type,
-      is_nullable,
-      column_default,
-      datetime_precision,
-      udt_name 
-    FROM information_schema.columns 
-    WHERE table_schema = 'public' 
-      AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      c.relname AS table_name,
+      a.attname AS column_name,
+      col.data_type,
+      col.is_nullable,
+      col.column_default,
+      col.datetime_precision,
+      col.udt_name,
+      t.typname AS pg_typname,
+      t.typtype AS pg_typtype,
+      tn.nspname AS pg_typnamespace
+    FROM pg_class c
+    JOIN pg_namespace cn ON cn.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid
+    JOIN pg_type t ON t.oid = a.atttypid
+    JOIN pg_namespace tn ON tn.oid = t.typnamespace
+    LEFT JOIN information_schema.columns col 
+      ON col.table_schema = cn.nspname 
+      AND col.table_name = c.relname 
+      AND col.column_name = a.attname
+    WHERE cn.nspname = 'public' 
+      AND c.relname IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap')
+      AND a.attnum > 0
+      AND NOT a.attisdropped;
   `);
 
   const foundCols = new Map<
@@ -423,6 +443,9 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       column_default: string | null;
       datetime_precision: number | null;
       udt_name: string;
+      pg_typname: string;
+      pg_typtype: string;
+      pg_typnamespace: string;
     }
   >();
   for (const row of colsRes.rows) {
@@ -435,6 +458,9 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
           ? Number(row.datetime_precision)
           : null,
       udt_name: row.udt_name,
+      pg_typname: row.pg_typname,
+      pg_typtype: row.pg_typtype,
+      pg_typnamespace: row.pg_typnamespace,
     });
   }
 
@@ -443,6 +469,26 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     if (!found) {
       errors.push(`Missing column '${colKey}'`);
       continue;
+    }
+    if (found.pg_typtype === 'd') {
+      errors.push(
+        `Column '${colKey}' uses an unapproved domain type '${found.pg_typname}'. Domains are strictly rejected.`
+      );
+    }
+    if (found.pg_typtype !== expected.typeType) {
+      errors.push(
+        `Column '${colKey}' type category mismatch: expected '${expected.typeType}', got '${found.pg_typtype}'`
+      );
+    }
+    if (found.pg_typnamespace !== expected.typeNamespace) {
+      errors.push(
+        `Column '${colKey}' type namespace mismatch: expected '${expected.typeNamespace}', got '${found.pg_typnamespace}'`
+      );
+    }
+    if (found.pg_typname !== expected.baseType) {
+      errors.push(
+        `Column '${colKey}' base type mismatch: expected '${expected.baseType}', got '${found.pg_typname}'`
+      );
     }
     if (found.data_type !== expected.type) {
       errors.push(`Column '${colKey}' data type mismatch: expected '${expected.type}', got '${found.data_type}'`);
@@ -659,13 +705,18 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 6. Indexes: verify name, table, uniqueness, validity, non-partial, non-expression, and exact column order
+  // 6. Indexes: verify name, table, access method, uniqueness, validity, readiness, non-partial, non-expression, nulls-distinctness, and exact column order
   const idxRes = await client.query(`
     SELECT
       i.relname AS indexname,
       t.relname AS tablename,
+      am.amname AS access_method,
       ix.indisunique,
       ix.indisvalid,
+      ix.indisready,
+      ix.indnatts,
+      ix.indnkeyatts,
+      COALESCE((to_jsonb(ix.*) ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct,
       ix.indpred IS NOT NULL AS is_partial,
       ix.indexprs IS NOT NULL AS is_expression,
       pg_get_expr(ix.indpred, ix.indrelid) AS predicate,
@@ -678,6 +729,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     JOIN pg_class i ON i.oid = ix.indexrelid
     JOIN pg_class t ON t.oid = ix.indrelid
     JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_am am ON am.oid = i.relam
     WHERE n.nspname = 'public'
       AND t.relname IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
   `);
@@ -686,8 +738,13 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     string,
     {
       table: string;
+      accessMethod: string;
       unique: boolean;
       valid: boolean;
+      ready: boolean;
+      indnatts: number;
+      indnkeyatts: number;
+      nullsNotDistinct: boolean;
       isPartial: boolean;
       isExpression: boolean;
       predicate: string | null;
@@ -701,8 +758,13 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
 
     foundIndexes.set(row.indexname, {
       table: row.tablename,
+      accessMethod: row.access_method,
       unique: Boolean(row.indisunique),
       valid: Boolean(row.indisvalid),
+      ready: Boolean(row.indisready),
+      indnatts: Number(row.indnatts),
+      indnkeyatts: Number(row.indnkeyatts),
+      nullsNotDistinct: Boolean(row.nulls_not_distinct),
       isPartial: Boolean(row.is_partial),
       isExpression: Boolean(row.is_expression),
       predicate: row.predicate || null,
@@ -760,8 +822,26 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     if (found.table !== expected.table) {
       errors.push(`Index '${idxName}' on table '${found.table}', expected '${expected.table}'`);
     }
+    if (found.accessMethod !== 'btree') {
+      errors.push(`Index '${idxName}' access method mismatch: expected 'btree', got '${found.accessMethod}'`);
+    }
     if (!found.valid) {
       errors.push(`Index '${idxName}' is marked invalid in pg_index`);
+    }
+    if (!found.ready) {
+      errors.push(`Index '${idxName}' is marked not ready in pg_index`);
+    }
+    if (found.indnatts !== expected.columns.length) {
+      errors.push(`Index '${idxName}' attribute count mismatch: expected ${expected.columns.length}, got ${found.indnatts}`);
+    }
+    if (found.indnkeyatts !== expected.columns.length) {
+      errors.push(`Index '${idxName}' key attribute count mismatch: expected ${expected.columns.length}, got ${found.indnkeyatts}`);
+    }
+    if (found.indnatts > found.indnkeyatts) {
+      errors.push(`Index '${idxName}' contains unapproved included non-key columns (indnatts: ${found.indnatts}, indnkeyatts: ${found.indnkeyatts})`);
+    }
+    if (found.nullsNotDistinct) {
+      errors.push(`Index '${idxName}' specifies unapproved NULLS NOT DISTINCT semantics`);
     }
     if (expected.unique && !found.unique) {
       errors.push(`Index '${idxName}' must be UNIQUE, but found non-unique index`);

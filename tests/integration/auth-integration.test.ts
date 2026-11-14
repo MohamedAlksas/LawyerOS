@@ -1985,6 +1985,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         process.env.TEST_DATABASE_URL = prevUrl;
         getEnv(true);
       }
+      await clearGlobalSingletons();
     }
   }, 45000);
 
@@ -2084,6 +2085,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         process.env.TEST_DATABASE_URL = prevUrl;
         getEnv(true);
       }
+      await clearGlobalSingletons();
     }
   }, 45000);
 
@@ -2178,6 +2180,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         process.env.TEST_DATABASE_URL = prevUrl;
         getEnv(true);
       }
+      await clearGlobalSingletons();
     }
   }, 45000);
 
@@ -2283,6 +2286,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         process.env.TEST_DATABASE_URL = prevUrl;
         getEnv(true);
       }
+      await clearGlobalSingletons();
     }
   }, 45000);
 
@@ -2496,6 +2500,45 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       await confirmOwnerProvisioning(res128.user.id, validCode);
       const bootstrapConfirmed = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
       expect(bootstrapConfirmed?.isClosed).toBe(true);
+
+      // 4. Actual login and MFA verification with the exact 128-character password (R11-04)
+      const freshOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+      const login128Req = new NextRequest(`${freshOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: freshOrigin },
+        body: JSON.stringify({
+          email: 'valid.owner@office.eg',
+          password: password128,
+        }),
+      });
+      const login128Res = await authRoutePOST(login128Req);
+      expect(login128Res.status).toBe(200);
+      const login128Json = await login128Res.json();
+      expect(login128Json.twoFactorRedirect).toBe(true);
+
+      const tfCookie128 = (login128Res.headers.getSetCookie?.() || [login128Res.headers.get('set-cookie') || ''])
+        .find((c) => c.includes('better-auth.two_factor='));
+      expect(tfCookie128).toBeDefined();
+
+      const mfaCode128 = await generateTotpCode(res128.totpSecret);
+      const mfa128Req = new NextRequest(`${freshOrigin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: tfCookie128!.split(';')[0],
+          origin: freshOrigin,
+        },
+        body: JSON.stringify({ code: mfaCode128 }),
+      });
+      const mfa128Res = await authRoutePOST(mfa128Req);
+      expect(mfa128Res.status).toBe(200);
+      const mfa128Json = await mfa128Res.json();
+      expect(mfa128Json.token).toBeDefined();
+
+      const session128Cookie = `better-auth.session_token=${signSessionTokenCookie(mfa128Json.token, getEnv().BETTER_AUTH_SECRET)}`;
+      const actor128 = await requireActor({ headers: new Headers({ cookie: session128Cookie }) });
+      expect(actor128.id).toBe(res128.user.id);
+      expect(actor128.role).toBe('OWNER');
     } finally {
       await clearGlobalSingletons();
       await freshDb.drop().catch(() => {});
@@ -2503,6 +2546,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         process.env.TEST_DATABASE_URL = prevUrl;
         getEnv(true);
       }
+      await clearGlobalSingletons();
     }
   });
 
@@ -2531,6 +2575,9 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(unauthRes.status).toBe(401);
 
     // 2. Authenticated request with session
+    const ownerUser = await prisma.user.findUnique({ where: { id: provisionedOwner.userId } });
+    const currentVersion = ownerUser?.credentialVersion ?? 1;
+
     const testSessionToken = `sess-f06-${Date.now()}`;
     await prisma.session.create({
       data: {
@@ -2538,6 +2585,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         userId: provisionedOwner.userId,
         token: testSessionToken,
         expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        credentialVersion: currentVersion,
       },
     });
     const sessionCookieHeader = `better-auth.session_token=${signSessionTokenCookie(testSessionToken, getEnv().BETTER_AUTH_SECRET)}`;
@@ -2555,7 +2603,56 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const noPassRes = await authRoutePOST(noPassReq);
     expect(noPassRes.status).toBe(400);
 
-    // 2.5 Cross-origin request with genuine session cookie must be rejected with 403 (R10-03)
+    // 2.5 Cross-origin matrix requests with genuine session cookie must be rejected with 403 (R10-03 & R11-03)
+    // Variant 1: Untrusted Origin with matching untrusted Host
+    const v1Req = new NextRequest(generateUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+        origin: 'https://attacker.evil.com',
+        host: 'attacker.evil.com',
+        'sec-fetch-site': 'same-site',
+      },
+      body: JSON.stringify({ password: 'WrongPassword999!' }),
+    });
+    const v1Res = await authRoutePOST(v1Req);
+    expect(v1Res.status).toBe(403);
+    const tfV1 = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfV1?.failedVerificationCount).toBe(0);
+
+    // Variant 2: Cookie-bearing request without Origin or Referer or Fetch Metadata
+    const v2Req = new NextRequest(generateUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify({ password: 'WrongPassword999!' }),
+    });
+    const v2Res = await authRoutePOST(v2Req);
+    expect(v2Res.status).toBe(403);
+    const tfV2 = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfV2?.failedVerificationCount).toBe(0);
+
+    // Variant 3: Origin: null with untrusted Host
+    const v3Req = new NextRequest(generateUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+        origin: 'null',
+        host: 'attacker.evil.com',
+        'sec-fetch-site': 'same-origin',
+      },
+      body: JSON.stringify({ password: 'WrongPassword999!' }),
+    });
+    const v3Res = await authRoutePOST(v3Req);
+    expect(v3Res.status).toBe(403);
+    const tfV3 = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfV3?.failedVerificationCount).toBe(0);
+
+    // Standard untrusted Origin request
     const crossOriginReq = new NextRequest(generateUrl, {
       method: 'POST',
       headers: {
@@ -2779,6 +2876,266 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       }),
     });
     await authRoutePOST(resetPwReq);
+  });
+
+  it('invalidates password proof when sign-in completes after password rotation via genuine PostgreSQL barrier (R11-01)', async () => {
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const currentPassword = 'BrandNewPassword2026!#';
+    const rotatedPassword = 'RotatedAgainPassword2026!#';
+
+    // 1. Establish an active session (Context A) for the owner with current password
+    const signInReqA = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: testOrigin },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: currentPassword,
+      }),
+    });
+    const signInResA = await authRoutePOST(signInReqA);
+    expect(signInResA.status).toBe(200);
+    const tfCookieA = (signInResA.headers.getSetCookie?.() || [signInResA.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    expect(tfCookieA).toBeDefined();
+
+    const codeA = await generateTotpCode(provisionedOwner.totpSecret);
+    const verifyReqA = new NextRequest(`${testOrigin}/api/auth/two-factor/verify-totp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieA!.split(';')[0],
+        origin: testOrigin,
+      },
+      body: JSON.stringify({ code: codeA }),
+    });
+    const verifyResA = await authRoutePOST(verifyReqA);
+    expect(verifyResA.status).toBe(200);
+    const verifyJsonA = await verifyResA.json();
+    const sessionTokenA = verifyJsonA.token;
+    const sessionCookieHeaderA = `better-auth.session_token=${signSessionTokenCookie(sessionTokenA, getEnv().BETTER_AUTH_SECRET)}`;
+
+    const actorA = await requireActor({ headers: new Headers({ cookie: sessionCookieHeaderA }) });
+    expect(actorA.id).toBe(provisionedOwner.userId);
+
+    // 2. Install temporary PostgreSQL trigger on "session" gated on B's User-Agent
+    const barrierClient = await pool.connect();
+    const barrierLockId = 987654321;
+    try {
+      await barrierClient.query(`
+        CREATE OR REPLACE FUNCTION trg_fn_wait_barrier() RETURNS TRIGGER AS $$
+        BEGIN
+          IF NEW."userAgent" = 'synthetic-round11-exploit-agent' THEN
+            PERFORM pg_advisory_lock(${barrierLockId});
+            PERFORM pg_advisory_unlock(${barrierLockId});
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_session_barrier ON "session";
+        CREATE TRIGGER trg_session_barrier
+          BEFORE INSERT ON "session"
+          FOR EACH ROW
+          EXECUTE FUNCTION trg_fn_wait_barrier();
+      `);
+
+      // Acquire advisory lock on barrierClient so that B will block
+      await barrierClient.query(`SELECT pg_advisory_lock(${barrierLockId});`);
+
+      // 3. Begin Context B sign-in with the OLD password
+      const signInReqB = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'user-agent': 'synthetic-round11-exploit-agent',
+          origin: testOrigin,
+        },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: currentPassword,
+        }),
+      });
+
+      const signInPromiseB = authRoutePOST(signInReqB);
+
+      // Wait until B reaches the BEFORE INSERT trigger and blocks on advisory lock
+      let waitingOnBarrier = false;
+      for (let i = 0; i < 50; i++) {
+        const lockRes = await pool.query(
+          `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = ${barrierLockId} AND granted = false;`
+        );
+        if (parseInt(lockRes.rows[0].count, 10) > 0) {
+          waitingOnBarrier = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waitingOnBarrier).toBe(true);
+
+      // 4. Change password through Context A and commit with HTTP 200
+      const pwChangeReq = new NextRequest(`${testOrigin}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: sessionCookieHeaderA,
+          origin: testOrigin,
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword: rotatedPassword,
+          revokeOtherSessions: true,
+        }),
+      });
+      const pwChangeRes = await authRoutePOST(pwChangeReq);
+      expect(pwChangeRes.status).toBe(200);
+
+      // 5. Release Context B by unlocking the advisory lock
+      await barrierClient.query(`SELECT pg_advisory_unlock(${barrierLockId});`);
+
+      // Await B's sign-in response
+      const signInResB = await signInPromiseB;
+      expect(signInResB.status).toBe(200);
+      const tfCookieB = (signInResB.headers.getSetCookie?.() || [signInResB.headers.get('set-cookie') || ''])
+        .find((c) => c.includes('better-auth.two_factor='));
+      expect(tfCookieB).toBeDefined();
+
+      // 6. Submit valid TOTP on B's challenge: must return HTTP 401, zero session cookie, and fail requireActor
+      const codeB = await generateTotpCode(provisionedOwner.totpSecret);
+      const finishBReq = new NextRequest(`${testOrigin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: tfCookieB!.split(';')[0],
+          origin: testOrigin,
+        },
+        body: JSON.stringify({ code: codeB }),
+      });
+      const finishBRes = await authRoutePOST(finishBReq);
+
+      expect(finishBRes.status).toBe(401);
+      const finishBCookies = finishBRes.headers.getSetCookie?.() || [
+        finishBRes.headers.get('set-cookie') || '',
+      ];
+      const hasIssuedSessionB = finishBCookies.some(
+        (c) => c.startsWith('better-auth.session_token=') && !c.includes('Max-Age=0')
+      );
+      expect(hasIssuedSessionB).toBe(false);
+
+      await expect(requireActor({ headers: finishBRes.headers })).rejects.toThrowError(AuthenticationError);
+
+      // 7. Reset password back for subsequent tests
+      const freshLoginReq = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: testOrigin },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: rotatedPassword,
+        }),
+      });
+      const freshLoginRes = await authRoutePOST(freshLoginReq);
+      expect(freshLoginRes.status).toBe(200);
+      const freshTf = (freshLoginRes.headers.getSetCookie?.() || [freshLoginRes.headers.get('set-cookie') || ''])
+        .find((c) => c.includes('better-auth.two_factor='));
+      const freshCode = await generateTotpCode(provisionedOwner.totpSecret);
+      const freshMfaReq = new NextRequest(`${testOrigin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: freshTf!.split(';')[0],
+          origin: testOrigin,
+        },
+        body: JSON.stringify({ code: freshCode }),
+      });
+      const freshMfaRes = await authRoutePOST(freshMfaReq);
+      const freshMfaJson = await freshMfaRes.json();
+      const freshSessionCookie = `better-auth.session_token=${signSessionTokenCookie(freshMfaJson.token, getEnv().BETTER_AUTH_SECRET)}`;
+
+      const resetPwReq = new NextRequest(`${testOrigin}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: freshSessionCookie,
+          origin: testOrigin,
+        },
+        body: JSON.stringify({
+          currentPassword: rotatedPassword,
+          newPassword: currentPassword,
+          revokeOtherSessions: true,
+        }),
+      });
+      await authRoutePOST(resetPwReq);
+    } finally {
+      await barrierClient.query(`SELECT pg_advisory_unlock_all();`).catch(() => {});
+      await pool.query(`DROP TRIGGER IF EXISTS trg_session_barrier ON "session";`).catch(() => {});
+      await pool.query(`DROP FUNCTION IF EXISTS trg_fn_wait_barrier();`).catch(() => {});
+      barrierClient.release();
+    }
+  });
+
+  it('enforces database and role search_path isolation against malicious search_path redirection (R11-04)', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE SCHEMA IF NOT EXISTS evil_schema;
+        CREATE TABLE IF NOT EXISTS evil_schema."user" (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          "emailVerified" BOOLEAN NOT NULL DEFAULT true,
+          image TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT NOW(),
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT NOW(),
+          role TEXT NOT NULL DEFAULT 'OWNER',
+          "twoFactorEnabled" BOOLEAN DEFAULT true
+        );
+        INSERT INTO evil_schema."user" (id, name, email, role)
+        VALUES ('decoy-evil-user-id', 'مهاجم خبيث', 'attacker@evil.invalid', 'OWNER')
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      // Verify that Prisma and identity queries pin to public schema
+      // Even if ambient PGOPTIONS or search_path is set to evil_schema, public
+      const originalPgOptions = process.env.PGOPTIONS;
+      process.env.PGOPTIONS = '-c search_path=evil_schema,public';
+      try {
+        const isolatedPool = new Pool({
+          connectionString: dedicated.url,
+        });
+        const isolatedClient = await isolatedPool.connect();
+        try {
+          // Unqualified raw query hits evil_schema."user" due to search_path
+          const unqualifiedRes = await isolatedClient.query('SELECT name FROM "user" ORDER BY "createdAt" ASC LIMIT 1');
+          expect(unqualifiedRes.rows[0].name).toBe('مهاجم خبيث');
+
+          // BUT our application and Prisma adapter explicitly pin public schema
+          const prisma = getPrismaClient();
+          const publicUsers = await prisma.user.findMany({
+            where: { id: 'decoy-evil-user-id' },
+          });
+          // Must NOT find the decoy attacker in public user catalog
+          expect(publicUsers.length).toBe(0);
+
+          // Authentic owner in public schema is resolved
+          const authenticOwner = await prisma.user.findFirst({
+            where: { email: provisionedOwner.email },
+          });
+          expect(authenticOwner).toBeDefined();
+          expect(authenticOwner?.email).toBe(provisionedOwner.email);
+        } finally {
+          isolatedClient.release();
+          await isolatedPool.end();
+        }
+      } finally {
+        if (originalPgOptions !== undefined) {
+          process.env.PGOPTIONS = originalPgOptions;
+        } else {
+          delete process.env.PGOPTIONS;
+        }
+      }
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS evil_schema CASCADE;`).catch(() => {});
+      client.release();
+    }
   });
 
   afterAll(async () => {

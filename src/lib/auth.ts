@@ -34,6 +34,24 @@ export function getPrismaClient(): PrismaClient {
   return client;
 }
 
+export function getTrustedOrigins(): Set<string> {
+  const env = getEnv();
+  const base = new URL(env.BETTER_AUTH_URL).origin;
+  const origins = new Set<string>([base]);
+  try {
+    const parsed = new URL(env.BETTER_AUTH_URL);
+    const portStr = parsed.port ? `:${parsed.port}` : '';
+    if (parsed.hostname === '127.0.0.1') {
+      origins.add(`${parsed.protocol}//localhost${portStr}`);
+    } else if (parsed.hostname === 'localhost') {
+      origins.add(`${parsed.protocol}//127.0.0.1${portStr}`);
+    }
+  } catch {
+    // Ignore URL parsing errors
+  }
+  return origins;
+}
+
 function createAuthInstance() {
   const env = getEnv();
   const prisma = getPrismaClient();
@@ -44,6 +62,7 @@ function createAuthInstance() {
     }),
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
+    trustedOrigins: Array.from(getTrustedOrigins()),
     emailAndPassword: {
       enabled: true,
       disableSignUp: true, // Public self-registration is strictly forbidden

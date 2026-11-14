@@ -253,59 +253,74 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         { table_name: 'office_bootstrap' },
       ];
 
-      const cols = [
-        { table_name: 'user', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'email', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'emailVerified', data_type: 'boolean', is_nullable: 'NO', column_default: 'false', datetime_precision: null, udt_name: 'bool' },
-        { table_name: 'user', column_name: 'image', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'user', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'user', column_name: 'role', data_type: 'USER-DEFINED', is_nullable: 'NO', column_default: "'OWNER'::\"UserRole\"", datetime_precision: null, udt_name: 'UserRole' },
-        { table_name: 'user', column_name: 'twoFactorEnabled', data_type: 'boolean', is_nullable: 'YES', column_default: 'false', datetime_precision: null, udt_name: 'bool' },
+      interface MockCol {
+        table_name: string;
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+        column_default: string | null;
+        datetime_precision: number | null;
+        udt_name: string;
+        pg_typname: string;
+        pg_typtype: string;
+        pg_typnamespace: string;
+      }
 
-        { table_name: 'session', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'token', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'ipAddress', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'userAgent', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+      const cols: MockCol[] = [
+        { table_name: 'user', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'email', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'emailVerified', data_type: 'boolean', is_nullable: 'NO', column_default: 'false', datetime_precision: null, udt_name: 'bool', pg_typname: 'bool', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'image', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'role', data_type: 'USER-DEFINED', is_nullable: 'NO', column_default: "'OWNER'::\"UserRole\"", datetime_precision: null, udt_name: 'UserRole', pg_typname: 'UserRole', pg_typtype: 'e', pg_typnamespace: 'public' },
+        { table_name: 'user', column_name: 'twoFactorEnabled', data_type: 'boolean', is_nullable: 'YES', column_default: 'false', datetime_precision: null, udt_name: 'bool', pg_typname: 'bool', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'user', column_name: 'credentialVersion', data_type: 'integer', is_nullable: 'NO', column_default: '1', datetime_precision: null, udt_name: 'int4', pg_typname: 'int4', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
 
-        { table_name: 'account', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accountId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'providerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accessToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'refreshToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'idToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accessTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'refreshTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'scope', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'password', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'token', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'ipAddress', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'userAgent', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'session', column_name: 'credentialVersion', data_type: 'integer', is_nullable: 'NO', column_default: '1', datetime_precision: null, udt_name: 'int4', pg_typname: 'int4', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
 
-        { table_name: 'verification', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'identifier', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'value', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'verification', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'verification', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'accountId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'providerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'accessToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'refreshToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'idToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'accessTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'refreshTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'scope', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'password', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'account', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
 
-        { table_name: 'twoFactor', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'secret', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'backupCodes', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'verified', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool' },
-        { table_name: 'twoFactor', column_name: 'failedVerificationCount', data_type: 'integer', is_nullable: 'NO', column_default: '0', datetime_precision: null, udt_name: 'int4' },
-        { table_name: 'twoFactor', column_name: 'lockedUntil', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'verification', column_name: 'identifier', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'verification', column_name: 'value', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'verification', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'verification', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'verification', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
 
-        { table_name: 'office_bootstrap', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: "'singleton'::text", datetime_precision: null, udt_name: 'text' },
-        { table_name: 'office_bootstrap', column_name: 'isClosed', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool' },
-        { table_name: 'office_bootstrap', column_name: 'closedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
-        { table_name: 'office_bootstrap', column_name: 'ownerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'secret', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'backupCodes', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'verified', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool', pg_typname: 'bool', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'failedVerificationCount', data_type: 'integer', is_nullable: 'NO', column_default: '0', datetime_precision: null, udt_name: 'int4', pg_typname: 'int4', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'twoFactor', column_name: 'lockedUntil', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+
+        { table_name: 'office_bootstrap', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: "'singleton'::text", datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'office_bootstrap', column_name: 'isClosed', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool', pg_typname: 'bool', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'office_bootstrap', column_name: 'closedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp', pg_typname: 'timestamp', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
+        { table_name: 'office_bootstrap', column_name: 'ownerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text', pg_typname: 'text', pg_typtype: 'b', pg_typnamespace: 'pg_catalog' },
       ];
 
       const pkeys = [
@@ -354,8 +369,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'user_email_key',
           tablename: 'user',
+          access_method: 'btree',
           indisunique: true,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -365,8 +385,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'session_token_key',
           tablename: 'session',
+          access_method: 'btree',
           indisunique: true,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -376,8 +401,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'session_userId_idx',
           tablename: 'session',
+          access_method: 'btree',
           indisunique: false,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -387,8 +417,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'account_userId_idx',
           tablename: 'account',
+          access_method: 'btree',
           indisunique: false,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -398,8 +433,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'verification_identifier_idx',
           tablename: 'verification',
+          access_method: 'btree',
           indisunique: false,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -409,8 +449,13 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         {
           indexname: 'twoFactor_userId_idx',
           tablename: 'twoFactor',
+          access_method: 'btree',
           indisunique: false,
           indisvalid: true,
+          indisready: true,
+          indnatts: 1,
+          indnkeyatts: 1,
+          nulls_not_distinct: false,
           is_partial: false,
           is_expression: false,
           predicate: null as string | null,
@@ -431,7 +476,7 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           if (sql.includes('information_schema.tables')) {
             return { rows: catalog.tables };
           }
-          if (sql.includes('information_schema.columns')) {
+          if (sql.includes('information_schema.columns') || sql.includes('pg_attribute')) {
             return { rows: catalog.cols };
           }
           if (sql.includes("tc.constraint_type = 'PRIMARY KEY'")) {
@@ -565,6 +610,9 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         column_default: null,
         datetime_precision: null,
         udt_name: 'text',
+        pg_typname: 'text',
+        pg_typtype: 'b',
+        pg_typnamespace: 'pg_catalog',
       });
       const client = createMockClient(catalog);
       const res = await verifySchemaEquivalence(client);
@@ -628,6 +676,107 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       expect(res.equivalent).toBe(false);
       expect(res.errors).toContain(
         "Column 'user.createdAt' default mismatch: expected 'CURRENT_TIMESTAMP', got '(CURRENT_TIMESTAMP + '1 day'::interval)'"
+      );
+    });
+
+    it('rejects domain type on managed column fail-closed (R11 domain reproduction / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'user' && c.column_name === 'image');
+      if (col) {
+        col.pg_typtype = 'd';
+        col.pg_typname = 'codex_image';
+        col.pg_typnamespace = 'public';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Column 'user.image' uses an unapproved domain type 'codex_image'. Domains are strictly rejected."
+      );
+    });
+
+    it('rejects unapproved type namespace on column fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'user' && c.column_name === 'name');
+      if (col) {
+        col.pg_typnamespace = 'custom_schema';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Column 'user.name' type namespace mismatch: expected 'pg_catalog', got 'custom_schema'"
+      );
+    });
+
+    it('rejects base type mismatch on column fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'user' && c.column_name === 'name');
+      if (col) {
+        col.pg_typname = 'varchar';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Column 'user.name' base type mismatch: expected 'text', got 'varchar'"
+      );
+    });
+
+    it('rejects non-btree index access method fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.access_method = 'hash';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' access method mismatch: expected 'btree', got 'hash'"
+      );
+    });
+
+    it('rejects index containing unapproved included non-key columns fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.indnatts = 2;
+        idx.indnkeyatts = 1;
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' contains unapproved included non-key columns (indnatts: 2, indnkeyatts: 1)"
+      );
+    });
+
+    it('rejects index not ready (indisready = false) fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.indisready = false;
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' is marked not ready in pg_index"
+      );
+    });
+
+    it('rejects index with unapproved NULLS NOT DISTINCT semantics fail-closed (R11 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.nulls_not_distinct = true;
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' specifies unapproved NULLS NOT DISTINCT semantics"
       );
     });
   });
