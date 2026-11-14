@@ -4,7 +4,9 @@ import {
   parseTargetUrl,
   runIdentityBaseline,
   sanitizeTargetUrl,
+  verifySchemaEquivalence,
 } from '@/cli/baseline-identity';
+import type { Client } from 'pg';
 
 describe('CLI Baseline Identity Unit Tests (R08)', () => {
   describe('parseCliArgs', () => {
@@ -157,6 +159,47 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       expect(parsed.ssl).toBe(false);
       expect(parsed.sslmode).toBeUndefined();
     });
+
+    it('supports case-insensitive key and value matching for sslmode (F02)', () => {
+      const p1 = parseTargetUrl('postgresql://127.0.0.1:5432/test_db?SSLMODE=verify-full');
+      expect(p1.ssl).toEqual({ rejectUnauthorized: true });
+      expect(p1.sslmode).toBe('verify-full');
+      expect(p1.canonicalUrl).toContain('sslmode=verify-full');
+
+      const p2 = parseTargetUrl('postgresql://127.0.0.1:5432/test_db?SslMode=REQUIRE');
+      expect(p2.ssl).toEqual({ rejectUnauthorized: false });
+      expect(p2.sslmode).toBe('require');
+      expect(p2.canonicalUrl).toContain('sslmode=require');
+
+      const p3 = parseTargetUrl('postgresql://127.0.0.1:5432/test_db?sSLmODe=DISABLE');
+      expect(p3.ssl).toBe(false);
+      expect(p3.sslmode).toBe('disable');
+      expect(p3.canonicalUrl).toContain('sslmode=disable');
+    });
+
+    it('rejects duplicate or contradictory sslmode parameters fail-closed (F02)', () => {
+      expect(() =>
+        parseTargetUrl('postgresql://127.0.0.1:5432/test_db?sslmode=disable&sslmode=verify-full')
+      ).toThrowError(/Target database URL specifies duplicate or contradictory connection parameter: 'sslmode'\./);
+
+      expect(() =>
+        parseTargetUrl('postgresql://127.0.0.1:5432/test_db?sslmode=require&SSLMODE=disable')
+      ).toThrowError(/Target database URL specifies duplicate or contradictory connection parameter: 'sslmode'\./);
+
+      expect(() =>
+        parseTargetUrl('postgresql://127.0.0.1:5432/test_db?SSLMODE=verify-full&sslmode=verify-full')
+      ).toThrowError(/Target database URL specifies duplicate or contradictory connection parameter: 'sslmode'\./);
+    });
+
+    it('rejects duplicate schema parameters fail-closed (F02)', () => {
+      expect(() =>
+        parseTargetUrl('postgresql://127.0.0.1:5432/test_db?schema=public&schema=public')
+      ).toThrowError(/Target database URL specifies duplicate or contradictory connection parameter: 'schema'\./);
+
+      expect(() =>
+        parseTargetUrl('postgresql://127.0.0.1:5432/test_db?schema=public&SCHEMA=public')
+      ).toThrowError(/Target database URL specifies duplicate or contradictory connection parameter: 'schema'\./);
+    });
   });
 
   describe('parseTargetUrl: General Structure & Sanitization', () => {
@@ -191,6 +234,317 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       await expect(runIdentityBaseline({ targetUrl: '' })).rejects.toThrow(
         /Target database URL is required/
       );
+    });
+  });
+
+  describe('verifySchemaEquivalence Semantic Checks (F01)', () => {
+    function buildValidCatalog() {
+      const enums = [
+        { schemaname: 'public', typname: 'UserRole', enumlabel: 'OWNER' },
+        { schemaname: 'public', typname: 'UserRole', enumlabel: 'MAINTAINER' },
+      ];
+
+      const tables = [
+        { table_name: 'user' },
+        { table_name: 'session' },
+        { table_name: 'account' },
+        { table_name: 'verification' },
+        { table_name: 'twoFactor' },
+        { table_name: 'office_bootstrap' },
+      ];
+
+      const cols = [
+        { table_name: 'user', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'email', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'emailVerified', data_type: 'boolean', is_nullable: 'NO', column_default: 'false', udt_name: 'bool' },
+        { table_name: 'user', column_name: 'image', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
+        { table_name: 'user', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'user', column_name: 'role', data_type: 'USER-DEFINED', is_nullable: 'NO', column_default: "'OWNER'::\"UserRole\"", udt_name: 'UserRole' },
+        { table_name: 'user', column_name: 'twoFactorEnabled', data_type: 'boolean', is_nullable: 'YES', column_default: 'false', udt_name: 'bool' },
+
+        { table_name: 'session', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'token', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'ipAddress', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'userAgent', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+
+        { table_name: 'account', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accountId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'providerId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accessToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'refreshToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'idToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accessTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'refreshTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'scope', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'password', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+
+        { table_name: 'verification', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'identifier', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'value', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+
+        { table_name: 'twoFactor', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'secret', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'backupCodes', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'verified', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', udt_name: 'bool' },
+        { table_name: 'twoFactor', column_name: 'failedVerificationCount', data_type: 'integer', is_nullable: 'NO', column_default: '0', udt_name: 'int4' },
+        { table_name: 'twoFactor', column_name: 'lockedUntil', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
+
+        { table_name: 'office_bootstrap', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: "'singleton'::text", udt_name: 'text' },
+        { table_name: 'office_bootstrap', column_name: 'isClosed', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', udt_name: 'bool' },
+        { table_name: 'office_bootstrap', column_name: 'closedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
+        { table_name: 'office_bootstrap', column_name: 'ownerId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+      ];
+
+      const pkeys = [
+        { table_name: 'user', constraint_name: 'user_pkey', column_name: 'id', ordinal_position: 1 },
+        { table_name: 'session', constraint_name: 'session_pkey', column_name: 'id', ordinal_position: 1 },
+        { table_name: 'account', constraint_name: 'account_pkey', column_name: 'id', ordinal_position: 1 },
+        { table_name: 'verification', constraint_name: 'verification_pkey', column_name: 'id', ordinal_position: 1 },
+        { table_name: 'twoFactor', constraint_name: 'twoFactor_pkey', column_name: 'id', ordinal_position: 1 },
+        { table_name: 'office_bootstrap', constraint_name: 'office_bootstrap_pkey', column_name: 'id', ordinal_position: 1 },
+      ];
+
+      const fkeys = [
+        {
+          constraint_name: 'session_userId_fkey',
+          table_name: 'session',
+          column_name: 'userId',
+          foreign_table_schema: 'public',
+          foreign_table_name: 'user',
+          foreign_column_name: 'id',
+          delete_rule: 'CASCADE',
+          update_rule: 'CASCADE',
+        },
+        {
+          constraint_name: 'account_userId_fkey',
+          table_name: 'account',
+          column_name: 'userId',
+          foreign_table_schema: 'public',
+          foreign_table_name: 'user',
+          foreign_column_name: 'id',
+          delete_rule: 'CASCADE',
+          update_rule: 'CASCADE',
+        },
+        {
+          constraint_name: 'twoFactor_userId_fkey',
+          table_name: 'twoFactor',
+          column_name: 'userId',
+          foreign_table_schema: 'public',
+          foreign_table_name: 'user',
+          foreign_column_name: 'id',
+          delete_rule: 'CASCADE',
+          update_rule: 'CASCADE',
+        },
+      ];
+
+      const indexes = [
+        {
+          indexname: 'user_email_key',
+          tablename: 'user',
+          indisunique: true,
+          indisvalid: true,
+          indexdef: 'CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email)',
+        },
+        {
+          indexname: 'session_token_key',
+          tablename: 'session',
+          indisunique: true,
+          indisvalid: true,
+          indexdef: 'CREATE UNIQUE INDEX session_token_key ON public.session USING btree (token)',
+        },
+        {
+          indexname: 'session_userId_idx',
+          tablename: 'session',
+          indisunique: false,
+          indisvalid: true,
+          indexdef: 'CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId")',
+        },
+        {
+          indexname: 'account_userId_idx',
+          tablename: 'account',
+          indisunique: false,
+          indisvalid: true,
+          indexdef: 'CREATE INDEX "account_userId_idx" ON public.account USING btree ("userId")',
+        },
+        {
+          indexname: 'verification_identifier_idx',
+          tablename: 'verification',
+          indisunique: false,
+          indisvalid: true,
+          indexdef: 'CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier)',
+        },
+        {
+          indexname: 'twoFactor_userId_idx',
+          tablename: 'twoFactor',
+          indisunique: false,
+          indisvalid: true,
+          indexdef: 'CREATE INDEX "twoFactor_userId_idx" ON public."twoFactor" USING btree ("userId")',
+        },
+      ];
+
+      return { enums, tables, cols, pkeys, fkeys, indexes };
+    }
+
+    function createMockClient(catalog: ReturnType<typeof buildValidCatalog>) {
+      return {
+        query: async (sql: string) => {
+          if (sql.includes('pg_enum')) {
+            return { rows: catalog.enums };
+          }
+          if (sql.includes('information_schema.tables')) {
+            return { rows: catalog.tables };
+          }
+          if (sql.includes('information_schema.columns')) {
+            return { rows: catalog.cols };
+          }
+          if (sql.includes("tc.constraint_type = 'PRIMARY KEY'")) {
+            return { rows: catalog.pkeys };
+          }
+          if (sql.includes("tc.constraint_type = 'FOREIGN KEY'")) {
+            return { rows: catalog.fkeys };
+          }
+          if (sql.includes('FROM pg_index')) {
+            return { rows: catalog.indexes };
+          }
+          return { rows: [] };
+        },
+      } as unknown as Client;
+    }
+
+    it('approves a fully equivalent valid catalog matching approved migration SQL', async () => {
+      const catalog = buildValidCatalog();
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(true);
+      expect(res.errors).toEqual([]);
+    });
+
+    it('rejects reproduction (a): same-name non-unique user_email_key index fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.indisunique = false;
+        idx.indexdef = 'CREATE INDEX user_email_key ON public."user" USING btree (email)';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Index 'user_email_key' must be UNIQUE, but found non-unique index");
+    });
+
+    it('rejects reproduction (b): twoFactor.verified default false instead of true fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'twoFactor' && c.column_name === 'verified');
+      if (col) {
+        col.column_default = 'false';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Column 'twoFactor.verified' default mismatch: expected 'true', got 'false'");
+    });
+
+    it('rejects reproduction (c): session_userId_fkey retargeted to unrelated table fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const fk = catalog.fkeys.find((f) => f.constraint_name === 'session_userId_fkey');
+      if (fk) {
+        fk.foreign_table_name = 'sentinel_audit_log';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Foreign key 'session_userId_fkey' referenced table expected 'user', got 'sentinel_audit_log'"
+      );
+    });
+
+    it('rejects primary key on wrong column (e.g. user_pkey on name)', async () => {
+      const catalog = buildValidCatalog();
+      const pk = catalog.pkeys.find((p) => p.constraint_name === 'user_pkey');
+      if (pk) {
+        pk.column_name = 'name';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Primary key 'user_pkey' columns mismatch: expected [id], got [name]");
+    });
+
+    it('rejects foreign key with incorrect delete rule (e.g. RESTRICT instead of CASCADE)', async () => {
+      const catalog = buildValidCatalog();
+      const fk = catalog.fkeys.find((f) => f.constraint_name === 'account_userId_fkey');
+      if (fk) {
+        fk.delete_rule = 'RESTRICT';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Foreign key 'account_userId_fkey' delete rule expected 'CASCADE', got 'RESTRICT'");
+    });
+
+    it('rejects UserRole enum missing required value', async () => {
+      const catalog = buildValidCatalog();
+      catalog.enums = [{ schemaname: 'public', typname: 'UserRole', enumlabel: 'OWNER' }];
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Enum 'UserRole' missing value 'MAINTAINER'");
+    });
+
+    it('rejects UserRole enum containing unexpected value', async () => {
+      const catalog = buildValidCatalog();
+      catalog.enums.push({ schemaname: 'public', typname: 'UserRole', enumlabel: 'SUPERUSER' });
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Enum 'UserRole' contains unexpected value 'SUPERUSER'");
+    });
+
+    it('rejects missing table fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      catalog.tables = catalog.tables.filter((t) => t.table_name !== 'office_bootstrap');
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Missing table 'office_bootstrap'");
+    });
+
+    it('rejects missing required column fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      catalog.cols = catalog.cols.filter((c) => !(c.table_name === 'user' && c.column_name === 'role'));
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Missing column 'user.role'");
+    });
+
+    it('rejects unexpected extra columns on managed table fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      catalog.cols.push({
+        table_name: 'user',
+        column_name: 'injected_column',
+        data_type: 'text',
+        is_nullable: 'YES',
+        column_default: null,
+        udt_name: 'text',
+      });
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Table column 'user.injected_column' is not part of the managed baseline schema");
     });
   });
 });

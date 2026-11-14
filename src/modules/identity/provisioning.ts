@@ -1,6 +1,7 @@
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { hashPassword, verifyPassword, symmetricEncrypt, symmetricDecrypt, generateRandomString } from 'better-auth/crypto';
+import { z } from 'zod';
 import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { randomBytes, randomUUID } from 'crypto';
@@ -80,12 +81,16 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
     throw new ProvisioningError('INVALID_INPUT', 'الاسم يجب أن يحتوي على حرفين على الأقل.');
   }
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!email || !z.string().email().safeParse(email).success) {
     throw new ProvisioningError('INVALID_INPUT', 'صيغة البريد الإلكتروني غير صالحة.');
   }
 
   if (!password || password.length < 8) {
     throw new ProvisioningError('INVALID_INPUT', 'كلمة المرور يجب أن لا تقل عن 8 أحرف.');
+  }
+
+  if (password.length > 128) {
+    throw new ProvisioningError('INVALID_INPUT', 'كلمة المرور يجب ألا تتجاوز 128 حرفاً.');
   }
 
   // Pre-check before transaction

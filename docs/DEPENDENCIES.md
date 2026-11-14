@@ -137,47 +137,59 @@ npx tsx src/cli/baseline-identity.ts --target-url "$DATABASE_URL"
 ### 6.2 Procedure Architecture & Execution Safeguards
 The `baseline-identity` entry point enforces strict execution guarantees in sequence:
 
-1. **Explicit Target Requirement & Strict Port Validation (Correction 1)**:
+1. **Explicit Target Requirement & Strict Port Validation (Correction 1 / F02)**:
    - Rejects empty target URLs fail-closed with exit code 1 (`"Target database URL is required. Ambient target fallback is refused."`).
    - Validates explicit port numbers as integers in the range `1..65535`. Explicit port `0`, negative ports, ports exceeding `65535`, or non-integer port strings are rejected fail-closed before creating any client or opening any socket.
    - Omitted ports default explicitly to `5432` without consulting ambient driver variables (`PGPORT`).
    - Rejects ambiguous or unsupported routing query parameters (`search_path`, `options`, or non-public `schema`) fail-closed.
    - Constructs a canonical validated target URL (`canonicalUrl`) sharing the exact endpoint parameters and connection policy between `pg.Client` and Prisma CLI subprocesses.
 
-2. **Explicit TLS Policy & Credential Protection (Correction 2)**:
-   - Preserves explicit transport encryption:
+2. **Consistent TLS Option Casing & Duplicate Parameter Policy (F02)**:
+   - Case-insensitive parameter matching: supports `sslmode`, `SSLMODE`, `SslMode` consistently.
+   - Duplicate parameter detection fail-closed: repeated or contradictory connection parameters (e.g. `sslmode=disable&sslmode=verify-full`, `sslmode=require&SSLMODE=disable`, or repeated `schema` keys) are rejected fail-closed before opening any connection:
+     `Target database URL specifies duplicate or contradictory connection parameter: 'sslmode'.`
+   - Explicit transport policy enforcement:
      * `sslmode=disable`: sets `ssl: false`.
      * `sslmode=require`: sets `ssl: { rejectUnauthorized: false }`.
      * `sslmode=verify-full`: sets `ssl: { rejectUnauthorized: true }`.
    - Unsupported or unrecognized `sslmode` values (e.g. `prefer`, `allow`) are rejected fail-closed before connecting.
+   - Reconstructed canonical URL preserves the normalized lowercase `sslmode`, ensuring `pg.Client`, schema verification, and Prisma CLI share the exact same transport encryption policy.
    - Ambient `PGSSLMODE` cannot override or weaken the explicit target policy.
    - Sanitizes and redacts credentials in all logs and error messages (`sanitizeTargetUrl`).
 
-3. **Database Assertion & Fail-Fast Transaction**:
-   - Extracts explicit connection parameters (`host`, `port`, `database`, `user`, `password`, `ssl`), preventing ambient driver fallback variables (`PGDATABASE`) from redirecting the connection.
-   - Executes `SELECT current_database()` and asserts that the connected database matches the intended target database before executing any statements.
-   - For unbaselined databases, executes `prisma/migrations/20261111000000_init_auth/migration.sql` in a single transaction (`BEGIN ... COMMIT`).
-   - Any SQL error or collision triggers immediate `ROLLBACK`, leaving pre-existing data (e.g. sentinel records) completely undamaged.
+3. **Schema Pinning & Ambient Routing Defense (F05)**:
+   - Connects with explicit `options: '-c search_path=public'` on the driver client.
+   - Immediately executes `SET search_path = public;` on connection to neutralize any ambient `PGOPTIONS` or role/database defaults.
+   - Asserts `current_database() === targetDatabase` and `current_schema() === 'public'` before executing any DDL or catalog inspection.
+   - Within clean baseline transactions, executes `SET LOCAL search_path = public;` and performs in-transaction catalog verification before issuing `COMMIT`.
+   - Sanitizes `PGOPTIONS` in Prisma CLI subprocess environment, neutralizing ambient search path redirects while preserving any unrelated options.
+   - Fully qualifies catalog queries (`table_schema = 'public'`, `schemaname = 'public'`, and `typnamespace = 'public'::regnamespace`).
+   - Ensures alternate schemas (e.g. `staging`) and pre-existing sentinel data remain completely undamaged and unpolluted.
 
-4. **Deep Catalog & Schema Verification Before History Recording**:
-   - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema equivalence or check for missing columns.
-   - For this reason, `baseline-identity.ts` performs direct PostgreSQL catalog verification in `information_schema` and `pg_indexes` **before** marking the migration as applied in Prisma:
-     - Verifies all required tables exist: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
-     - Verifies all critical columns, types, nullability, and defaults exist: including `twoFactor.failedVerificationCount`, `twoFactor.lockedUntil`, and `office_bootstrap.isClosed`.
-     - Verifies primary keys (`user_pkey`, `session_pkey`, etc.) and foreign key constraints (`session_userId_fkey`, `account_userId_fkey`, `twoFactor_userId_fkey`) with `ON DELETE CASCADE ON UPDATE CASCADE`.
-     - Verifies required unique and lookup indexes (`user_email_key`, `session_token_key`, etc.).
-     - Verifies custom enum types (`UserRole` with `OWNER`, `MAINTAINER`).
+4. **Semantic Catalog & Schema Verification Before History Authorization (F01)**:
+   - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema semantics or detect missing/divergent column definitions.
+   - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking the migration as applied in Prisma:
+     - **Tables**: verifies all 6 required tables exist in `public`: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
+     - **Columns, Types, Nullability, Defaults**: verifies all 47 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
+       * `twoFactor.verified`: boolean NOT NULL, default must be `true` (rejects default `false`).
+       * `twoFactor.failedVerificationCount`: integer NOT NULL, default `0`.
+       * `office_bootstrap.isClosed`: boolean NOT NULL, default `true`.
+       * Verifies timestamp defaults (`CURRENT_TIMESTAMP`), boolean defaults, and rejects any unexpected extra columns on managed tables.
+     - **Primary Keys**: verifies constraint name, table binding, and exact primary key column definitions (`['id']` across all 6 tables).
+     - **Foreign Keys**: verifies constraint name, source table/column, referenced schema (`public`), referenced table (`user`), referenced column (`id`), and cascading actions (`ON DELETE CASCADE ON UPDATE CASCADE`). Rejects foreign keys redirected to unrelated tables.
+     - **Indexes**: queries `pg_index` to verify index name, table binding, validity (`indisvalid = true`), uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`), and indexed column matching. Non-unique same-name indexes are rejected fail-closed.
+     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'MAINTAINER']`, rejecting missing or extraneous values.
 
-5. **Post-DDL Recovery & Idempotent Resume Semantics (Correction 3)**:
+5. **Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05)**:
    - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
-     * The tool detects existing managed entities without completed migration history.
-     * Performs deep physical schema equivalence verification across all 6 tables, columns, constraints, and indexes.
+     * Detects existing managed entities without completed migration history.
+     * Performs full semantic schema verification across all 6 tables, 47 columns, constraints, foreign keys, indexes, and enum type.
      * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` without re-executing DDL (`recovered: true`).
      * If conflicting or partial: refuses fail-closed without recording history, dropping tables, or damaging sentinel data.
-   - **Already-Completed State**: If `20261111000000_init_auth` is already recorded as applied in `_prisma_migrations`, verifies schema equivalence and returns cleanly (`alreadyCompleted: true`).
+   - **Already-Completed State**: If `20261111000000_init_auth` is already recorded as applied in `_prisma_migrations`, verifies semantic schema equivalence and returns cleanly (`alreadyCompleted: true`).
 
 6. **Scoped Migration History Recording**:
-   - Only after physical schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the canonical validated target URL.
+   - Only after semantic schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the canonical validated target URL and sanitized environment.
    - Executes `npx prisma migrate status` passing the canonical target URL to confirm migration history is clean.
 
 ### 6.3 Post-Baseline Verification

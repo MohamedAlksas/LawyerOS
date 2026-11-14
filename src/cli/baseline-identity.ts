@@ -152,27 +152,42 @@ export function parseTargetUrl(targetUrl: string): ParsedTargetUrl {
     port = 5432;
   }
 
-  // Query parameter validation: reject ambiguous routing options
+  // Query parameter validation: reject ambiguous routing options and duplicate parameters
+  const paramCounts = new Map<string, number>();
+  const normalizedParams = new Map<string, string>();
+
   for (const [key, value] of parsed.searchParams.entries()) {
     const lowerKey = key.toLowerCase();
+    const count = (paramCounts.get(lowerKey) || 0) + 1;
+    paramCounts.set(lowerKey, count);
+
+    if (count > 1) {
+      throw new Error(
+        `Target database URL specifies duplicate or contradictory connection parameter: '${lowerKey}'.`
+      );
+    }
+
     if (!ALLOWED_QUERY_PARAMS.has(lowerKey)) {
       throw new Error(
         `Target database URL specifies unsupported or ambiguous query parameter: '${key}'. Baseline requires a direct connection to public schema without routing alterations.`
       );
     }
+
     if (lowerKey === 'schema' && value.toLowerCase() !== 'public') {
       throw new Error(
         `Target database URL specifies unsupported or ambiguous query parameter: 'schema'. Baseline requires a direct connection to public schema without routing alterations.`
       );
     }
+
+    normalizedParams.set(lowerKey, value);
   }
 
-  // Explicit TLS policy validation
-  const rawSslMode = parsed.searchParams.get('sslmode');
+  // Explicit TLS policy validation (case-insensitive key and value matching)
+  const rawSslMode = normalizedParams.get('sslmode');
   let ssl: boolean | { rejectUnauthorized: boolean };
   let normalizedSslMode: string | undefined;
 
-  if (rawSslMode !== null) {
+  if (rawSslMode !== undefined) {
     const mode = rawSslMode.toLowerCase().trim();
     normalizedSslMode = mode;
     if (mode === 'disable') {
@@ -208,7 +223,7 @@ export function parseTargetUrl(targetUrl: string): ParsedTargetUrl {
   if (normalizedSslMode) {
     canonicalParams.set('sslmode', normalizedSslMode);
   }
-  if (parsed.searchParams.has('schema')) {
+  if (normalizedParams.has('schema')) {
     canonicalParams.set('schema', 'public');
   }
   const queryString = canonicalParams.toString();
@@ -262,27 +277,37 @@ export function parseCliArgs(args: string[]): { targetUrl?: string } {
 export async function verifySchemaEquivalence(client: Client): Promise<{ equivalent: boolean; errors: string[] }> {
   const errors: string[] = [];
 
-  // 1. Enum UserRole
+  // 1. Enum UserRole (verified in public namespace with exact value set)
   const enumRes = await client.query(`
-    SELECT e.enumlabel
+    SELECT
+      n.nspname AS schemaname,
+      t.typname,
+      e.enumlabel
     FROM pg_enum e
     JOIN pg_type t ON e.enumtypid = t.oid
+    JOIN pg_namespace n ON n.oid = t.typnamespace
     WHERE t.typname = 'UserRole'
+      AND n.nspname = 'public'
     ORDER BY e.enumsortorder;
   `);
   const foundEnumLabels = enumRes.rows.map((r: { enumlabel: string }) => r.enumlabel);
   const expectedEnumLabels = ['OWNER', 'MAINTAINER'];
   if (enumRes.rows.length === 0) {
-    errors.push("Missing enum type 'UserRole'");
+    errors.push("Missing enum type 'UserRole' in schema 'public'");
   } else {
     for (const label of expectedEnumLabels) {
       if (!foundEnumLabels.includes(label)) {
         errors.push(`Enum 'UserRole' missing value '${label}'`);
       }
     }
+    for (const label of foundEnumLabels) {
+      if (!expectedEnumLabels.includes(label)) {
+        errors.push(`Enum 'UserRole' contains unexpected value '${label}'`);
+      }
+    }
   }
 
-  // 2. Tables
+  // 2. Tables (all 6 managed tables in public schema)
   const expectedTables = ['user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap'];
   const tablesRes = await client.query(`
     SELECT table_name 
@@ -297,67 +322,86 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 3. Columns, Types, Nullability
-  const expectedCols: Record<
-    string,
-    { type: string; nullable: string; udt?: string }
-  > = {
-    'user.id': { type: 'text', nullable: 'NO' },
-    'user.name': { type: 'text', nullable: 'NO' },
-    'user.email': { type: 'text', nullable: 'NO' },
-    'user.emailVerified': { type: 'boolean', nullable: 'NO' },
-    'user.image': { type: 'text', nullable: 'YES' },
-    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole' },
-    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES' },
+  // 3. Columns, Types, Nullability, and Defaults
+  const isCurrentTimestamp = (val: string | null) => val !== null && /CURRENT_TIMESTAMP|now\(\)/i.test(val);
+  const isFalse = (val: string | null) => val !== null && (val === 'false' || val.startsWith('false'));
+  const isTrue = (val: string | null) => val !== null && (val === 'true' || val.startsWith('true'));
+  const isZero = (val: string | null) => val !== null && (val === '0' || val.startsWith('0'));
+  const isSingleton = (val: string | null) => val !== null && val.includes('singleton');
+  const isOwnerEnum = (val: string | null) => val !== null && val.includes('OWNER');
 
-    'session.id': { type: 'text', nullable: 'NO' },
-    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'session.token': { type: 'text', nullable: 'NO' },
-    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'session.ipAddress': { type: 'text', nullable: 'YES' },
-    'session.userAgent': { type: 'text', nullable: 'YES' },
-    'session.userId': { type: 'text', nullable: 'NO' },
+  interface ExpectedColDef {
+    type: string;
+    nullable: string;
+    udt?: string;
+    hasDefault: boolean;
+    defaultValidator?: (defaultVal: string | null) => boolean;
+    expectedDefaultDesc?: string;
+  }
 
-    'account.id': { type: 'text', nullable: 'NO' },
-    'account.accountId': { type: 'text', nullable: 'NO' },
-    'account.providerId': { type: 'text', nullable: 'NO' },
-    'account.userId': { type: 'text', nullable: 'NO' },
-    'account.accessToken': { type: 'text', nullable: 'YES' },
-    'account.refreshToken': { type: 'text', nullable: 'YES' },
-    'account.idToken': { type: 'text', nullable: 'YES' },
-    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES' },
-    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES' },
-    'account.scope': { type: 'text', nullable: 'YES' },
-    'account.password': { type: 'text', nullable: 'YES' },
-    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO' },
+  const expectedCols: Record<string, ExpectedColDef> = {
+    'user.id': { type: 'text', nullable: 'NO', hasDefault: false },
+    'user.name': { type: 'text', nullable: 'NO', hasDefault: false },
+    'user.email': { type: 'text', nullable: 'NO', hasDefault: false },
+    'user.emailVerified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isFalse, expectedDefaultDesc: 'false' },
+    'user.image': { type: 'text', nullable: 'YES', hasDefault: false },
+    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole', hasDefault: true, defaultValidator: isOwnerEnum, expectedDefaultDesc: "'OWNER'::\"UserRole\"" },
+    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES', hasDefault: true, defaultValidator: isFalse, expectedDefaultDesc: 'false' },
 
-    'verification.id': { type: 'text', nullable: 'NO' },
-    'verification.identifier': { type: 'text', nullable: 'NO' },
-    'verification.value': { type: 'text', nullable: 'NO' },
-    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO' },
+    'session.id': { type: 'text', nullable: 'NO', hasDefault: false },
+    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'session.token': { type: 'text', nullable: 'NO', hasDefault: false },
+    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'session.ipAddress': { type: 'text', nullable: 'YES', hasDefault: false },
+    'session.userAgent': { type: 'text', nullable: 'YES', hasDefault: false },
+    'session.userId': { type: 'text', nullable: 'NO', hasDefault: false },
 
-    'twoFactor.id': { type: 'text', nullable: 'NO' },
-    'twoFactor.secret': { type: 'text', nullable: 'NO' },
-    'twoFactor.backupCodes': { type: 'text', nullable: 'NO' },
-    'twoFactor.userId': { type: 'text', nullable: 'NO' },
-    'twoFactor.verified': { type: 'boolean', nullable: 'NO' },
-    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO' },
-    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES' },
+    'account.id': { type: 'text', nullable: 'NO', hasDefault: false },
+    'account.accountId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'account.providerId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'account.userId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'account.accessToken': { type: 'text', nullable: 'YES', hasDefault: false },
+    'account.refreshToken': { type: 'text', nullable: 'YES', hasDefault: false },
+    'account.idToken': { type: 'text', nullable: 'YES', hasDefault: false },
+    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
+    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
+    'account.scope': { type: 'text', nullable: 'YES', hasDefault: false },
+    'account.password': { type: 'text', nullable: 'YES', hasDefault: false },
+    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
 
-    'office_bootstrap.id': { type: 'text', nullable: 'NO' },
-    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO' },
-    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO' },
-    'office_bootstrap.ownerId': { type: 'text', nullable: 'NO' },
+    'verification.id': { type: 'text', nullable: 'NO', hasDefault: false },
+    'verification.identifier': { type: 'text', nullable: 'NO', hasDefault: false },
+    'verification.value': { type: 'text', nullable: 'NO', hasDefault: false },
+    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+
+    'twoFactor.id': { type: 'text', nullable: 'NO', hasDefault: false },
+    'twoFactor.secret': { type: 'text', nullable: 'NO', hasDefault: false },
+    'twoFactor.backupCodes': { type: 'text', nullable: 'NO', hasDefault: false },
+    'twoFactor.userId': { type: 'text', nullable: 'NO', hasDefault: false },
+    'twoFactor.verified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isTrue, expectedDefaultDesc: 'true' },
+    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO', hasDefault: true, defaultValidator: isZero, expectedDefaultDesc: '0' },
+    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
+
+    'office_bootstrap.id': { type: 'text', nullable: 'NO', hasDefault: true, defaultValidator: isSingleton, expectedDefaultDesc: "'singleton'::text" },
+    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isTrue, expectedDefaultDesc: 'true' },
+    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'office_bootstrap.ownerId': { type: 'text', nullable: 'NO', hasDefault: false },
   };
 
   const colsRes = await client.query(`
-    SELECT table_name, column_name, data_type, is_nullable, udt_name 
+    SELECT
+      table_name,
+      column_name,
+      data_type,
+      is_nullable,
+      column_default,
+      udt_name 
     FROM information_schema.columns 
     WHERE table_schema = 'public' 
       AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
@@ -365,12 +409,13 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
 
   const foundCols = new Map<
     string,
-    { data_type: string; is_nullable: string; udt_name: string }
+    { data_type: string; is_nullable: string; column_default: string | null; udt_name: string }
   >();
   for (const row of colsRes.rows) {
     foundCols.set(`${row.table_name}.${row.column_name}`, {
       data_type: row.data_type,
       is_nullable: row.is_nullable,
+      column_default: row.column_default !== undefined ? row.column_default : null,
       udt_name: row.udt_name,
     });
   }
@@ -390,40 +435,84 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     if (expected.udt && found.udt_name !== expected.udt) {
       errors.push(`Column '${colKey}' UDT mismatch: expected '${expected.udt}', got '${found.udt_name}'`);
     }
+    if (expected.hasDefault) {
+      if (found.column_default === null) {
+        errors.push(`Column '${colKey}' missing expected default '${expected.expectedDefaultDesc}'`);
+      } else if (expected.defaultValidator && !expected.defaultValidator(found.column_default)) {
+        errors.push(`Column '${colKey}' default mismatch: expected '${expected.expectedDefaultDesc}', got '${found.column_default}'`);
+      }
+    } else {
+      if (found.column_default !== null) {
+        errors.push(`Column '${colKey}' unexpected default: expected no default, got '${found.column_default}'`);
+      }
+    }
   }
 
-  // 4. Primary Keys
+  for (const [colKey] of foundCols) {
+    if (!expectedCols[colKey]) {
+      errors.push(`Table column '${colKey}' is not part of the managed baseline schema`);
+    }
+  }
+
+  // 4. Primary Keys: verify constraint names, tables, and exact key columns
   const pkeyRes = await client.query(`
-    SELECT tc.table_name, tc.constraint_name, kcu.column_name
+    SELECT
+      tc.table_name,
+      tc.constraint_name,
+      kcu.column_name,
+      kcu.ordinal_position
     FROM information_schema.table_constraints tc
     JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name
      AND tc.table_schema = kcu.table_schema
     WHERE tc.constraint_type = 'PRIMARY KEY' 
       AND tc.table_schema = 'public'
-      AND tc.table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      AND tc.table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap')
+    ORDER BY tc.table_name, kcu.ordinal_position;
   `);
-  const foundPkeys = new Set(pkeyRes.rows.map((r: { constraint_name: string }) => r.constraint_name));
-  const expectedPkeys = [
-    'user_pkey',
-    'session_pkey',
-    'account_pkey',
-    'verification_pkey',
-    'twoFactor_pkey',
-    'office_bootstrap_pkey',
-  ];
-  for (const pk of expectedPkeys) {
-    if (!foundPkeys.has(pk)) {
-      errors.push(`Missing primary key '${pk}'`);
+
+  const foundPkeys = new Map<string, { table: string; columns: string[] }>();
+  for (const row of pkeyRes.rows) {
+    let entry = foundPkeys.get(row.constraint_name);
+    if (!entry) {
+      entry = { table: row.table_name, columns: [] };
+      foundPkeys.set(row.constraint_name, entry);
+    }
+    entry.columns.push(row.column_name);
+  }
+
+  const expectedPkeys: Record<string, { table: string; columns: string[] }> = {
+    user_pkey: { table: 'user', columns: ['id'] },
+    session_pkey: { table: 'session', columns: ['id'] },
+    account_pkey: { table: 'account', columns: ['id'] },
+    verification_pkey: { table: 'verification', columns: ['id'] },
+    twoFactor_pkey: { table: 'twoFactor', columns: ['id'] },
+    office_bootstrap_pkey: { table: 'office_bootstrap', columns: ['id'] },
+  };
+
+  for (const [pkName, expected] of Object.entries(expectedPkeys)) {
+    const found = foundPkeys.get(pkName);
+    if (!found) {
+      errors.push(`Missing primary key constraint '${pkName}'`);
+      continue;
+    }
+    if (found.table !== expected.table) {
+      errors.push(`Primary key '${pkName}' attached to table '${found.table}', expected '${expected.table}'`);
+    }
+    if (found.columns.join(',') !== expected.columns.join(',')) {
+      errors.push(
+        `Primary key '${pkName}' columns mismatch: expected [${expected.columns.join(', ')}], got [${found.columns.join(', ')}]`
+      );
     }
   }
 
-  // 5. Foreign Keys with Cascade Actions
+  // 5. Foreign Keys with source/target definitions and cascading actions
   const fkeyRes = await client.query(`
     SELECT
       tc.constraint_name,
       tc.table_name,
       kcu.column_name,
+      ccu.table_schema AS foreign_table_schema,
       ccu.table_name AS foreign_table_name,
       ccu.column_name AS foreign_column_name,
       rc.delete_rule,
@@ -442,48 +531,204 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       AND tc.table_schema = 'public'
       AND tc.table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
   `);
-  const foundFkeys = new Map<string, { delete_rule: string; update_rule: string }>();
+
+  const foundFkeys = new Map<
+    string,
+    {
+      table: string;
+      column: string;
+      foreignSchema: string;
+      foreignTable: string;
+      foreignColumn: string;
+      deleteRule: string;
+      updateRule: string;
+    }
+  >();
   for (const row of fkeyRes.rows) {
     foundFkeys.set(row.constraint_name, {
-      delete_rule: row.delete_rule,
-      update_rule: row.update_rule,
+      table: row.table_name,
+      column: row.column_name,
+      foreignSchema: row.foreign_table_schema,
+      foreignTable: row.foreign_table_name,
+      foreignColumn: row.foreign_column_name,
+      deleteRule: row.delete_rule,
+      updateRule: row.update_rule,
     });
   }
 
-  const expectedFkeys = ['session_userId_fkey', 'account_userId_fkey', 'twoFactor_userId_fkey'];
-  for (const fk of expectedFkeys) {
-    const found = foundFkeys.get(fk);
+  const expectedFkeys: Record<
+    string,
+    {
+      table: string;
+      column: string;
+      foreignSchema: string;
+      foreignTable: string;
+      foreignColumn: string;
+      deleteRule: string;
+      updateRule: string;
+    }
+  > = {
+    session_userId_fkey: {
+      table: 'session',
+      column: 'userId',
+      foreignSchema: 'public',
+      foreignTable: 'user',
+      foreignColumn: 'id',
+      deleteRule: 'CASCADE',
+      updateRule: 'CASCADE',
+    },
+    account_userId_fkey: {
+      table: 'account',
+      column: 'userId',
+      foreignSchema: 'public',
+      foreignTable: 'user',
+      foreignColumn: 'id',
+      deleteRule: 'CASCADE',
+      updateRule: 'CASCADE',
+    },
+    twoFactor_userId_fkey: {
+      table: 'twoFactor',
+      column: 'userId',
+      foreignSchema: 'public',
+      foreignTable: 'user',
+      foreignColumn: 'id',
+      deleteRule: 'CASCADE',
+      updateRule: 'CASCADE',
+    },
+  };
+
+  for (const [fkName, expected] of Object.entries(expectedFkeys)) {
+    const found = foundFkeys.get(fkName);
     if (!found) {
-      errors.push(`Missing foreign key constraint '${fk}'`);
-    } else {
-      if (found.delete_rule !== 'CASCADE') {
-        errors.push(`Foreign key '${fk}' delete rule expected 'CASCADE', got '${found.delete_rule}'`);
-      }
-      if (found.update_rule !== 'CASCADE') {
-        errors.push(`Foreign key '${fk}' update rule expected 'CASCADE', got '${found.update_rule}'`);
-      }
+      errors.push(`Missing foreign key constraint '${fkName}'`);
+      continue;
+    }
+    if (found.table !== expected.table) {
+      errors.push(`Foreign key '${fkName}' source table expected '${expected.table}', got '${found.table}'`);
+    }
+    if (found.column !== expected.column) {
+      errors.push(`Foreign key '${fkName}' source column expected '${expected.column}', got '${found.column}'`);
+    }
+    if (found.foreignSchema !== expected.foreignSchema) {
+      errors.push(
+        `Foreign key '${fkName}' referenced schema expected '${expected.foreignSchema}', got '${found.foreignSchema}'`
+      );
+    }
+    if (found.foreignTable !== expected.foreignTable) {
+      errors.push(
+        `Foreign key '${fkName}' referenced table expected '${expected.foreignTable}', got '${found.foreignTable}'`
+      );
+    }
+    if (found.foreignColumn !== expected.foreignColumn) {
+      errors.push(
+        `Foreign key '${fkName}' referenced column expected '${expected.foreignColumn}', got '${found.foreignColumn}'`
+      );
+    }
+    if (found.deleteRule !== expected.deleteRule) {
+      errors.push(`Foreign key '${fkName}' delete rule expected '${expected.deleteRule}', got '${found.deleteRule}'`);
+    }
+    if (found.updateRule !== expected.updateRule) {
+      errors.push(`Foreign key '${fkName}' update rule expected '${expected.updateRule}', got '${found.updateRule}'`);
     }
   }
 
-  // 6. Indexes
+  // 6. Indexes: verify name, table, uniqueness, validity, and indexed columns
   const idxRes = await client.query(`
-    SELECT indexname 
-    FROM pg_indexes 
-    WHERE schemaname = 'public'
-      AND tablename IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+    SELECT
+      i.relname AS indexname,
+      t.relname AS tablename,
+      ix.indisunique,
+      ix.indisvalid,
+      pg_get_indexdef(ix.indexrelid) AS indexdef
+    FROM pg_index ix
+    JOIN pg_class i ON i.oid = ix.indexrelid
+    JOIN pg_class t ON t.oid = ix.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
   `);
-  const foundIndexes = new Set(idxRes.rows.map((r: { indexname: string }) => r.indexname));
-  const expectedIndexes = [
-    'user_email_key',
-    'session_token_key',
-    'session_userId_idx',
-    'account_userId_idx',
-    'verification_identifier_idx',
-    'twoFactor_userId_idx',
-  ];
-  for (const idx of expectedIndexes) {
-    if (!foundIndexes.has(idx)) {
-      errors.push(`Missing index '${idx}'`);
+
+  const foundIndexes = new Map<
+    string,
+    {
+      table: string;
+      unique: boolean;
+      valid: boolean;
+      indexdef: string;
+    }
+  >();
+  for (const row of idxRes.rows) {
+    foundIndexes.set(row.indexname, {
+      table: row.tablename,
+      unique: Boolean(row.indisunique),
+      valid: Boolean(row.indisvalid),
+      indexdef: row.indexdef,
+    });
+  }
+
+  const expectedIndexes: Record<
+    string,
+    {
+      table: string;
+      unique: boolean;
+      columns: string[];
+    }
+  > = {
+    user_email_key: {
+      table: 'user',
+      unique: true,
+      columns: ['email'],
+    },
+    session_token_key: {
+      table: 'session',
+      unique: true,
+      columns: ['token'],
+    },
+    session_userId_idx: {
+      table: 'session',
+      unique: false,
+      columns: ['userId'],
+    },
+    account_userId_idx: {
+      table: 'account',
+      unique: false,
+      columns: ['userId'],
+    },
+    verification_identifier_idx: {
+      table: 'verification',
+      unique: false,
+      columns: ['identifier'],
+    },
+    twoFactor_userId_idx: {
+      table: 'twoFactor',
+      unique: false,
+      columns: ['userId'],
+    },
+  };
+
+  for (const [idxName, expected] of Object.entries(expectedIndexes)) {
+    const found = foundIndexes.get(idxName);
+    if (!found) {
+      errors.push(`Missing index '${idxName}'`);
+      continue;
+    }
+    if (found.table !== expected.table) {
+      errors.push(`Index '${idxName}' on table '${found.table}', expected '${expected.table}'`);
+    }
+    if (!found.valid) {
+      errors.push(`Index '${idxName}' is marked invalid in pg_index`);
+    }
+    if (expected.unique && !found.unique) {
+      errors.push(`Index '${idxName}' must be UNIQUE, but found non-unique index`);
+    }
+    if (!expected.unique && found.unique) {
+      errors.push(`Index '${idxName}' expected to be non-unique, but found UNIQUE index`);
+    }
+    for (const col of expected.columns) {
+      const colRegex = new RegExp(`\\b"${col}"\\b|\\b${col}\\b`);
+      if (!colRegex.test(found.indexdef)) {
+        errors.push(`Index '${idxName}' definition missing column '${col}': ${found.indexdef}`);
+      }
     }
   }
 
@@ -518,7 +763,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
   log(`[Identity Baseline] Initializing baseline on target: ${connParams.host}:${connParams.port}/${connParams.database}`);
 
-  // 1. Connect with explicit connection parameters
+  // 1. Connect with explicit connection parameters and search_path pinning
   const client = new Client({
     host: connParams.host,
     port: connParams.port,
@@ -526,11 +771,15 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
     user: connParams.user,
     password: connParams.password,
     ssl: connParams.ssl,
+    options: '-c search_path=public',
   });
 
   await client.connect();
 
   try {
+    // Enforce explicit search_path on connection to neutralize ambient PGOPTIONS or role search_path
+    await client.query('SET search_path = public;');
+
     // 2. Assert connected database strictly matches intended target database
     const dbCheckRes = await client.query('SELECT current_database() AS current_db');
     const currentDb = dbCheckRes.rows[0]?.current_db;
@@ -540,7 +789,15 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       );
     }
 
-    log(`[Identity Baseline] Target confirmed: ${currentDb}. Inspecting existing database state...`);
+    const schemaCheck = await client.query('SELECT current_schema() AS current_schema');
+    const currentSchema = schemaCheck.rows[0]?.current_schema;
+    if (currentSchema !== 'public') {
+      throw new Error(
+        `Connected schema '${currentSchema}' does not match intended schema 'public'. Ambient schema routing detected. Aborting baseline.`
+      );
+    }
+
+    log(`[Identity Baseline] Target confirmed: ${currentDb} (schema: ${currentSchema}). Inspecting existing database state...`);
 
     // 3. Inspect existing database state before mutating or recording
     // 3.1 Check _prisma_migrations table
@@ -584,7 +841,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
     const managedEntitiesCheck = await client.query(`
       SELECT
         (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap')) AS table_count,
-        (SELECT count(*)::int FROM pg_type WHERE typname = 'UserRole') AS enum_count;
+        (SELECT count(*)::int FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public' AND t.typname = 'UserRole') AS enum_count;
     `);
     const tableCount = Number(managedEntitiesCheck.rows[0]?.table_count || 0);
     const enumCount = Number(managedEntitiesCheck.rows[0]?.enum_count || 0);
@@ -620,7 +877,15 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
       await client.query('BEGIN');
       try {
+        await client.query('SET LOCAL search_path = public;');
         await client.query(migrationSql);
+
+        // Verify catalog in-transaction before committing DDL
+        const inTxVerifyRes = await verifySchemaEquivalence(client);
+        if (!inTxVerifyRes.equivalent) {
+          throw new Error(`In-transaction catalog verification failed: ${inTxVerifyRes.errors.join('; ')}`);
+        }
+
         await client.query('COMMIT');
       } catch (sqlErr) {
         await client.query('ROLLBACK').catch(() => {});
@@ -630,26 +895,30 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
           }`
         );
       }
-
-      log('[Identity Baseline] Migration SQL applied. Verifying PostgreSQL catalog before recording history...');
-      const verifyRes = await verifySchemaEquivalence(client);
-      if (!verifyRes.equivalent) {
-        throw new Error(`Catalog verification failed post-DDL: ${verifyRes.errors.join('; ')}`);
-      }
     }
 
     log('[Identity Baseline] Schema verified. Recording migration in Prisma history table...');
 
     // 4. Record applied migration in Prisma migration history table
     const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
+    const cleanEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      DATABASE_URL: connParams.canonicalUrl,
+    };
+    if (cleanEnv.PGOPTIONS) {
+      const sanitized = cleanEnv.PGOPTIONS.replace(/-c\s+search_path=[^\s]+/gi, '').trim();
+      if (sanitized.length > 0) {
+        cleanEnv.PGOPTIONS = `${sanitized} -c search_path=public`;
+      } else {
+        delete cleanEnv.PGOPTIONS;
+      }
+    }
+
     const resolveResult = spawnSync(
       process.execPath,
       [prismaJs, 'migrate', 'resolve', '--applied', '20261111000000_init_auth'],
       {
-        env: {
-          ...process.env,
-          DATABASE_URL: connParams.canonicalUrl,
-        },
+        env: cleanEnv,
         encoding: 'utf-8',
       }
     );
@@ -667,10 +936,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       process.execPath,
       [prismaJs, 'migrate', 'status'],
       {
-        env: {
-          ...process.env,
-          DATABASE_URL: connParams.canonicalUrl,
-        },
+        env: cleanEnv,
         encoding: 'utf-8',
       }
     );

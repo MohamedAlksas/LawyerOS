@@ -40,6 +40,19 @@ function signSessionTokenCookie(token: string, secret: string): string {
   return encodeURIComponent(`${token}.${signature}`);
 }
 
+function extractTrustIdentifierFromCookie(cookieHeader: string): string {
+  const cookiePart = cookieHeader.split(';')[0];
+  const eqIdx = cookiePart.indexOf('=');
+  const cookieVal = decodeURIComponent(cookiePart.substring(eqIdx + 1));
+  const dotIdx = cookieVal.lastIndexOf('.');
+  const payload = dotIdx !== -1 ? cookieVal.substring(0, dotIdx) : cookieVal;
+  const exclIdx = payload.indexOf('!');
+  if (exclIdx !== -1) {
+    return payload.substring(exclIdx + 1);
+  }
+  return payload;
+}
+
 function makeSessionHeaders(token: string): Headers {
   const env = getEnv();
   const signed = signSessionTokenCookie(token, env.BETTER_AUTH_SECRET);
@@ -447,6 +460,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
   it('rejects authentic signed historical trusted-device cookie and requires fresh 2FA challenge on sign-in (R02)', async () => {
     const prisma = getPrismaClient();
     const env = getEnv();
+    const prevAuthUrl = process.env.BETTER_AUTH_URL;
+
+    // Assert current application provider is configured for HTTP
+    expect(getAuth().options.baseURL).toBe('http://127.0.0.1:3000');
 
     // 1. Obtain genuine historical trust cookie through prior 30-day provider configuration
     const priorAuthHttp = betterAuth({
@@ -504,7 +521,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const verifyPriorJson = await verifyPriorRes.json();
     expect(verifyPriorJson.token).toBeDefined();
 
-    // Step C: Extract authentic issued trust_device cookie and verify database record
+    // Step C: Extract authentic issued trust_device cookie and verify exact database record
     const verifySetCookies = verifyPriorRes.headers.getSetCookie?.() || [
       verifyPriorRes.headers.get('set-cookie') || '',
     ];
@@ -512,10 +529,12 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(issuedTrustCookie).toBeDefined();
     const trustCookieHeader = issuedTrustCookie!.split(';')[0];
 
+    const httpTrustIdentifier = extractTrustIdentifierFromCookie(trustCookieHeader);
     const trustVerifRecord = await prisma.verification.findFirst({
-      where: { value: provisionedOwner.userId },
+      where: { identifier: httpTrustIdentifier },
     });
     expect(trustVerifRecord).toBeDefined();
+    expect(trustVerifRecord?.value).toBe(provisionedOwner.userId);
     expect(trustVerifRecord?.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
     // Step D: Extract issued session token cookie and verify session exists in DB
@@ -547,11 +566,12 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     expect(deletedSession).toBeNull();
 
-    // Assert better-auth.trust_device cookie and its database verification record remain intact and unexpired
-    const retainedTrustRecord = await prisma.verification.findUnique({
-      where: { id: trustVerifRecord!.id },
+    // Assert exact better-auth.trust_device database verification record remains intact and unexpired
+    const retainedTrustRecord = await prisma.verification.findFirst({
+      where: { identifier: httpTrustIdentifier },
     });
     expect(retainedTrustRecord).toBeDefined();
+    expect(retainedTrustRecord?.value).toBe(provisionedOwner.userId);
     expect(retainedTrustRecord!.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
     try {
@@ -587,7 +607,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         requireActor({ headers: signInReq.headers })
       ).rejects.toThrowError(AuthenticationError);
 
-      // 2. HTTPS: Obtain authentic historical trust cookie through HTTPS provider configuration
+      // 2. HTTPS: Reconfigure current application provider for HTTPS and assert provider options
+      process.env.BETTER_AUTH_URL = 'https://office.lawoffice.internal:3000';
+      getEnv(true);
+      global.__lawoffice_auth = undefined;
+      expect(getAuth().options.baseURL).toBe('https://office.lawoffice.internal:3000');
+
+      // Obtain authentic historical trust cookie through HTTPS prior provider configuration
       const priorAuthHttps = betterAuth({
         database: prismaAdapter(getPrismaClient(), { provider: 'postgresql' }),
         secret: env.BETTER_AUTH_SECRET,
@@ -648,6 +674,14 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       expect(issuedSecureTrustCookie).toBeDefined();
       const secureTrustCookieHeader = issuedSecureTrustCookie!.split(';')[0];
 
+      const secureTrustIdentifier = extractTrustIdentifierFromCookie(secureTrustCookieHeader);
+      const secureTrustVerif = await prisma.verification.findFirst({
+        where: { identifier: secureTrustIdentifier },
+      });
+      expect(secureTrustVerif).toBeDefined();
+      expect(secureTrustVerif?.value).toBe(provisionedOwner.userId);
+      expect(secureTrustVerif!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
       // Extract issued HTTPS session token cookie and verify session exists in DB
       const priorSessionCookieHttps = verifyHttpsCookies.find(
         (c) => c.includes('__Secure-better-auth.session_token=') || c.includes('better-auth.session_token=')
@@ -677,12 +711,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       });
       expect(deletedSessionHttps).toBeNull();
 
-      // Assert trust verification record remains intact and unexpired in DB
-      const secureTrustVerif = await prisma.verification.findFirst({
-        where: { value: provisionedOwner.userId },
+      // Assert exact trust verification record remains intact and unexpired in DB
+      const retainedSecureTrust = await prisma.verification.findFirst({
+        where: { identifier: secureTrustIdentifier },
       });
-      expect(secureTrustVerif).toBeDefined();
-      expect(secureTrustVerif!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      expect(retainedSecureTrust).toBeDefined();
+      expect(retainedSecureTrust?.value).toBe(provisionedOwner.userId);
+      expect(retainedSecureTrust!.expiresAt.getTime()).toBeGreaterThan(Date.now());
 
       // Present authentic __Secure- trust cookie to CURRENT application route over HTTPS
       const signInReqSecure = new NextRequest('https://office.lawoffice.internal:3000/api/auth/sign-in/email', {
@@ -715,6 +750,9 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         requireActor({ headers: signInReqSecure.headers })
       ).rejects.toThrowError(AuthenticationError);
     } finally {
+      process.env.BETTER_AUTH_URL = prevAuthUrl || 'http://127.0.0.1:3000';
+      getEnv(true);
+      global.__lawoffice_auth = undefined;
       await prisma.verification.deleteMany({
         where: { value: provisionedOwner.userId },
       }).catch(() => {});
@@ -2349,6 +2387,304 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(tfRecord?.lockedUntil).not.toBeNull();
     expect(tfRecord!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
     expect(tfRecord?.failedVerificationCount).toBeGreaterThanOrEqual(5);
+  });
+
+  it('enforces provider-compatible credential boundaries on owner provisioning (F04)', async () => {
+    // 1. Password exceeding 128 characters is rejected fail-closed
+    const password129 = 'A'.repeat(129) + '!1';
+    await expect(
+      provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'valid.owner@office.eg',
+        password: password129,
+      })
+    ).rejects.toThrowError(ProvisioningError);
+
+    try {
+      await provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'valid.owner@office.eg',
+        password: password129,
+      });
+      expect.unreachable('Should have thrown on 129-char password');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProvisioningError);
+      expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
+      expect((err as ProvisioningError).message).toContain('128');
+    }
+
+    // 2. Malformed email with consecutive dots rejected fail-closed
+    await expect(
+      provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'owner..name@synthetic.invalid',
+        password: 'ValidPassword123!',
+      })
+    ).rejects.toThrowError(ProvisioningError);
+
+    try {
+      await provisionOwner({
+        name: 'الأستاذ عادل المالك',
+        email: 'owner..name@synthetic.invalid',
+        password: 'ValidPassword123!',
+      });
+      expect.unreachable('Should have thrown on consecutive dots in email');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProvisioningError);
+      expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
+      expect((err as ProvisioningError).message).toContain('البريد الإلكتروني');
+    }
+  });
+
+  it('closes alternate recovery-generation paths on /api/auth/two-factor/generate-backup-codes around persistent lock (F06)', async () => {
+    const prisma = getPrismaClient();
+
+    // Reset failed count and lock for test isolation
+    await prisma.twoFactor.updateMany({
+      where: { userId: provisionedOwner.userId },
+      data: { failedVerificationCount: 0, lockedUntil: null },
+    });
+
+    const tfInitial = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    const initialCodes = tfInitial?.backupCodes;
+
+    // 1. Unauthenticated request to /api/auth/two-factor/generate-backup-codes fails closed with 401
+    const unauthReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
+    });
+    const unauthRes = await authRoutePOST(unauthReq);
+    expect(unauthRes.status).toBe(401);
+
+    // 2. Authenticated request with session
+    const testSessionToken = `sess-f06-${Date.now()}`;
+    await prisma.session.create({
+      data: {
+        id: `sess-f06-id-${Date.now()}`,
+        userId: provisionedOwner.userId,
+        token: testSessionToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+      },
+    });
+    const sessionCookieHeader = `better-auth.session_token=${signSessionTokenCookie(testSessionToken, getEnv().BETTER_AUTH_SECRET)}`;
+
+    // Missing password returns 400
+    const noPassReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify({}),
+    });
+    const noPassRes = await authRoutePOST(noPassReq);
+    expect(noPassRes.status).toBe(400);
+
+    // 3. Wrong password returns 400 and increments failedVerificationCount under atomic lock
+    const wrongPassReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify({ password: 'WrongPassword999!' }),
+    });
+    const wrongPassRes = await authRoutePOST(wrongPassReq);
+    expect(wrongPassRes.status).toBe(400);
+
+    const tfAfterWrong = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfAfterWrong?.failedVerificationCount).toBe(1);
+    expect(tfAfterWrong?.backupCodes).toBe(initialCodes); // Untouched
+
+    // Trigger lock: set failedVerificationCount to 5 and lockedUntil in the future
+    await prisma.twoFactor.updateMany({
+      where: { userId: provisionedOwner.userId },
+      data: { failedVerificationCount: 5, lockedUntil: new Date(Date.now() + 15 * 60 * 1000) },
+    });
+
+    // 4. While locked, request returns 429 and does NOT mutate backup codes even if password is correct
+    const lockedReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
+    });
+    const lockedRes = await authRoutePOST(lockedReq);
+    expect(lockedRes.status).toBe(429);
+    const lockedJson = await lockedRes.json();
+    expect(lockedJson.error).toContain('تم قفل الإجراء مؤقتاً');
+
+    const tfWhileLocked = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfWhileLocked?.backupCodes).toBe(initialCodes); // Strictly unchanged
+
+    // 5. Simulate lock expiry: reset lock
+    await prisma.twoFactor.updateMany({
+      where: { userId: provisionedOwner.userId },
+      data: { failedVerificationCount: 0, lockedUntil: null },
+    });
+
+    // Valid authenticated request succeeds with 200 and issues 10 new codes
+    const validReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+      },
+      body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
+    });
+    const validRes = await authRoutePOST(validReq);
+    expect(validRes.status).toBe(200);
+    const validJson = await validRes.json();
+    expect(Array.isArray(validJson.backupCodes)).toBe(true);
+    expect(validJson.backupCodes.length).toBe(10);
+
+    const tfAfterSuccess = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfAfterSuccess?.backupCodes).not.toBe(initialCodes); // Rotated
+  });
+
+  it('invalidates prior-password unfinished MFA challenges upon password rotation (F10)', async () => {
+    // 1. Establish an active session (Context A) for the owner with current password
+    const currentPassword = 'BrandNewPassword2026!#';
+
+    // Context A sign-in:
+    const signInReqA = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: currentPassword,
+      }),
+    });
+    const signInResA = await authRoutePOST(signInReqA);
+    expect(signInResA.status).toBe(200);
+    const tfCookieA = (signInResA.headers.getSetCookie?.() || [signInResA.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    expect(tfCookieA).toBeDefined();
+
+    const codeA = await generateTotpCode(provisionedOwner.totpSecret);
+    const verifyReqA = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfCookieA!.split(';')[0],
+      },
+      body: JSON.stringify({ code: codeA }),
+    });
+    const verifyResA = await authRoutePOST(verifyReqA);
+    expect(verifyResA.status).toBe(200);
+    const verifyJsonA = await verifyResA.json();
+    const sessionTokenA = verifyJsonA.token;
+    const sessionCookieHeaderA = `better-auth.session_token=${signSessionTokenCookie(sessionTokenA, getEnv().BETTER_AUTH_SECRET)}`;
+
+    // Verify Context A has an active actor
+    const actorA = await requireActor({ headers: new Headers({ cookie: sessionCookieHeaderA }) });
+    expect(actorA.id).toBe(provisionedOwner.userId);
+
+    // 2. Client initiates a SECOND login attempt with current password (Context B),
+    // receiving twoFactorRedirect and a two_factor challenge cookie, but does NOT complete MFA yet.
+    const signInReqB = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: currentPassword,
+      }),
+    });
+    const signInResB = await authRoutePOST(signInReqB);
+    expect(signInResB.status).toBe(200);
+    const signInJsonB = await signInResB.json();
+    expect(signInJsonB.twoFactorRedirect).toBe(true);
+
+    const pendingChallengeCookie = (signInResB.headers.getSetCookie?.() || [signInResB.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    expect(pendingChallengeCookie).toBeDefined();
+    const pendingChallengeHeader = pendingChallengeCookie!.split(';')[0];
+
+    // 3. Now, in session Context A, owner rotates password to a newer password
+    const rotatedPassword = 'RotatedPassword2026!@#';
+    const pwChangeReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeaderA,
+      },
+      body: JSON.stringify({
+        currentPassword,
+        newPassword: rotatedPassword,
+        revokeOtherSessions: true,
+      }),
+    });
+    const pwChangeRes = await authRoutePOST(pwChangeReq);
+    expect(pwChangeRes.status).toBe(200);
+
+    // 4. The pending challenge (Context B) based on the OLD password credential is now submitted with valid TOTP
+    const codeB = await generateTotpCode(provisionedOwner.totpSecret);
+    const finishOldChallengeReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: pendingChallengeHeader,
+      },
+      body: JSON.stringify({ code: codeB }),
+    });
+    const finishOldChallengeRes = await authRoutePOST(finishOldChallengeReq);
+
+    // Must be rejected (non-200 / 401) and issue NO session token cookie
+    expect(finishOldChallengeRes.status).not.toBe(200);
+    const finishCookies = finishOldChallengeRes.headers.getSetCookie?.() || [
+      finishOldChallengeRes.headers.get('set-cookie') || '',
+    ];
+    const hasIssuedSession = finishCookies.some(
+      (c) => c.startsWith('better-auth.session_token=') && !c.includes('Max-Age=0')
+    );
+    expect(hasIssuedSession).toBe(false);
+
+    // 5. Subsequent sign-in with the NEW password and fresh TOTP succeeds cleanly
+    const freshSignInReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: provisionedOwner.email,
+        password: rotatedPassword,
+      }),
+    });
+    const freshSignInRes = await authRoutePOST(freshSignInReq);
+    expect(freshSignInRes.status).toBe(200);
+    const freshTfCookie = (freshSignInRes.headers.getSetCookie?.() || [freshSignInRes.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    expect(freshTfCookie).toBeDefined();
+
+    const freshCode = await generateTotpCode(provisionedOwner.totpSecret);
+    const freshVerifyReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: freshTfCookie!.split(';')[0],
+      },
+      body: JSON.stringify({ code: freshCode }),
+    });
+    const freshVerifyRes = await authRoutePOST(freshVerifyReq);
+    expect(freshVerifyRes.status).toBe(200);
+    const freshVerifyJson = await freshVerifyRes.json();
+    expect(freshVerifyJson.token).toBeDefined();
+
+    // Reset password back for subsequent tests if any
+    const resetPwReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `better-auth.session_token=${signSessionTokenCookie(freshVerifyJson.token, getEnv().BETTER_AUTH_SECRET)}`,
+      },
+      body: JSON.stringify({
+        currentPassword: rotatedPassword,
+        newPassword: 'BrandNewPassword2026!#',
+        revokeOtherSessions: true,
+      }),
+    });
+    await authRoutePOST(resetPwReq);
   });
 
   afterAll(async () => {

@@ -4,6 +4,18 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { twoFactor } from '@/lib/auth-client';
 
+/**
+ * Normalizes Eastern Arabic-Indic digits (٠-٩) and Persian digits (۰-۹) to standard ASCII (0-9)
+ * and strips any non-numeric characters.
+ */
+export function normalizeOtpDigits(input: string): string {
+  if (!input) return '';
+  return input
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, '');
+}
+
 export default function VerifyPage() {
   const router = useRouter();
   const [method, setMethod] = useState<'totp' | 'backup'>('totp');
@@ -15,12 +27,26 @@ export default function VerifyPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setIsLoading(true);
 
-    try {
-      if (method === 'totp') {
+    if (method === 'totp') {
+      const normalized = normalizeOtpDigits(totpCode);
+      if (!normalized) {
+        setError('يرجى إدخال رمز التحقق المكوّن من 6 أرقام.');
+        return;
+      }
+      if (normalized.length < 6) {
+        setError(`رمز التحقق غير مكتمل (${normalized.length} من 6 أرقام). يرجى إدخال 6 أرقام.`);
+        return;
+      }
+      if (normalized.length > 6) {
+        setError('رمز التحقق يجب ألا يتجاوز 6 أرقام.');
+        return;
+      }
+
+      setIsLoading(true);
+      try {
         const res = await twoFactor.verifyTotp({
-          code: totpCode.trim(),
+          code: normalized,
         });
 
         if (res.error) {
@@ -30,9 +56,21 @@ export default function VerifyPage() {
         }
 
         router.push('/');
-      } else {
+      } catch {
+        setError('حدث خطأ أثناء الاتصال بالخادم للتحقق من الرمز. برجاء المحاولة مجدداً.');
+        setIsLoading(false);
+      }
+    } else {
+      const trimmed = backupCode.trim();
+      if (!trimmed) {
+        setError('يرجى إدخال رمز الاسترداد.');
+        return;
+      }
+
+      setIsLoading(true);
+      try {
         const res = await twoFactor.verifyBackupCode({
-          code: backupCode.trim(),
+          code: trimmed,
         });
 
         if (res.error) {
@@ -42,10 +80,10 @@ export default function VerifyPage() {
         }
 
         router.push('/');
+      } catch {
+        setError('حدث خطأ أثناء الاتصال بالخادم للتحقق من الرمز. برجاء المحاولة مجدداً.');
+        setIsLoading(false);
       }
-    } catch {
-      setError('حدث خطأ أثناء التحقق من الرمز. برجاء المحاولة مجدداً.');
-      setIsLoading(false);
     }
   };
 
@@ -60,9 +98,10 @@ export default function VerifyPage() {
         {error && (
           <div
             role="alert"
+            aria-live="polite"
             className="mb-4 p-3 bg-red-50 border border-red-200 text-[#A4262C] text-sm rounded flex items-center gap-2"
           >
-            <span>⚠️</span>
+            <span aria-hidden="true">⚠️</span>
             <span>{error}</span>
           </div>
         )}
@@ -108,19 +147,29 @@ export default function VerifyPage() {
                 id="totpCode"
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 pattern="[0-9]*"
                 maxLength={6}
                 required
                 autoFocus
                 dir="ltr"
                 value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => {
+                  const normalized = normalizeOtpDigits(e.target.value).slice(0, 6);
+                  setTotpCode(normalized);
+                  if (error) setError(null);
+                }}
                 className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center tracking-widest text-xl font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"
                 placeholder="123456"
               />
-              <p className="text-xs text-[#4D606A] mt-1.5">
-                أدخل الرمز الحالي المعروض في تطبيق المصادقة (Google Authenticator أو ما يماثله).
-              </p>
+              <div className="flex justify-between items-center text-xs text-[#4D606A] mt-1.5">
+                <span>أدخل الرمز من تطبيق المصادقة (يدعم الأرقام العربية والإنجليزية).</span>
+                {totpCode.length > 0 && (
+                  <span className="font-mono text-[#14566B] font-medium" dir="ltr">
+                    {totpCode.length}/6
+                  </span>
+                )}
+              </div>
             </div>
           ) : (
             <div>
@@ -134,7 +183,10 @@ export default function VerifyPage() {
                 autoFocus
                 dir="ltr"
                 value={backupCode}
-                onChange={(e) => setBackupCode(e.target.value)}
+                onChange={(e) => {
+                  setBackupCode(e.target.value);
+                  if (error) setError(null);
+                }}
                 className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center font-mono text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"
                 placeholder="xxxxx-xxxxx"
               />

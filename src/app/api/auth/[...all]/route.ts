@@ -1,5 +1,8 @@
 import { auth, getPrismaClient } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireActor } from '@/modules/identity/require-actor';
+import { regenerateRecoveryCodes } from '@/modules/identity/recovery-codes';
+import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 
 const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
@@ -39,6 +42,52 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
         )
         .join('; ');
       request.headers.set('cookie', cleaned);
+    }
+  }
+
+  // F10: Invalidate prior-password unfinished MFA challenges before provider processing
+  if (
+    pathname.includes('/two-factor/verify-totp') ||
+    pathname.includes('/two-factor/verify-backup-code')
+  ) {
+    const cookieHeader = request.headers.get('cookie');
+    if (cookieHeader) {
+      const cookies = cookieHeader.split(';').map((c) => c.trim());
+      const tfCookie = cookies.find(
+        (c) =>
+          c.startsWith('better-auth.two_factor=') ||
+          c.startsWith('__Secure-better-auth.two_factor=')
+      );
+      if (tfCookie) {
+        const cookieVal = tfCookie.split('=')[1] || '';
+        const rawToken = cookieVal.split('.')[0];
+        if (rawToken) {
+          const prisma = getPrismaClient();
+          const verifRecord = await prisma.verification.findFirst({
+            where: {
+              OR: [
+                { identifier: rawToken },
+                { identifier: decodeURIComponent(rawToken) },
+                { identifier: cookieVal },
+                { identifier: `two-factor-${rawToken}` },
+              ],
+            },
+          });
+          if (verifRecord) {
+            const account = await prisma.account.findFirst({
+              where: { userId: verifRecord.value, providerId: 'credential' },
+            });
+            if (account && new Date(verifRecord.createdAt) < new Date(account.updatedAt)) {
+              // Stale challenge created under prior password! Delete and reject!
+              await prisma.verification.delete({ where: { id: verifRecord.id } }).catch(() => {});
+              return NextResponse.json(
+                { error: 'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.' },
+                { status: 401 }
+              );
+            }
+          }
+        }
+      }
     }
   }
 
@@ -124,6 +173,44 @@ export async function POST(request: NextRequest) {
   if (blocked) return blocked;
 
   const pathname = request.nextUrl.pathname;
+
+  // F06: Intercept raw POST /api/auth/two-factor/generate-backup-codes to enforce
+  // identical Identity authorization, password reauthentication, and atomic lockout budget
+  if (pathname.includes('/two-factor/generate-backup-codes')) {
+    try {
+      const actor = await requireActor({ headers: request.headers });
+      const body = await request.clone().json().catch(() => ({}));
+      const password = body.currentPassword || body.password;
+      if (!password || typeof password !== 'string' || password.trim().length === 0) {
+        return NextResponse.json(
+          { error: 'كلمة المرور الحالية مطلوبة لتأكيد الهوية.' },
+          { status: 400 }
+        );
+      }
+
+      const backupCodes = await regenerateRecoveryCodes(actor, password);
+      return NextResponse.json({ backupCodes, status: true }, { status: 200 });
+    } catch (err) {
+      if (err instanceof AuthenticationError) {
+        if (err.code === 'RATE_LIMITED') {
+          return NextResponse.json({ error: err.message }, { status: 429 });
+        }
+        if (
+          err.code === 'UNAUTHENTICATED' ||
+          err.code === 'SESSION_EXPIRED' ||
+          err.code === 'SESSION_INACTIVE'
+        ) {
+          return NextResponse.json({ error: err.message }, { status: 401 });
+        }
+        return NextResponse.json({ error: err.message }, { status: 400 });
+      }
+      if (err instanceof AuthorizationError) {
+        return NextResponse.json({ error: err.message }, { status: 403 });
+      }
+      return NextResponse.json({ error: 'حدث خطأ غير متوقع أثناء معالجة رموز الاسترداد.' }, { status: 500 });
+    }
+  }
+
   let reqToExecute = request;
   if (pathname.includes('/change-password')) {
     try {
@@ -141,7 +228,8 @@ export async function POST(request: NextRequest) {
 
   const response = await auth.handler(reqToExecute);
 
-  // R04: When password change succeeds, verify other sessions are evicted
+  // R04 & F10: When password change succeeds, verify other sessions are evicted
+  // and all unfinished prior-password MFA challenges are invalidated
   if (pathname.includes('/change-password') && response.status === 200) {
     try {
       const sessionData = await auth.api.getSession({
@@ -153,10 +241,21 @@ export async function POST(request: NextRequest) {
       });
       if (sessionData && sessionData.session) {
         const prisma = getPrismaClient();
+        const userId = sessionData.session.userId;
+        const currentSessionId = sessionData.session.id;
+
+        // Revoke all other sessions for this user (R04)
         await prisma.session.deleteMany({
           where: {
-            userId: sessionData.session.userId,
-            id: { not: sessionData.session.id },
+            userId,
+            id: { not: currentSessionId },
+          },
+        });
+
+        // Invalidate any unfinished MFA challenges created under the prior password (F10)
+        await prisma.verification.deleteMany({
+          where: {
+            value: userId,
           },
         });
       }
@@ -165,6 +264,61 @@ export async function POST(request: NextRequest) {
         { error: 'فشل في إنهاء الجلسات الأخرى للمستخدم بعد تغيير كلمة المرور.' },
         { status: 500 }
       );
+    }
+  }
+
+  // F10: If two-factor verification endpoint succeeded, ensure newly created session
+  // was not issued against a rotated credential
+  if (
+    (pathname.includes('/two-factor/verify-totp') ||
+      pathname.includes('/two-factor/verify-backup-code')) &&
+    response.status === 200
+  ) {
+    try {
+      const setCookies = response.headers.getSetCookie?.() || [
+        response.headers.get('set-cookie') || '',
+      ];
+      const sessionCookie = setCookies.find(
+        (c) =>
+          c.startsWith('better-auth.session_token=') ||
+          c.startsWith('__Secure-better-auth.session_token=')
+      );
+      if (sessionCookie) {
+        const rawCookiePart = sessionCookie.split(';')[0];
+        const eqIdx = rawCookiePart.indexOf('=');
+        const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
+        const decodedVal = decodeURIComponent(cookieVal);
+        const rawToken = decodedVal.split('.')[0];
+        if (rawToken) {
+          const prisma = getPrismaClient();
+          const newSession = await prisma.session.findFirst({
+            where: {
+              OR: [
+                { token: rawToken },
+                { token: decodedVal },
+                { token: cookieVal },
+              ],
+            },
+          });
+          if (newSession) {
+            const account = await prisma.account.findFirst({
+              where: { userId: newSession.userId, providerId: 'credential' },
+            });
+            if (account && new Date(newSession.createdAt) <= new Date(account.updatedAt)) {
+              await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
+              const errRes = NextResponse.json(
+                { error: 'تم تغيير كلمة المرور الخاصة بالحساب. يلزم إعادة تسجيل الدخول بكلمة المرور الجديدة.' },
+                { status: 401 }
+              );
+              errRes.cookies.delete('better-auth.session_token');
+              errRes.cookies.delete('__Secure-better-auth.session_token');
+              return errRes;
+            }
+          }
+        }
+      }
+    } catch {
+      // Best-effort post-verification check
     }
   }
 

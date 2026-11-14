@@ -485,5 +485,192 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       await mismatchedDb.drop().catch(() => {});
     }
   }, 60000);
+
+  it('rejects baseline when user_email_key is non-unique (reproduction a / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      // 1. Apply approved migration SQL without Prisma history
+      await reproDb.pool.query(migrationSql);
+
+      // 2. Insert sentinel data
+      await reproDb.pool.query(`
+        CREATE TABLE repro_a_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_a_sentinel (note) VALUES ('SENTINEL_A_PRESERVED');
+      `);
+
+      // 3. Mutate user_email_key to be non-unique (same name)
+      await reproDb.pool.query('DROP INDEX "user_email_key";');
+      await reproDb.pool.query('CREATE INDEX "user_email_key" ON "user"("email");');
+
+      // 4. Baseline must fail fast and refuse to record history
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      // 5. Zero history recorded in _prisma_migrations
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      // 6. Sentinel data remains intact
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_a_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_A_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('rejects baseline when twoFactor.verified default is false instead of true (reproduction b / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_b_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_b_sentinel (note) VALUES ('SENTINEL_B_PRESERVED');
+      `);
+
+      // Mutate default to false
+      await reproDb.pool.query('ALTER TABLE "twoFactor" ALTER COLUMN "verified" SET DEFAULT false;');
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_b_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_B_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('rejects baseline when session_userId_fkey is retargeted to an unrelated table (reproduction c / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE unrelated_target (id TEXT PRIMARY KEY);
+        CREATE TABLE repro_c_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_c_sentinel (note) VALUES ('SENTINEL_C_PRESERVED');
+      `);
+
+      // Retarget session_userId_fkey to unrelated table while keeping name and cascade actions
+      await reproDb.pool.query('ALTER TABLE "session" DROP CONSTRAINT "session_userId_fkey";');
+      await reproDb.pool.query(
+        'ALTER TABLE "session" ADD CONSTRAINT "session_userId_fkey" FOREIGN KEY ("userId") REFERENCES unrelated_target(id) ON DELETE CASCADE ON UPDATE CASCADE;'
+      );
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_c_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_C_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('pins public schema and neutralizes ambient PGOPTIONS search_path routing (F05)', async () => {
+    const ambientDb = await createDedicatedTestDatabase();
+    const origPgOptions = process.env.PGOPTIONS;
+    try {
+      // 1. Create a staging schema in the dedicated target database
+      await ambientDb.pool.query('CREATE SCHEMA staging;');
+      await ambientDb.pool.query(`
+        CREATE TABLE staging.sentinel_staging (id SERIAL PRIMARY KEY, data TEXT);
+        INSERT INTO staging.sentinel_staging (data) VALUES ('STAGING_DATA_INTACT');
+      `);
+
+      // 2. Set ambient PGOPTIONS to redirect search_path to staging,public
+      process.env.PGOPTIONS = '-c search_path=staging,public';
+
+      // 3. Execute baseline: must neutralize ambient routing, pin public schema, and succeed
+      const baselineResult = await runIdentityBaseline({
+        targetUrl: ambientDb.url,
+        silent: true,
+      });
+      expect(baselineResult.success).toBe(true);
+
+      // 4. Verify staging schema received ZERO managed tables (no leakage into staging)
+      const stagingTablesRes = await ambientDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'staging' AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      `);
+      expect(stagingTablesRes.rows.length).toBe(0);
+
+      // Staging sentinel intact
+      const stagingSentinel = await ambientDb.pool.query('SELECT * FROM staging.sentinel_staging;');
+      expect(stagingSentinel.rows.length).toBe(1);
+      expect(stagingSentinel.rows[0].data).toBe('STAGING_DATA_INTACT');
+
+      // 5. Verify public schema received all 6 managed tables
+      const publicTablesRes = await ambientDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name IN ('user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap');
+      `);
+      expect(publicTablesRes.rows.length).toBe(6);
+
+      // 6. Verify migration status is clean in public schema
+      const statusRes = runPrismaCli(['migrate', 'status'], ambientDb.url);
+      expect(statusRes.status).toBe(0);
+      expect(statusRes.stdout).toContain('Database schema is up to date');
+    } finally {
+      if (origPgOptions === undefined) {
+        delete process.env.PGOPTIONS;
+      } else {
+        process.env.PGOPTIONS = origPgOptions;
+      }
+      await ambientDb.drop().catch(() => {});
+    }
+  }, 90000);
 });
 
