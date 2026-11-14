@@ -170,14 +170,31 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
    - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema semantics or detect missing/divergent column definitions.
    - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking the migration as applied in Prisma:
      - **Tables**: verifies all 6 required tables exist in `public`: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
-     - **Columns, Types, Nullability, Defaults**: verifies all 47 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
-       * `twoFactor.verified`: boolean NOT NULL, default must be `true` (rejects default `false`).
-       * `twoFactor.failedVerificationCount`: integer NOT NULL, default `0`.
-       * `office_bootstrap.isClosed`: boolean NOT NULL, default `true`.
-       * Verifies timestamp defaults (`CURRENT_TIMESTAMP`), boolean defaults, and rejects any unexpected extra columns on managed tables.
+     - **Columns, Types, Precision, Nullability, Defaults**: verifies all 47 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
+       * **Datetime Precision**: queries `information_schema.columns.datetime_precision`. All 14 `TIMESTAMP(3)` columns (`user.createdAt`, `user.updatedAt`, `session.expiresAt`, `session.createdAt`, `session.updatedAt`, `account.accessTokenExpiresAt`, `account.refreshTokenExpiresAt`, `account.createdAt`, `account.updatedAt`, `verification.expiresAt`, `verification.createdAt`, `verification.updatedAt`, `twoFactor.lockedUntil`, `office_bootstrap.closedAt`) must have `datetime_precision = 3`. Truncated precision (e.g. `timestamp(0)`) or untyped timestamps are rejected fail-closed.
+       * **Strict Canonical Default Expressions**:
+         - Timestamp defaults must strictly match `CURRENT_TIMESTAMP` or `now()`. Any interval additions, arithmetic expressions (such as `+ interval '1 day'`), or arbitrary functions are rejected fail-closed.
+         - `twoFactor.verified`: boolean NOT NULL, default must be strictly `true` (rejects default `false`).
+         - `twoFactor.failedVerificationCount`: integer NOT NULL, default strictly `0`.
+         - `office_bootstrap.isClosed`: boolean NOT NULL, default strictly `true`.
+         - `office_bootstrap.id`: text NOT NULL, default strictly `'singleton'::text`.
+         - `user.role`: UserRole NOT NULL, default strictly `'OWNER'::"UserRole"`.
+         - `user.emailVerified` and `user.twoFactorEnabled`: default strictly `false`.
+       * Rejects any missing columns or unexpected extra columns on managed tables.
      - **Primary Keys**: verifies constraint name, table binding, and exact primary key column definitions (`['id']` across all 6 tables).
      - **Foreign Keys**: verifies constraint name, source table/column, referenced schema (`public`), referenced table (`user`), referenced column (`id`), and cascading actions (`ON DELETE CASCADE ON UPDATE CASCADE`). Rejects foreign keys redirected to unrelated tables.
-     - **Indexes**: queries `pg_index` to verify index name, table binding, validity (`indisvalid = true`), uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`), and indexed column matching. Non-unique same-name indexes are rejected fail-closed.
+     - **Structured Index Verification**: queries `pg_index` joined on `pg_class`, `pg_attribute`, and `pg_namespace`:
+       * Verifies index name, table binding, and index validity (`indisvalid = true`).
+       * Verifies index uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`, `false` for foreign key and lookup indexes). Same-name non-unique indexes are rejected fail-closed.
+       * Strictly rejects partial indexes: asserts `indpred IS NULL` (`is_partial = false`). Any index definition containing a `WHERE` predicate (such as `UNIQUE (email) WHERE false`) is rejected fail-closed.
+       * Strictly rejects expression indexes: asserts `indexprs IS NULL` (`is_expression = false`).
+       * Verifies exact column count, column names, and column order extracted via `generate_series(1, ix.indnatts)` with `pg_get_indexdef(ix.indexrelid, k, true)`:
+         - `user_email_key`: exactly 1 column `['email']`. Rejects composite indexes (such as `(email, name)`).
+         - `session_token_key`: exactly 1 column `['token']`.
+         - `session_userId_idx`: exactly 1 column `['userId']`.
+         - `account_userId_idx`: exactly 1 column `['userId']`.
+         - `verification_identifier_idx`: exactly 1 column `['identifier']`.
+         - `twoFactor_userId_idx`: exactly 1 column `['userId']`.
      - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'MAINTAINER']`, rejecting missing or extraneous values.
 
 5. **Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05)**:

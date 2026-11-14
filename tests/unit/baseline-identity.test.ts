@@ -254,58 +254,58 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       ];
 
       const cols = [
-        { table_name: 'user', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'email', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'emailVerified', data_type: 'boolean', is_nullable: 'NO', column_default: 'false', udt_name: 'bool' },
-        { table_name: 'user', column_name: 'image', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'user', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
-        { table_name: 'user', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'user', column_name: 'role', data_type: 'USER-DEFINED', is_nullable: 'NO', column_default: "'OWNER'::\"UserRole\"", udt_name: 'UserRole' },
-        { table_name: 'user', column_name: 'twoFactorEnabled', data_type: 'boolean', is_nullable: 'YES', column_default: 'false', udt_name: 'bool' },
+        { table_name: 'user', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'name', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'email', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'emailVerified', data_type: 'boolean', is_nullable: 'NO', column_default: 'false', datetime_precision: null, udt_name: 'bool' },
+        { table_name: 'user', column_name: 'image', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'user', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'user', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'user', column_name: 'role', data_type: 'USER-DEFINED', is_nullable: 'NO', column_default: "'OWNER'::\"UserRole\"", datetime_precision: null, udt_name: 'UserRole' },
+        { table_name: 'user', column_name: 'twoFactorEnabled', data_type: 'boolean', is_nullable: 'YES', column_default: 'false', datetime_precision: null, udt_name: 'bool' },
 
-        { table_name: 'session', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'token', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'session', column_name: 'ipAddress', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'userAgent', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'session', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'token', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'session', column_name: 'ipAddress', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'userAgent', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'session', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
 
-        { table_name: 'account', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accountId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'providerId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accessToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'refreshToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'idToken', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'accessTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'refreshTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'scope', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'password', data_type: 'text', is_nullable: 'YES', column_default: null, udt_name: 'text' },
-        { table_name: 'account', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
-        { table_name: 'account', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accountId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'providerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accessToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'refreshToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'idToken', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'accessTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'refreshTokenExpiresAt', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'scope', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'password', data_type: 'text', is_nullable: 'YES', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'account', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'account', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
 
-        { table_name: 'verification', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'identifier', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'value', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'verification', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
-        { table_name: 'verification', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
-        { table_name: 'verification', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'identifier', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'value', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'verification', column_name: 'expiresAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'createdAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'verification', column_name: 'updatedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
 
-        { table_name: 'twoFactor', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'secret', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'backupCodes', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
-        { table_name: 'twoFactor', column_name: 'verified', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', udt_name: 'bool' },
-        { table_name: 'twoFactor', column_name: 'failedVerificationCount', data_type: 'integer', is_nullable: 'NO', column_default: '0', udt_name: 'int4' },
-        { table_name: 'twoFactor', column_name: 'lockedUntil', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, udt_name: 'timestamp' },
+        { table_name: 'twoFactor', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'secret', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'backupCodes', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'userId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
+        { table_name: 'twoFactor', column_name: 'verified', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool' },
+        { table_name: 'twoFactor', column_name: 'failedVerificationCount', data_type: 'integer', is_nullable: 'NO', column_default: '0', datetime_precision: null, udt_name: 'int4' },
+        { table_name: 'twoFactor', column_name: 'lockedUntil', data_type: 'timestamp without time zone', is_nullable: 'YES', column_default: null, datetime_precision: 3, udt_name: 'timestamp' },
 
-        { table_name: 'office_bootstrap', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: "'singleton'::text", udt_name: 'text' },
-        { table_name: 'office_bootstrap', column_name: 'isClosed', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', udt_name: 'bool' },
-        { table_name: 'office_bootstrap', column_name: 'closedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', udt_name: 'timestamp' },
-        { table_name: 'office_bootstrap', column_name: 'ownerId', data_type: 'text', is_nullable: 'NO', column_default: null, udt_name: 'text' },
+        { table_name: 'office_bootstrap', column_name: 'id', data_type: 'text', is_nullable: 'NO', column_default: "'singleton'::text", datetime_precision: null, udt_name: 'text' },
+        { table_name: 'office_bootstrap', column_name: 'isClosed', data_type: 'boolean', is_nullable: 'NO', column_default: 'true', datetime_precision: null, udt_name: 'bool' },
+        { table_name: 'office_bootstrap', column_name: 'closedAt', data_type: 'timestamp without time zone', is_nullable: 'NO', column_default: 'CURRENT_TIMESTAMP', datetime_precision: 3, udt_name: 'timestamp' },
+        { table_name: 'office_bootstrap', column_name: 'ownerId', data_type: 'text', is_nullable: 'NO', column_default: null, datetime_precision: null, udt_name: 'text' },
       ];
 
       const pkeys = [
@@ -356,6 +356,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'user',
           indisunique: true,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['email'],
           indexdef: 'CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email)',
         },
         {
@@ -363,6 +367,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'session',
           indisunique: true,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['token'],
           indexdef: 'CREATE UNIQUE INDEX session_token_key ON public.session USING btree (token)',
         },
         {
@@ -370,6 +378,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'session',
           indisunique: false,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['userId'],
           indexdef: 'CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId")',
         },
         {
@@ -377,6 +389,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'account',
           indisunique: false,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['userId'],
           indexdef: 'CREATE INDEX "account_userId_idx" ON public.account USING btree ("userId")',
         },
         {
@@ -384,6 +400,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'verification',
           indisunique: false,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['identifier'],
           indexdef: 'CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier)',
         },
         {
@@ -391,6 +411,10 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           tablename: 'twoFactor',
           indisunique: false,
           indisvalid: true,
+          is_partial: false,
+          is_expression: false,
+          predicate: null as string | null,
+          index_columns: ['userId'],
           indexdef: 'CREATE INDEX "twoFactor_userId_idx" ON public."twoFactor" USING btree ("userId")',
         },
       ];
@@ -539,12 +563,72 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         data_type: 'text',
         is_nullable: 'YES',
         column_default: null,
+        datetime_precision: null,
         udt_name: 'text',
       });
       const client = createMockClient(catalog);
       const res = await verifySchemaEquivalence(client);
       expect(res.equivalent).toBe(false);
       expect(res.errors).toContain("Table column 'user.injected_column' is not part of the managed baseline schema");
+    });
+
+    it('rejects R10 reproduction 1: partial user_email_key index with WHERE predicate fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.is_partial = true;
+        idx.predicate = 'false';
+        idx.indexdef = 'CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email) WHERE false';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' must not be a partial index, but found predicate: false"
+      );
+    });
+
+    it('rejects R10 reproduction 2: composite user_email_key (email, name) index fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.index_columns = ['email', 'name'];
+        idx.indexdef = 'CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email, name)';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' column count mismatch: expected [email], got [email, name]"
+      );
+    });
+
+    it('rejects R10 reproduction 3: user.createdAt with datetime_precision 0 fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'user' && c.column_name === 'createdAt');
+      if (col) {
+        col.datetime_precision = 0;
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Column 'user.createdAt' datetime precision mismatch: expected 3, got 0"
+      );
+    });
+
+    it('rejects R10 reproduction 3: user.createdAt default with interval addition fail-closed', async () => {
+      const catalog = buildValidCatalog();
+      const col = catalog.cols.find((c) => c.table_name === 'user' && c.column_name === 'createdAt');
+      if (col) {
+        col.column_default = "(CURRENT_TIMESTAMP + '1 day'::interval)";
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Column 'user.createdAt' default mismatch: expected 'CURRENT_TIMESTAMP', got '(CURRENT_TIMESTAMP + '1 day'::interval)'"
+      );
     });
   });
 });

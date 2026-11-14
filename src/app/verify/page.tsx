@@ -3,18 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { twoFactor } from '@/lib/auth-client';
-
-/**
- * Normalizes Eastern Arabic-Indic digits (٠-٩) and Persian digits (۰-۹) to standard ASCII (0-9)
- * and strips any non-numeric characters.
- */
-export function normalizeOtpDigits(input: string): string {
-  if (!input) return '';
-  return input
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
-    .replace(/\D/g, '');
-}
+import { parseAndValidateOtp } from '@/modules/identity/otp-input';
 
 export default function VerifyPage() {
   const router = useRouter();
@@ -29,24 +18,16 @@ export default function VerifyPage() {
     setError(null);
 
     if (method === 'totp') {
-      const normalized = normalizeOtpDigits(totpCode);
-      if (!normalized) {
-        setError('يرجى إدخال رمز التحقق المكوّن من 6 أرقام.');
-        return;
-      }
-      if (normalized.length < 6) {
-        setError(`رمز التحقق غير مكتمل (${normalized.length} من 6 أرقام). يرجى إدخال 6 أرقام.`);
-        return;
-      }
-      if (normalized.length > 6) {
-        setError('رمز التحقق يجب ألا يتجاوز 6 أرقام.');
+      const validation = parseAndValidateOtp(totpCode);
+      if (!validation.valid) {
+        setError(validation.message);
         return;
       }
 
       setIsLoading(true);
       try {
         const res = await twoFactor.verifyTotp({
-          code: normalized,
+          code: validation.normalizedCode,
         });
 
         if (res.error) {
@@ -148,15 +129,12 @@ export default function VerifyPage() {
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
-                pattern="[0-9]*"
-                maxLength={6}
                 required
                 autoFocus
                 dir="ltr"
                 value={totpCode}
                 onChange={(e) => {
-                  const normalized = normalizeOtpDigits(e.target.value).slice(0, 6);
-                  setTotpCode(normalized);
+                  setTotpCode(e.target.value);
                   if (error) setError(null);
                 }}
                 className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center tracking-widest text-xl font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"

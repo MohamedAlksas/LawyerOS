@@ -57,8 +57,11 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const dismissCodesButtonRef = useRef<HTMLButtonElement | null>(null);
+  const generationRef = useRef<number>(0);
 
   const closeRegenModal = useCallback(() => {
+    generationRef.current += 1;
+    setIsProcessing(false);
     setShowRegenModal(false);
     setPasswordForCodes('');
     setNewCodes(null);
@@ -201,9 +204,14 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
     e.preventDefault();
     setRegenError(null);
     setIsProcessing(true);
+    const currentGen = ++generationRef.current;
 
     try {
       const res = await regenerateBackupCodesAction(passwordForCodes);
+      if (currentGen !== generationRef.current) {
+        // Modal was dismissed or closed while request was in-flight
+        return;
+      }
       if (!res.success) {
         setRegenError(res.message || 'فشل إعادة توليد الرموز.');
         return;
@@ -211,9 +219,14 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
       setNewCodes(res.backupCodes);
       setPasswordForCodes('');
     } catch {
+      if (currentGen !== generationRef.current) {
+        return;
+      }
       setRegenError('حدث خطأ في الاتصال بالخادم. يرجى المحاولة مجدداً.');
     } finally {
-      setIsProcessing(false);
+      if (currentGen === generationRef.current) {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -316,6 +329,8 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
               ref={triggerButtonRef}
               type="button"
               onClick={() => {
+                generationRef.current += 1;
+                setIsProcessing(false);
                 setActionError(null);
                 setActionSuccess(null);
                 setNewCodes(null);

@@ -322,18 +322,25 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 3. Columns, Types, Nullability, and Defaults
-  const isCurrentTimestamp = (val: string | null) => val !== null && /CURRENT_TIMESTAMP|now\(\)/i.test(val);
-  const isFalse = (val: string | null) => val !== null && (val === 'false' || val.startsWith('false'));
-  const isTrue = (val: string | null) => val !== null && (val === 'true' || val.startsWith('true'));
-  const isZero = (val: string | null) => val !== null && (val === '0' || val.startsWith('0'));
-  const isSingleton = (val: string | null) => val !== null && val.includes('singleton');
-  const isOwnerEnum = (val: string | null) => val !== null && val.includes('OWNER');
+  // 3. Columns, Types, Nullability, Precision, and Defaults
+  const isStrictCurrentTimestamp = (val: string | null) =>
+    val !== null && /^(CURRENT_TIMESTAMP|now\(\))$/i.test(val.trim());
+  const isStrictFalse = (val: string | null) =>
+    val !== null && /^false$/i.test(val.trim());
+  const isStrictTrue = (val: string | null) =>
+    val !== null && /^true$/i.test(val.trim());
+  const isStrictZero = (val: string | null) =>
+    val !== null && /^0$/.test(val.trim());
+  const isStrictSingleton = (val: string | null) =>
+    val !== null && /^'singleton'(::text)?$/i.test(val.trim());
+  const isStrictOwnerEnum = (val: string | null) =>
+    val !== null && /^'OWNER'::"?UserRole"?$/i.test(val.trim());
 
   interface ExpectedColDef {
     type: string;
     nullable: string;
     udt?: string;
+    datetimePrecision?: number;
     hasDefault: boolean;
     defaultValidator?: (defaultVal: string | null) => boolean;
     expectedDefaultDesc?: string;
@@ -343,18 +350,18 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     'user.id': { type: 'text', nullable: 'NO', hasDefault: false },
     'user.name': { type: 'text', nullable: 'NO', hasDefault: false },
     'user.email': { type: 'text', nullable: 'NO', hasDefault: false },
-    'user.emailVerified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isFalse, expectedDefaultDesc: 'false' },
+    'user.emailVerified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
     'user.image': { type: 'text', nullable: 'YES', hasDefault: false },
-    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
-    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole', hasDefault: true, defaultValidator: isOwnerEnum, expectedDefaultDesc: "'OWNER'::\"UserRole\"" },
-    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES', hasDefault: true, defaultValidator: isFalse, expectedDefaultDesc: 'false' },
+    'user.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'user.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
+    'user.role': { type: 'USER-DEFINED', nullable: 'NO', udt: 'UserRole', hasDefault: true, defaultValidator: isStrictOwnerEnum, expectedDefaultDesc: "'OWNER'::\"UserRole\"" },
+    'user.twoFactorEnabled': { type: 'boolean', nullable: 'YES', hasDefault: true, defaultValidator: isStrictFalse, expectedDefaultDesc: 'false' },
 
     'session.id': { type: 'text', nullable: 'NO', hasDefault: false },
-    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'session.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
     'session.token': { type: 'text', nullable: 'NO', hasDefault: false },
-    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'session.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'session.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
     'session.ipAddress': { type: 'text', nullable: 'YES', hasDefault: false },
     'session.userAgent': { type: 'text', nullable: 'YES', hasDefault: false },
     'session.userId': { type: 'text', nullable: 'NO', hasDefault: false },
@@ -366,31 +373,31 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     'account.accessToken': { type: 'text', nullable: 'YES', hasDefault: false },
     'account.refreshToken': { type: 'text', nullable: 'YES', hasDefault: false },
     'account.idToken': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
-    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
+    'account.accessTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
+    'account.refreshTokenExpiresAt': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
     'account.scope': { type: 'text', nullable: 'YES', hasDefault: false },
     'account.password': { type: 'text', nullable: 'YES', hasDefault: false },
-    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'account.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'account.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
 
     'verification.id': { type: 'text', nullable: 'NO', hasDefault: false },
     'verification.identifier': { type: 'text', nullable: 'NO', hasDefault: false },
     'verification.value': { type: 'text', nullable: 'NO', hasDefault: false },
-    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
-    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
-    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: false },
+    'verification.expiresAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
+    'verification.createdAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'verification.updatedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: false },
 
     'twoFactor.id': { type: 'text', nullable: 'NO', hasDefault: false },
     'twoFactor.secret': { type: 'text', nullable: 'NO', hasDefault: false },
     'twoFactor.backupCodes': { type: 'text', nullable: 'NO', hasDefault: false },
     'twoFactor.userId': { type: 'text', nullable: 'NO', hasDefault: false },
-    'twoFactor.verified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isTrue, expectedDefaultDesc: 'true' },
-    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO', hasDefault: true, defaultValidator: isZero, expectedDefaultDesc: '0' },
-    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES', hasDefault: false },
+    'twoFactor.verified': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
+    'twoFactor.failedVerificationCount': { type: 'integer', nullable: 'NO', hasDefault: true, defaultValidator: isStrictZero, expectedDefaultDesc: '0' },
+    'twoFactor.lockedUntil': { type: 'timestamp without time zone', nullable: 'YES', datetimePrecision: 3, hasDefault: false },
 
-    'office_bootstrap.id': { type: 'text', nullable: 'NO', hasDefault: true, defaultValidator: isSingleton, expectedDefaultDesc: "'singleton'::text" },
-    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isTrue, expectedDefaultDesc: 'true' },
-    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO', hasDefault: true, defaultValidator: isCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
+    'office_bootstrap.id': { type: 'text', nullable: 'NO', hasDefault: true, defaultValidator: isStrictSingleton, expectedDefaultDesc: "'singleton'::text" },
+    'office_bootstrap.isClosed': { type: 'boolean', nullable: 'NO', hasDefault: true, defaultValidator: isStrictTrue, expectedDefaultDesc: 'true' },
+    'office_bootstrap.closedAt': { type: 'timestamp without time zone', nullable: 'NO', datetimePrecision: 3, hasDefault: true, defaultValidator: isStrictCurrentTimestamp, expectedDefaultDesc: 'CURRENT_TIMESTAMP' },
     'office_bootstrap.ownerId': { type: 'text', nullable: 'NO', hasDefault: false },
   };
 
@@ -401,6 +408,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       data_type,
       is_nullable,
       column_default,
+      datetime_precision,
       udt_name 
     FROM information_schema.columns 
     WHERE table_schema = 'public' 
@@ -409,13 +417,23 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
 
   const foundCols = new Map<
     string,
-    { data_type: string; is_nullable: string; column_default: string | null; udt_name: string }
+    {
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+      datetime_precision: number | null;
+      udt_name: string;
+    }
   >();
   for (const row of colsRes.rows) {
     foundCols.set(`${row.table_name}.${row.column_name}`, {
       data_type: row.data_type,
       is_nullable: row.is_nullable,
       column_default: row.column_default !== undefined ? row.column_default : null,
+      datetime_precision:
+        row.datetime_precision !== undefined && row.datetime_precision !== null
+          ? Number(row.datetime_precision)
+          : null,
       udt_name: row.udt_name,
     });
   }
@@ -434,6 +452,15 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
     if (expected.udt && found.udt_name !== expected.udt) {
       errors.push(`Column '${colKey}' UDT mismatch: expected '${expected.udt}', got '${found.udt_name}'`);
+    }
+    if (expected.datetimePrecision !== undefined) {
+      if (found.datetime_precision !== expected.datetimePrecision) {
+        errors.push(
+          `Column '${colKey}' datetime precision mismatch: expected ${expected.datetimePrecision}, got ${
+            found.datetime_precision !== null ? found.datetime_precision : 'null'
+          }`
+        );
+      }
     }
     if (expected.hasDefault) {
       if (found.column_default === null) {
@@ -632,13 +659,20 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 6. Indexes: verify name, table, uniqueness, validity, and indexed columns
+  // 6. Indexes: verify name, table, uniqueness, validity, non-partial, non-expression, and exact column order
   const idxRes = await client.query(`
     SELECT
       i.relname AS indexname,
       t.relname AS tablename,
       ix.indisunique,
       ix.indisvalid,
+      ix.indpred IS NOT NULL AS is_partial,
+      ix.indexprs IS NOT NULL AS is_expression,
+      pg_get_expr(ix.indpred, ix.indrelid) AS predicate,
+      ARRAY(
+        SELECT pg_get_indexdef(ix.indexrelid, k, true)
+        FROM generate_series(1, ix.indnatts) AS k
+      ) AS index_columns,
       pg_get_indexdef(ix.indexrelid) AS indexdef
     FROM pg_index ix
     JOIN pg_class i ON i.oid = ix.indexrelid
@@ -654,14 +688,25 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       table: string;
       unique: boolean;
       valid: boolean;
+      isPartial: boolean;
+      isExpression: boolean;
+      predicate: string | null;
+      columns: string[];
       indexdef: string;
     }
   >();
   for (const row of idxRes.rows) {
+    const rawCols: string[] = Array.isArray(row.index_columns) ? row.index_columns : [];
+    const normalizedCols = rawCols.map((c: string) => c.trim().replace(/^"|"$/g, ''));
+
     foundIndexes.set(row.indexname, {
       table: row.tablename,
       unique: Boolean(row.indisunique),
       valid: Boolean(row.indisvalid),
+      isPartial: Boolean(row.is_partial),
+      isExpression: Boolean(row.is_expression),
+      predicate: row.predicate || null,
+      columns: normalizedCols,
       indexdef: row.indexdef,
     });
   }
@@ -724,10 +769,25 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     if (!expected.unique && found.unique) {
       errors.push(`Index '${idxName}' expected to be non-unique, but found UNIQUE index`);
     }
-    for (const col of expected.columns) {
-      const colRegex = new RegExp(`\\b"${col}"\\b|\\b${col}\\b`);
-      if (!colRegex.test(found.indexdef)) {
-        errors.push(`Index '${idxName}' definition missing column '${col}': ${found.indexdef}`);
+    if (found.isPartial) {
+      errors.push(
+        `Index '${idxName}' must not be a partial index, but found predicate: ${found.predicate || found.indexdef}`
+      );
+    }
+    if (found.isExpression) {
+      errors.push(`Index '${idxName}' must not be an expression index: ${found.indexdef}`);
+    }
+    if (found.columns.length !== expected.columns.length) {
+      errors.push(
+        `Index '${idxName}' column count mismatch: expected [${expected.columns.join(', ')}], got [${found.columns.join(', ')}]`
+      );
+    } else {
+      for (let i = 0; i < expected.columns.length; i++) {
+        if (found.columns[i] !== expected.columns[i]) {
+          errors.push(
+            `Index '${idxName}' column ${i + 1} mismatch: expected '${expected.columns[i]}', got '${found.columns[i]}'`
+          );
+        }
       }
     }
   }

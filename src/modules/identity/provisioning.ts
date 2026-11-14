@@ -6,6 +6,7 @@ import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { randomBytes, randomUUID } from 'crypto';
 import { AuthenticationError, ProvisioningError } from './types';
+import { parseAndValidateOtp } from './otp-input';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
@@ -413,10 +414,11 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
   const prisma = getPrismaClient();
   const env = getEnv();
 
-  const code = totpCode?.trim();
-  if (!code || !/^\d{6}$/.test(code)) {
-    throw new AuthenticationError('INVALID_CREDENTIALS', 'رمز التحقق يجب أن يتكون من 6 أرقام.');
+  const validation = parseAndValidateOtp(totpCode);
+  if (!validation.valid) {
+    throw new AuthenticationError('INVALID_CREDENTIALS', validation.message);
   }
+  const code = validation.normalizedCode;
 
   type ConfirmTxResult =
     | { status: 'LOCKED' }

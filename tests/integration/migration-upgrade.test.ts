@@ -619,6 +619,132 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     }
   }, 60000);
 
+  it('rejects baseline when user_email_key is a partial index with predicate (R10 reproduction 1 / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r10_1_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r10_1_sentinel (note) VALUES ('SENTINEL_R10_1_PRESERVED');
+      `);
+
+      // Replace user_email_key with a partial index having WHERE false
+      await reproDb.pool.query('DROP INDEX "user_email_key";');
+      await reproDb.pool.query('CREATE UNIQUE INDEX "user_email_key" ON "user"("email") WHERE false;');
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r10_1_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R10_1_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('rejects baseline when user_email_key is a composite index on (email, name) (R10 reproduction 2 / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r10_2_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r10_2_sentinel (note) VALUES ('SENTINEL_R10_2_PRESERVED');
+      `);
+
+      // Replace user_email_key with a composite index on (email, name)
+      await reproDb.pool.query('DROP INDEX "user_email_key";');
+      await reproDb.pool.query('CREATE UNIQUE INDEX "user_email_key" ON "user"("email", "name");');
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r10_2_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R10_2_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('rejects baseline when user.createdAt has precision 0 and interval arithmetic default (R10 reproduction 3 / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const migrationSqlPath = path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+      const fs = await import('fs');
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(migrationSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r10_3_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r10_3_sentinel (note) VALUES ('SENTINEL_R10_3_PRESERVED');
+      `);
+
+      // Alter user.createdAt to TIMESTAMP(0) with default CURRENT_TIMESTAMP + interval '1 day'
+      await reproDb.pool.query('ALTER TABLE "user" ALTER COLUMN "createdAt" TYPE TIMESTAMP(0);');
+      await reproDb.pool.query(`ALTER TABLE "user" ALTER COLUMN "createdAt" SET DEFAULT (CURRENT_TIMESTAMP + interval '1 day');`);
+
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/conflicting or incompatible managed entities/);
+
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r10_3_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R10_3_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
   it('pins public schema and neutralizes ambient PGOPTIONS search_path routing (F05)', async () => {
     const ambientDb = await createDedicatedTestDatabase();
     const origPgOptions = process.env.PGOPTIONS;

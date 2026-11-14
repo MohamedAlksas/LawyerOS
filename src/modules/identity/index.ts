@@ -4,3 +4,4 @@ export * from './require-actor';
 export * from './sessions';
 export * from './provisioning';
 export * from './recovery-codes';
+export * from './otp-input';

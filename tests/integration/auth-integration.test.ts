@@ -462,14 +462,15 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const env = getEnv();
     const prevAuthUrl = process.env.BETTER_AUTH_URL;
 
-    // Assert current application provider is configured for HTTP
-    expect(getAuth().options.baseURL).toBe('http://127.0.0.1:3000');
+    // Assert current application provider is configured for HTTP (supports both port 3000 and CI port 3100)
+    const currentHttpOrigin = getAuth().options.baseURL;
+    expect(currentHttpOrigin).toBe(env.BETTER_AUTH_URL || 'http://127.0.0.1:3000');
 
     // 1. Obtain genuine historical trust cookie through prior 30-day provider configuration
     const priorAuthHttp = betterAuth({
       database: prismaAdapter(getPrismaClient(), { provider: 'postgresql' }),
       secret: env.BETTER_AUTH_SECRET,
-      baseURL: 'http://127.0.0.1:3000',
+      baseURL: currentHttpOrigin,
       emailAndPassword: { enabled: true },
       plugins: [
         twoFactor({
@@ -484,7 +485,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     // Step A: Initial password challenge on prior provider
-    const signInPriorReq = new Request('http://127.0.0.1:3000/api/auth/sign-in/email', {
+    const signInPriorReq = new Request(`${currentHttpOrigin}/api/auth/sign-in/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -505,7 +506,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     // Step B: Genuine MFA verification with trustDevice: true on prior provider
     const validTotp = await generateTotpCode(provisionedOwner.totpSecret);
-    const verifyPriorReq = new Request('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+    const verifyPriorReq = new Request(`${currentHttpOrigin}/api/auth/two-factor/verify-totp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -550,7 +551,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(sessionInDb).toBeDefined();
 
     // Sign out prior session using the actual issued session cookie header (not Authorization: Bearer)
-    const signOutReq = new Request('http://127.0.0.1:3000/api/auth/sign-out', {
+    const signOutReq = new Request(`${currentHttpOrigin}/api/auth/sign-out`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -576,7 +577,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     try {
       // 1. Client presents authentic signed historical trusted-device cookie over HTTP to CURRENT real route
-      const signInReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+      const signInReq = new NextRequest(`${currentHttpOrigin}/api/auth/sign-in/email`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -750,7 +751,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         requireActor({ headers: signInReqSecure.headers })
       ).rejects.toThrowError(AuthenticationError);
     } finally {
-      process.env.BETTER_AUTH_URL = prevAuthUrl || 'http://127.0.0.1:3000';
+      process.env.BETTER_AUTH_URL = prevAuthUrl || currentHttpOrigin;
       getEnv(true);
       global.__lawoffice_auth = undefined;
       await prisma.verification.deleteMany({
@@ -2389,50 +2390,119 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(tfRecord?.failedVerificationCount).toBeGreaterThanOrEqual(5);
   });
 
-  it('enforces provider-compatible credential boundaries on owner provisioning (F04)', async () => {
-    // 1. Password exceeding 128 characters is rejected fail-closed
-    const password129 = 'A'.repeat(129) + '!1';
-    await expect(
-      provisionOwner({
-        name: 'الأستاذ عادل المالك',
-        email: 'valid.owner@office.eg',
-        password: password129,
-      })
-    ).rejects.toThrowError(ProvisioningError);
+  it('enforces provider-compatible credential boundaries and state invariants on owner provisioning (F04 / R10-07)', async () => {
+    const freshDb = await createDedicatedTestDatabase();
+    const prevUrl = process.env.TEST_DATABASE_URL;
+    process.env.TEST_DATABASE_URL = freshDb.url;
+    getEnv(true);
+    await clearGlobalSingletons();
 
     try {
-      await provisionOwner({
+      const migrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
+      const initClient = await freshDb.pool.connect();
+      try {
+        await initClient.query(migrationSql);
+      } finally {
+        initClient.release();
+      }
+      const prismaFresh = getPrismaClient();
+
+      // State before attempts: unbootstrapped database
+      expect(await prismaFresh.user.count()).toBe(0);
+      expect(await prismaFresh.account.count()).toBe(0);
+      expect(await prismaFresh.twoFactor.count()).toBe(0);
+      const bootstrapBefore = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bootstrapBefore?.isClosed ?? false).toBe(false);
+
+      // 1. Exact 129-character password ('A'.repeat(127) + '!1' => length 129) is rejected fail-closed
+      const password129 = 'A'.repeat(127) + '!1';
+      expect(password129.length).toBe(129);
+
+      await expect(
+        provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'valid.owner@office.eg',
+          password: password129,
+        })
+      ).rejects.toThrowError(ProvisioningError);
+
+      try {
+        await provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'valid.owner@office.eg',
+          password: password129,
+        });
+        expect.unreachable('Should have thrown on 129-char password');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ProvisioningError);
+        expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
+        expect((err as ProvisioningError).message).toContain('128');
+      }
+
+      // Assert zero rows inserted and bootstrap remains open
+      expect(await prismaFresh.user.count()).toBe(0);
+      expect(await prismaFresh.account.count()).toBe(0);
+      expect(await prismaFresh.twoFactor.count()).toBe(0);
+      const bootstrapAfter129 = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bootstrapAfter129?.isClosed ?? false).toBe(false);
+
+      // 2. Malformed email with consecutive dots rejected fail-closed
+      await expect(
+        provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'owner..name@synthetic.invalid',
+          password: 'ValidPassword123!',
+        })
+      ).rejects.toThrowError(ProvisioningError);
+
+      try {
+        await provisionOwner({
+          name: 'الأستاذ عادل المالك',
+          email: 'owner..name@synthetic.invalid',
+          password: 'ValidPassword123!',
+        });
+        expect.unreachable('Should have thrown on consecutive dots in email');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ProvisioningError);
+        expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
+        expect((err as ProvisioningError).message).toContain('البريد الإلكتروني');
+      }
+
+      // Assert zero rows inserted and bootstrap remains open
+      expect(await prismaFresh.user.count()).toBe(0);
+      expect(await prismaFresh.account.count()).toBe(0);
+      expect(await prismaFresh.twoFactor.count()).toBe(0);
+      const bootstrapAfterEmail = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bootstrapAfterEmail?.isClosed ?? false).toBe(false);
+
+      // 3. Exact 128-character password ('A'.repeat(126) + '!1' => length 128) passes input validation and succeeds
+      const password128 = 'A'.repeat(126) + '!1';
+      expect(password128.length).toBe(128);
+
+      const res128 = await provisionOwner({
         name: 'الأستاذ عادل المالك',
         email: 'valid.owner@office.eg',
-        password: password129,
+        password: password128,
       });
-      expect.unreachable('Should have thrown on 129-char password');
-    } catch (err) {
-      expect(err).toBeInstanceOf(ProvisioningError);
-      expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
-      expect((err as ProvisioningError).message).toContain('128');
-    }
+      expect(res128.user.id).toBeDefined();
+      expect(res128.totpSecret).toBeDefined();
 
-    // 2. Malformed email with consecutive dots rejected fail-closed
-    await expect(
-      provisionOwner({
-        name: 'الأستاذ عادل المالك',
-        email: 'owner..name@synthetic.invalid',
-        password: 'ValidPassword123!',
-      })
-    ).rejects.toThrowError(ProvisioningError);
-
-    try {
-      await provisionOwner({
-        name: 'الأستاذ عادل المالك',
-        email: 'owner..name@synthetic.invalid',
-        password: 'ValidPassword123!',
-      });
-      expect.unreachable('Should have thrown on consecutive dots in email');
-    } catch (err) {
-      expect(err).toBeInstanceOf(ProvisioningError);
-      expect((err as ProvisioningError).code).toBe('INVALID_INPUT');
-      expect((err as ProvisioningError).message).toContain('البريد الإلكتروني');
+      // Confirm owner to complete enrollment and close bootstrap
+      const validCode = await generateTotpCode(res128.totpSecret);
+      await confirmOwnerProvisioning(res128.user.id, validCode);
+      const bootstrapConfirmed = await prismaFresh.officeBootstrap.findUnique({ where: { id: 'singleton' } });
+      expect(bootstrapConfirmed?.isClosed).toBe(true);
+    } finally {
+      await clearGlobalSingletons();
+      await freshDb.drop().catch(() => {});
+      if (prevUrl) {
+        process.env.TEST_DATABASE_URL = prevUrl;
+        getEnv(true);
+      }
     }
   });
 
@@ -2448,10 +2518,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const tfInitial = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
     const initialCodes = tfInitial?.backupCodes;
 
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const generateUrl = `${testOrigin}/api/auth/two-factor/generate-backup-codes`;
+
     // 1. Unauthenticated request to /api/auth/two-factor/generate-backup-codes fails closed with 401
-    const unauthReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+    const unauthReq = new NextRequest(generateUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: testOrigin },
       body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
     });
     const unauthRes = await authRoutePOST(unauthReq);
@@ -2470,23 +2543,42 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const sessionCookieHeader = `better-auth.session_token=${signSessionTokenCookie(testSessionToken, getEnv().BETTER_AUTH_SECRET)}`;
 
     // Missing password returns 400
-    const noPassReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+    const noPassReq = new NextRequest(generateUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         cookie: sessionCookieHeader,
+        origin: testOrigin,
       },
       body: JSON.stringify({}),
     });
     const noPassRes = await authRoutePOST(noPassReq);
     expect(noPassRes.status).toBe(400);
 
-    // 3. Wrong password returns 400 and increments failedVerificationCount under atomic lock
-    const wrongPassReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+    // 2.5 Cross-origin request with genuine session cookie must be rejected with 403 (R10-03)
+    const crossOriginReq = new NextRequest(generateUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         cookie: sessionCookieHeader,
+        origin: 'https://malicious.attacker.com',
+      },
+      body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
+    });
+    const crossOriginRes = await authRoutePOST(crossOriginReq);
+    expect(crossOriginRes.status).toBe(403);
+
+    // Failure count in twoFactor must NOT be incremented and remains 0
+    const tfAfterCrossOrigin = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
+    expect(tfAfterCrossOrigin?.failedVerificationCount).toBe(0);
+
+    // 3. Wrong password returns 400 and increments failedVerificationCount under atomic lock
+    const wrongPassReq = new NextRequest(generateUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieHeader,
+        origin: testOrigin,
       },
       body: JSON.stringify({ password: 'WrongPassword999!' }),
     });
@@ -2504,11 +2596,12 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     // 4. While locked, request returns 429 and does NOT mutate backup codes even if password is correct
-    const lockedReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+    const lockedReq = new NextRequest(generateUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         cookie: sessionCookieHeader,
+        origin: testOrigin,
       },
       body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
     });
@@ -2527,11 +2620,12 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
 
     // Valid authenticated request succeeds with 200 and issues 10 new codes
-    const validReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/generate-backup-codes', {
+    const validReq = new NextRequest(generateUrl, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         cookie: sessionCookieHeader,
+        origin: testOrigin,
       },
       body: JSON.stringify({ password: 'BrandNewPassword2026!#' }),
     });
