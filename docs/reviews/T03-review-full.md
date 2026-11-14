@@ -2,6 +2,8 @@
 
 **CHANGES_REQUESTED — 14 November 2026, Africa/Cairo.** Keep [PR #8](https://github.com/MohamedAlksas/LawyerOS/pull/8) draft. No merge, deployment, real data or T04. [Consolidated self-contained assignment](T03-corrections-round9.md).
 
+**Subsequent assignment update — 14 November 2026:** After this audit, the owner requested a prompt to resolve everything. Assignment version9.1 therefore promotes H01/H02 to F10/F11, adds the prospective unfinished-challenge invalidation rule in SECURITY_OPERATIONS/AC-02, and assigns dialog accessibility work. The audit findings and requirement interpretation below remain historical at fa8726e; no new runtime verification or implementation is implied by this planning update.
+
 This audit was requested after round 8, against the same application implementation. It is not a review of a new Gemini correction submission. It expands from the latest correction diff to the entire implemented Identity/authentication surface and supporting foundation. Six additional required defects were confirmed beyond the three already assigned. Two further observations are explicitly separated as a policy proposal and nonblocking backlog item.
 
 ## Checkpoints and scope

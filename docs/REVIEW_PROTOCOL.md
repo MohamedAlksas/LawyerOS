@@ -64,7 +64,7 @@ Apply each AC to the task owning its behavior, not to every task in its mileston
 | AC | Behavior | Test type and evidence | Milestone/task |
 |---|---|---|---|
 | AC-01 | Direct unauthenticated or maintenance-role requests cannot access matters, documents, or finance | HTTP integration + E2E | M1/M4 |
-| AC-02 | TOTP, recovery, session revocation, and no public registration | Auth integration + two devices | M1 |
+| AC-02 | TOTP, recovery, session revocation, no public registration, and password-change invalidation of prior-credential unfinished MFA challenges | Auth integration + two devices + controlled rotation/completion races | M1 |
 | AC-03 | Same party has different roles; first instance and appeal are independent | Module integration with PostgreSQL | T06 |
 | AC-04 | Retrying a hearing-result request returns the same result without duplicating the next hearing | Scheduling Interface + browser retry | M3 |
 | AC-05 | Task creation failure inside the transaction leaves no partial result | Integration with controlled failure at an appropriate Seam | M3 |
