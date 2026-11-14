@@ -12,7 +12,7 @@
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 313,
+  "zipEntries": 317,
   "zipSourceHashes": "All match",
   "outputs": [
     {
@@ -45,15 +45,15 @@
     },
     {
       "Name": "LawOffice-OS-Gemini-Prompts.md",
-      "Length": 214466
+      "Length": 209930
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 560143
+      "Length": 555607
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1668687
+      "Length": 1694960
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
