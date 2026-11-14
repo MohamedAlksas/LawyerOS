@@ -1,0 +1,105 @@
+# T03 — Complete consolidated correction round 9
+
+Implement only F01–F09 below. This is the complete inline assignment following a full audit of the current implementation, superseding round8. No review-report/task-card lookup is needed to discover fixes. Preserve completed corrections; do not restart T03. H01/H02 below are explicitly not assigned implementation.
+
+## Repository, checkpoint and scope
+
+Workspace D:/Lawyer; canonical origin https://github.com/MohamedAlksas/LawyerOS.git; existing feature/t03-identity-sessions branch and draft https://github.com/MohamedAlksas/LawyerOS/pull/8. Reviewed full-audit head fa8726e32e46b92d269b61a2b68b156437a6789d; last application implementation4a8d17848b16ebaab17f86e3ae9ac9c495e74ab2. T02 is ACCEPTED and integrated into origin/main at e598c1649b82f34ea94338cda5ef25da32b5299f. Fetch and safely incorporate the latest Codex documentation publication; preserve local/other-agent work, verify branch/remote/HEAD, and report divergence rather than reset/clean/force-push/automatic stash.
+
+Codex plans and independently reviews; Gemini implements with the owner's selected model. No multi-model workflow change was authorized. Follow AGENTS.md, GEMINI.md, PRODUCT.md, GLOSSARY.md, docs/PRD.md and project Git/review/native-agent rules. English documents/identifiers, Arabic RTL application. No main push/merge, deployment, real data, dependency/stack changes, T04, visual redesign, new business modules, SaaS/offline/AI or deletion of installed agent assets.
+
+## Exact project skills and native slice ownership
+
+Load and record actual paths/hashes: .agents/skills/lawoffice-delivery/SKILL.md; .agents/skills/lawoffice-security-operations/SKILL.md; .agents/skills/lawoffice-testing/SKILL.md; .agents/skills/lawoffice-arabic-ui/SKILL.md; .agents/skills/graphify/SKILL.md. Project rules govern generic profiles.
+
+This is an explicit Codex slice refinement of T03 defaults under docs/AGENCY_AGENTS.md. Keep default Identity/Test/AppSec responsibilities and add only the two specialists actually needed for database safety and UI behavior:
+
+1. Phase A lead agency-database-reliability-engineer: profile .agents/skills/engineering-database-reliability-engineer/SKILL.md; definition .agents/agents/agency-database-reliability-engineer.md. Owns src/cli/baseline-identity.ts, minimal baseline comparison support and docs/DEPENDENCIES.md. Implements F01/F02/F05 because they concern schema correctness, safe migration and recovery. No backup/HA/replication/PITR expansion.
+2. Phase B lead agency-identity-access-engineer: profile .agents/skills/engineering-identity-access-engineer/SKILL.md; definition .agents/agents/agency-identity-access-engineer.md. Owns src/modules/identity/provisioning.ts, necessary shared credential validation, src/lib/auth.ts, src/app/api/auth/[...all]/route.ts and recovery command changes if needed. Implements F04/F06; coordinates only minimal localized CLI/confirmation input handling for F09 if required.
+3. Phase C lead agency-frontend-developer: profile .agents/skills/engineering-frontend-developer/SKILL.md; definition .agents/agents/agency-frontend-developer.md. Owns src/app/settings/security/actions.ts, security-client.tsx and src/app/verify/page.tsx, plus a minimal shared result/input helper if needed. Implements F07/F08/F09 without redesign. Read installed Next guides in node_modules/next/dist/docs/, including 01-app/01-getting-started/10-error-handling.md and 01-app/02-guides/server-actions.md; use the actual installed APIs.
+4. Shared test lead agency-test-automation-engineer: profile .agents/skills/testing-test-automation-engineer/SKILL.md; definition .agents/agents/agency-test-automation-engineer.md. Owns affected unit/integration/browser tests, including F03 actual HTTP/HTTPS provider lifecycle and all new negative/regression evidence. Coordinate red/green handoffs with each phase; no concurrent writers to a test file.
+5. Independent support agency-application-security-engineer: profile .agents/skills/security-appsec-engineer/SKILL.md; definition .agents/agents/agency-application-security-engineer.md. Audits exact frozen checkpoints, endpoint reachability, schema/history authorization, credential compatibility and error/secret handling. Authors' PASS statements are not independent approval.
+
+Invoke each required profile through a distinct actual native child. Use canonical/registered-alias preflight; unavailable execution is BLOCKED_NATIVE_AGENTS before dependent edits. No same-session personas, fake IDs, silent substitutions, nested delegation or full-roster launch. The coordinator assigns/sequences/reconciles rather than implementing every specialty. Tell children they share the codebase, must preserve others' edits and own only their named paths. Serialize overlapping writes; freeze phase/final committed SHAs before support inspection. Record actual IDs, paths/hashes, ownership, checkpoint SHAs, findings/actions and reconciliation.
+
+## F01 — Semantic schema verification before history authorization
+
+Current verifier ignores defaults, compares primary/index names without full definitions and discards foreign-key source/target definitions. Three independent real fixtures starting from approved SQL without history were all incorrectly accepted and marked completed: same-name nonunique user_email_key (duplicate emails then persisted); twoFactor.verified default false instead of true; session_userId_fkey redirected to an unrelated table while name/cascade actions matched.
+
+Verify actual managed-schema semantics tied to approved migration: tables/columns, relevant exact types/precision/nullability/defaults, enum namespace/value set, primary-key columns, FK source/referenced schema/table/columns/actions, and index keys/uniqueness/validity/predicates/expressions. Names alone never authorize recovery. Define harmless semantic-equivalence handling; preserve unrelated objects/data. Gate recovery and already-completed success; incompatible/partial state refuses without blind resolve, destructive repair or dropping owner data. Keep docs accurate.
+
+Real PostgreSQL regressions must separately exercise all three exact reproductions plus wrong PK columns/index keys/FK actions/defaults/type precision/nullability/enum namespace or values and incomplete schema. Invoke the canonical operator entry point; assert rejection/no new completed history/no destructive change/sentinel retention. Matching installed schema must resume after a real history fault is removed; retain SQL rollback, already-completed and genuine post-upgrade authentication.
+
+## F02 — Consistent TLS option casing/duplicate policy
+
+Current allow-list lowercases parameter names but get('sslmode') is case-sensitive/first-only. SSLMODE=verify-full is accepted then disappears with ssl=false; sslmode=disable&sslmode=verify-full becomes disable. Reject unsupported casing and duplicate/contradictory options before creating a client, or consistently normalize deliberately supported unambiguous keys. Never accept and discard explicit TLS policy. SQL/verification/Prisma share the same accepted policy.
+
+Test both reproductions, reversed duplicates, invalid/valid duplicates, mixed-case duplicates, allowed/rejected casing and unknown options; inspect actual driver parameters/canonical URL and prove rejected cases cause no connection/DDL/history. Preserve ordinary require/verify-full/disable, valid1..65535 ports and explicit omitted-port behavior. Do not call plaintext connectivity TLS evidence or print credentials.
+
+## F03 — Real current-provider HTTP and HTTPS trust lifecycle
+
+Prior-provider issuance and signed-cookie sign-out now work. Current HTTPS fixture only changes request URL: immediately before that request getAuth().options.baseURL still reports HTTP. Configure/assert the actual current provider for each protocol, reload relevant cached environment/auth state safely, and restore in finally. No production provider rewrite.
+
+For HTTP and HTTPS: genuine prior password/MFA with30-day trust; capture issued signed session and exact trust cookie/verification identifier; assert old session exists; real signed-cookie sign-out succeeds and deletes it; exact trust record remains unexpired; correspondingly configured current app requires fresh MFA, issues no authenticated session before verification and denies protected access. Do not substitute any arbitrary verification row for the issued trust record.
+
+## F04 — Provision only credentials the configured provider can authenticate
+
+Current custom provisioning requires password>=8 but ignores provider maximum128 and uses a looser email regex. Parent real protocol proof: password128 reaches MFA after completed setup; password129 completes setup/permanently closes bootstrap, then sign-in returns400/PASSWORD_TOO_LONG. owner..name@synthetic.invalid also completes setup, then returns400/INVALID_EMAIL.
+
+Apply constraints compatible with the effective configured provider before owner reservation/secret generation/closure. Preserve intended email normalization and actual password semantics; do not silently alter valid passwords or upgrade dependencies. Reject unsupported credentials without leaving a pending unusable owner or closing bootstrap. Preserve controlled resume and possession proof. Keep user-facing guidance Arabic and actionable.
+
+Tests: supported positive credentials, password128/129 and minimum boundaries, the exact malformed email, provider-compatible email examples, zero persisted owner/closure on rejection, interrupted setup/resume and actual password→MFA→protected access for accepted input. No known/default credentials.
+
+## F05 — Pin the actual schema before any baseline mutation
+
+The SQL client inherits PGOPTIONS, and unqualified migration SQL follows search_path. Parent explicit public-target fixture with existing staging schema and PGOPTIONS='-c search_path=staging,public' committed all six managed tables in staging, then failed public verification; public had zero managed tables. Rejecting URL options alone does not prevent ambient or role/database search-path routing.
+
+Establish/assert the approved public schema before catalog inspection/DDL; neutralize or reject unsupported ambient routing consistently across SQL, verification and Prisma; account for role/database/session search_path defaults. Qualify catalog/history objects where needed. Do not silently clear requested supported security options. Verify managed schema inside the DDL transaction before committing where appropriate; post-commit history failures still need safe F01 recovery. Never report rollback for DDL already committed elsewhere.
+
+Tests: exact PGOPTIONS reproduction; controlled role/database nonpublic search_path; clean public target; supported explicit public policy; pre-existing managed-name objects in an alternate schema; actual fault/rollback/retry. Before and after refusal/failure, assert unrelated/alternate schemas and sentinel data were not mutated, no misplaced managed tables/history were created and the approved public path still works.
+
+## F06 — Close alternate recovery-generation paths around the persistent limit
+
+Actual proof: five wrong custom recovery passwords persist count5/active lock; correct password via custom command still rejects; raw POST /api/auth/two-factor/generate-backup-codes nevertheless returns200/ten new codes and changes stored codes. The provider's separate limiter is not the custom persistent atomic lock.
+
+Inventory reachable recovery/MFA mutation endpoints. Block an unsupported duplicate public generation route or make every reachable generation path enforce the same Identity authorization, fresh reauthentication and persistent atomic budget. Preserve useful provider endpoints and genuine MFA flow; server-only helpers are not public HTTP disclosures. Do not introduce a second independent counter that can be alternated to bypass the bound.
+
+Use actual HTTP/Server Action plus real PostgreSQL tests for direct alternate path during lock, wrong-password attempts across paths/processes/concurrency, lock expiry/legitimate recovery, unchanged codes on refusal, stale/revoked/unauthenticated sessions, required permissions and old-code invalidation after legitimate rotation. Preserve single-use recovery behavior. No blanket exemption or test-only production branch.
+
+## F07 — Make failed logout visible and retryable
+
+SecurityClient ignores signOut()'s error result and redirects in catch. Production browser proof:503 sign-out leads to login screen while one server session remains usable and protected security page reopens.
+
+Inspect actual provider result; navigate only after confirmed logout. Failure/uncertain outcome must show sanitized Arabic feedback, reset processing state and permit safe retry without claiming the session ended. Preserve successful cookie/session revocation.
+
+Real browser tests:503/transport failure, visible error/no false success, retry after service recovery, database/session-cookie consequences, protected access denied after successful logout. Do not satisfy the test by only hiding the page or deleting an unrelated fixture session.
+
+## F08 — Return typed expected errors through production Server Actions
+
+Wrong recovery passwords throw AuthenticationError across the Server Action; client displays err.message. Actual production-mode browser renders Minified React error #441 instead of Arabic wrong-password/attempt/lock guidance. Development behavior is insufficient evidence.
+
+Model expected validation/authentication/lock outcomes as typed sanitized result data and map stable codes to clear Arabic UI. Keep identity/permission checks server-side and failures closed. Preserve success DTOs and ten-code display; unexpected errors receive generic Arabic feedback without raw provider/SQL/stack/digest text. Do not serialize Error objects, secrets or unrestricted exception messages.
+
+Production-build browser tests: wrong/empty password where reachable, remaining-attempt/locked outcome and expiry recovery, unexpected server/network fault, success and processing-state restoration. Confirm clear Arabic announced feedback and no sensitive output. Follow installed Next guidance for expected error returns.
+
+## F09 — Accept supported Arabic and Latin input digits
+
+verify/page.tsx strips non-ASCII digits; actual production browser fills six Arabic-Indic or Persian digits and receives empty input. Project Arabic-UI instructions explicitly require Arabic/Latin digit input.
+
+Normalize supported digits before strict TOTP validation and length checks. Preserve Latin input, required six-digit semantics, meaningful malformed/short/long-code feedback and correct provider wire values. Keep controlled CLI/confirmation input behavior consistent where the same supported user input is accepted; coordinate Identity/Frontend ownership of a minimal shared normalization helper if needed.
+
+Tests: Arabic-Indic, Persian, Latin and mixed supported digits through actual verification UI; successful genuine OTP after normalization, bad code refusal, paste/typing and mobile width. Do not accept letters or weaken MFA validation. Use synthetic secrets and never record the seed/code in evidence.
+
+## Explicitly deferred observations
+
+H01: parent observed an old-password pending challenge can finish after password change and produce an accepted session. Existing wording explicitly revokes other sessions, not unfinished challenges. Record a security-policy proposal/decision before assigning challenge invalidation or new schema; do not silently expand this correction. H02: dialog focus leaves the visual overlay and lacks dialog semantics; track as P3 UI backlog, not an unannounced acceptance gate. No production implementation of H01/H02 is assigned here.
+
+## Verification, evidence and stop
+
+Preserve previous repairs: session cryptographic/provider selection, idle/max-age/credential checks, mandatory MFA/trust restrictions, permanent race-safe bootstrap, scoped fixture ownership, actual signed-cookie sign-out, pending-attempt locks, closure waiter barriers and recovery replay protection.
+
+Establish meaningful failing regressions for confirmed defects, implement incrementally and freeze committed checkpoints for independent support review. Run configured units, real PostgreSQL integration/negative/fault/recovery/concurrency tests, lint/typecheck, attributable fresh default build and30existing browser journeys plus new cases. Distinguish default builds from local test-only webpack, observed defects from acceptance assertions, fixture errors from code failures, and skipped/timeout cases from passed cases. Current full audit's local startup build exceeded60seconds twice; hosted default CI passed. Diagnose/report environment limits without weakening guards or fabricating local55-pass/default-build evidence. Physical TTY/screen reader/device/deployment checks remain NOT RUN unless actually performed.
+
+Use synthetic isolated resources only; verify ownership before cleanup. Preserve all installed/tracked/untracked .agents/, .codex/ and .opencode/ assets. Run local committed code-only Graphify with full SOURCE.json SHA/query/coverage limits; no external labels/uploads/keys/upgrades/hooks. Validate Agency routing/planning and regenerate derived deliverables after canonical changes.
+
+Save docs/reviews/T03-submission-round9.md with each F01–F09 disposition, actual red/green commands/exits/positive and negative observations, migration/recovery effects, protocol/build/environment attribution, NOT RUN limits, actual skills/native IDs/profile-definition hashes/ownership/checkpoints/findings/reconciliation, Graphify provenance and branch/base/frozen/report/verified pushed SHA/PR. Keep H01/H02 dispositions separate. Report publication SHA externally after commit, without self-referential amendments. Push coherent updates to this existing branch/PR, keep draft and stop for Codex review. No self-approval, merge, deployment, real data or T04.
