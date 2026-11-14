@@ -12,7 +12,7 @@
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 309,
+  "zipEntries": 313,
   "zipSourceHashes": "All match",
   "outputs": [
     {
@@ -29,7 +29,7 @@
     },
     {
       "Name": "Agency-Agent-Validation.json",
-      "Length": 8951
+      "Length": 9195
     },
     {
       "Name": "Agency-Profile-Recovery.json",
@@ -45,15 +45,15 @@
     },
     {
       "Name": "LawOffice-OS-Gemini-Prompts.md",
-      "Length": 212165
+      "Length": 214466
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 557842
+      "Length": 560143
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1636228
+      "Length": 1668687
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
