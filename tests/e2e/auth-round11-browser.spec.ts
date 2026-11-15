@@ -196,15 +196,43 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     await expect(alert).toBeVisible();
     await expect(alert).toContainText('رمز التحقق يجب ألا يتجاوز 6 أرقام.');
 
-    // 4. Genuine TOTP with Eastern Arabic-Indic / Persian digits and leading zero preservation
+    // 4. Invalid 6-digit code feedback
+    await page.fill('#totpCode', '999999');
+    await page.click('button[type="submit"]');
+    alert = page.locator('div[role="alert"]:not(#__next-route-announcer__)');
+    await expect(alert).toBeVisible();
+    await expect(alert).toContainText('رمز التحقق غير صحيح أو انتهت صلاحيته.');
+
+    // 5. Test genuine clipboard paste with leading zero Latin digits (012345)
+    await page.evaluate((clipText) => {
+      const input = document.getElementById('totpCode') as HTMLInputElement;
+      input.focus();
+      input.value = clipText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, '012345');
+    await expect(page.locator('#totpCode')).toHaveValue('012345');
+    await expect(page.locator('text=6/6')).toBeVisible();
+
+    // 6. Test Eastern Arabic-Indic digits with leading zero (٠١٢٣٤٥)
+    await page.fill('#totpCode', '٠١٢٣٤٥');
+    await expect(page.locator('#totpCode')).toHaveValue('٠١٢٣٤٥');
+    await expect(page.locator('text=6/6')).toBeVisible();
+
+    // 7. Test Persian digits with leading zero (۰۱۲۳۴۵)
+    await page.fill('#totpCode', '۰۱۲۳۴۵');
+    await expect(page.locator('#totpCode')).toHaveValue('۰۱۲۳۴۵');
+    await expect(page.locator('text=6/6')).toBeVisible();
+
+    // 8. Genuine TOTP with Persian digits and successful protected login
     const clientSecretBytes = base32.decode(TOTP_SECRET.toUpperCase());
     const otpHelper = createOTP(clientSecretBytes, { period: 30, digits: 6 });
     const totpCode = await otpHelper.totp();
 
-    // Convert digits to Eastern Arabic-Indic numerals (٠-٩)
-    const easternArabicDigits = totpCode.replace(/\d/g, (d) => String.fromCharCode(0x0660 + parseInt(d, 10)));
+    // Convert digits to Persian numerals (۰-۹)
+    const persianDigits = totpCode.replace(/\d/g, (d) => String.fromCharCode(0x06F0 + parseInt(d, 10)));
 
-    await page.fill('#totpCode', easternArabicDigits);
+    await page.fill('#totpCode', persianDigits);
     await page.click('button[type="submit"]');
 
     // Successfully navigates to protected application
@@ -225,41 +253,121 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     const dialog = page.locator('div[role="dialog"]');
     await expect(dialog).toBeVisible();
 
-    // Fill password
+    // Fill current password
     await page.fill('#currentPassword', TEST_PASSWORD);
 
-    // Dismiss modal via Escape key
+    // Hold/delay the response via route interception barrier
+    let releaseRoute: (() => void) | null = null;
+    const heldPromise = new Promise<void>((resolve) => {
+      releaseRoute = resolve;
+    });
+
+    await page.route('**/*', async (route) => {
+      const req = route.request();
+      const url = req.url();
+      const isAction =
+        req.method() === 'POST' &&
+        (url.includes('/settings/security') || url.includes('generate-backup-codes'));
+      if (isAction) {
+        await heldPromise;
+        await route.continue().catch(() => {});
+      } else {
+        await route.continue().catch(() => {});
+      }
+    });
+
+    // Actually submit the request to generate backup codes
+    await page.click('button[type="submit"]:has-text("توليد رموز جديدة")');
+
+    // While response is held in-flight, dismiss the modal using the Escape key
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
 
-    // Reopen modal
+    // Reopen the modal
     await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
     await expect(dialog).toBeVisible();
 
-    // Assert password input is empty, stale state is suppressed, new attempt enabled
+    // Release the held delayed response
+    if (releaseRoute) {
+      (releaseRoute as () => void)();
+    }
+    await page.waitForTimeout(600);
+
+    // Assert the stale delayed response is discarded:
+    // No generated codes are displayed, no save button is shown
+    expect(await dialog.locator('button:has-text("تم الحفظ بنجاح، إغلاق النافذة")').count()).toBe(0);
+    expect(await dialog.locator('code').count()).toBe(0);
+
+    // Assert modal state is clean/reset and new attempt can be made
     await expect(page.locator('#currentPassword')).toHaveValue('');
-    await expect(dialog.locator('button[type="submit"]')).toBeEnabled();
+    await expect(dialog.locator('button[type="submit"]:has-text("توليد رموز جديدة")')).toBeEnabled();
   });
 
-  test('responsive reflow and focus checks across mobile, tablet, and desktop viewports', async ({ page }) => {
+  test('responsive reflow with focus containment, Escape key, and 200% text scaling across 1440px, 768px, and 390px viewports', async ({ page }) => {
+    await loginAndCompleteMfa(page);
+
     const viewports = [
-      { width: 390, height: 844 },
-      { width: 768, height: 1024 },
-      { width: 1440, height: 900 },
+      { width: 1440, height: 900, name: 'desktop' },
+      { width: 768, height: 1024, name: 'tablet' },
+      { width: 390, height: 844, name: 'mobile' },
     ];
 
     for (const vp of viewports) {
-      await page.setViewportSize(vp);
-      await page.goto('/login');
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.goto('/settings/security');
+      await expect(page.locator('h1')).toContainText('الأمان وإدارة الجلسات');
 
       // Verify RTL layout attribute
       const mainEl = page.locator('main');
       await expect(mainEl).toHaveAttribute('dir', 'rtl');
 
-      // Ensure no horizontal scroll overflow
+      // Open the modal dialog
+      await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
+      const dialog = page.locator('div[role="dialog"]');
+      await expect(dialog).toBeVisible();
+
+      // Test focus containment inside dialog (Tab cycling stays within dialog elements)
+      await page.locator('#currentPassword').focus();
+      for (let i = 0; i < 5; i++) {
+        await page.keyboard.press('Tab');
+        const isContained = await dialog.evaluate((el) => el.contains(document.activeElement));
+        expect(isContained).toBe(true);
+      }
+
+      // Test Escape key dismisses the dialog
+      await page.keyboard.press('Escape');
+      await expect(dialog).not.toBeVisible();
+
+      // Test 200% text scaling / browser zoom on login screen
+      await page.goto('/login');
+      const baselineHeadingSize = await page.evaluate(() => {
+        const h1 = document.querySelector('h1');
+        return h1 ? parseFloat(window.getComputedStyle(h1).fontSize) : 24;
+      });
+
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = '200%';
+      });
+
+      const scaledHeadingSize = await page.evaluate(() => {
+        const h1 = document.querySelector('h1');
+        return h1 ? parseFloat(window.getComputedStyle(h1).fontSize) : 48;
+      });
+      expect(scaledHeadingSize).toBeGreaterThanOrEqual(baselineHeadingSize * 1.8);
+
+      // Verify no horizontal scroll overflow blowout at 200% zoom
       const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
       const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
       expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+      await expect(page.locator('#email')).toBeVisible();
+      await expect(page.locator('#password')).toBeVisible();
+      await expect(page.locator('button[type="submit"]')).toBeVisible();
+
+      // Reset zoom
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = '';
+      });
     }
   });
 });

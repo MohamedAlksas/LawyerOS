@@ -840,5 +840,199 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       await ambientDb.drop().catch(() => {});
     }
   }, 90000);
+
+  it('executes non-destructive upgrade from prior canonical 47-column schema and preserves pre-existing records and sentinel data (R12 / R12-03)', async () => {
+    const upgradeDb = await createDedicatedTestDatabase();
+    try {
+      const fs = await import('fs');
+      const initMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const initSql = fs.readFileSync(initMigrationSqlPath, 'utf-8');
+
+      // 1. Apply only the prior 47-column canonical baseline
+      await upgradeDb.pool.query(initSql);
+
+      // Verify user and session do NOT yet have credentialVersion
+      const userColCheckBefore = await upgradeDb.pool.query(`
+        SELECT column_name FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'user' AND column_name = 'credentialVersion';
+      `);
+      expect(userColCheckBefore.rows.length).toBe(0);
+
+      // 2. Insert sentinel table and pre-existing user, account, and session data
+      await upgradeDb.pool.query(`
+        CREATE TABLE upgrade_r12_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO upgrade_r12_sentinel (note) VALUES ('SENTINEL_R12_UPGRADE_PRESERVED');
+      `);
+
+      await upgradeDb.pool.query(`
+        INSERT INTO "user" ("id", "name", "email", "emailVerified", "role", "createdAt", "updatedAt")
+        VALUES ('usr-preexisting-1', 'Preexisting Lawyer', 'preexisting@office.eg', true, 'OWNER', NOW(), NOW());
+
+        INSERT INTO "account" ("id", "userId", "accountId", "providerId", "password", "createdAt", "updatedAt")
+        VALUES ('acc-preexisting-1', 'usr-preexisting-1', 'preexisting@office.eg', 'credential', '$2a$10$preexistinghash', NOW(), NOW());
+
+        INSERT INTO "session" ("id", "userId", "token", "expiresAt", "createdAt", "updatedAt")
+        VALUES ('ses-preexisting-1', 'usr-preexisting-1', 'preexisting-session-token', NOW() + interval '7 days', NOW(), NOW());
+      `);
+
+      // 3. Execute baseline entry point: must detect 47-column schema, run 20261114000000 forward migration in-transaction, verify, and resolve both migrations
+      const baselineResult = await runIdentityBaseline({
+        targetUrl: upgradeDb.url,
+        silent: true,
+      });
+      expect(baselineResult.success).toBe(true);
+      expect(baselineResult.recovered).toBe(true);
+
+      // 4. Verify columns and defaults in information_schema
+      const userColCheckAfter = await upgradeDb.pool.query(`
+        SELECT column_name, column_default, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'user' AND column_name = 'credentialVersion';
+      `);
+      expect(userColCheckAfter.rows.length).toBe(1);
+      expect(userColCheckAfter.rows[0].data_type).toBe('integer');
+      expect(userColCheckAfter.rows[0].column_default).toBe('1');
+
+      const sessionColCheckAfter = await upgradeDb.pool.query(`
+        SELECT column_name, column_default, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'session' AND column_name = 'credentialVersion';
+      `);
+      expect(sessionColCheckAfter.rows.length).toBe(1);
+      expect(sessionColCheckAfter.rows[0].data_type).toBe('integer');
+      expect(sessionColCheckAfter.rows[0].column_default).toBe('1');
+
+      // 5. Verify pre-existing data is intact and populated with credentialVersion = 1
+      const userRow = await upgradeDb.pool.query('SELECT * FROM "user" WHERE id = $1', ['usr-preexisting-1']);
+      expect(userRow.rows.length).toBe(1);
+      expect(userRow.rows[0].credentialVersion).toBe(1);
+
+      const sessionRow = await upgradeDb.pool.query('SELECT * FROM "session" WHERE id = $1', ['ses-preexisting-1']);
+      expect(sessionRow.rows.length).toBe(1);
+      expect(sessionRow.rows[0].credentialVersion).toBe(1);
+
+      const sentinelCheck = await upgradeDb.pool.query('SELECT * FROM upgrade_r12_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R12_UPGRADE_PRESERVED');
+
+      // 6. Verify migration history contains both migrations with status clean
+      const migHistory = await upgradeDb.pool.query(`
+        SELECT migration_name, finished_at, applied_steps_count 
+        FROM _prisma_migrations 
+        ORDER BY migration_name ASC;
+      `);
+      const migNames = migHistory.rows.map((r: { migration_name: string }) => r.migration_name);
+      expect(migNames).toContain('20261111000000_init_auth');
+      expect(migNames).toContain('20261114000000_credential_version');
+      for (const row of migHistory.rows) {
+        expect(row.finished_at).not.toBeNull();
+        expect(row.applied_steps_count).toBeGreaterThanOrEqual(0);
+      }
+
+      const deployRes = runPrismaCli(['migrate', 'deploy'], upgradeDb.url);
+      expect(deployRes.status).toBe(0);
+      expect(deployRes.stdout).toContain('No pending migrations to apply');
+
+      // 7. Verify atomic trigger trg_account_password_sync_credential_version:
+      // Insert companion verification record
+      await upgradeDb.pool.query(`
+        INSERT INTO "verification" ("id", "identifier", "value", "expiresAt", "createdAt", "updatedAt")
+        VALUES ('ver-companion-1', '2fa-cred-ver-usr-preexisting-1', 'dummy-token', NOW() + interval '1 day', NOW(), NOW());
+      `);
+
+      // Update account password
+      await upgradeDb.pool.query(`
+        UPDATE "account" SET "password" = '$2a$10$newhashedpassword' WHERE "id" = 'acc-preexisting-1';
+      `);
+
+      // Assert user credentialVersion was incremented to 2
+      const userAfterUpdate = await upgradeDb.pool.query('SELECT * FROM "user" WHERE id = $1', ['usr-preexisting-1']);
+      expect(userAfterUpdate.rows[0].credentialVersion).toBe(2);
+
+      // Assert old session with credentialVersion 1 was evicted
+      const sessionAfterUpdate = await upgradeDb.pool.query('SELECT * FROM "session" WHERE id = $1', ['ses-preexisting-1']);
+      expect(sessionAfterUpdate.rows.length).toBe(0);
+
+      // Assert companion verification was purged
+      const verAfterUpdate = await upgradeDb.pool.query('SELECT * FROM "verification" WHERE identifier = $1', ['2fa-cred-ver-usr-preexisting-1']);
+      expect(verAfterUpdate.rows.length).toBe(0);
+
+      // 8. Verify trigger trg_session_set_credential_version:
+      // Insert new session without explicit credentialVersion: trigger sets it to current user.credentialVersion (2)
+      await upgradeDb.pool.query(`
+        INSERT INTO "session" ("id", "userId", "token", "expiresAt", "createdAt", "updatedAt")
+        VALUES ('ses-new-1', 'usr-preexisting-1', 'new-token-after-pw-change', NOW() + interval '7 days', NOW(), NOW());
+      `);
+      const newSession = await upgradeDb.pool.query('SELECT * FROM "session" WHERE id = $1', ['ses-new-1']);
+      expect(newSession.rows.length).toBe(1);
+      expect(newSession.rows[0].credentialVersion).toBe(2);
+    } finally {
+      await upgradeDb.drop().catch(() => {});
+    }
+  }, 90000);
+
+  it('rejects baseline when index uses unapproved ICU casefold collation public.review_casefold (R12 / F01)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const fs = await import('fs');
+      const initMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const forwardMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261114000000_credential_version/migration.sql'
+      );
+      const initSql = fs.readFileSync(initMigrationSqlPath, 'utf-8');
+      const forwardSql = fs.readFileSync(forwardMigrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(initSql);
+      await reproDb.pool.query(forwardSql);
+
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r12_icu_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r12_icu_sentinel (note) VALUES ('SENTINEL_R12_ICU_PRESERVED');
+      `);
+
+      // Create custom collation public.review_casefold (try ICU first, fallback to standard C if ICU not available)
+      try {
+        await reproDb.pool.query(`CREATE COLLATION public.review_casefold (provider = icu, locale = 'und-u-ks-level2', deterministic = false);`);
+      } catch {
+        await reproDb.pool.query(`CREATE COLLATION public.review_casefold (locale = 'C');`);
+      }
+
+      // Recreate user_email_key with the unapproved collation
+      await reproDb.pool.query('DROP INDEX "user_email_key";');
+      await reproDb.pool.query('CREATE UNIQUE INDEX "user_email_key" ON "user"("email" COLLATE public.review_casefold);');
+
+      // Attempt to baseline: must fail fast and report unapproved collation
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/unapproved collation 'public.review_casefold'|conflicting or incompatible managed entities/);
+
+      // Verify migration history was NOT recorded
+      const migTableRes = await reproDb.pool.query(`
+        SELECT table_name FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = '_prisma_migrations';
+      `);
+      if (migTableRes.rows.length > 0) {
+        const historyRows = await reproDb.pool.query(
+          'SELECT * FROM _prisma_migrations WHERE migration_name = $1',
+          ['20261111000000_init_auth']
+        );
+        expect(historyRows.rows.length).toBe(0);
+      }
+
+      // Verify sentinel data was NOT damaged
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r12_icu_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R12_ICU_PRESERVED');
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
 });
 

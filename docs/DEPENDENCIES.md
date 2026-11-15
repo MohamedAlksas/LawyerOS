@@ -166,11 +166,14 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
    - Fully qualifies catalog queries (`table_schema = 'public'`, `schemaname = 'public'`, and `typnamespace = 'public'::regnamespace`).
    - Ensures alternate schemas (e.g. `staging`) and pre-existing sentinel data remain completely undamaged and unpolluted.
 
-4. **Semantic Catalog & Schema Verification Before History Authorization (F01 / R11-02)**:
+4. **Semantic Catalog & Schema Verification Before History Authorization (F01 / R11-02 / R12-02)**:
    - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema semantics or detect missing/divergent column definitions.
-   - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking the migration as applied in Prisma:
+   - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking migrations as applied in Prisma:
+     - **Two-Step Migration Sequence**:
+       * `20261111000000_init_auth`: initial baseline schema creating all 6 managed tables, primary keys, foreign keys, indexes, and enum type (47 columns).
+       * `20261114000000_credential_version`: additive forward migration adding `credentialVersion` columns to `user` and `session`, session eviction on password updates, companion verification cleanup, and session version population triggers (49 total columns).
      - **Tables**: verifies all 6 required tables exist in `public`: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
-     - **Columns, Types, Namespaces, Precision, Nullability, Defaults**: verifies all 49 columns across the 6 tables against the approved migration `20261111000000_init_auth`:
+     - **Columns, Types, Namespaces, Precision, Nullability, Defaults**: verifies all 49 columns across the 6 tables against the approved managed schema:
        * **Namespace-Qualified Type & Domain Identity**: queries `pg_attribute`, `pg_type`, `pg_namespace`, and `information_schema.columns`:
          - All standard managed columns must be base types (`t.typtype === 'b'`) in the `pg_catalog` namespace (`nsp.nspname === 'pg_catalog'`).
          - Domain types (`t.typtype === 'd'`) are strictly rejected fail-closed (e.g. `CREATE DOMAIN public.codex_image AS text CHECK (VALUE <> '')`).
@@ -189,13 +192,16 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
        * Rejects any missing columns or unexpected extra columns on managed tables.
      - **Primary Keys**: verifies constraint name, table binding, and exact primary key column definitions (`['id']` across all 6 tables).
      - **Foreign Keys**: verifies constraint name, source table/column, referenced schema (`public`), referenced table (`user`), referenced column (`id`), and cascading actions (`ON DELETE CASCADE ON UPDATE CASCADE`). Rejects foreign keys redirected to unrelated tables.
-     - **Structured Index Verification**: queries `pg_index` joined on `pg_class`, `pg_attribute`, `pg_namespace`, and `pg_am`:
+     - **Structured Index Verification (R11 / R12-02)**: queries `pg_index` joined on `pg_class`, `pg_attribute`, `pg_namespace`, `pg_am`, `pg_collation`, and `pg_opclass`:
        * Verifies index name, table binding, access method (`am.amname === 'btree'`), validity (`indisvalid = true`), and readiness (`indisready = true`). Non-btree access methods or unready indexes are rejected fail-closed.
        * Verifies key attributes and included non-key columns: asserts `indnatts === expected.columns.length` and `indnkeyatts === expected.columns.length`. Indexes with included non-key columns (`INCLUDE (...)`) are rejected fail-closed.
        * Verifies null distinctness: asserts `indnullsnotdistinct === false`. Unapproved `NULLS NOT DISTINCT` semantics are rejected fail-closed.
        * Verifies index uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`, `false` for foreign key and lookup indexes). Same-name non-unique indexes are rejected fail-closed.
        * Strictly rejects partial indexes: asserts `indpred IS NULL` (`is_partial = false`). Any index definition containing a `WHERE` predicate (such as `UNIQUE (email) WHERE false`) is rejected fail-closed.
        * Strictly rejects expression indexes: asserts `indexprs IS NULL` (`is_expression = false`).
+       * **Index Collation Validation (R12-02)**: verifies each key column uses `collname = 'default'` in namespace `pg_catalog`. Unapproved ICU collations (e.g. `public.review_casefold`) alter case-folding and uniqueness comparison semantics and are strictly rejected fail-closed.
+       * **Index Operator Class Validation (R12-02)**: verifies each key column uses `opcname = 'text_ops'` in namespace `pg_catalog`. Non-default operator classes (e.g. `varchar_ops`) are strictly rejected fail-closed.
+       * **Index Option Validation (R12-02)**: verifies each key column has `indoption = 0`. Non-zero options are rejected fail-closed.
        * Verifies exact column count, column names, and column order extracted via `generate_series(1, ix.indnatts)` with `pg_get_indexdef(ix.indexrelid, k, true)`:
          - `user_email_key`: exactly 1 column `['email']`. Rejects composite indexes (such as `(email, name)`).
          - `session_token_key`: exactly 1 column `['token']`.
@@ -203,18 +209,23 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
          - `account_userId_idx`: exactly 1 column `['userId']`.
          - `verification_identifier_idx`: exactly 1 column `['identifier']`.
          - `twoFactor_userId_idx`: exactly 1 column `['userId']`.
-     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'MAINTAINER']`, rejecting missing or extraneous values.
+     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'LAWYER', 'STAFF', 'ACCOUNTANT']`, rejecting missing or extraneous values.
 
-5. **Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05)**:
+5. **Non-Destructive Upgrade, Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05 / R12-03)**:
+   - **Non-Destructive Upgrade from Prior Canonical Schema (47 columns)**: If the target database already has the prior canonical schema without `credentialVersion`:
+     * Executes forward migration `20261114000000_credential_version` non-destructively in a transaction.
+     * Verifies physical schema equivalence in-transaction.
+     * Safely records both migrations `20261111000000_init_auth` and `20261114000000_credential_version` in `_prisma_migrations`.
+     * Pre-existing user and session records receive default `credentialVersion = 1`, and all pre-existing sentinel data remains completely undamaged.
    - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
      * Detects existing managed entities without completed migration history.
      * Performs full semantic schema verification across all 6 tables, 49 columns, constraints, foreign keys, indexes, and enum type.
-     * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` without re-executing DDL (`recovered: true`).
+     * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` and `prisma migrate resolve --applied 20261114000000_credential_version` without re-executing DDL (`recovered: true`).
      * If conflicting or partial: refuses fail-closed without recording history, dropping tables, or damaging sentinel data.
-   - **Already-Completed State**: If `20261111000000_init_auth` is already recorded as applied in `_prisma_migrations`, verifies semantic schema equivalence and returns cleanly (`alreadyCompleted: true`).
+   - **Already-Completed State**: If both migrations are already recorded as applied in `_prisma_migrations`, verifies semantic schema equivalence and returns cleanly (`alreadyCompleted: true`).
 
 6. **Scoped Migration History Recording**:
-   - Only after semantic schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` passing the canonical validated target URL and sanitized environment.
+   - Only after semantic schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` and `npx prisma migrate resolve --applied 20261114000000_credential_version` passing the canonical validated target URL and sanitized environment.
    - Executes `npx prisma migrate status` passing the canonical target URL to confirm migration history is clean.
 
 ### 6.3 Post-Baseline Verification

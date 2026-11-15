@@ -158,7 +158,6 @@ export async function POST(request: NextRequest) {
 
       const origin = request.headers.get('origin');
       const referer = request.headers.get('referer');
-      const host = request.headers.get('host');
 
       // Cookie-bearing requests strictly require Origin or Referer
       if (!origin && !referer) {
@@ -168,15 +167,32 @@ export async function POST(request: NextRequest) {
       const allowedOrigins = getTrustedOrigins();
 
       if (origin === 'null') {
-        // If origin === 'null', strictly verify if host header matches a trusted origin
-        const isTrustedHost = Array.from(allowedOrigins).some((to) => {
-          try {
-            return new URL(to).host === host;
-          } catch {
-            return false;
-          }
-        });
-        if (!isTrustedHost || request.headers.get('sec-fetch-site') !== 'same-origin') {
+        let reqOrigin: string;
+        try {
+          reqOrigin = new URL(request.url).origin;
+        } catch {
+          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        }
+
+        const host = request.headers.get('host');
+        const isTrustedHost = host
+          ? Array.from(allowedOrigins).some((to) => {
+              try {
+                return new URL(to).host === host;
+              } catch {
+                return false;
+              }
+            })
+          : true;
+
+        // R12-04: Validate complete inferred destination origin (scheme, host, port) from request.url
+        // Reject untrusted scheme/destination even if Host header matches a trusted host,
+        // and reject untrusted Host header even if request.url was constructed with trusted base
+        if (
+          !isTrustedHost ||
+          !allowedOrigins.has(reqOrigin) ||
+          request.headers.get('sec-fetch-site') !== 'same-origin'
+        ) {
           return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
       } else {
@@ -294,8 +310,31 @@ export async function POST(request: NextRequest) {
               where: { identifier: `2fa-cred-ver-${rawToken}` },
             });
 
-            const currentCredVer = await getUserCredentialVersion(targetUserId);
-            expectedCredVer = currentCredVer;
+            let currentCredVer: number;
+            try {
+              currentCredVer = await getUserCredentialVersion(targetUserId);
+              expectedCredVer = currentCredVer;
+            } catch {
+              // Fail closed if version resolution fails
+              await prisma.verification.deleteMany({
+                where: {
+                  OR: [
+                    { id: verifRecord.id },
+                    { identifier: `2fa-cred-ver-${rawToken}` },
+                  ],
+                },
+              }).catch(() => {});
+              const errRes = NextResponse.json(
+                {
+                  error:
+                    'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+                },
+                { status: 401 }
+              );
+              errRes.cookies.delete('better-auth.two_factor');
+              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              return errRes;
+            }
 
             const account = await prisma.account.findFirst({
               where: { userId: targetUserId, providerId: 'credential' },
@@ -304,10 +343,11 @@ export async function POST(request: NextRequest) {
             const isStaleByAccount =
               account && challengeCreatedAt < new Date(account.updatedAt);
             const isStaleByCredVer =
-              credVerRecord && Number(credVerRecord.value) !== currentCredVer;
+              !credVerRecord || Number(credVerRecord.value) !== currentCredVer;
 
-            if (isStaleByAccount || isStaleByCredVer) {
-              // Stale challenge created under prior password! Delete and reject fail-closed!
+            // R12-01: Enforce credVerRecord presence: if missing, mismatched, or stale, fail closed
+            if (!credVerRecord || isStaleByAccount || isStaleByCredVer) {
+              // Stale challenge created under prior password or missing companion record! Delete and reject fail-closed!
               await prisma.verification.deleteMany({
                 where: {
                   OR: [
@@ -367,27 +407,28 @@ export async function POST(request: NextRequest) {
 
   const response = await auth.handler(reqToExecute);
 
-  // R11-01: In POST /api/auth/sign-in/email:
+  // R11-01 & R12-01: In POST /api/auth/sign-in/email:
   // When Better Auth issues a 2FA challenge cookie, stamp companion record in verification:
   // identifier: '2fa-cred-ver-' + rawToken, value: String(userCredentialVersion), with matching expiresAt.
-  if (pathname.includes('/sign-in/email') && signInUserCredentialVersion !== null) {
-    try {
-      const setCookies = response.headers.getSetCookie?.() || [
-        response.headers.get('set-cookie') || '',
-      ];
-      const tfCookie = setCookies.find(
-        (c) =>
-          c.startsWith('better-auth.two_factor=') ||
-          c.startsWith('__Secure-better-auth.two_factor=')
-      );
-      if (tfCookie) {
-        const rawCookiePart = tfCookie.split(';')[0];
-        const eqIdx = rawCookiePart.indexOf('=');
-        const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
-        const decodedVal = decodeURIComponent(cookieVal);
-        const rawToken = decodedVal.split('.')[0];
-        if (rawToken) {
-          const prisma = getPrismaClient();
+  if (pathname.includes('/sign-in/email')) {
+    const setCookies = response.headers.getSetCookie?.() || [
+      response.headers.get('set-cookie') || '',
+    ];
+    const tfCookie = setCookies.find(
+      (c) =>
+        c.startsWith('better-auth.two_factor=') ||
+        c.startsWith('__Secure-better-auth.two_factor=')
+    );
+    if (tfCookie) {
+      const rawCookiePart = tfCookie.split(';')[0];
+      const eqIdx = rawCookiePart.indexOf('=');
+      const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
+      const decodedVal = decodeURIComponent(cookieVal);
+      const rawToken = decodedVal.split('.')[0];
+      if (rawToken) {
+        const prisma = getPrismaClient();
+        let verifRecordId: string | null = null;
+        try {
           const verifRecord = await prisma.verification.findFirst({
             where: {
               OR: [
@@ -398,31 +439,74 @@ export async function POST(request: NextRequest) {
               ],
             },
           });
+          if (!verifRecord) {
+            throw new Error(`Verification challenge record not found for token ${rawToken}`);
+          }
+          verifRecordId = verifRecord.id;
+
           const expiresAt =
-            verifRecord?.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
+            verifRecord.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
+
+          let credVer = signInUserCredentialVersion;
+          if (credVer === null || credVer === undefined) {
+            credVer = await getUserCredentialVersion(verifRecord.value);
+          }
 
           await prisma.verification.deleteMany({
             where: { identifier: `2fa-cred-ver-${rawToken}` },
-          }).catch(() => {});
+          });
 
           await prisma.verification.create({
             data: {
               id: randomUUID(),
               identifier: `2fa-cred-ver-${rawToken}`,
-              value: String(signInUserCredentialVersion),
+              value: String(credVer),
               expiresAt,
             },
-          }).catch(() => {});
+          });
+        } catch {
+          // R12-01: Prevent companion insert failure suppression!
+          // If inserting 2fa-cred-ver-${rawToken} fails, clean up created verification record,
+          // clear 2FA cookies, and return HTTP 500 fail-closed
+          if (verifRecordId) {
+            await prisma.verification.deleteMany({
+              where: {
+                OR: [
+                  { id: verifRecordId },
+                  { identifier: `2fa-cred-ver-${rawToken}` },
+                ],
+              },
+            }).catch(() => {});
+          } else {
+            await prisma.verification.deleteMany({
+              where: {
+                OR: [
+                  { identifier: rawToken },
+                  { identifier: `2fa-cred-ver-${rawToken}` },
+                ],
+              },
+            }).catch(() => {});
+          }
+
+          const errRes = NextResponse.json(
+            { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
+            { status: 500 }
+          );
+          errRes.cookies.delete('better-auth.two_factor');
+          errRes.cookies.delete('__Secure-better-auth.two_factor');
+          return errRes;
         }
       }
+    }
 
-      // Also if a direct session was issued without 2FA:
-      const sessionCookie = setCookies.find(
-        (c) =>
-          c.startsWith('better-auth.session_token=') ||
-          c.startsWith('__Secure-better-auth.session_token=')
-      );
-      if (sessionCookie) {
+    // Also if a direct session was issued without 2FA:
+    const sessionCookie = setCookies.find(
+      (c) =>
+        c.startsWith('better-auth.session_token=') ||
+        c.startsWith('__Secure-better-auth.session_token=')
+    );
+    if (sessionCookie && signInUserCredentialVersion !== null) {
+      try {
         const rawCookiePart = sessionCookie.split(';')[0];
         const eqIdx = rawCookiePart.indexOf('=');
         const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
@@ -447,9 +531,9 @@ export async function POST(request: NextRequest) {
             );
           }
         }
+      } catch {
+        // Best-effort sign-in metadata stamping
       }
-    } catch {
-      // Best-effort sign-in metadata stamping
     }
   }
 

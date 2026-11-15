@@ -93,6 +93,56 @@ async function waitForLockWaiters(pool: Pool, expectedCount: number, timeoutMs =
   throw new Error(`Timed out waiting for ${expectedCount} lock waiter(s) in pg_locks`);
 }
 
+async function applyAllTestMigrations(pool: Pool): Promise<void> {
+  const initSqlPath = path.resolve(
+    process.cwd(),
+    'prisma/migrations/20261111000000_init_auth/migration.sql'
+  );
+  const initSql = fs.readFileSync(initSqlPath, 'utf-8');
+
+  const credSqlPath = path.resolve(
+    process.cwd(),
+    'prisma/migrations/20261114000000_credential_version/migration.sql'
+  );
+  const credSql = fs.existsSync(credSqlPath) ? fs.readFileSync(credSqlPath, 'utf-8') : '';
+
+  const client = await pool.connect();
+  try {
+    const statements = initSql
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    for (const statement of statements) {
+      await client.query(statement).catch((err) => {
+        if (
+          !err.message.includes('already exists') &&
+          !err.message.includes('duplicate')
+        ) {
+          throw err;
+        }
+      });
+    }
+
+    await client
+      .query(
+        'ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;'
+      )
+      .catch(() => {});
+    await client
+      .query(
+        'ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);'
+      )
+      .catch(() => {});
+
+    if (credSql) {
+      await client.query(credSql).catch(() => {});
+    }
+  } finally {
+    client.release();
+  }
+}
+
 describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
   let dedicated: { url: string; pool: Pool; drop: () => Promise<void> };
   let pool: Pool;
@@ -110,46 +160,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await clearGlobalSingletons();
 
     // 2. Schema installation / migration check from T02
-    // Run the migration SQL idempotently or create tables if they do not exist
-    const migrationSqlPath = path.resolve(
-      process.cwd(),
-      'prisma/migrations/20261111000000_init_auth/migration.sql'
-    );
-    const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-
-    const client = await pool.connect();
-    try {
-      // Execute migration SQL statement-by-statement to handle pre-existing types/tables idempotently
-      const statements = migrationSql
-        .split(';')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-
-      for (const statement of statements) {
-        await client.query(statement).catch((err) => {
-          if (
-            !err.message.includes('already exists') &&
-            !err.message.includes('duplicate')
-          ) {
-            throw err;
-          }
-        });
-      }
-
-      // Ensure columns added in T03 exist even if twoFactor table pre-existed
-      await client
-        .query(
-          'ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;'
-        )
-        .catch(() => {});
-      await client
-        .query(
-          'ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);'
-        )
-        .catch(() => {});
-    } finally {
-      client.release();
-    }
+    await applyAllTestMigrations(pool);
   }, 30000);
 
   afterAll(async () => {
@@ -1742,22 +1753,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     try {
       // Migrate fresh bootstrap database
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const client = await freshBootstrapDb.pool.connect();
-      try {
-        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
-        for (const s of statements) {
-          await client.query(s).catch(() => {});
-        }
-        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;').catch(() => {});
-        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);').catch(() => {});
-      } finally {
-        client.release();
-      }
+      await applyAllTestMigrations(freshBootstrapDb.pool);
 
       // Initial provisioning of fresh owner with ordinary Arabic name and normal email (NO magic string heuristics)
       const setupResult = await provisionOwner({
@@ -1837,22 +1833,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     try {
       // Migrate fresh database
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const client = await freshDb.pool.connect();
-      try {
-        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
-        for (const s of statements) {
-          await client.query(s).catch(() => {});
-        }
-        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "failedVerificationCount" INTEGER NOT NULL DEFAULT 0;').catch(() => {});
-        await client.query('ALTER TABLE "twoFactor" ADD COLUMN IF NOT EXISTS "lockedUntil" TIMESTAMP(3);').catch(() => {});
-      } finally {
-        client.release();
-      }
+      await applyAllTestMigrations(freshDb.pool);
 
       // 1. Formerly exempt email 'adel.lawyer@office.eg' also universally begins unverified with bootstrap open
       const initial = await provisionOwner({
@@ -1998,17 +1979,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await clearGlobalSingletons();
 
     try {
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const initClient = await freshDb.pool.connect();
-      try {
-        await initClient.query(migrationSql);
-      } finally {
-        initClient.release();
-      }
+      await applyAllTestMigrations(freshDb.pool);
       const prismaFresh = getPrismaClient();
 
       // Start fresh reservation for an owner
@@ -2098,17 +2069,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await clearGlobalSingletons();
 
     try {
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const initClient = await freshDb.pool.connect();
-      try {
-        await initClient.query(migrationSql);
-      } finally {
-        initClient.release();
-      }
+      await applyAllTestMigrations(freshDb.pool);
       const prismaFresh = getPrismaClient();
 
       // Start fresh reservation for an owner
@@ -2192,17 +2153,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await clearGlobalSingletons();
 
     try {
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const initClient = await freshDb.pool.connect();
-      try {
-        await initClient.query(migrationSql);
-      } finally {
-        initClient.release();
-      }
+      await applyAllTestMigrations(freshDb.pool);
       const prismaFresh = getPrismaClient();
 
       const initial = await provisionOwner({
@@ -2402,17 +2353,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     await clearGlobalSingletons();
 
     try {
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const initClient = await freshDb.pool.connect();
-      try {
-        await initClient.query(migrationSql);
-      } finally {
-        initClient.release();
-      }
+      await applyAllTestMigrations(freshDb.pool);
       const prismaFresh = getPrismaClient();
 
       // State before attempts: unbootstrapped database
@@ -3021,7 +2962,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       );
       expect(hasIssuedSessionB).toBe(false);
 
-      await expect(requireActor({ headers: finishBRes.headers })).rejects.toThrowError(AuthenticationError);
+      // finishBRes returned 401 and issued no session cookie, so requireActor fails closed
+      await expect(requireActor({ headers: finishBRes.headers })).rejects.toThrowError(
+        expect.objectContaining({ code: 'UNAUTHENTICATED' })
+      );
 
       // 7. Reset password back for subsequent tests
       const freshLoginReq = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
@@ -3069,6 +3013,266 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       await pool.query(`DROP TRIGGER IF EXISTS trg_session_barrier ON "session";`).catch(() => {});
       await pool.query(`DROP FUNCTION IF EXISTS trg_fn_wait_barrier();`).catch(() => {});
       barrierClient.release();
+    }
+  });
+
+  it('direct requireActor eviction: evicts active session and deletes row from PostgreSQL when user.credentialVersion increments (R12-01 / R12-05)', async () => {
+    const prisma = getPrismaClient();
+    const env = getEnv();
+
+    const ownerUser = await prisma.user.findUnique({ where: { id: provisionedOwner.userId } });
+    const currentVersion = ownerUser?.credentialVersion ?? 1;
+
+    const testSessionToken = `sess-r12-direct-${Date.now()}`;
+    const sessionRecord = await prisma.session.create({
+      data: {
+        id: `sess-r12-id-${Date.now()}`,
+        userId: provisionedOwner.userId,
+        token: testSessionToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        credentialVersion: currentVersion,
+      },
+    });
+
+    const sessionCookieHeader = `better-auth.session_token=${signSessionTokenCookie(testSessionToken, env.BETTER_AUTH_SECRET)}`;
+
+    // Verified: requireActor succeeds with valid session
+    const actorBefore = await requireActor({ headers: new Headers({ cookie: sessionCookieHeader }) });
+    expect(actorBefore.id).toBe(provisionedOwner.userId);
+
+    // Atomically increment user.credentialVersion in PostgreSQL
+    await pool.query('UPDATE "user" SET "credentialVersion" = "credentialVersion" + 1 WHERE id = $1', [
+      provisionedOwner.userId,
+    ]);
+
+    // Calling requireActor now throws AuthenticationError ('SESSION_EXPIRED')
+    await expect(
+      requireActor({ headers: new Headers({ cookie: sessionCookieHeader }) })
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'SESSION_EXPIRED',
+        message: expect.stringContaining('تم تغيير كلمة المرور أو إثبات الهوية'),
+      })
+    );
+
+    // Assert session row was permanently deleted from PostgreSQL
+    const sessionInDb = await prisma.session.findUnique({
+      where: { id: sessionRecord.id },
+    });
+    expect(sessionInDb).toBeNull();
+  });
+
+  it('companion persistence failure: fails closed with HTTP 500 and cleans up primary challenge when 2fa-cred-ver insert fails (R12-01)', async () => {
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE OR REPLACE FUNCTION fail_companion_insert() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.identifier LIKE '2fa-cred-ver-%' THEN
+            RAISE EXCEPTION 'Simulated PostgreSQL failure during companion verification insert';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_fail_companion_insert ON "verification";
+        CREATE TRIGGER trg_fail_companion_insert
+        BEFORE INSERT ON "verification"
+        FOR EACH ROW
+        EXECUTE FUNCTION fail_companion_insert();
+      `);
+
+      const signInReq = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: testOrigin },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: 'BrandNewPassword2026!#',
+        }),
+      });
+
+      const signInRes = await authRoutePOST(signInReq);
+
+      expect(signInRes.status).toBe(500);
+      const resJson = await signInRes.json();
+      expect(resJson.error).toBe('فشل في تهيئة سياق أمان التحقق الثنائي.');
+
+      // Assert no valid 2FA cookies left (either omitted or expired via Max-Age=0 / 1970)
+      const setCookies = signInRes.headers.getSetCookie?.() || [
+        signInRes.headers.get('set-cookie') || '',
+      ];
+      const validTfCookie = setCookies.find((c) => {
+        if (!c.includes('better-auth.two_factor=')) return false;
+        if (c.includes('Max-Age=0') || c.includes('Expires=Thu, 01 Jan 1970')) return false;
+        const val = c.split(';')[0].split('=')[1];
+        return val && val.length > 0;
+      });
+      expect(validTfCookie).toBeUndefined();
+
+      // Assert companion records and primary verification record for this user are cleaned up
+      const verifRows = await pool.query(
+        'SELECT * FROM "verification" WHERE value = $1 OR identifier LIKE $2',
+        [provisionedOwner.userId, '2fa-cred-ver-%']
+      );
+      expect(verifRows.rows.length).toBe(0);
+    } finally {
+      await client.query('DROP TRIGGER IF EXISTS trg_fail_companion_insert ON "verification";').catch(() => {});
+      await client.query('DROP FUNCTION IF EXISTS fail_companion_insert();').catch(() => {});
+      client.release();
+    }
+  });
+
+  it('rotation failure: rolls back PostgreSQL transaction when user.credentialVersion update fails and preserves original password hash (R12-01)', async () => {
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const prisma = getPrismaClient();
+    const env = getEnv();
+
+    // 1. Establish an active session for the owner
+    const testSessionToken = `sess-r12-rotfail-${Date.now()}`;
+    const ownerUser = await prisma.user.findUnique({ where: { id: provisionedOwner.userId } });
+    const currentVersion = ownerUser?.credentialVersion ?? 1;
+
+    await prisma.session.create({
+      data: {
+        id: `sess-r12-rotfail-id-${Date.now()}`,
+        userId: provisionedOwner.userId,
+        token: testSessionToken,
+        expiresAt: new Date(Date.now() + 12 * 3600 * 1000),
+        credentialVersion: currentVersion,
+      },
+    });
+
+    const sessionCookieHeader = `better-auth.session_token=${signSessionTokenCookie(testSessionToken, env.BETTER_AUTH_SECRET)}`;
+
+    // Read initial password hash from account table
+    const accBefore = await prisma.account.findFirst({
+      where: { userId: provisionedOwner.userId, providerId: 'credential' },
+    });
+    expect(accBefore).toBeDefined();
+    const originalHashedPassword = accBefore!.password;
+
+    // 2. Attach a trigger on "user" that prevents credentialVersion update
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE OR REPLACE FUNCTION fail_user_cred_ver_update() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."credentialVersion" <> OLD."credentialVersion" THEN
+            RAISE EXCEPTION 'Simulated PostgreSQL failure during user credentialVersion update';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_test_fail_cred_ver ON "user";
+        CREATE TRIGGER trg_test_fail_cred_ver
+        BEFORE UPDATE OF "credentialVersion" ON "user"
+        FOR EACH ROW
+        EXECUTE FUNCTION fail_user_cred_ver_update();
+      `);
+
+      // 3. Attempt password change
+      const pwChangeReq = new NextRequest(`${testOrigin}/api/auth/change-password`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: sessionCookieHeader,
+          origin: testOrigin,
+        },
+        body: JSON.stringify({
+          currentPassword: 'BrandNewPassword2026!#',
+          newPassword: 'AttemptedRotatedPassword2026!#',
+          revokeOtherSessions: true,
+        }),
+      });
+
+      const pwChangeRes = await authRoutePOST(pwChangeReq);
+
+      // Assert password change failed closed (non-200)
+      expect(pwChangeRes.status).not.toBe(200);
+      expect([500, 503]).toContain(pwChangeRes.status);
+
+      // 4. Assert PostgreSQL transaction rolled back:
+      // account.password still contains original password hash and was NOT changed
+      const accAfter = await prisma.account.findFirst({
+        where: { userId: provisionedOwner.userId, providerId: 'credential' },
+      });
+      expect(accAfter?.password).toBe(originalHashedPassword);
+
+      // user.credentialVersion was NOT modified
+      const userAfter = await prisma.user.findUnique({
+        where: { id: provisionedOwner.userId },
+      });
+      expect(userAfter?.credentialVersion).toBe(currentVersion);
+    } finally {
+      await client.query('DROP TRIGGER IF EXISTS trg_test_fail_cred_ver ON "user";').catch(() => {});
+      await client.query('DROP FUNCTION IF EXISTS fail_user_cred_ver_update();').catch(() => {});
+      client.release();
+    }
+  });
+
+  it('enforces search_path matrix isolation across fresh connections ($user public, public, pg_catalog public) against hijacking (R12-03)', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE SCHEMA IF NOT EXISTS decoy_schema;
+        CREATE TABLE IF NOT EXISTS decoy_schema."user" (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          "emailVerified" BOOLEAN NOT NULL DEFAULT true,
+          image TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT NOW(),
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT NOW(),
+          role TEXT NOT NULL DEFAULT 'OWNER',
+          "twoFactorEnabled" BOOLEAN DEFAULT true,
+          "credentialVersion" INTEGER NOT NULL DEFAULT 999
+        );
+        INSERT INTO decoy_schema."user" (id, name, email, role, "credentialVersion")
+        VALUES ('decoy-hijack-user-id', 'مستخدم مضلل', 'hijacker@decoy.invalid', 'OWNER', 999)
+        ON CONFLICT (id) DO NOTHING;
+      `);
+
+      const searchPathVariations = [
+        '"$user", public',
+        'public',
+        'pg_catalog, public',
+        'decoy_schema, public',
+      ];
+
+      for (const sp of searchPathVariations) {
+        const freshPool = new Pool({
+          connectionString: dedicated.url,
+        });
+        const freshClient = await freshPool.connect();
+        try {
+          await freshClient.query(`SET search_path TO ${sp}`);
+          const spRes = await freshClient.query('SHOW search_path');
+          expect(spRes.rows[0].search_path).toBeDefined();
+
+          // Application Prisma client pins public schema and cannot be hijacked
+          const prisma = getPrismaClient();
+          const publicUsers = await prisma.user.findMany({
+            where: { id: 'decoy-hijack-user-id' },
+          });
+          expect(publicUsers.length).toBe(0);
+
+          const authenticOwner = await prisma.user.findFirst({
+            where: { email: provisionedOwner.email },
+          });
+          expect(authenticOwner).toBeDefined();
+          expect(authenticOwner?.email).toBe(provisionedOwner.email);
+          expect(authenticOwner?.name).not.toBe('مستخدم مضلل');
+        } finally {
+          freshClient.release();
+          await freshPool.end();
+        }
+      }
+    } finally {
+      await client.query('DROP SCHEMA IF EXISTS decoy_schema CASCADE;').catch(() => {});
+      client.release();
     }
   });
 
@@ -3325,20 +3529,7 @@ describe('Test Target Validation & Isolation Guard (R07)', () => {
 
     try {
       // Migrate sentinelDb
-      const migrationSqlPath = path.resolve(
-        process.cwd(),
-        'prisma/migrations/20261111000000_init_auth/migration.sql'
-      );
-      const migrationSql = fs.readFileSync(migrationSqlPath, 'utf-8');
-      const client = await sentinelDb.pool.connect();
-      try {
-        const statements = migrationSql.split(';').map((s) => s.trim()).filter((s) => s.length > 0);
-        for (const s of statements) {
-          await client.query(s).catch(() => {});
-        }
-      } finally {
-        client.release();
-      }
+      await applyAllTestMigrations(sentinelDb.pool);
 
       const prisma = getPrismaClient();
 

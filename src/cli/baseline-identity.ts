@@ -6,12 +6,14 @@ import { spawnSync } from 'child_process';
 export interface BaselineOptions {
   targetUrl: string;
   migrationSqlPath?: string;
+  forwardMigrationSqlPath?: string;
   silent?: boolean;
 }
 
 export interface BaselineResult {
   success: boolean;
   appliedMigration: string;
+  appliedMigrations?: string[];
   tables: string[];
   durationMs: number;
   recovered?: boolean;
@@ -705,7 +707,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
-  // 6. Indexes: verify name, table, access method, uniqueness, validity, readiness, non-partial, non-expression, nulls-distinctness, and exact column order
+  // 6. Indexes: verify name, table, access method, uniqueness, validity, readiness, non-partial, non-expression, nulls-distinctness, collation, opclass, indoption, and exact column order
   const idxRes = await client.query(`
     SELECT
       i.relname AS indexname,
@@ -724,6 +726,32 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
         SELECT pg_get_indexdef(ix.indexrelid, k, true)
         FROM generate_series(1, ix.indnatts) AS k
       ) AS index_columns,
+      ARRAY(
+        SELECT COALESCE(c.collname, 'none')::text
+        FROM generate_series(1, ix.indnkeyatts) AS k
+        LEFT JOIN pg_collation c ON c.oid = (string_to_array(ix.indcollation::text, ' '))[k]::oid
+      )::text[] AS coll_names,
+      ARRAY(
+        SELECT COALESCE(cnsp.nspname, 'none')::text
+        FROM generate_series(1, ix.indnkeyatts) AS k
+        LEFT JOIN pg_collation c ON c.oid = (string_to_array(ix.indcollation::text, ' '))[k]::oid
+        LEFT JOIN pg_namespace cnsp ON cnsp.oid = c.collnamespace
+      )::text[] AS coll_namespaces,
+      ARRAY(
+        SELECT COALESCE(opc.opcname, 'none')::text
+        FROM generate_series(1, ix.indnkeyatts) AS k
+        LEFT JOIN pg_opclass opc ON opc.oid = (string_to_array(ix.indclass::text, ' '))[k]::oid
+      )::text[] AS opc_names,
+      ARRAY(
+        SELECT COALESCE(onsp.nspname, 'none')::text
+        FROM generate_series(1, ix.indnkeyatts) AS k
+        LEFT JOIN pg_opclass opc ON opc.oid = (string_to_array(ix.indclass::text, ' '))[k]::oid
+        LEFT JOIN pg_namespace onsp ON onsp.oid = opc.opcnamespace
+      )::text[] AS opc_namespaces,
+      ARRAY(
+        SELECT (string_to_array(ix.indoption::text, ' '))[k]::int
+        FROM generate_series(1, ix.indnkeyatts) AS k
+      ) AS ind_options,
       pg_get_indexdef(ix.indexrelid) AS indexdef
     FROM pg_index ix
     JOIN pg_class i ON i.oid = ix.indexrelid
@@ -749,12 +777,34 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       isExpression: boolean;
       predicate: string | null;
       columns: string[];
+      collNames: string[];
+      collNamespaces: string[];
+      opcNames: string[];
+      opcNamespaces: string[];
+      indOptions: number[];
       indexdef: string;
     }
   >();
+  const parsePgStringArray = (val: unknown): string[] => {
+    if (Array.isArray(val)) return val.map(String);
+    if (typeof val === 'string' && val.startsWith('{') && val.endsWith('}')) {
+      return val.slice(1, -1).split(',').map((s) => s.trim().replace(/^"|"$/g, ''));
+    }
+    return [];
+  };
+
   for (const row of idxRes.rows) {
-    const rawCols: string[] = Array.isArray(row.index_columns) ? row.index_columns : [];
+    const rawCols: string[] = parsePgStringArray(row.index_columns);
     const normalizedCols = rawCols.map((c: string) => c.trim().replace(/^"|"$/g, ''));
+    const collNames: string[] = parsePgStringArray(row.coll_names);
+    const collNamespaces: string[] = parsePgStringArray(row.coll_namespaces);
+    const opcNames: string[] = parsePgStringArray(row.opc_names);
+    const opcNamespaces: string[] = parsePgStringArray(row.opc_namespaces);
+    const indOptions: number[] = Array.isArray(row.ind_options)
+      ? row.ind_options.map(Number)
+      : typeof row.ind_options === 'string' && row.ind_options.startsWith('{') && row.ind_options.endsWith('}')
+      ? row.ind_options.slice(1, -1).split(',').map(Number)
+      : [];
 
     foundIndexes.set(row.indexname, {
       table: row.tablename,
@@ -769,6 +819,11 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       isExpression: Boolean(row.is_expression),
       predicate: row.predicate || null,
       columns: normalizedCols,
+      collNames,
+      collNamespaces,
+      opcNames,
+      opcNamespaces,
+      indOptions,
       indexdef: row.indexdef,
     });
   }
@@ -863,9 +918,30 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       );
     } else {
       for (let i = 0; i < expected.columns.length; i++) {
-        if (found.columns[i] !== expected.columns[i]) {
+        const colName = expected.columns[i];
+        if (found.columns[i] !== colName) {
           errors.push(
-            `Index '${idxName}' column ${i + 1} mismatch: expected '${expected.columns[i]}', got '${found.columns[i]}'`
+            `Index '${idxName}' column ${i + 1} mismatch: expected '${colName}', got '${found.columns[i]}'`
+          );
+        }
+        const collName = found.collNames[i];
+        const collNamespace = found.collNamespaces[i];
+        if (collName !== 'default' || collNamespace !== 'pg_catalog') {
+          errors.push(
+            `Index '${idxName}' column '${colName}' specifies unapproved collation '${collNamespace}.${collName}'. Expected 'pg_catalog.default'.`
+          );
+        }
+        const opcName = found.opcNames[i];
+        const opcNamespace = found.opcNamespaces[i];
+        if (opcName !== 'text_ops' || opcNamespace !== 'pg_catalog') {
+          errors.push(
+            `Index '${idxName}' column '${colName}' specifies unapproved operator class '${opcNamespace}.${opcName}'. Expected 'pg_catalog.text_ops'.`
+          );
+        }
+        const optVal = found.indOptions[i];
+        if (optVal !== 0) {
+          errors.push(
+            `Index '${idxName}' column '${colName}' specifies unapproved index options (${optVal}). Expected 0.`
           );
         }
       }
@@ -948,20 +1024,24 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       ) AS has_migrations_table;
     `);
     const hasMigrationsTable = Boolean(migTableCheck.rows[0]?.has_migrations_table);
+    const appliedSet = new Set<string>();
 
     if (hasMigrationsTable) {
       const appliedCheck = await client.query(`
-        SELECT id, migration_name, finished_at, rolled_back_at
+        SELECT migration_name
         FROM _prisma_migrations
-        WHERE migration_name = '20261111000000_init_auth';
+        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;
       `);
-      const row = appliedCheck.rows[0];
-      if (row && row.finished_at !== null && row.rolled_back_at === null) {
-        log('[Identity Baseline] Migration 20261111000000_init_auth is already marked applied in _prisma_migrations. Verifying schema equivalence...');
+      for (const r of appliedCheck.rows) {
+        appliedSet.add(r.migration_name);
+      }
+
+      if (appliedSet.has('20261111000000_init_auth') && appliedSet.has('20261114000000_credential_version')) {
+        log('[Identity Baseline] Both migrations are already marked applied in _prisma_migrations. Verifying schema equivalence...');
         const verifyRes = await verifySchemaEquivalence(client);
         if (!verifyRes.equivalent) {
           throw new Error(
-            `Migration history indicates '20261111000000_init_auth' is applied, but physical schema verification failed: ${verifyRes.errors.join('; ')}`
+            `Migration history indicates all migrations are applied, but physical schema verification failed: ${verifyRes.errors.join('; ')}`
           );
         }
 
@@ -970,6 +1050,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
         return {
           success: true,
           appliedMigration: '20261111000000_init_auth',
+          appliedMigrations: ['20261111000000_init_auth', '20261114000000_credential_version'],
           tables: ['user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap'],
           durationMs,
           alreadyCompleted: true,
@@ -987,10 +1068,62 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
     const enumCount = Number(managedEntitiesCheck.rows[0]?.enum_count || 0);
     const hasManagedEntities = tableCount > 0 || enumCount > 0;
 
+    const credVerCheck = await client.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'user' AND column_name = 'credentialVersion'
+      ) AS has_cred_ver;
+    `);
+    const hasCredVer = Boolean(credVerCheck.rows[0]?.has_cred_ver);
+
+    const allManagedTablesExist = tableCount === 6;
+
+    const initMigrationPath =
+      options.migrationSqlPath ||
+      path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
+
+    const forwardMigrationPath =
+      options.forwardMigrationSqlPath ||
+      path.resolve(process.cwd(), 'prisma/migrations/20261114000000_credential_version/migration.sql');
+
     let isRecovery = false;
 
-    if (hasManagedEntities) {
-      log('[Identity Baseline] Managed entities detected without completed migration history. Verifying physical schema equivalence...');
+    if (allManagedTablesExist && !hasCredVer) {
+      // 3.3 Target database has prior canonical schema (47 columns) without credentialVersion:
+      // Perform non-destructive upgrade by executing forward migration 20261114000000_credential_version
+      log('[Identity Baseline] Detected prior canonical schema (47 columns). Executing non-destructive forward upgrade...');
+      if (!fs.existsSync(forwardMigrationPath)) {
+        throw new Error(`Forward migration SQL script not found at: ${forwardMigrationPath}`);
+      }
+      const forwardSql = fs.readFileSync(forwardMigrationPath, 'utf-8');
+
+      await client.query('BEGIN');
+      try {
+        await client.query('SET LOCAL search_path = public;');
+        await client.query(forwardSql);
+
+        const inTxVerifyRes = await verifySchemaEquivalence(client);
+        if (!inTxVerifyRes.equivalent) {
+          throw new Error(
+            `Upgrade schema verification failed: conflicting or incompatible managed entities: ${inTxVerifyRes.errors.join(
+              '; '
+            )}`
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (sqlErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw new Error(
+          `Cannot baseline: existing schema contains conflicting or incompatible managed entities: Non-destructive upgrade execution failed: ${
+            sqlErr instanceof Error ? sqlErr.message : String(sqlErr)
+          }`
+        );
+      }
+      isRecovery = true;
+    } else if (hasManagedEntities) {
+      // 3.4 Managed entities exist and credentialVersion column is present: verify physical schema equivalence
+      log('[Identity Baseline] Managed entities detected. Verifying physical schema equivalence...');
       const verifyRes = await verifySchemaEquivalence(client);
 
       if (!verifyRes.equivalent) {
@@ -1002,35 +1135,40 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       log('[Identity Baseline] Physical schema is fully equivalent (matching SQL-committed state). Resuming history recording without re-executing DDL...');
       isRecovery = true;
     } else {
-      // 3.3 No managed entities exist: clean baseline execution
+      // 3.5 No managed entities exist: clean baseline execution (applies init migration + forward migration)
       log('[Identity Baseline] Clean target detected. Executing migration SQL in a single fail-fast transaction...');
 
-      const migrationPath =
-        options.migrationSqlPath ||
-        path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql');
-
-      if (!fs.existsSync(migrationPath)) {
-        throw new Error(`Baseline migration SQL script not found at: ${migrationPath}`);
+      if (!fs.existsSync(initMigrationPath)) {
+        throw new Error(`Baseline migration SQL script not found at: ${initMigrationPath}`);
+      }
+      if (!fs.existsSync(forwardMigrationPath)) {
+        throw new Error(`Forward migration SQL script not found at: ${forwardMigrationPath}`);
       }
 
-      const migrationSql = fs.readFileSync(migrationPath, 'utf-8');
+      const initSql = fs.readFileSync(initMigrationPath, 'utf-8');
+      const forwardSql = fs.readFileSync(forwardMigrationPath, 'utf-8');
 
       await client.query('BEGIN');
       try {
         await client.query('SET LOCAL search_path = public;');
-        await client.query(migrationSql);
+        await client.query(initSql);
+        await client.query(forwardSql);
 
         // Verify catalog in-transaction before committing DDL
         const inTxVerifyRes = await verifySchemaEquivalence(client);
         if (!inTxVerifyRes.equivalent) {
-          throw new Error(`In-transaction catalog verification failed: ${inTxVerifyRes.errors.join('; ')}`);
+          throw new Error(
+            `In-transaction catalog verification failed: conflicting or incompatible managed entities: ${inTxVerifyRes.errors.join(
+              '; '
+            )}`
+          );
         }
 
         await client.query('COMMIT');
       } catch (sqlErr) {
         await client.query('ROLLBACK').catch(() => {});
         throw new Error(
-          `Baseline migration SQL execution failed in transaction: ${
+          `Cannot baseline: existing schema contains conflicting or incompatible managed entities: Baseline migration SQL execution failed: ${
             sqlErr instanceof Error ? sqlErr.message : String(sqlErr)
           }`
         );
@@ -1039,7 +1177,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
     log('[Identity Baseline] Schema verified. Recording migration in Prisma history table...');
 
-    // 4. Record applied migration in Prisma migration history table
+    // 4. Record applied migrations in Prisma migration history table
     const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
     const cleanEnv: NodeJS.ProcessEnv = {
       ...process.env,
@@ -1054,21 +1192,33 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       }
     }
 
-    const resolveResult = spawnSync(
-      process.execPath,
-      [prismaJs, 'migrate', 'resolve', '--applied', '20261111000000_init_auth'],
-      {
-        env: cleanEnv,
-        encoding: 'utf-8',
-      }
-    );
-
-    if (resolveResult.status !== 0) {
-      throw new Error(
-        `Prisma migrate resolve failed (status ${resolveResult.status}): ${
-          resolveResult.stderr || resolveResult.stdout || 'Unknown error'
-        }`
+    const resolveMigration = (migName: string) => {
+      const resolveResult = spawnSync(
+        process.execPath,
+        [prismaJs, 'migrate', 'resolve', '--applied', migName],
+        {
+          env: cleanEnv,
+          encoding: 'utf-8',
+        }
       );
+
+      if (resolveResult.status !== 0) {
+        throw new Error(
+          `Prisma migrate resolve failed for '${migName}' (status ${resolveResult.status}): ${
+            resolveResult.stderr || resolveResult.stdout || 'Unknown error'
+          }`
+        );
+      }
+    };
+
+    if (!appliedSet.has('20261111000000_init_auth')) {
+      log('[Identity Baseline] Resolving migration 20261111000000_init_auth...');
+      resolveMigration('20261111000000_init_auth');
+    }
+
+    if (!appliedSet.has('20261114000000_credential_version')) {
+      log('[Identity Baseline] Resolving migration 20261114000000_credential_version...');
+      resolveMigration('20261114000000_credential_version');
     }
 
     // 5. Verify migration status reports clean state
@@ -1083,7 +1233,7 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
     if (statusResult.status !== 0) {
       throw new Error(
-        `Prisma migrate status failed (status ${statusResult.status}): ${
+        `Prisma migrate status reported errors (status ${statusResult.status}): ${
           statusResult.stderr || statusResult.stdout || 'Unknown error'
         }`
       );
@@ -1091,11 +1241,12 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
     const durationMs = Date.now() - startTime;
     const actionLabel = isRecovery ? 'recovered and baselined' : 'baselined';
-    log(`[Identity Baseline] Success! Migration 20261111000000_init_auth ${actionLabel} in ${durationMs}ms.`);
+    log(`[Identity Baseline] Success! Migrations 20261111000000_init_auth & 20261114000000_credential_version ${actionLabel} in ${durationMs}ms.`);
 
     return {
       success: true,
       appliedMigration: '20261111000000_init_auth',
+      appliedMigrations: ['20261111000000_init_auth', '20261114000000_credential_version'],
       tables: ['user', 'session', 'account', 'verification', 'twoFactor', 'office_bootstrap'],
       durationMs,
       recovered: isRecovery,

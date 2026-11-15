@@ -365,7 +365,29 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         },
       ];
 
-      const indexes = [
+      interface MockIndex {
+        indexname: string;
+        tablename: string;
+        access_method: string;
+        indisunique: boolean;
+        indisvalid: boolean;
+        indisready: boolean;
+        indnatts: number;
+        indnkeyatts: number;
+        nulls_not_distinct: boolean;
+        is_partial: boolean;
+        is_expression: boolean;
+        predicate: string | null;
+        index_columns: string[];
+        coll_names: string[];
+        coll_namespaces: string[];
+        opc_names: string[];
+        opc_namespaces: string[];
+        ind_options: number[];
+        indexdef: string;
+      }
+
+      const indexes: MockIndex[] = [
         {
           indexname: 'user_email_key',
           tablename: 'user',
@@ -380,6 +402,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['email'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE UNIQUE INDEX user_email_key ON public."user" USING btree (email)',
         },
         {
@@ -396,6 +423,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['token'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE UNIQUE INDEX session_token_key ON public.session USING btree (token)',
         },
         {
@@ -412,6 +444,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['userId'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE INDEX "session_userId_idx" ON public.session USING btree ("userId")',
         },
         {
@@ -428,6 +465,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['userId'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE INDEX "account_userId_idx" ON public.account USING btree ("userId")',
         },
         {
@@ -444,6 +486,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['identifier'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE INDEX verification_identifier_idx ON public.verification USING btree (identifier)',
         },
         {
@@ -460,6 +507,11 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_expression: false,
           predicate: null as string | null,
           index_columns: ['userId'],
+          coll_names: ['default'],
+          coll_namespaces: ['pg_catalog'],
+          opc_names: ['text_ops'],
+          opc_namespaces: ['pg_catalog'],
+          ind_options: [0],
           indexdef: 'CREATE INDEX "twoFactor_userId_idx" ON public."twoFactor" USING btree ("userId")',
         },
       ];
@@ -777,6 +829,50 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       expect(res.equivalent).toBe(false);
       expect(res.errors).toContain(
         "Index 'user_email_key' specifies unapproved NULLS NOT DISTINCT semantics"
+      );
+    });
+
+    it('rejects ICU casefold collation on index column fail-closed (R12 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.coll_names = ['review_casefold'];
+        idx.coll_namespaces = ['public'];
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' column 'email' specifies unapproved collation 'public.review_casefold'. Expected 'pg_catalog.default'."
+      );
+    });
+
+    it('rejects non-default operator class on index column fail-closed (R12 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.opc_names = ['varchar_ops'];
+        idx.opc_namespaces = ['pg_catalog'];
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' column 'email' specifies unapproved operator class 'pg_catalog.varchar_ops'. Expected 'pg_catalog.text_ops'."
+      );
+    });
+
+    it('rejects non-zero indoption on index column fail-closed (R12 / F01)', async () => {
+      const catalog = buildValidCatalog();
+      const idx = catalog.indexes.find((i) => i.indexname === 'user_email_key');
+      if (idx) {
+        idx.ind_options = [1];
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Index 'user_email_key' column 'email' specifies unapproved index options (1). Expected 0."
       );
     });
   });

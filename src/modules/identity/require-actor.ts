@@ -121,7 +121,28 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     }
   }
 
-  // Check if credentials were changed after session creation (B3)
+  // Enforce session.credentialVersion === user.credentialVersion fail-closed (R12-01)
+  const dbSession = await prisma.session.findUnique({
+    where: { id: session.id },
+    select: { credentialVersion: true },
+  });
+
+  if (
+    !dbSession ||
+    dbSession.credentialVersion === null ||
+    dbSession.credentialVersion === undefined ||
+    user.credentialVersion === null ||
+    user.credentialVersion === undefined ||
+    dbSession.credentialVersion !== user.credentialVersion
+  ) {
+    await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+    throw new AuthenticationError(
+      'SESSION_EXPIRED',
+      'تم تغيير كلمة المرور أو إثبات الهوية. يلزم إعادة تسجيل الدخول.'
+    );
+  }
+
+  // Check if credentials were changed after session creation (B3 defense-in-depth)
   const account = await prisma.account.findFirst({
     where: { userId: user.id, providerId: 'credential' },
   });
