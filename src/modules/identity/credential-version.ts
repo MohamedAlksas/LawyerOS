@@ -19,18 +19,19 @@ export async function getUserCredentialVersion(userId: string): Promise<number> 
 
 /**
  * Retrieves the authoritative credentialVersion integer for a user by email.
- * Throws if the user is missing or database error occurs.
+ * Returns null if the user is missing (allowing provider authentication to handle invalid credentials).
+ * Throws if a database error occurs so caller fails closed.
  */
-export async function getUserCredentialVersionByEmail(email: string): Promise<number> {
+export async function getUserCredentialVersionByEmail(email: string): Promise<number | null> {
   const prisma = getPrismaClient();
   const user = await prisma.user.findFirst({
     where: { email: { equals: email, mode: 'insensitive' } },
     select: { credentialVersion: true },
   });
-  if (!user || user.credentialVersion === null || user.credentialVersion === undefined) {
-    throw new Error(`User with email ${email} not found or missing credentialVersion`);
+  if (!user) {
+    return null;
   }
-  return user.credentialVersion;
+  return user.credentialVersion ?? 1;
 }
 
 /**

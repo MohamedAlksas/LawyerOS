@@ -209,14 +209,19 @@ The `baseline-identity` entry point enforces strict execution guarantees in sequ
          - `account_userId_idx`: exactly 1 column `['userId']`.
          - `verification_identifier_idx`: exactly 1 column `['identifier']`.
          - `twoFactor_userId_idx`: exactly 1 column `['userId']`.
-     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'LAWYER', 'STAFF', 'ACCOUNTANT']`, rejecting missing or extraneous values.
+     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'MAINTAINER']`, rejecting missing or extraneous values.
+     - **Security Triggers & Trigger Functions (R13-02 / R13-03)**: queries `pg_trigger`, `pg_proc`, `pg_class`, and `pg_namespace` to verify:
+       * `trg_session_set_credential_version`: defined on `public."session"`, timing `BEFORE`, event `INSERT`, `FOR EACH ROW`, enabled `'O'`, executing `public.trg_session_set_credential_version()`, with `prosecdef = true` (`SECURITY DEFINER`) and `proconfig` containing `search_path=public, pg_catalog`.
+       * `trg_account_password_sync_credential_version`: defined on `public."account"`, timing `AFTER`, event `UPDATE`, `FOR EACH ROW`, enabled `'O'`, executing `public.trg_account_password_sync_credential_version()`, with `prosecdef = true` (`SECURITY DEFINER`) and `proconfig` containing `search_path=public, pg_catalog`.
+       * Rejects missing, disabled (`enabled !== 'O'`), altered, or unconfigured triggers/functions fail-closed without recording false completed history.
 
-5. **Non-Destructive Upgrade, Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05 / R12-03)**:
-   - **Non-Destructive Upgrade from Prior Canonical Schema (47 columns)**: If the target database already has the prior canonical schema without `credentialVersion`:
-     * Executes forward migration `20261114000000_credential_version` non-destructively in a transaction.
-     * Verifies physical schema equivalence in-transaction.
-     * Safely records both migrations `20261111000000_init_auth` and `20261114000000_credential_version` in `_prisma_migrations`.
-     * Pre-existing user and session records receive default `credentialVersion = 1`, and all pre-existing sentinel data remains completely undamaged.
+5. **Non-Destructive Upgrade, Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05 / R12-03 / R13-02)**:
+   - **Non-Destructive Upgrade from Prior Canonical Schema (47 columns) or Incomplete Version Schemas (49 columns without triggers)**:
+     * If the target database has the prior canonical schema (47 columns) or lacks the required atomic security triggers:
+       - Executes forward migration `20261114000000_credential_version` non-destructively in an atomic transaction.
+       - Verifies physical schema equivalence in-transaction (including columns, defaults, indexes, collations, and both security triggers).
+       - Safely records both migrations `20261111000000_init_auth` and `20261114000000_credential_version` in `_prisma_migrations`.
+       - Pre-existing user and session records receive default `credentialVersion = 1`, and all pre-existing sentinel data remains completely undamaged.
    - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
      * Detects existing managed entities without completed migration history.
      * Performs full semantic schema verification across all 6 tables, 49 columns, constraints, foreign keys, indexes, and enum type.

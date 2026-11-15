@@ -1034,5 +1034,135 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       await reproDb.drop().catch(() => {});
     }
   }, 60000);
+
+  it('installs missing triggers on 49-column schema during forward upgrade and fails closed if triggers are disabled (R13-02)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const fs = await import('fs');
+      const initMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const forwardMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261114000000_credential_version/migration.sql'
+      );
+      const initSql = fs.readFileSync(initMigrationSqlPath, 'utf-8');
+      const forwardSql = fs.readFileSync(forwardMigrationSqlPath, 'utf-8');
+
+      // 1. Install tables and columns
+      await reproDb.pool.query(initSql);
+      await reproDb.pool.query(forwardSql);
+
+      // 2. Remove triggers and trigger functions to simulate 49-column schema missing security triggers (R11 artifact / incomplete migration)
+      await reproDb.pool.query(`
+        DROP TRIGGER IF EXISTS trg_session_set_credential_version ON public."session";
+        DROP TRIGGER IF EXISTS trg_account_password_sync_credential_version ON public."account";
+        DROP FUNCTION IF EXISTS public.trg_session_set_credential_version();
+        DROP FUNCTION IF EXISTS public.trg_account_password_sync_credential_version();
+      `);
+
+      // 3. Add sentinel data
+      await reproDb.pool.query(`
+        CREATE TABLE repro_r13_trigger_sentinel (id SERIAL PRIMARY KEY, note TEXT);
+        INSERT INTO repro_r13_trigger_sentinel (note) VALUES ('SENTINEL_R13_TRIGGERS_PRESERVED');
+      `);
+
+      // 4. Run baseline: must detect missing triggers, execute forward migration in transaction, verify, and resolve
+      const baselineResult = await runIdentityBaseline({ targetUrl: reproDb.url, silent: true });
+      expect(baselineResult.success).toBe(true);
+
+      // Verify triggers now exist in pg_trigger with enabled 'O' and function with safe search_path
+      const trgCheck = await reproDb.pool.query(`
+        SELECT t.tgname, t.tgenabled::text AS enabled, p.prosecdef, p.proconfig
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_proc p ON p.oid = t.tgfoid
+        WHERE c.relname IN ('session', 'account')
+          AND t.tgname IN ('trg_session_set_credential_version', 'trg_account_password_sync_credential_version');
+      `);
+      expect(trgCheck.rows.length).toBe(2);
+      for (const row of trgCheck.rows) {
+        expect(row.enabled).toBe('O');
+        expect(row.prosecdef).toBe(true);
+        expect(row.proconfig).toContain('search_path=public, pg_catalog');
+      }
+
+      // 5. Verify sentinel intact
+      const sentinelCheck = await reproDb.pool.query('SELECT * FROM repro_r13_trigger_sentinel');
+      expect(sentinelCheck.rows.length).toBe(1);
+      expect(sentinelCheck.rows[0].note).toBe('SENTINEL_R13_TRIGGERS_PRESERVED');
+
+      // 6. Now simulate disabled trigger on an already-recorded baseline: MUST fail closed
+      await reproDb.pool.query('ALTER TABLE public."session" DISABLE TRIGGER trg_session_set_credential_version;');
+      await expect(
+        runIdentityBaseline({ targetUrl: reproDb.url, silent: true })
+      ).rejects.toThrow(/Trigger 'trg_session_set_credential_version' is not enabled/);
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
+
+  it('executes triggers immune to ambient search_path and resolves only public schema (R13-03)', async () => {
+    const reproDb = await createDedicatedTestDatabase();
+    try {
+      const fs = await import('fs');
+      const initMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261111000000_init_auth/migration.sql'
+      );
+      const forwardMigrationSqlPath = path.resolve(
+        process.cwd(),
+        'prisma/migrations/20261114000000_credential_version/migration.sql'
+      );
+      const initSql = fs.readFileSync(initMigrationSqlPath, 'utf-8');
+      const forwardSql = fs.readFileSync(forwardMigrationSqlPath, 'utf-8');
+
+      await reproDb.pool.query(initSql);
+      await reproDb.pool.query(forwardSql);
+
+      // 1. Setup decoy schema and decoy user table with credentialVersion 999
+      await reproDb.pool.query(`
+        CREATE SCHEMA review_decoy;
+        CREATE TABLE review_decoy."user" (id TEXT PRIMARY KEY, "credentialVersion" INTEGER NOT NULL);
+        INSERT INTO review_decoy."user" (id, "credentialVersion") VALUES ('usr-decoy-test', 999);
+
+        INSERT INTO public."user" (id, name, email, "emailVerified", "role", "credentialVersion", "createdAt", "updatedAt")
+        VALUES ('usr-decoy-test', 'Real Public User', 'decoy.test@office.eg', true, 'OWNER', 42, NOW(), NOW());
+      `);
+
+      // 2. Open fresh pg.Client connection with ambient search_path routing to review_decoy,public
+      const { Client } = await import('pg');
+      const decoyClient = new Client({
+        connectionString: reproDb.url,
+        options: '-c search_path=review_decoy,public',
+      });
+      await decoyClient.connect();
+
+      try {
+        // Assert ambient search_path is indeed review_decoy,public
+        const spRes = await decoyClient.query('SHOW search_path;');
+        expect(spRes.rows[0].search_path).toContain('review_decoy');
+
+        // Unqualified "user" query on this connection hits review_decoy."user" (version 999)
+        const decoyCheck = await decoyClient.query('SELECT "credentialVersion" FROM "user" WHERE id = $1;', ['usr-decoy-test']);
+        expect(decoyCheck.rows[0].credentialVersion).toBe(999);
+
+        // Insert new session on public."session" without explicit credentialVersion
+        await decoyClient.query(`
+          INSERT INTO public."session" (id, "userId", token, "expiresAt", "createdAt", "updatedAt")
+          VALUES ('ses-decoy-test-1', 'usr-decoy-test', 'tok-decoy-1', NOW() + interval '1 day', NOW(), NOW());
+        `);
+
+        // 3. Verify that the session stamped version 42 from public."user", NOT 999 from decoy!
+        const sesCheck = await reproDb.pool.query('SELECT "credentialVersion" FROM public."session" WHERE id = $1;', ['ses-decoy-test-1']);
+        expect(sesCheck.rows[0].credentialVersion).toBe(42);
+      } finally {
+        await decoyClient.end();
+      }
+    } finally {
+      await reproDb.drop().catch(() => {});
+    }
+  }, 60000);
 });
 

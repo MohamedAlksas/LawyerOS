@@ -948,6 +948,133 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     }
   }
 
+  // 7. Security Triggers & Trigger Functions: verify existence, table binding, event, timing, enabled state, function namespace, security definer, and search_path configuration
+  const trgRes = await client.query(`
+    SELECT
+      t.tgname AS trigger_name,
+      c.relname AS table_name,
+      t.tgenabled::text AS enabled,
+      p.proname AS function_name,
+      pn.nspname AS function_schema,
+      p.prosecdef,
+      p.proconfig,
+      CASE
+        WHEN (t.tgtype & 2) <> 0 THEN 'BEFORE'
+        ELSE 'AFTER'
+      END AS action_timing,
+      CASE
+        WHEN (t.tgtype & 4) <> 0 THEN 'INSERT'
+        WHEN (t.tgtype & 8) <> 0 THEN 'DELETE'
+        WHEN (t.tgtype & 16) <> 0 THEN 'UPDATE'
+      END AS action_event,
+      ((t.tgtype & 1) <> 0) AS is_row_trigger
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace cn ON cn.oid = c.relnamespace
+    JOIN pg_proc p ON p.oid = t.tgfoid
+    JOIN pg_namespace pn ON pn.oid = p.pronamespace
+    WHERE cn.nspname = 'public'
+      AND NOT t.tgisinternal
+      AND t.tgname IN ('trg_session_set_credential_version', 'trg_account_password_sync_credential_version');
+  `);
+
+  const foundTriggers = new Map<
+    string,
+    {
+      tableName: string;
+      enabled: string;
+      functionName: string;
+      functionSchema: string;
+      prosecdef: boolean;
+      proconfig: string[];
+      actionTiming: string;
+      actionEvent: string;
+      isRowTrigger: boolean;
+    }
+  >();
+
+  for (const row of trgRes.rows) {
+    foundTriggers.set(row.trigger_name, {
+      tableName: row.table_name,
+      enabled: String(row.enabled),
+      functionName: row.function_name,
+      functionSchema: row.function_schema,
+      prosecdef: Boolean(row.prosecdef),
+      proconfig: parsePgStringArray(row.proconfig),
+      actionTiming: row.action_timing,
+      actionEvent: row.action_event,
+      isRowTrigger: Boolean(row.is_row_trigger),
+    });
+  }
+
+  const expectedTriggers: Record<
+    string,
+    {
+      table: string;
+      timing: string;
+      event: string;
+      functionName: string;
+      functionSchema: string;
+      expectedConfigSubstring: string;
+    }
+  > = {
+    trg_session_set_credential_version: {
+      table: 'session',
+      timing: 'BEFORE',
+      event: 'INSERT',
+      functionName: 'trg_session_set_credential_version',
+      functionSchema: 'public',
+      expectedConfigSubstring: 'search_path=public, pg_catalog',
+    },
+    trg_account_password_sync_credential_version: {
+      table: 'account',
+      timing: 'AFTER',
+      event: 'UPDATE',
+      functionName: 'trg_account_password_sync_credential_version',
+      functionSchema: 'public',
+      expectedConfigSubstring: 'search_path=public, pg_catalog',
+    },
+  };
+
+  for (const [trgName, expected] of Object.entries(expectedTriggers)) {
+    const found = foundTriggers.get(trgName);
+    if (!found) {
+      errors.push(`Missing security trigger '${trgName}'`);
+      continue;
+    }
+    if (found.tableName !== expected.table) {
+      errors.push(`Trigger '${trgName}' table mismatch: expected '${expected.table}', got '${found.tableName}'`);
+    }
+    if (found.actionTiming !== expected.timing) {
+      errors.push(`Trigger '${trgName}' timing mismatch: expected '${expected.timing}', got '${found.actionTiming}'`);
+    }
+    if (found.actionEvent !== expected.event) {
+      errors.push(`Trigger '${trgName}' event mismatch: expected '${expected.event}', got '${found.actionEvent}'`);
+    }
+    if (!found.isRowTrigger) {
+      errors.push(`Trigger '${trgName}' must be FOR EACH ROW`);
+    }
+    if (found.enabled !== 'O') {
+      errors.push(`Trigger '${trgName}' is not enabled (expected 'O', got '${found.enabled}')`);
+    }
+    if (found.functionSchema !== expected.functionSchema || found.functionName !== expected.functionName) {
+      errors.push(
+        `Trigger '${trgName}' function mismatch: expected '${expected.functionSchema}.${expected.functionName}', got '${found.functionSchema}.${found.functionName}'`
+      );
+    }
+    if (!found.prosecdef) {
+      errors.push(`Trigger function '${expected.functionSchema}.${expected.functionName}' must be SECURITY DEFINER`);
+    }
+    const hasSafeSearchPath = found.proconfig.some((c) =>
+      c.replace(/\s+/g, ' ').includes(expected.expectedConfigSubstring)
+    );
+    if (!hasSafeSearchPath) {
+      errors.push(
+        `Trigger function '${expected.functionSchema}.${expected.functionName}' missing safe search_path config (expected containing '${expected.expectedConfigSubstring}', got: [${found.proconfig.join(', ')}])`
+      );
+    }
+  }
+
   return {
     equivalent: errors.length === 0,
     errors,
@@ -1076,7 +1203,20 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
     `);
     const hasCredVer = Boolean(credVerCheck.rows[0]?.has_cred_ver);
 
+    const triggerCountCheck = await client.query(`
+      SELECT count(*)::int AS trigger_count
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace cn ON cn.oid = c.relnamespace
+      WHERE cn.nspname = 'public'
+        AND NOT t.tgisinternal
+        AND t.tgname IN ('trg_session_set_credential_version', 'trg_account_password_sync_credential_version');
+    `);
+    const triggerCount = Number(triggerCountCheck.rows[0]?.trigger_count || 0);
+    const hasBothTriggers = triggerCount === 2;
+
     const allManagedTablesExist = tableCount === 6;
+    const needsForwardUpgrade = allManagedTablesExist && (!hasCredVer || !hasBothTriggers);
 
     const initMigrationPath =
       options.migrationSqlPath ||
@@ -1088,10 +1228,10 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
     let isRecovery = false;
 
-    if (allManagedTablesExist && !hasCredVer) {
-      // 3.3 Target database has prior canonical schema (47 columns) without credentialVersion:
+    if (needsForwardUpgrade) {
+      // 3.3 Target database has prior canonical schema (47 columns) or lacks required security triggers:
       // Perform non-destructive upgrade by executing forward migration 20261114000000_credential_version
-      log('[Identity Baseline] Detected prior canonical schema (47 columns). Executing non-destructive forward upgrade...');
+      log('[Identity Baseline] Detected schema needing forward upgrade (prior canonical 47 columns or missing triggers). Executing non-destructive forward upgrade...');
       if (!fs.existsSync(forwardMigrationPath)) {
         throw new Error(`Forward migration SQL script not found at: ${forwardMigrationPath}`);
       }

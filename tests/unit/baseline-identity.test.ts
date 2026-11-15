@@ -516,7 +516,47 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         },
       ];
 
-      return { enums, tables, cols, pkeys, fkeys, indexes };
+      interface MockTrigger {
+        trigger_name: string;
+        table_name: string;
+        enabled: string;
+        function_name: string;
+        function_schema: string;
+        prosecdef: boolean;
+        proconfig: string[];
+        action_timing: string;
+        action_event: string;
+        is_row_trigger: boolean;
+      }
+
+      const triggers: MockTrigger[] = [
+        {
+          trigger_name: 'trg_session_set_credential_version',
+          table_name: 'session',
+          enabled: 'O',
+          function_name: 'trg_session_set_credential_version',
+          function_schema: 'public',
+          prosecdef: true,
+          proconfig: ['search_path=public, pg_catalog'],
+          action_timing: 'BEFORE',
+          action_event: 'INSERT',
+          is_row_trigger: true,
+        },
+        {
+          trigger_name: 'trg_account_password_sync_credential_version',
+          table_name: 'account',
+          enabled: 'O',
+          function_name: 'trg_account_password_sync_credential_version',
+          function_schema: 'public',
+          prosecdef: true,
+          proconfig: ['search_path=public, pg_catalog'],
+          action_timing: 'AFTER',
+          action_event: 'UPDATE',
+          is_row_trigger: true,
+        },
+      ];
+
+      return { enums, tables, cols, pkeys, fkeys, indexes, triggers };
     }
 
     function createMockClient(catalog: ReturnType<typeof buildValidCatalog>) {
@@ -539,6 +579,9 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           }
           if (sql.includes('FROM pg_index')) {
             return { rows: catalog.indexes };
+          }
+          if (sql.includes('FROM pg_trigger')) {
+            return { rows: catalog.triggers };
           }
           return { rows: [] };
         },
@@ -873,6 +916,57 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       expect(res.equivalent).toBe(false);
       expect(res.errors).toContain(
         "Index 'user_email_key' column 'email' specifies unapproved index options (1). Expected 0."
+      );
+    });
+
+    it('rejects baseline when required security trigger is missing fail-closed (R13-02)', async () => {
+      const catalog = buildValidCatalog();
+      catalog.triggers = catalog.triggers.filter((t) => t.trigger_name !== 'trg_session_set_credential_version');
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain("Missing security trigger 'trg_session_set_credential_version'");
+    });
+
+    it('rejects baseline when security trigger is disabled (enabled != O) fail-closed (R13-02)', async () => {
+      const catalog = buildValidCatalog();
+      const trg = catalog.triggers.find((t) => t.trigger_name === 'trg_account_password_sync_credential_version');
+      if (trg) {
+        trg.enabled = 'D';
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Trigger 'trg_account_password_sync_credential_version' is not enabled (expected 'O', got 'D')"
+      );
+    });
+
+    it('rejects baseline when trigger function lacks SECURITY DEFINER fail-closed (R13-02)', async () => {
+      const catalog = buildValidCatalog();
+      const trg = catalog.triggers.find((t) => t.trigger_name === 'trg_session_set_credential_version');
+      if (trg) {
+        trg.prosecdef = false;
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Trigger function 'public.trg_session_set_credential_version' must be SECURITY DEFINER"
+      );
+    });
+
+    it('rejects baseline when trigger function lacks safe search_path configuration fail-closed (R13-02 / R13-03)', async () => {
+      const catalog = buildValidCatalog();
+      const trg = catalog.triggers.find((t) => t.trigger_name === 'trg_account_password_sync_credential_version');
+      if (trg) {
+        trg.proconfig = ['search_path=decoy,public'];
+      }
+      const client = createMockClient(catalog);
+      const res = await verifySchemaEquivalence(client);
+      expect(res.equivalent).toBe(false);
+      expect(res.errors).toContain(
+        "Trigger function 'public.trg_account_password_sync_credential_version' missing safe search_path config (expected containing 'search_path=public, pg_catalog', got: [search_path=decoy,public])"
       );
     });
   });

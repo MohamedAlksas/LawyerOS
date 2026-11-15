@@ -3213,12 +3213,211 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     }
   });
 
-  it('enforces search_path matrix isolation across fresh connections ($user public, public, pg_catalog public) against hijacking (R12-03)', async () => {
+  it('fails closed with HTTP 500 when initial credentialVersion read throws during sign-in (R13-01)', async () => {
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const credVerModule = await import('@/modules/identity/credential-version');
+    const spy = vi
+      .spyOn(credVerModule, 'getUserCredentialVersionByEmail')
+      .mockRejectedValueOnce(new Error('Simulated database failure during initial credentialVersion read'));
+
+    try {
+      const signInReq = new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: testOrigin },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: 'BrandNewPassword2026!#',
+        }),
+      });
+
+      const signInRes = await authRoutePOST(signInReq);
+
+      expect(signInRes.status).toBe(500);
+      const resJson = await signInRes.json();
+      expect(resJson.error).toBe('فشل في قراءة حالة أمان الحساب. يرجى إعادة المحاولة.');
+
+      // Assert zero session or 2FA cookies issued
+      const setCookies = signInRes.headers.getSetCookie?.() || [
+        signInRes.headers.get('set-cookie') || '',
+      ];
+      const validCookie = setCookies.find(
+        (c) =>
+          (c.includes('better-auth.session_token=') || c.includes('better-auth.two_factor=')) &&
+          !c.includes('Max-Age=0') &&
+          !c.includes('Expires=Thu, 01 Jan 1970')
+      );
+      expect(validCookie).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('enforces single authoritative rotation boundary: atomically increments to version 2 (not 3) and authorizes replacement session (R13-04)', async () => {
+    const testOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const prisma = getPrismaClient();
+    const env = getEnv();
+
+    // 1. Create a dedicated user starting cleanly at credentialVersion 1
+    const rotUserId = crypto.randomUUID();
+    const rotEmail = `rot.boundary.${Date.now()}@office.eg`;
+    const initialPass = 'InitialPass2026!#';
+    const newPass = 'NewRotatedPass2026!#';
+    const { hashPassword, symmetricEncrypt } = await import('better-auth/crypto');
+    const initialHash = await hashPassword(initialPass);
+
+    await prisma.user.create({
+      data: {
+        id: rotUserId,
+        name: 'مالك حدود التدوير',
+        email: rotEmail,
+        emailVerified: true,
+        role: 'OWNER',
+        twoFactorEnabled: true,
+        credentialVersion: 1,
+      },
+    });
+
+    await prisma.account.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId: rotUserId,
+        providerId: 'credential',
+        accountId: rotUserId,
+        password: initialHash,
+      },
+    });
+
+    const rotTotpSecret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    const encSecret = await symmetricEncrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: `base32:${rotTotpSecret}`,
+    });
+    const encBackupCodes = await symmetricEncrypt({
+      key: env.BETTER_AUTH_SECRET,
+      data: JSON.stringify(['code1111', 'code2222']),
+    });
+
+    await prisma.twoFactor.create({
+      data: {
+        id: crypto.randomUUID(),
+        userId: rotUserId,
+        secret: encSecret,
+        backupCodes: encBackupCodes,
+        verified: true,
+      },
+    });
+
+    // 2. Sign in Context A and acquire valid session A
+    const signInA = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: testOrigin },
+      body: JSON.stringify({ email: rotEmail, password: initialPass }),
+    }));
+    expect(signInA.status).toBe(200);
+    const tfA = (signInA.headers.getSetCookie?.() || [signInA.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    const codeA = await generateTotpCode(rotTotpSecret);
+    const verifyA = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/two-factor/verify-totp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfA!.split(';')[0],
+        origin: testOrigin,
+      },
+      body: JSON.stringify({ code: codeA }),
+    }));
+    expect(verifyA.status).toBe(200);
+    const verifyAJson = await verifyA.json();
+    const sessionCookieA = `better-auth.session_token=${signSessionTokenCookie(verifyAJson.token, env.BETTER_AUTH_SECRET)}`;
+
+    // 3. Sign in Context B and acquire valid session B
+    const signInB = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: testOrigin },
+      body: JSON.stringify({ email: rotEmail, password: initialPass }),
+    }));
+    expect(signInB.status).toBe(200);
+    const tfB = (signInB.headers.getSetCookie?.() || [signInB.headers.get('set-cookie') || ''])
+      .find((c) => c.includes('better-auth.two_factor='));
+    const codeB = await generateTotpCode(rotTotpSecret);
+    const verifyB = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/two-factor/verify-totp`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: tfB!.split(';')[0],
+        origin: testOrigin,
+      },
+      body: JSON.stringify({ code: codeB }),
+    }));
+    expect(verifyB.status).toBe(200);
+    const verifyBJson = await verifyB.json();
+    const sessionCookieB = `better-auth.session_token=${signSessionTokenCookie(verifyBJson.token, env.BETTER_AUTH_SECRET)}`;
+
+    // Verify both session A and session B have credentialVersion: 1
+    const userBeforeRot = await prisma.user.findUnique({ where: { id: rotUserId } });
+    expect(userBeforeRot?.credentialVersion).toBe(1);
+
+    // 4. In Context A, change password via POST /api/auth/change-password
+    const changePwRes = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: sessionCookieA,
+        origin: testOrigin,
+      },
+      body: JSON.stringify({
+        currentPassword: initialPass,
+        newPassword: newPass,
+        revokeOtherSessions: true,
+      }),
+    }));
+    expect(changePwRes.status).toBe(200);
+
+    // 5. Assert user's version in PostgreSQL is EXACTLY 2 (single atomic increment, NO second increment to 3)
+    const userAfterRot = await prisma.user.findUnique({ where: { id: rotUserId } });
+    expect(userAfterRot?.credentialVersion).toBe(2);
+
+    // Extract replacement session cookie from response
+    const changePwCookies = changePwRes.headers.getSetCookie?.() || [changePwRes.headers.get('set-cookie') || ''];
+    const repCookieHeader = changePwCookies.find(
+      (c) => (c.startsWith('better-auth.session_token=') || c.startsWith('__Secure-better-auth.session_token=')) && !c.includes('Max-Age=0')
+    );
+    expect(repCookieHeader).toBeDefined();
+    const repCookie = repCookieHeader!.split(';')[0];
+
+    // Assert replacement session in PostgreSQL has credentialVersion: 2
+    const repSessions = await prisma.session.findMany({ where: { userId: rotUserId } });
+    expect(repSessions.length).toBe(1);
+    expect(repSessions[0].credentialVersion).toBe(2);
+
+    // 6. Assert replacement session authorizes requireActor
+    const actorRep = await requireActor({ headers: new Headers({ cookie: repCookie }) });
+    expect(actorRep.id).toBe(rotUserId);
+
+    // 7. Assert old session B is physically revoked from PostgreSQL and fails requireActor
+    const oldSessionInDb = await prisma.session.findFirst({ where: { token: verifyBJson.token } });
+    expect(oldSessionInDb).toBeNull();
+
+    await expect(requireActor({ headers: new Headers({ cookie: sessionCookieB }) })).rejects.toThrowError(
+      expect.objectContaining({ code: 'UNAUTHENTICATED' })
+    );
+
+    // 8. Assert fresh login with new password works
+    const freshSignIn = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: testOrigin },
+      body: JSON.stringify({ email: rotEmail, password: newPass }),
+    }));
+    expect(freshSignIn.status).toBe(200);
+  });
+
+  it('enforces fresh connection search_path matrix isolation against decoy table hijacking (R13-03)', async () => {
+    const origPgOptions = process.env.PGOPTIONS;
     const client = await pool.connect();
     try {
+      await client.query('CREATE SCHEMA IF NOT EXISTS review_decoy;');
       await client.query(`
-        CREATE SCHEMA IF NOT EXISTS decoy_schema;
-        CREATE TABLE IF NOT EXISTS decoy_schema."user" (
+        CREATE TABLE IF NOT EXISTS review_decoy."user" (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
           email TEXT NOT NULL,
@@ -3230,48 +3429,55 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
           "twoFactorEnabled" BOOLEAN DEFAULT true,
           "credentialVersion" INTEGER NOT NULL DEFAULT 999
         );
-        INSERT INTO decoy_schema."user" (id, name, email, role, "credentialVersion")
-        VALUES ('decoy-hijack-user-id', 'مستخدم مضلل', 'hijacker@decoy.invalid', 'OWNER', 999)
-        ON CONFLICT (id) DO NOTHING;
       `);
+      await client.query(`
+        INSERT INTO review_decoy."user" (id, name, email, role, "credentialVersion")
+        VALUES ($1, 'مستخدم تضليلي خبيث', $2, 'OWNER', 999)
+        ON CONFLICT (id) DO UPDATE SET "credentialVersion" = 999;
+      `, [provisionedOwner.userId, provisionedOwner.email]);
 
-      const searchPathVariations = [
-        '"$user", public',
-        'public',
-        'pg_catalog, public',
-        'decoy_schema, public',
-      ];
+      // Set ambient PGOPTIONS so that fresh connections adopt search_path=review_decoy,public
+      process.env.PGOPTIONS = '-c search_path=review_decoy,public';
 
-      for (const sp of searchPathVariations) {
-        const freshPool = new Pool({
-          connectionString: dedicated.url,
-        });
-        const freshClient = await freshPool.connect();
-        try {
-          await freshClient.query(`SET search_path TO ${sp}`);
-          const spRes = await freshClient.query('SHOW search_path');
-          expect(spRes.rows[0].search_path).toBeDefined();
+      const freshPool = new Pool({ connectionString: dedicated.url });
+      const freshClient = await freshPool.connect();
+      try {
+        const spRes = await freshClient.query('SHOW search_path;');
+        expect(spRes.rows[0].search_path).toContain('review_decoy');
 
-          // Application Prisma client pins public schema and cannot be hijacked
-          const prisma = getPrismaClient();
-          const publicUsers = await prisma.user.findMany({
-            where: { id: 'decoy-hijack-user-id' },
-          });
-          expect(publicUsers.length).toBe(0);
+        // Verify that raw unqualified SELECT FROM "user" hits the decoy
+        const rawRes = await freshClient.query('SELECT "credentialVersion" FROM "user" WHERE id = $1', [
+          provisionedOwner.userId,
+        ]);
+        expect(rawRes.rows[0].credentialVersion).toBe(999);
 
-          const authenticOwner = await prisma.user.findFirst({
-            where: { email: provisionedOwner.email },
-          });
-          expect(authenticOwner).toBeDefined();
-          expect(authenticOwner?.email).toBe(provisionedOwner.email);
-          expect(authenticOwner?.name).not.toBe('مستخدم مضلل');
-        } finally {
-          freshClient.release();
-          await freshPool.end();
-        }
+        // Now test that session insertion trigger stamps from public.user (immune to ambient search_path)
+        const testSessId = `sess-sp-fresh-${Date.now()}`;
+        const sessRes = await freshClient.query(
+          'INSERT INTO public."session" (id, "userId", token, "expiresAt", "createdAt", "updatedAt") VALUES ($1, $2, $3, NOW() + interval \'1 hour\', NOW(), NOW()) RETURNING "credentialVersion"',
+          [testSessId, provisionedOwner.userId, `tok-${testSessId}`]
+        );
+        // Must be stamped with public.user credentialVersion (e.g. 1 or 2), NOT 999!
+        expect(sessRes.rows[0].credentialVersion).not.toBe(999);
+
+        const pubUserVer = await client.query('SELECT "credentialVersion" FROM public."user" WHERE id = $1', [
+          provisionedOwner.userId,
+        ]);
+        expect(sessRes.rows[0].credentialVersion).toBe(pubUserVer.rows[0].credentialVersion);
+
+        // Clean up test session
+        await freshClient.query('DELETE FROM public."session" WHERE id = $1', [testSessId]);
+      } finally {
+        freshClient.release();
+        await freshPool.end();
       }
     } finally {
-      await client.query('DROP SCHEMA IF EXISTS decoy_schema CASCADE;').catch(() => {});
+      if (origPgOptions !== undefined) {
+        process.env.PGOPTIONS = origPgOptions;
+      } else {
+        delete process.env.PGOPTIONS;
+      }
+      await client.query('DROP SCHEMA IF EXISTS review_decoy CASCADE;').catch(() => {});
       client.release();
     }
   });
