@@ -157,6 +157,122 @@ function extractCookieValue(setCookies: string[], cookieName: string): string | 
   return null;
 }
 
+interface SecurityStateSnapshot {
+  user: {
+    credentialVersion: number;
+    twoFactorEnabled: boolean | null;
+  };
+  account: {
+    passwordHash: string | null;
+  };
+  twoFactor: {
+    secret: string;
+    backupCodes: string;
+    verified: boolean;
+    failedVerificationCount: number;
+    lockedUntil: string | null;
+  } | null;
+  sessions: Array<{
+    id: string;
+    token: string;
+    credentialVersion: number;
+    expiresAt: string;
+  }>;
+  verifications: Array<{
+    id: string;
+    identifier: string;
+    value: string;
+    expiresAt: string;
+  }>;
+}
+
+async function getSecurityStateSnapshot(pool: Pool, userId: string): Promise<SecurityStateSnapshot> {
+  const userRes = await pool.query(
+    'SELECT "credentialVersion", "twoFactorEnabled" FROM "user" WHERE id = $1',
+    [userId]
+  );
+  const accRes = await pool.query(
+    'SELECT password FROM account WHERE "userId" = $1',
+    [userId]
+  );
+  const tfRes = await pool.query(
+    'SELECT secret, "backupCodes", verified, "failedVerificationCount", "lockedUntil" FROM "twoFactor" WHERE "userId" = $1',
+    [userId]
+  );
+  const sessRes = await pool.query(
+    'SELECT id, token, "credentialVersion", "expiresAt" FROM session WHERE "userId" = $1 ORDER BY id ASC',
+    [userId]
+  );
+  const verRes = await pool.query(
+    'SELECT id, identifier, value, "expiresAt" FROM verification WHERE identifier LIKE $1 OR identifier = $2 ORDER BY id ASC',
+    [`2fa-cred-ver-${userId}%`, userId]
+  );
+
+  return {
+    user: {
+      credentialVersion: userRes.rows[0]?.credentialVersion,
+      twoFactorEnabled: userRes.rows[0]?.twoFactorEnabled,
+    },
+    account: {
+      passwordHash: accRes.rows[0]?.password ?? null,
+    },
+    twoFactor: tfRes.rows[0]
+      ? {
+          secret: tfRes.rows[0].secret,
+          backupCodes: tfRes.rows[0].backupCodes,
+          verified: tfRes.rows[0].verified,
+          failedVerificationCount: tfRes.rows[0].failedVerificationCount,
+          lockedUntil: tfRes.rows[0].lockedUntil ? new Date(tfRes.rows[0].lockedUntil).toISOString() : null,
+        }
+      : null,
+    sessions: sessRes.rows.map((r) => ({
+      id: r.id,
+      token: r.token,
+      credentialVersion: r.credentialVersion,
+      expiresAt: new Date(r.expiresAt).toISOString(),
+    })),
+    verifications: verRes.rows.map((r) => ({
+      id: r.id,
+      identifier: r.identifier,
+      value: r.value,
+      expiresAt: new Date(r.expiresAt).toISOString(),
+    })),
+  };
+}
+
+function assertSecurityStateUnchanged(before: SecurityStateSnapshot, after: SecurityStateSnapshot): void {
+  // Compare values strictly in memory without printing sensitive hashes/secrets
+  expect(after.user.credentialVersion).toBe(before.user.credentialVersion);
+  expect(after.user.twoFactorEnabled).toBe(before.user.twoFactorEnabled);
+  expect(after.account.passwordHash).toBe(before.account.passwordHash);
+
+  if (before.twoFactor && after.twoFactor) {
+    expect(after.twoFactor.secret).toBe(before.twoFactor.secret);
+    expect(after.twoFactor.backupCodes).toBe(before.twoFactor.backupCodes);
+    expect(after.twoFactor.verified).toBe(before.twoFactor.verified);
+    expect(after.twoFactor.failedVerificationCount).toBe(before.twoFactor.failedVerificationCount);
+    expect(after.twoFactor.lockedUntil).toBe(before.twoFactor.lockedUntil);
+  } else {
+    expect(after.twoFactor).toEqual(before.twoFactor);
+  }
+
+  expect(after.sessions.length).toBe(before.sessions.length);
+  for (let i = 0; i < before.sessions.length; i++) {
+    expect(after.sessions[i].id).toBe(before.sessions[i].id);
+    expect(after.sessions[i].token).toBe(before.sessions[i].token);
+    expect(after.sessions[i].credentialVersion).toBe(before.sessions[i].credentialVersion);
+    expect(after.sessions[i].expiresAt).toBe(before.sessions[i].expiresAt);
+  }
+
+  expect(after.verifications.length).toBe(before.verifications.length);
+  for (let i = 0; i < before.verifications.length; i++) {
+    expect(after.verifications[i].id).toBe(before.verifications[i].id);
+    expect(after.verifications[i].identifier).toBe(before.verifications[i].identifier);
+    expect(after.verifications[i].value).toBe(before.verifications[i].value);
+    expect(after.verifications[i].expiresAt).toBe(before.verifications[i].expiresAt);
+  }
+}
+
 describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance)', () => {
   const nextBin = path.resolve(process.cwd(), 'node_modules/next/dist/bin/next');
   let serverChild: ChildProcess;
@@ -176,6 +292,26 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
   let validSessionCookie: string | null = null;
 
   let originalTestDatabaseUrl: string | undefined;
+
+  async function getFreshMfaChallenge(): Promise<string> {
+    const res = await makeRequest(serverPort, {
+      method: 'POST',
+      path: '/api/auth/sign-in/email',
+      headers: {
+        'Host': `127.0.0.1:${serverPort}`,
+        'Origin': trustedOrigin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: OWNER_EMAIL,
+        password: OWNER_INITIAL_PASSWORD,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const tfCookie = extractCookieValue(res.setCookies, 'better-auth.two_factor');
+    expect(tfCookie).not.toBeNull();
+    return tfCookie!;
+  }
 
   beforeAll(async () => {
     validateTestEnvironment();
@@ -363,7 +499,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
   describe('Case 2: Untrusted Origin (http://untrusted-attacker.invalid)', () => {
     it('2.1. rejects sign-in attempt from untrusted origin with HTTP 403, zero cookies, zero state mutation', async () => {
-      const beforeVerif = await dedicatedPool.query('SELECT count(*)::int as count FROM verification');
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -382,40 +518,58 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(403);
       expect(res.setCookies.length).toBe(0);
 
-      // Verify zero state mutation in database
-      const afterVerif = await dedicatedPool.query('SELECT count(*)::int as count FROM verification');
-      expect(afterVerif.rows[0].count).toBe(beforeVerif.rows[0].count);
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('2.2. rejects TOTP verification attempt from untrusted origin with HTTP 403, zero session tokens issued', async () => {
-      const beforeSess = await dedicatedPool.query('SELECT count(*)::int as count FROM session');
+    it('2.2. rejects TOTP verification from untrusted origin with fresh challenge, proves challenge remains valid for trusted request', async () => {
+      // 1. Issue a fresh, valid, unconsumed MFA challenge from trusted origin
+      const freshChallengeCookie = await getFreshMfaChallenge();
       const code = await generateTotpCode(ownerTotpSecret);
 
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
+      // 2. Untrusted origin attempt
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/verify-totp',
         headers: {
           'Host': `127.0.0.1:${serverPort}`,
           'Origin': UNTRUSTED_ORIGIN,
-          'Cookie': validTwoFactorCookie!,
+          'Cookie': freshChallengeCookie,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ code }),
       });
 
       expect(res.status).toBe(403);
-      const sessionCookie = extractCookieValue(res.setCookies, 'better-auth.session_token');
-      expect(sessionCookie).toBeNull();
+      expect(extractCookieValue(res.setCookies, 'better-auth.session_token')).toBeNull();
 
-      const afterSess = await dedicatedPool.query('SELECT count(*)::int as count FROM session');
-      expect(afterSess.rows[0].count).toBe(beforeSess.rows[0].count);
+      // State is unmutated by the untrusted attempt
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
+
+      // 3. Demonstrate that the exact same challenge STILL WORKS through an allowed trusted request
+      const freshCode = await generateTotpCode(ownerTotpSecret);
+      const trustedRes = await makeRequest(serverPort, {
+        method: 'POST',
+        path: '/api/auth/two-factor/verify-totp',
+        headers: {
+          'Host': `127.0.0.1:${serverPort}`,
+          'Origin': trustedOrigin,
+          'Cookie': freshChallengeCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: freshCode }),
+      });
+
+      expect(trustedRes.status).toBe(200);
+      const sessionCookie = extractCookieValue(trustedRes.setCookies, 'better-auth.session_token');
+      expect(sessionCookie).not.toBeNull();
     });
 
-    it('2.3. rejects backup code regeneration from untrusted origin with HTTP 403, zero data mutation', async () => {
-      const before2fa = await dedicatedPool.query(
-        'SELECT "backupCodes" FROM "twoFactor" WHERE "userId" = $1',
-        [ownerUserId]
-      );
+    it('2.3. rejects backup code regeneration from untrusted origin with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -433,18 +587,12 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       const body = res.json<{ error?: string }>();
       expect(body.error).toContain('Origin غير صالح أو غير موثوق');
 
-      const after2fa = await dedicatedPool.query(
-        'SELECT "backupCodes" FROM "twoFactor" WHERE "userId" = $1',
-        [ownerUserId]
-      );
-      expect(after2fa.rows[0].backupCodes).toBe(before2fa.rows[0].backupCodes);
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('2.4. rejects password change attempt from untrusted origin with HTTP 403, password unchanged in DB', async () => {
-      const beforeAcc = await dedicatedPool.query(
-        'SELECT password, "updatedAt" FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
+    it('2.4. rejects password change attempt from untrusted origin with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -463,28 +611,26 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
 
-      const afterAcc = await dedicatedPool.query(
-        'SELECT password, "updatedAt" FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
-      expect(afterAcc.rows[0].password).toBe(beforeAcc.rows[0].password);
-      expect(afterAcc.rows[0].updatedAt.toISOString()).toBe(beforeAcc.rows[0].updatedAt.toISOString());
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
   });
 
   describe('Case 3: Missing Origin on Cookie-Bearing State-Changing Requests', () => {
-    it('3.1. rejects cookie-bearing TOTP verification when Origin and Referer are omitted with HTTP 403', async () => {
-      const beforeSess = await dedicatedPool.query('SELECT count(*)::int as count FROM session');
+    it('3.1. rejects cookie-bearing TOTP verification when Origin and Referer are omitted with HTTP 403, challenge remains valid', async () => {
+      const freshChallengeCookie = await getFreshMfaChallenge();
       const code = await generateTotpCode(ownerTotpSecret);
+
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/verify-totp',
         headers: {
           'Host': `127.0.0.1:${serverPort}`,
-          'Cookie': validTwoFactorCookie!,
+          'Cookie': freshChallengeCookie,
           'Content-Type': 'application/json',
-          // Note: Origin and Referer explicitly omitted
+          // Origin and Referer explicitly omitted
         },
         body: JSON.stringify({ code }),
       });
@@ -492,11 +638,28 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(403);
       expect(extractCookieValue(res.setCookies, 'better-auth.session_token')).toBeNull();
 
-      const afterSess = await dedicatedPool.query('SELECT count(*)::int as count FROM session');
-      expect(afterSess.rows[0].count).toBe(beforeSess.rows[0].count);
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
+
+      // Demonstrate that challenge remains valid through trusted request
+      const freshCode = await generateTotpCode(ownerTotpSecret);
+      const trustedRes = await makeRequest(serverPort, {
+        method: 'POST',
+        path: '/api/auth/two-factor/verify-totp',
+        headers: {
+          'Host': `127.0.0.1:${serverPort}`,
+          'Origin': trustedOrigin,
+          'Cookie': freshChallengeCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: freshCode }),
+      });
+      expect(trustedRes.status).toBe(200);
     });
 
-    it('3.2. rejects cookie-bearing backup codes regeneration when Origin and Referer are omitted with HTTP 403', async () => {
+    it('3.2. rejects cookie-bearing backup codes regeneration when Origin and Referer are omitted with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/generate-backup-codes',
@@ -504,7 +667,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
           'Host': `127.0.0.1:${serverPort}`,
           'Cookie': validSessionCookie!,
           'Content-Type': 'application/json',
-          // Note: Origin and Referer explicitly omitted
+          // Origin and Referer explicitly omitted
         },
         body: JSON.stringify({ currentPassword: OWNER_INITIAL_PASSWORD }),
       });
@@ -512,13 +675,13 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(403);
       const body = res.json<{ error?: string }>();
       expect(body.error).toContain('Origin غير صالح أو غير موثوق');
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('3.3. rejects cookie-bearing change-password when Origin and Referer are omitted with HTTP 403', async () => {
-      const beforeAcc = await dedicatedPool.query(
-        'SELECT password FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
+    it('3.3. rejects cookie-bearing change-password when Origin and Referer are omitted with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -527,7 +690,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
           'Host': `127.0.0.1:${serverPort}`,
           'Cookie': validSessionCookie!,
           'Content-Type': 'application/json',
-          // Note: Origin and Referer explicitly omitted
+          // Origin and Referer explicitly omitted
         },
         body: JSON.stringify({
           currentPassword: OWNER_INITIAL_PASSWORD,
@@ -537,16 +700,15 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
 
-      const afterAcc = await dedicatedPool.query(
-        'SELECT password FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
-      expect(afterAcc.rows[0].password).toBe(beforeAcc.rows[0].password);
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
   });
 
   describe('Case 4: Literal Origin null (Origin: null)', () => {
-    it('4.1. rejects sign-in with Origin: null with HTTP 403, zero cookies issued', async () => {
+    it('4.1. rejects sign-in with Origin: null with HTTP 403, zero cookies, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/sign-in/email',
@@ -563,10 +725,16 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
       expect(res.setCookies.length).toBe(0);
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('4.2. rejects cookie-bearing TOTP verification with Origin: null without same-origin sec-fetch-site with HTTP 403', async () => {
+    it('4.2. rejects cookie-bearing TOTP verification with Origin: null without same-origin sec-fetch-site with HTTP 403, challenge remains valid', async () => {
+      const freshChallengeCookie = await getFreshMfaChallenge();
       const code = await generateTotpCode(ownerTotpSecret);
+
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -574,7 +742,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
         headers: {
           'Host': `127.0.0.1:${serverPort}`,
           'Origin': 'null',
-          'Cookie': validTwoFactorCookie!,
+          'Cookie': freshChallengeCookie,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ code }),
@@ -582,9 +750,29 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
       expect(extractCookieValue(res.setCookies, 'better-auth.session_token')).toBeNull();
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
+
+      // Demonstrate that challenge remains valid through trusted request
+      const freshCode = await generateTotpCode(ownerTotpSecret);
+      const trustedRes = await makeRequest(serverPort, {
+        method: 'POST',
+        path: '/api/auth/two-factor/verify-totp',
+        headers: {
+          'Host': `127.0.0.1:${serverPort}`,
+          'Origin': trustedOrigin,
+          'Cookie': freshChallengeCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: freshCode }),
+      });
+      expect(trustedRes.status).toBe(200);
     });
 
-    it('4.3. rejects cookie-bearing backup codes regeneration with Origin: null without same-origin sec-fetch-site with HTTP 403', async () => {
+    it('4.3. rejects cookie-bearing backup codes regeneration with Origin: null without same-origin sec-fetch-site with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/generate-backup-codes',
@@ -600,13 +788,13 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(403);
       const body = res.json<{ error?: string }>();
       expect(body.error).toContain('Origin غير صالح أو غير موثوق');
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('4.4. rejects cookie-bearing change-password with Origin: null with HTTP 403', async () => {
-      const beforeAcc = await dedicatedPool.query(
-        'SELECT password FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
+    it('4.4. rejects cookie-bearing change-password with Origin: null with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -625,16 +813,15 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
 
-      const afterAcc = await dedicatedPool.query(
-        'SELECT password FROM account WHERE "userId" = $1',
-        [ownerUserId]
-      );
-      expect(afterAcc.rows[0].password).toBe(beforeAcc.rows[0].password);
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
   });
 
   describe('Case 5: Conflicting Host and Proxy Header Validation', () => {
-    it('5.1. rejects backup code regeneration with spoofed Host header with HTTP 403', async () => {
+    it('5.1. rejects backup code regeneration with spoofed Host header with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/generate-backup-codes',
@@ -650,9 +837,14 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(403);
       const body = res.json<{ error?: string }>();
       expect(body.error).toContain('Origin غير صالح أو غير موثوق');
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('5.2. ignores X-Forwarded-Host to prevent origin expansion, rejecting untrusted origin with HTTP 403', async () => {
+    it('5.2. ignores X-Forwarded-Host to prevent origin expansion, rejecting untrusted origin with HTTP 403, zero state mutation', async () => {
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/sign-in/email',
@@ -670,10 +862,16 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
       expect(res.setCookies.length).toBe(0);
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
     });
 
-    it('5.3. ignores X-Forwarded-Host on cookie-bearing 2FA verification, rejecting untrusted origin with HTTP 403', async () => {
+    it('5.3. ignores X-Forwarded-Host on cookie-bearing 2FA verification, rejecting untrusted origin with HTTP 403, challenge remains valid', async () => {
+      const freshChallengeCookie = await getFreshMfaChallenge();
       const code = await generateTotpCode(ownerTotpSecret);
+
+      const beforeState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
       const res = await makeRequest(serverPort, {
         method: 'POST',
@@ -682,7 +880,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
           'Host': `127.0.0.1:${serverPort}`,
           'X-Forwarded-Host': 'attacker.invalid',
           'Origin': 'http://attacker.invalid',
-          'Cookie': validTwoFactorCookie!,
+          'Cookie': freshChallengeCookie,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ code }),
@@ -690,15 +888,33 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
       expect(res.status).toBe(403);
       expect(extractCookieValue(res.setCookies, 'better-auth.session_token')).toBeNull();
+
+      const afterState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+      assertSecurityStateUnchanged(beforeState, afterState);
+
+      // Demonstrate that challenge remains valid through trusted request
+      const freshCode = await generateTotpCode(ownerTotpSecret);
+      const trustedRes = await makeRequest(serverPort, {
+        method: 'POST',
+        path: '/api/auth/two-factor/verify-totp',
+        headers: {
+          'Host': `127.0.0.1:${serverPort}`,
+          'Origin': trustedOrigin,
+          'Cookie': freshChallengeCookie,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: freshCode }),
+      });
+      expect(trustedRes.status).toBe(200);
     });
 
     it('5.4. confirms zero database state drift across all untrusted and conflicting requests', async () => {
-      // 1. Session count remains exactly 1 (the original trusted session)
+      // 1. Session count remains valid
       const sessRes = await dedicatedPool.query(
         'SELECT count(*)::int as count FROM session WHERE "userId" = $1',
         [ownerUserId]
       );
-      expect(sessRes.rows[0].count).toBe(1);
+      expect(sessRes.rows[0].count).toBeGreaterThanOrEqual(1);
 
       // 2. User credentialVersion remains untouched
       const userRes = await dedicatedPool.query(
@@ -713,42 +929,120 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
         [ownerUserId]
       );
       expect(accRes.rows[0].password).toBeDefined();
+
+      // 4. TwoFactor failed verification count remains 0
+      const tfRes = await dedicatedPool.query(
+        'SELECT "failedVerificationCount", "lockedUntil" FROM "twoFactor" WHERE "userId" = $1',
+        [ownerUserId]
+      );
+      expect(tfRes.rows[0].failedVerificationCount).toBe(0);
+      expect(tfRes.rows[0].lockedUntil).toBeNull();
     });
   });
 
-  describe('Case 6: Trusted Password Mutation & Session Revocation Verification (Final Control)', () => {
+  describe('Case 6: Production Password-Change Rate-Limiting Throttling & Recovery (R16-01 Boundary Regression)', () => {
     const NEW_OWNER_PASSWORD = 'MatrixOwnerRotatedSecret2026!';
 
-    it('6.1. successfully changes password from trusted origin, triggering credentialVersion increment and session eviction', async () => {
-      expect(validSessionCookie).not.toBeNull();
+    it(
+      '6.1. proves rate-limiting boundary: 3 wrong-current-password attempts allowed (400), 4th throttled with HTTP 429 and X-Retry-After, zero state mutation',
+      async () => {
+        // Wait 10.5s to ensure a fresh, dedicated 10-second rate-limit window for /change-password
+        await new Promise((r) => setTimeout(r, 10500));
 
-      const res = await makeRequest(serverPort, {
-        method: 'POST',
-        path: '/api/auth/change-password',
-        headers: {
-          'Host': `127.0.0.1:${serverPort}`,
-          'Origin': trustedOrigin,
-          'Cookie': validSessionCookie!,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          currentPassword: OWNER_INITIAL_PASSWORD,
-          newPassword: NEW_OWNER_PASSWORD,
-          revokeOtherSessions: true,
-        }),
-      });
+        const baselineState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
 
-      expect(res.status).toBe(200);
+        // Requests 1, 2, 3: Within the allowance (max: 3 per 10s) -> Rejected by credential verification (HTTP 400 BAD_REQUEST)
+        for (let i = 1; i <= 3; i++) {
+          const res = await makeRequest(serverPort, {
+            method: 'POST',
+            path: '/api/auth/change-password',
+            headers: {
+              'Host': `127.0.0.1:${serverPort}`,
+              'Origin': trustedOrigin,
+              'Cookie': validSessionCookie!,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              currentPassword: `WrongPasswordAttempt${i}!#`,
+              newPassword: 'AttemptedNewPassword123!#',
+            }),
+          });
+          expect(res.status).toBe(400);
+        }
 
-      // Database verification: trigger incremented user.credentialVersion from 1 to 2
-      const userRes = await dedicatedPool.query(
-        'SELECT "credentialVersion" FROM "user" WHERE id = $1',
-        [ownerUserId]
-      );
-      expect(userRes.rows[0].credentialVersion).toBe(2);
-    });
+        // Request 4: Exceeds the rate limit (4th request in the same 10s bucket) -> Must receive HTTP 429
+        const throttledRes = await makeRequest(serverPort, {
+          method: 'POST',
+          path: '/api/auth/change-password',
+          headers: {
+            'Host': `127.0.0.1:${serverPort}`,
+            'Origin': trustedOrigin,
+            'Cookie': validSessionCookie!,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            currentPassword: 'WrongPasswordAttempt4!#',
+            newPassword: 'AttemptedNewPassword123!#',
+          }),
+        });
 
-    it('6.2. confirms old session is now rejected with HTTP 401 on protected endpoint', async () => {
+        expect(throttledRes.status).toBe(429);
+
+        // Verify presence and validity of Retry-After headers without exposing secrets
+        const retryAfterHeader =
+          (throttledRes.headers['x-retry-after'] as string | undefined) ||
+          (throttledRes.headers['retry-after'] as string | undefined);
+        expect(retryAfterHeader).toBeDefined();
+        const retryAfterSeconds = parseInt(retryAfterHeader!, 10);
+        expect(retryAfterSeconds).toBeGreaterThan(0);
+        expect(retryAfterSeconds).toBeLessThanOrEqual(10);
+
+        const body = throttledRes.json<{ message?: string }>();
+        expect(body.message).toMatch(/too many requests/i);
+
+        // Verify that all rejected and throttled attempts caused ZERO database mutation
+        const afterThrottledState = await getSecurityStateSnapshot(dedicatedPool, ownerUserId);
+        assertSecurityStateUnchanged(baselineState, afterThrottledState);
+      },
+      30000
+    );
+
+    it(
+      '6.2. proves recovery after rate-limit window expiration and executes genuine password rotation',
+      async () => {
+        // Wait 11 seconds for the rate-limit window to completely reset
+        await new Promise((r) => setTimeout(r, 11000));
+
+        // Submit a genuine password change request with valid current password and trusted origin
+        const res = await makeRequest(serverPort, {
+          method: 'POST',
+          path: '/api/auth/change-password',
+          headers: {
+            'Host': `127.0.0.1:${serverPort}`,
+            'Origin': trustedOrigin,
+            'Cookie': validSessionCookie!,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            currentPassword: OWNER_INITIAL_PASSWORD,
+            newPassword: NEW_OWNER_PASSWORD,
+            revokeOtherSessions: true,
+          }),
+        });
+
+        expect(res.status).toBe(200);
+
+        // Database verification: PostgreSQL trigger incremented user.credentialVersion from 1 to 2
+        const userRes = await dedicatedPool.query(
+          'SELECT "credentialVersion" FROM "user" WHERE id = $1',
+          [ownerUserId]
+        );
+        expect(userRes.rows[0].credentialVersion).toBe(2);
+      },
+      30000
+    );
+
+    it('6.3. confirms old session is now rejected with HTTP 401 on protected endpoint', async () => {
       const res = await makeRequest(serverPort, {
         method: 'POST',
         path: '/api/auth/two-factor/generate-backup-codes',
@@ -764,7 +1058,7 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       expect(res.status).toBe(401);
     });
 
-    it('6.3. confirms new password works for trusted login and old password fails', async () => {
+    it('6.4. confirms new password works for trusted login and old password fails', async () => {
       // Old password fails
       const oldRes = await makeRequest(serverPort, {
         method: 'POST',

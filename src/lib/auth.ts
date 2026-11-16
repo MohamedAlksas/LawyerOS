@@ -103,10 +103,6 @@ function createAuthInstance() {
           window: 10,
           max: 50,
         },
-        '/change-password': {
-          window: 10,
-          max: 50,
-        },
       },
     },
     plugins: [
