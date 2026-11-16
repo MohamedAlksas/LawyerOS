@@ -40,7 +40,9 @@ export default async function HomePage() {
           </p>
         </div>
         <div className="text-xs font-medium text-[#4D606A] bg-white border border-[#D5DFE3] px-3 py-1.5 rounded-[6px] self-start sm:self-auto shadow-xs">
-          <span>{todayFormatted}</span>
+          <time dateTime={new Date().toISOString()}>
+            <bdi dir="rtl">{todayFormatted}</bdi>
+          </time>
         </div>
       </div>
 
@@ -61,7 +63,7 @@ export default async function HomePage() {
             لا توجد قضايا أو جلسات مسجلة حالياً
           </h2>
           <p className="text-sm text-[#4D606A] leading-relaxed">
-            نظام إدارة المكتب في مرحلته التشغيلية الأولى (M1). سيتم تفعيل وحدات إدارة ملفات القضايا والجلسات ومواعيد المحاكم في المراحل التالية وفق خطة العمل المعتمدة.
+            نظام إدارة المكتب في مرحلته التشغيلية الأولى (<bdi dir="ltr">M1</bdi>). سيتم تفعيل وحدات إدارة ملفات القضايا والجلسات ومواعيد المحاكم في المراحل التالية وفق خطة العمل المعتمدة.
           </p>
         </div>
 

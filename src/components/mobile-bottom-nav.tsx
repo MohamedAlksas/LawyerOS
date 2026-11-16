@@ -24,7 +24,8 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
       {/* Home Link */}
       <Link
         href="/"
-        data-testid="mobile-nav-home"
+        data-testid="nav-link-home"
+        aria-label="الرئيسية"
         aria-current={isHomeActive ? 'page' : undefined}
         className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isHomeActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
@@ -37,7 +38,8 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
       {/* Security Link */}
       <Link
         href="/settings/security"
-        data-testid="mobile-nav-security"
+        data-testid="nav-link-security"
+        aria-label="إعدادات الأمان"
         aria-current={isSecurityActive ? 'page' : undefined}
         className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isSecurityActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'

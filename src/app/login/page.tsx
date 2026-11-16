@@ -107,7 +107,7 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-6 text-center text-xs text-[#4D606A]">
-          المصادقة محمية ومشفرة وفق أعلى معايير أمان الهوية والجلسات.
+          تسجيل الدخول مخصص للمحامين والمساعدين المصرح لهم بمكتب المحاماة.
         </div>
       </div>
     </main>

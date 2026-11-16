@@ -26,7 +26,7 @@ export function DesktopSidebar() {
       role="navigation"
       aria-label="التنقل الرئيسي"
       data-testid="desktop-sidebar"
-      className="hidden lg:flex flex-col justify-between w-[232px] shrink-0 bg-white border-l border-[#D5DFE3] p-4 min-h-[calc(100vh-56px)] select-none"
+      className="hidden lg:flex flex-col justify-between w-[232px] shrink-0 sticky top-14 bg-white border-l border-[#D5DFE3] p-4 h-[calc(100vh-56px)] select-none"
     >
       <div className="space-y-6">
         <nav aria-label="التنقل الرئيسي" data-testid="desktop-nav" className="flex flex-col gap-1.5">
