@@ -17,6 +17,9 @@ export default async function SecuritySettingsPage() {
       if (error.code === 'MFA_REQUIRED') {
         redirect('/verify');
       }
+      if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
+        redirect('/login?error=session_expired');
+      }
       redirect('/login');
     }
     if (error instanceof AuthorizationError) {

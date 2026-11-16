@@ -15,8 +15,7 @@ export function SessionExpiredAlert() {
       data-testid="session-expired-alert"
       className="fixed top-4 inset-x-4 max-w-md mx-auto z-50 p-3.5 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] shadow-md flex items-center justify-center gap-2 text-sm font-semibold"
     >
-      <span aria-hidden="true">⚠️</span>
-      <span>انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.</span>
+      انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.
     </div>
   );
 }

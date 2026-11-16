@@ -47,7 +47,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F4F6F7] text-[#172A35]">
+    <div className="min-h-screen flex flex-col bg-[#F4F6F7] text-[#172A35] overflow-x-hidden max-w-full">
       {/* 1. Skip to Content Link */}
       <SkipLink />
 
@@ -76,7 +76,7 @@ export function AppShell({ children }: AppShellProps) {
           id="main-content"
           role="main"
           data-testid="main-content"
-          className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden"
+          className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden lg:mr-[232px]"
         >
           {children}
         </main>

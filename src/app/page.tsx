@@ -13,6 +13,9 @@ export default async function HomePage() {
       if (error.code === 'MFA_REQUIRED') {
         redirect('/verify');
       }
+      if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
+        redirect('/login?error=session_expired');
+      }
       redirect('/login');
     }
     throw error;
@@ -35,8 +38,8 @@ export default async function HomePage() {
           <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
             مكتب المحامي — لوحة المتابعة
           </h1>
-          <p className="text-sm text-[#4D606A] mt-1">
-            أهلاً بك، <span className="font-semibold text-[#172A35]">{actor.name}</span>
+          <p className="text-sm text-[#4D606A] mt-1 break-words">
+            أهلاً بك، <span className="font-semibold text-[#172A35] break-words">{actor.name}</span>
           </p>
         </div>
         <div className="text-xs font-medium text-[#4D606A] bg-white border border-[#D5DFE3] px-3 py-1.5 rounded-[6px] self-start sm:self-auto shadow-xs">
