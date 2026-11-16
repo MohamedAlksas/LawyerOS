@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-16  
 **Task Branch:** `feature/t04-arabic-pwa-shell`  
-**Pull Request:** Draft PR for T04  
+**Pull Request:** [Draft PR #10](https://github.com/MohamedAlksas/LawyerOS/pull/10)  
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Accepted Predecessor (T03):** `ca2819421d78a385841618505c8f8165f0b69b9e` (PR #8 merged into `origin/main`)  
 **Inspected Implementation Checkpoint:** `f8e0a153d8650df6e771f20ef572e11894d03da2`  
