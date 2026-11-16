@@ -26,11 +26,13 @@ $archiveFiles = $documents + @(
     '.gitignore', '.gitattributes', '.githooks/pre-push', '.github/workflows/planning-validation.yml',
     'scripts/Add-TaskGitInstructions.ps1', 'scripts/Build-TaskPromptIndex.ps1',
     'scripts/Validate-AntigravityKit.ps1', 'scripts/Build-PlanningKit.ps1',
-    'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json'
+    'scripts/Update-AgencyAgentPrompts.ps1', 'scripts/Validate-AgencyAgentRouting.ps1', 'docs/AGENCY_AGENT_ROUTING.json', 'docs/DEPENDENCIES.md'
 )
 $archiveFiles += $agencyProfileDocuments + @('docs/third-party/agency-agents-LICENSE.txt')
 $graphifyAssets = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot '.agents/skills/graphify') -File -Recurse -Force | Sort-Object FullName | ForEach-Object { [IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
 $archiveFiles += $graphifyAssets + @('scripts/Build-CodeGraph.ps1', 'docs/reviews/GRAPHIFY-setup.md', 'docs/third-party/graphify-LICENSE.txt', 'docs/third-party/graphify-LICENSE-MIT.txt', 'docs/third-party/graphify-NOTICE.txt')
+$reviewAssets = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'docs/reviews') -File -Recurse | Where-Object { $_.Extension -in @('.md', '.json') } | Sort-Object FullName | ForEach-Object { [IO.Path]::GetRelativePath($projectRoot, $_.FullName).Replace('\','/') })
+$archiveFiles = @($archiveFiles + $reviewAssets | Select-Object -Unique)
 $broken = [System.Collections.Generic.List[string]]::new()
 $linkCount = 0
 $bundle = [System.Text.StringBuilder]::new()

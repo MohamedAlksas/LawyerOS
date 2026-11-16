@@ -1,0 +1,106 @@
+{
+  "review": "T03 round12",
+  "date": "2026-11-14",
+  "decision": "CHANGES_REQUESTED",
+  "implementationSHA": "a4a14d9483e84e5bcadac7cd491d22d4f7fd76d8",
+  "submittedHeadSHA": "fc6d0463c96ba4f11e4ea8bb17e926dc7ab38d6c",
+  "observations": [
+    {
+      "id": "R12-01a",
+      "kind": "genuine protocol; observed DB barrier; companion insert fault",
+      "rotationStatus": 200,
+      "companionRows": 0,
+      "mfaStatus": 200,
+      "protectedActorAccepted": true
+    },
+    {
+      "id": "R12-01b",
+      "kind": "real DB version increment fault",
+      "rotationStatus": 500,
+      "userVersion": 1,
+      "newPasswordAccepted": true
+    },
+    {
+      "id": "R12-01c",
+      "kind": "deliberately constructed mismatch after genuine login",
+      "userVersion": 2,
+      "sessionVersion": 1,
+      "protectedActorAccepted": true
+    },
+    {
+      "id": "R12-02",
+      "kind": "actual prior committed SQL through public baseline",
+      "baselineRejectedMissingVersionColumns": true,
+      "retainedUserRows": 1,
+      "managedDeploy": "source inspected; NOT RUN separately"
+    },
+    {
+      "id": "R12-03",
+      "kind": "unapproved ICU casefold index through actual public baseline",
+      "equivalent": true,
+      "baselineSuccess": true,
+      "completedHistoryRows": 1,
+      "retainedOwnerRows": 1,
+      "caseVariantInsertSQLSTATE": "23505"
+    },
+    {
+      "id": "R12-04",
+      "kind": "genuine Cookie; JSON provider; explicit Origin enforcement; route functions, not HTTP production server",
+      "providerStatus": 403,
+      "interceptedStatus": 400,
+      "persistedFailures": 1
+    }
+  ],
+  "checks": {
+    "units": "137/137 exit0",
+    "typecheck": "exit0",
+    "lint": "exit0",
+    "initialFullIntegration": "67 passed / 1 readiness identity mismatch, exit1",
+    "readinessCorrectedEnvironment": "4/4 exit0",
+    "focusedObservers": "6/6 exit0; defect observers, not acceptance",
+    "strongerICUObserver": "1 pass / 5 skipped, exit0"
+  },
+  "hosted": {
+    "ciRun": 43618005197,
+    "job": 132517199456,
+    "mergeCandidate": "34b9f3d0db7161ea5a7807576bc173d7d30828c0",
+    "units": 137,
+    "integration": 68,
+    "e2e": 45,
+    "defaultBuild": "success",
+    "planningRun": 43618005158
+  },
+  "graph": {
+    "manifestSHA256": "7dc2625066cb3e701e3b93298b53200024c995e1b26e0c8631baff96ca2bafcb",
+    "query": "isSessionCredentialVersionMismatched",
+    "budget": 500,
+    "foundNodes": 41,
+    "shownNodes": 16,
+    "truncated": true
+  },
+  "notRunLocally": [
+    "fresh build",
+    "browser execution",
+    "production HTTP server matrix",
+    "screen reader",
+    "physical devices",
+    "TTY",
+    "deployment",
+    "real data"
+  ],
+  "cleanup": {
+    "ownedContainer": "lawoffice-codex-t03-r12",
+    "containerID": "42c9b1eba8dd71ea831e7a6b81660705edd2d730321e168c127ca399c91c75f7",
+    "label": "lawoffice.review=t03-round12",
+    "port": 14763,
+    "dedicatedDatabases": "dropped by owned fixture teardown",
+    "ownerContainer": "preserved",
+    "installedAssets": "preserved",
+    "ownedContainerStatus": "identity and label verified; no remaining dedicated fixtures; stopped and removed with anonymous volume"
+  },
+  "diagnosticSourceSHA256": {
+    "work/t03-r12-review/observer.test.ts": "2fa8aa9a1fe36944f37ed65588c370868ca1cfcab6d632465620eedf16032f27",
+    "work/t03-r12-review/vitest.config.mjs": "521d00ff57ba6677751400505e3a57501d9e5a7d1a310b6c20c6e977631fe3a4"
+  },
+  "planningValidation": "task-kit, installed routing, prompt index, planning kit, diff-check pass"
+}

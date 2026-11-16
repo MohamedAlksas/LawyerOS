@@ -1,0 +1,99 @@
+{
+  "review": "T03 round 3",
+  "date": "2026-11-13",
+  "sourceCommit": "cd60a6a0f66bcdf6554c9b986c5e058921ab8412",
+  "fixedPoint": "9ec5fd4c5ac0104b5757b4347031cece3c345bf4",
+  "method": "Independent actual-route/Module, pinned-provider and real PostgreSQL probes; actual CLI subprocesses. Synthetic data only. Sanitized observations, not committed application regression tests.",
+  "scope": "Owned disposable review container. Owner resources and operational databases untouched. Pool-override probe did not connect.",
+  "policyObservations": {
+    "defaultProvisioning": {
+      "proofSubmitted": false,
+      "verified": true,
+      "bootstrapClosed": true
+    },
+    "uriTotp": {
+      "http": 200,
+      "protectedActorAccepted": true
+    },
+    "httpsCookieDecoy": {
+      "beforeIdleMinutes": 31,
+      "plainDecoy": true,
+      "validSecureCookie": true,
+      "http": 200,
+      "protectedActorAccepted": true
+    },
+    "legacyTrust": {
+      "fixture": "Cookie actually issued by pinned library with previous 30-day policy",
+      "newConfigMaxAge": 0,
+      "http": 200,
+      "newChallengeRequired": false,
+      "protectedActorAccepted": true
+    },
+    "revocationFailure": {
+      "injected": "PostgreSQL delete-trigger error",
+      "http": 500,
+      "secondSessionAccepted": true
+    },
+    "atomicRecovery": {
+      "submitted": 8,
+      "recordedFailures": 5,
+      "locked": true,
+      "rateLimited": 4
+    },
+    "preexistingDatabase": {
+      "createdByHelper": false,
+      "sentinelBefore": true,
+      "sentinelAfter": false,
+      "helperReturnedFreshDatabase": true
+    },
+    "poolOverride": {
+      "unvalidatedOperationalNameSelected": true,
+      "connectionAttempted": false
+    }
+  },
+  "cliObservations": {
+    "firstWithoutProof": {
+      "exit": 1,
+      "timedOut": false,
+      "printsSeed": false,
+      "printsRecovery": false,
+      "rejectsExisting": false
+    },
+    "retryWithCorrectProof": {
+      "exit": 1,
+      "timedOut": false,
+      "printsSeed": false,
+      "printsRecovery": false,
+      "rejectsExisting": true
+    },
+    "validProofSuppliedOnRetry": true,
+    "afterFirst": {
+      "verified": false,
+      "bootstrapClosed": false
+    },
+    "afterRetry": {
+      "verified": false,
+      "isClosed": false
+    }
+  },
+  "checks": {
+    "cleanInstall": "exit 0; Prisma generation included",
+    "freshMigration": "exit 0",
+    "unitsLocal": "53/53; exit 0",
+    "unitsCi": "53/53; exit 0",
+    "integration": "35/35; exit 0",
+    "browser": "30/30; last-run status passed; isolated non-reused server, no retries, test-only webpack build",
+    "lint": "exit 0",
+    "typecheck": "exit 0",
+    "planningValidators": "exit 0",
+    "hostedApplicationRun": "43346080400; success including default build",
+    "hostedPlanningRun": "43346080329; success"
+  },
+  "limits": [
+    "Interactive TTY echo capture NOT RUN by Codex this round.",
+    "Nonempty T02 migration failure carried from prior review; no new upgrade proof supplied, not rerun this round.",
+    "Fixture adoption and migration-test findings are source inspection, distinguished from runtime observations in review.",
+    "Graph query displayed 39 of 46 nodes; source/tests inspected independently."
+  ],
+  "cleanup": "Full owned container ID and label verified then stopped/removed; review browser listener absent; owner container left running."
+}

@@ -8,11 +8,11 @@
   "nativeAgentDefinitions": 14,
   "bundledAgencyProfiles": 155,
   "agencyProfiles": 14,
-  "localLinksChecked": 261,
+  "localLinksChecked": 262,
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 253,
+  "zipEntries": 326,
   "zipSourceHashes": "All match",
   "outputs": [
     {
@@ -29,7 +29,7 @@
     },
     {
       "Name": "Agency-Agent-Validation.json",
-      "Length": 9195
+      "Length": 8951
     },
     {
       "Name": "Agency-Profile-Recovery.json",
@@ -45,15 +45,15 @@
     },
     {
       "Name": "LawOffice-OS-Gemini-Prompts.md",
-      "Length": 191919
+      "Length": 209876
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 535940
+      "Length": 555558
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1347913
+      "Length": 1752266
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
@@ -65,7 +65,7 @@
     },
     {
       "Name": "Prompt-Skill-Validation.json",
-      "Length": 7893
+      "Length": 7925
     }
   ]
 }

@@ -1,0 +1,236 @@
+{
+  "task": "T03",
+  "review": "round10",
+  "date": "2026-11-14",
+  "decision": "CHANGES_REQUESTED",
+  "base": "e598c1649b82f34ea94338cda5ef25da32b5299f",
+  "assignmentFixedPoint": "453c54c20559d08bbd9f9c86c99bffad390e7dde",
+  "inspectedImplementationSHA": "22a8546f64570314437ae77ea47cf56bc98911e3",
+  "verifiedSubmittedRemoteSHA": "aa086e582a0a7baebbf6ef0d42297affe2cdc01b",
+  "submittedFinalCommitOnlyChanges": [
+    "docs/reviews/T03-submission-round9.md"
+  ],
+  "postgresObservations": {
+    "tlsRepair": {
+      "uppercasePreserved": true,
+      "canonicalMode": "verify-full",
+      "duplicatesRejected": true,
+      "connectionAttempted": false
+    },
+    "originBoundary": {
+      "providerControlStatus": 200,
+      "interceptedStatus": 400,
+      "beforeFailureCount": 0,
+      "afterFailureCount": 1,
+      "codesUnchanged": true
+    },
+    "rotationRace": {
+      "actualConsumptionWaiterObserved": true,
+      "passwordChangeStatus": 200,
+      "rotationCommittedBeforeBarrierReleased": true,
+      "oldProofResponseStatus": 200,
+      "newSessionCreatedAfterRotation": true,
+      "protectedActorAccepted": true
+    },
+    "schema_partial_unique": {
+      "equivalent": true,
+      "errors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "duplicateEmails": 2,
+      "sentinelRetained": true
+    },
+    "schema_composite_unique": {
+      "equivalent": true,
+      "errors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "duplicateEmails": 2,
+      "sentinelRetained": true
+    },
+    "schema_precision_and_default": {
+      "equivalent": true,
+      "errors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "duplicateEmails": 0,
+      "sentinelRetained": true
+    }
+  },
+  "controlledConfirmationObservation": {
+    "localizedResults": [
+      {
+        "system": "ArabicIndic",
+        "rejected": true,
+        "errorCode": "INVALID_CREDENTIALS"
+      },
+      {
+        "system": "Persian",
+        "rejected": true,
+        "errorCode": "INVALID_CREDENTIALS"
+      }
+    ],
+    "asciiControlSucceeded": true
+  },
+  "productionBrowserObservations": {
+    "uiRepairs": {
+      "arabicOtpProtectedLogin": true,
+      "semanticDialog": true,
+      "focusContained": true,
+      "backgroundInert": true,
+      "escapeClosed": true,
+      "focusReturned": true
+    },
+    "typedErrorRepair": {
+      "production": true,
+      "arabicGuidance": true,
+      "noMinifiedReact": true
+    },
+    "productionOrigin": {
+      "providerControlStatus": 403,
+      "interceptedStatuses": [
+        400,
+        400,
+        400,
+        400,
+        429
+      ],
+      "persistedFailureCount": 5,
+      "lockActiveDatabaseUTC": true,
+      "legitimateCorrectPasswordStatus": 429
+    },
+    "dismissedGeneration": {
+      "serverResponseHeldAfterCommit": true,
+      "closedAndReopenedBeforeDelivery": true,
+      "priorRequestCodesDisplayedInNewDialog": true
+    },
+    "logoutRepair": {
+      "failureVisible": true,
+      "noFalseNavigation": true,
+      "retrySucceeded": true,
+      "protectedAccessDenied": true
+    }
+  },
+  "checks": {
+    "unit": {
+      "passed": 115,
+      "exit": 0,
+      "files": 9
+    },
+    "selectedIntegration": {
+      "origin": "http://127.0.0.1:3000",
+      "passed": 59,
+      "exit": 0,
+      "files": 3,
+      "fullSuiteLocallyRerun": false
+    },
+    "defaultBuild": {
+      "fresh": true,
+      "exit": 0,
+      "bundler": "Turbopack"
+    },
+    "webpackBuild": {
+      "reason": "TS2344 unsupported normalizeOtpDigits page export",
+      "defaultBuildFailure": false,
+      "exit": 1
+    },
+    "typecheckAndLint": [
+      {
+        "check": "typecheck",
+        "exit": 0
+      },
+      {
+        "check": "lint",
+        "exit": 0
+      }
+    ],
+    "existingBrowser": {
+      "lastRun": "passed",
+      "newCommittedRegressions": false,
+      "passed": 30,
+      "retries": 0
+    },
+    "postgresDiagnostic": {
+      "failure": "Provider Origin-control expectation incorrect under test-mode default skip; superseded by actual production control",
+      "passed": 5,
+      "exit": 1,
+      "failed": 1
+    },
+    "controlledConfirmationDiagnostic": {
+      "observesKnownDefect": true,
+      "passed": 1,
+      "exit": 0
+    },
+    "productionBrowserDiagnosticInitial": {
+      "passed": 3,
+      "exit": 1,
+      "failed": 2,
+      "diagnosticFailures": [
+        "alert selector also matched Next announcer",
+        "raw timestamp without timezone interpreted as local time"
+      ]
+    },
+    "productionBrowserDiagnosticCorrectedTargeted": {
+      "passed": 2,
+      "exit": 0,
+      "uniqueObservedCasesAcrossRuns": 5,
+      "allProductAcceptancePassed": false
+    }
+  },
+  "hostedCI": {
+    "failure": "HTTP fixture assumes port 3000; configured provider is port 3100",
+    "planningRun": 43578334774,
+    "laterE2E": "SKIPPED",
+    "integrationFailed": 1,
+    "job": 132397452124,
+    "startupIntegrationDefaultBuild": "PASS",
+    "laterBuild": "SKIPPED",
+    "planning": "PASS",
+    "unitPassed": 115,
+    "url": "https://github.com/MohamedAlksas/LawyerOS/actions/runs/43578334853",
+    "integrationPassed": 61,
+    "run": 43578334853
+  },
+  "graphify": {
+    "query": "handleAuthSecurityGuards",
+    "resultComplete": true,
+    "approximateResultTokens": 4919,
+    "manifest": "D:/Lawyer/work/graphify/22a8546f6457-320347cf/SOURCE.json",
+    "resultNodes": 30,
+    "manifestSHA256": "9506FD8DBAC46866FAB6EE48B496A92E517A9D30F4BB212F27967E639F219FF7",
+    "nodes": 262,
+    "communities": 11,
+    "resultEdges": 102,
+    "coverageLimit": "Committed selected code only; no Prisma/root configuration proof",
+    "requestedTokenBudget": 1600,
+    "edges": 609,
+    "sourceCommit": "22a8546f64570314437ae77ea47cf56bc98911e3"
+  },
+  "nativeEvidenceLimit": "Six native roles reported; runtime cannot be independently authenticated from submission table. Accessibility inspected checkpoint 453c54c predates changed UI; final rendered evidence required. No fabrication inferred solely from mismatch.",
+  "diagnosticSetupLimit": "Initial wrong synthetic operational database URL failed before schema application; corrected isolated migration succeeded. Test-mode Origin-control and browser diagnostic corrections are distinct from product fixes.",
+  "cleanup": {
+    "releasedPorts": [
+      14751,
+      14752
+    ],
+    "label": "lawoffice.review=t03-round10",
+    "agentAssetsDeleted": false,
+    "ownedContainer": "53681a4d965f44694d978e9e31113770bf6b1c8facf98de4e5ca8b08d3fc46c0",
+    "preservedExistingContainer": "2528fb994d14",
+    "preservedExistingPort": 5433,
+    "verifiedAndStopped": true
+  },
+  "notRun": [
+    "Physical TTY",
+    "Screen reader",
+    "Real devices",
+    "Deployment",
+    "Real client data",
+    "New npm ci; dependencies unchanged and existing pinned installation used",
+    "Local startup integration in this round"
+  ],
+  "interpretation": "Observational diagnostics that reproduce vulnerabilities are not product acceptance. Initial test-mode originBoundary data are retained with explicit production supersession, not relabeled green."
+}

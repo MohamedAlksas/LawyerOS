@@ -14,3 +14,13 @@
 - Preserve owner-installed agent assets, including untracked `.agents/`, `.codex/`, and `.opencode/` files. A validator failure is not deletion authorization. Do not run cleanup/delete commands against them unless the owner explicitly assigns that exact deletion; correct validator scoping instead of removing extra profiles.
 - `outputs/` contains derived reading and handoff copies. Root documents and `docs/` are the canonical sources. Regenerate deliverables whenever the plan changes to avoid conflicting versions.
 - Use `https://github.com/MohamedAlksas/LawyerOS.git` as the canonical GitHub origin. Follow `docs/GIT_WORKFLOW.md`: one branch per feature/assignment, push coherent updates to its existing branch, and review through that branch's PR. Verify branch/remote/head and preserve other agents' changes. No direct-main feature pushes, force pushes, or automatic merges. Report branch/base/pushed SHA/PR URL with submissions; dependent tasks normally require accepted predecessors integrated into `origin/main`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

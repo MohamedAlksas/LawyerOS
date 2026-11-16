@@ -1,0 +1,110 @@
+{
+  "review": "T03 round 5",
+  "date": "2026-11-13",
+  "sourceCommit": "352030df52cc4828cee66d2312428234141d91f0",
+  "frozenApplication": "03108fd62d33fe04bb460c73fafb7af7283d15d4",
+  "fixedPoint": "404015361d139c39a9e4a3bf3e18c2ca3bf04885",
+  "method": "Independent actual auth-route/Module and PostgreSQL row-lock interleaving probes; full-file SQL baseline via actual psql and Prisma CLI. Synthetic data only. Observational assertions include reproduced defects, not acceptance.",
+  "scope": "Owned disposable PostgreSQL container and independent non-reused browser server. Effective-port proof constructed driver parameters only and opened no socket.",
+  "policyAndOwnership": {
+    "formerlyExemptEmail": {
+      "proofSubmitted": false,
+      "verified": false,
+      "bootstrapClosed": false
+    },
+    "concurrentResumeAfterClosure": {
+      "confirmed": {
+        "ok": true
+      },
+      "resumed": {
+        "ok": true,
+        "returnedSeed": true,
+        "returnedRecovery": true
+      },
+      "bootstrapClosed": true,
+      "ordering": "Actual PostgreSQL row lock; confirmation queued before resumption; both prechecks observe pending state"
+    },
+    "httpSecureDecoy": {
+      "configuredProvider": "http/plain cookie",
+      "sessionAgeMinutes": 40,
+      "idleMinutesBefore": 31,
+      "secureDecoyHasValidSignature": false,
+      "http": 200,
+      "authenticatedSessionReturned": true,
+      "activityRefreshed": true,
+      "protectedActorAccepted": true
+    },
+    "omittedTestPort": {
+      "validationAccepted": true,
+      "validatorDefaultPort": 5432,
+      "operationalPort": 65432,
+      "driverPort": 65432,
+      "driverDatabase": "shared_test",
+      "connectionAttempted": false
+    },
+    "emptyConnectionOverrides": {
+      "submitted": 2,
+      "rejectedBeforeConnection": 2
+    },
+    "malformedDedicatedName": {
+      "rejected": true,
+      "created": false
+    }
+  },
+  "baseline": [
+    {
+      "fixture": "Nonempty retained-sentinel baseline",
+      "psqlExit": 0,
+      "sqlErrorsObserved": false,
+      "resolveExit": 0,
+      "statusExit": 0,
+      "deployExit": 0,
+      "userEmailColumnPresent": true,
+      "sentinelRetained": true
+    },
+    {
+      "fixture": "Synthetic existing-table conflict; error-path only",
+      "psqlExit": 0,
+      "sqlErrorsObserved": true,
+      "resolveExit": 0,
+      "statusExit": 0,
+      "deployExit": 0,
+      "userEmailColumnPresent": false,
+      "sentinelRetained": true
+    }
+  ],
+  "checks": {
+    "cleanInstall": "exit 0; generated pinned Prisma client",
+    "freshMigration": "exit 0",
+    "localUnits": "56/56; exit 0",
+    "lint": "exit 0",
+    "typecheck": "exit 0",
+    "integration": "45/45; exit 0; four files",
+    "browser": "30/30; exit 0; last-run passed; zero retries, non-reused server, test-only webpack build",
+    "targetedObserver": "2/2; exit 0; expected-defect observations",
+    "baselineObserver": "exit 0; records successful normal baseline and incomplete-schema conflict path with command exits0",
+    "hostedApplication": "43426217348; success including default build",
+    "hostedPlanning": "43426217424; success"
+  },
+  "graph": {
+    "sourceCommit": "352030df52cc4828cee66d2312428234141d91f0",
+    "snapshot": "work/graphify/352030df52cc-0c2a2b3d",
+    "nodes": 235,
+    "edges": 540,
+    "communities": 11,
+    "mode": "local-code-only-no-label",
+    "query": "provisionOwner",
+    "displayedNodes": 60,
+    "foundNodes": 72,
+    "tokenBudget": 1700
+  },
+  "limits": [
+    "Initial HTTP probe aged only updatedAt and did not establish refresh; completed proof consistently ages creation, activity and remaining expiry, with credentials predating login.",
+    "Omitted-port proof did not connect to any database.",
+    "Concurrency proof requires valid pending-setup credentials and observed PostgreSQL row-lock ordering; no anonymous disclosure claim.",
+    "Baseline conflict fixture is deliberate synthetic error injection, not a claim about ordinary T02 schema.",
+    "Interactive TTY capture NOT RUN; no matching claimed MutableStdout stream test found in committed source.",
+    "Prior historical-trust implementation evidence is distinguished from the still-invalid committed historical regression."
+  ],
+  "cleanup": "Docker Desktop engine was initially stopped and was started for verification. Exact labelled review container removed and browser listener14702 absent; no pre-existing container/database modified. Engine remains available."
+}

@@ -10,11 +10,15 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "node -e \"console.error('E2E tests (Playwright) are deferred to T04/T16 and NOT RUN in T02.'); process.exit(1);\""
+    "test:e2e": "playwright test",
+    "postinstall": "prisma generate",
+    "auth:provision-owner": "tsx src/cli/provision-owner.ts"
   },
   "dependencies": {
+    "@better-auth/prisma-adapter": "1.7.20",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "better-auth": "1.7.20",
     "next": "16.4.6",
     "pg": "8.23.1",
     "react": "19.3.1",
@@ -22,6 +26,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@tailwindcss/postcss": "4.3.5",
     "@types/node": "26.6.6",
     "@types/pg": "8.23.1",
@@ -32,6 +37,7 @@
     "postcss": "8.5.23",
     "prisma": "7.10.1",
     "tailwindcss": "4.3.5",
+    "tsx": "4.23.15",
     "typescript": "5.8.3",
     "vitest": "5.1.0"
   }

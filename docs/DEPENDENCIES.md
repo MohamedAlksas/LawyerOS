@@ -46,9 +46,9 @@ Canonical package manager: `npm` (single lockfile: `package-lock.json`)
 
 ---
 
-## 3. Pinned scaffold packages (installed in T01 and T02)
+## 3. Pinned scaffold and authentication packages (installed in T01, T02, and T03)
 
-These packages provide the minimum foundation for building, linting, typechecking, serving the Arabic project placeholder (`lang="ar-EG"`, `dir="rtl"`), environment schema validation, local database connection pooling, and health probes. No business domain models or authentication sessions are active in T02.
+These packages provide the minimum foundation for building, linting, typechecking, serving the Arabic project placeholder (`lang="ar-EG"`, `dir="rtl"`), environment schema validation, local database connection pooling, health probes, authentication sessions, and end-to-end browser verification.
 
 | Package | Pinned version | Type | Purpose & verification source |
 |---|---|---|---|
@@ -59,6 +59,8 @@ These packages provide the minimum foundation for building, linting, typecheckin
 | `pg` | `8.23.1` | `dependency` | Node PostgreSQL connection pooling driver for database readiness probes and server queries. Source: [node-postgres Docs](https://node-postgres.com). |
 | `@prisma/client` | `7.10.1` | `dependency` | Prisma 7 Client. Pinned exact for Better Auth compatibility. |
 | `@prisma/adapter-pg` | `7.10.1` | `dependency` | PostgreSQL driver adapter for Prisma 7 connection pooling. |
+| `better-auth` | `1.7.20` | `dependency` | Authentication framework with email/password, TOTP MFA, backup recovery codes, and server session management. Pinned exact in T03. |
+| `@better-auth/prisma-adapter` | `1.7.20` | `dependency` | Prisma adapter for Better Auth. Compatible with Prisma 7.10.1. Pinned exact in T03. |
 | `typescript` | `5.8.3` | `devDependency` | Static typing in strict mode. Selected for compatibility with `typescript-eslint@8.72.2` (`>=4.8.4 <6.0.0`). Source: [TypeScript Docs](https://www.typescriptlang.org). |
 | `@types/node` | `26.6.6` | `devDependency` | Type definitions matching Node.js 26 LTS. Source: [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped). |
 | `@types/react` | `19.3.0` | `devDependency` | Type definitions matching React 19.3. Source: [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped). |
@@ -66,24 +68,23 @@ These packages provide the minimum foundation for building, linting, typecheckin
 | `@types/pg` | `8.23.1` | `devDependency` | Type definitions matching `pg@8.23.1`. |
 | `prisma` | `7.10.1` | `devDependency` | Prisma 7 CLI for migration and schema management. Pinned exact. |
 | `vitest` | `5.1.0` | `devDependency` | Fast unit and integration test runner for Node environment and health checks. Source: [Vitest Docs](https://vitest.dev). |
+| `@playwright/test` | `1.65.0` | `devDependency` | End-to-end browser test automation for multi-context auth flows, session revocation, and responsive Arabic RTL verification. Introduced in T03 per explicit Codex authorization. |
 | `tailwindcss` | `4.3.5` | `devDependency` | Utility-first styling framework supporting RTL layout and CSS tokens. Source: [Tailwind CSS Docs](https://tailwindcss.com/docs). |
 | `@tailwindcss/postcss` | `4.3.5` | `devDependency` | PostCSS plugin for Tailwind CSS v4 integration with Next.js. |
 | `postcss` | `8.5.23` | `devDependency` | CSS transformation pipeline required by Tailwind. |
 | `eslint` | `9.39.5` | `devDependency` | Linter engine. Note: npm displays an unsupported maintenance notice for `eslint@9.39.5`, but its selected Next.js peer requirement is satisfied and linting passes cleanly with 0 errors. Source: [ESLint Docs](https://eslint.org). |
 | `eslint-config-next` | `16.4.6` | `devDependency` | Official Next.js ESLint configuration ruleset (native flat-config arrays `nextVitals` and `nextTypescript`). |
+| `tsx` | `4.23.15` | `devDependency` | TypeScript execution tool for CLI scripts (such as first-owner provisioning CLI). Pinned exact in T03. |
 
 ---
 
 ## 4. Planned later-task dependencies (Milestones M1–M8)
 
-These dependencies are verified for compatibility with the T01/T02 foundation and will be introduced in their respective assigned task cards. They are **not** installed in T02 to keep the runtime minimal and free of unapproved modules.
+These dependencies are verified for compatibility with the T01/T02/T03 foundation and will be introduced in their respective assigned task cards.
 
 | Domain / Milestone | Package | Target version | Assigned task | Notes & compatibility status |
 |---|---|---|---|---|
-| **Authentication** | `better-auth` | `1.7.20` | T03 | Session management, password hashing, TOTP MFA, recovery codes. Compatible with Next.js 16 and React 19. |
-| **Authentication** | `@better-auth/prisma-adapter` | `1.7.20` | T03 | Verified compatible with Prisma 7.10.1. |
-| **E2E Browser Testing** | `@playwright/test` | `1.65.0` | T04 | Headless browser testing for operational journeys (M1+). Source: [Playwright Docs](https://playwright.dev). |
-| **Arabic PDF Printing** | `@playwright/test` | `1.65.0` | T16 | Server-side Arabic PDF document compilation. |
+| **Arabic PDF Printing** | `@playwright/test` | `1.65.0` | T16 | Server-side Arabic PDF document compilation (reusing test runner browser binary). |
 | **Icons** | `lucide-react` | `1.16.0` | T04 | UI icons adaptable for RTL direction. |
 
 ---
@@ -114,3 +115,130 @@ npm run build
 # 7. Deferred E2E command convention (exits 1 with NOT RUN message in T02)
 npm run test:e2e
 ```
+
+---
+
+## 6. Canonical Identity Migration Baseline Procedure (T03 / R08)
+
+To safely baseline the initial Identity and Better Auth schema on an existing non-empty PostgreSQL database without data loss, follow this canonical, fail-fast procedure via the dedicated baseline tool:
+
+### 6.1 Single Executable Baseline Command
+Execute the canonical baseline CLI script with an explicit target database URL:
+```powershell
+# PowerShell: Explicit target URL binding
+npx tsx src/cli/baseline-identity.ts --target-url "$env:DATABASE_URL"
+```
+
+```bash
+# POSIX / Bash:
+npx tsx src/cli/baseline-identity.ts --target-url "$DATABASE_URL"
+```
+
+### 6.2 Procedure Architecture & Execution Safeguards
+The `baseline-identity` entry point enforces strict execution guarantees in sequence:
+
+1. **Explicit Target Requirement & Strict Port Validation (Correction 1 / F02)**:
+   - Rejects empty target URLs fail-closed with exit code 1 (`"Target database URL is required. Ambient target fallback is refused."`).
+   - Validates explicit port numbers as integers in the range `1..65535`. Explicit port `0`, negative ports, ports exceeding `65535`, or non-integer port strings are rejected fail-closed before creating any client or opening any socket.
+   - Omitted ports default explicitly to `5432` without consulting ambient driver variables (`PGPORT`).
+   - Rejects ambiguous or unsupported routing query parameters (`search_path`, `options`, or non-public `schema`) fail-closed.
+   - Constructs a canonical validated target URL (`canonicalUrl`) sharing the exact endpoint parameters and connection policy between `pg.Client` and Prisma CLI subprocesses.
+
+2. **Consistent TLS Option Casing & Duplicate Parameter Policy (F02)**:
+   - Case-insensitive parameter matching: supports `sslmode`, `SSLMODE`, `SslMode` consistently.
+   - Duplicate parameter detection fail-closed: repeated or contradictory connection parameters (e.g. `sslmode=disable&sslmode=verify-full`, `sslmode=require&SSLMODE=disable`, or repeated `schema` keys) are rejected fail-closed before opening any connection:
+     `Target database URL specifies duplicate or contradictory connection parameter: 'sslmode'.`
+   - Explicit transport policy enforcement:
+     * `sslmode=disable`: sets `ssl: false`.
+     * `sslmode=require`: sets `ssl: { rejectUnauthorized: false }`.
+     * `sslmode=verify-full`: sets `ssl: { rejectUnauthorized: true }`.
+   - Unsupported or unrecognized `sslmode` values (e.g. `prefer`, `allow`) are rejected fail-closed before connecting.
+   - Reconstructed canonical URL preserves the normalized lowercase `sslmode`, ensuring `pg.Client`, schema verification, and Prisma CLI share the exact same transport encryption policy.
+   - Ambient `PGSSLMODE` cannot override or weaken the explicit target policy.
+   - Sanitizes and redacts credentials in all logs and error messages (`sanitizeTargetUrl`).
+
+3. **Schema Pinning & Ambient Routing Defense (F05)**:
+   - Connects with explicit `options: '-c search_path=public'` on the driver client.
+   - Immediately executes `SET search_path = public;` on connection to neutralize any ambient `PGOPTIONS` or role/database defaults.
+   - Asserts `current_database() === targetDatabase` and `current_schema() === 'public'` before executing any DDL or catalog inspection.
+   - Within clean baseline transactions, executes `SET LOCAL search_path = public;` and performs in-transaction catalog verification before issuing `COMMIT`.
+   - Sanitizes `PGOPTIONS` in Prisma CLI subprocess environment, neutralizing ambient search path redirects while preserving any unrelated options.
+   - Fully qualifies catalog queries (`table_schema = 'public'`, `schemaname = 'public'`, and `typnamespace = 'public'::regnamespace`).
+   - Ensures alternate schemas (e.g. `staging`) and pre-existing sentinel data remain completely undamaged and unpolluted.
+
+4. **Semantic Catalog & Schema Verification Before History Authorization (F01 / R11-02 / R12-02)**:
+   - `prisma migrate status` and `prisma migrate deploy` check migration history entries in `_prisma_migrations` against filesystem migration directories; they **do not** verify physical database schema semantics or detect missing/divergent column definitions.
+   - For this reason, `baseline-identity.ts` performs comprehensive semantic PostgreSQL catalog verification **before** marking migrations as applied in Prisma:
+     - **Two-Step Migration Sequence**:
+       * `20261111000000_init_auth`: initial baseline schema creating all 6 managed tables, primary keys, foreign keys, indexes, and enum type (47 columns).
+       * `20261114000000_credential_version`: additive forward migration adding `credentialVersion` columns to `user` and `session`, session eviction on password updates, companion verification cleanup, and session version population triggers (49 total columns).
+     - **Tables**: verifies all 6 required tables exist in `public`: `user`, `session`, `account`, `verification`, `twoFactor`, `office_bootstrap`.
+     - **Columns, Types, Namespaces, Precision, Nullability, Defaults**: verifies all 49 columns across the 6 tables against the approved managed schema:
+       * **Namespace-Qualified Type & Domain Identity**: queries `pg_attribute`, `pg_type`, `pg_namespace`, and `information_schema.columns`:
+         - All standard managed columns must be base types (`t.typtype === 'b'`) in the `pg_catalog` namespace (`nsp.nspname === 'pg_catalog'`).
+         - Domain types (`t.typtype === 'd'`) are strictly rejected fail-closed (e.g. `CREATE DOMAIN public.codex_image AS text CHECK (VALUE <> '')`).
+         - `user.role` must be enum type (`t.typtype === 'e'`) in the `public` namespace (`nsp.nspname === 'public'`).
+         - Base type names must strictly match expected types: `text`, `bool`, `timestamp`, `int4`, and `UserRole`.
+       * **Datetime Precision**: queries `information_schema.columns.datetime_precision`. All 14 `TIMESTAMP(3)` columns (`user.createdAt`, `user.updatedAt`, `session.expiresAt`, `session.createdAt`, `session.updatedAt`, `account.accessTokenExpiresAt`, `account.refreshTokenExpiresAt`, `account.createdAt`, `account.updatedAt`, `verification.expiresAt`, `verification.createdAt`, `verification.updatedAt`, `twoFactor.lockedUntil`, `office_bootstrap.closedAt`) must have `datetime_precision = 3`. Truncated precision (e.g. `timestamp(0)`) or untyped timestamps are rejected fail-closed.
+       * **Strict Canonical Default Expressions**:
+         - Timestamp defaults must strictly match `CURRENT_TIMESTAMP` or `now()`. Any interval additions, arithmetic expressions (such as `+ interval '1 day'`), or arbitrary functions are rejected fail-closed.
+         - `twoFactor.verified`: boolean NOT NULL, default must be strictly `true` (rejects default `false`).
+         - `twoFactor.failedVerificationCount`: integer NOT NULL, default strictly `0`.
+         - `office_bootstrap.isClosed`: boolean NOT NULL, default strictly `true`.
+         - `office_bootstrap.id`: text NOT NULL, default strictly `'singleton'::text`.
+         - `user.role`: UserRole NOT NULL, default strictly `'OWNER'::"UserRole"`.
+         - `user.emailVerified` and `user.twoFactorEnabled`: default strictly `false`.
+         - `user.credentialVersion` and `session.credentialVersion`: integer NOT NULL, default strictly `1`.
+       * Rejects any missing columns or unexpected extra columns on managed tables.
+     - **Primary Keys**: verifies constraint name, table binding, and exact primary key column definitions (`['id']` across all 6 tables).
+     - **Foreign Keys**: verifies constraint name, source table/column, referenced schema (`public`), referenced table (`user`), referenced column (`id`), and cascading actions (`ON DELETE CASCADE ON UPDATE CASCADE`). Rejects foreign keys redirected to unrelated tables.
+     - **Structured Index Verification (R11 / R12-02)**: queries `pg_index` joined on `pg_class`, `pg_attribute`, `pg_namespace`, `pg_am`, `pg_collation`, and `pg_opclass`:
+       * Verifies index name, table binding, access method (`am.amname === 'btree'`), validity (`indisvalid = true`), and readiness (`indisready = true`). Non-btree access methods or unready indexes are rejected fail-closed.
+       * Verifies key attributes and included non-key columns: asserts `indnatts === expected.columns.length` and `indnkeyatts === expected.columns.length`. Indexes with included non-key columns (`INCLUDE (...)`) are rejected fail-closed.
+       * Verifies null distinctness: asserts `indnullsnotdistinct === false`. Unapproved `NULLS NOT DISTINCT` semantics are rejected fail-closed.
+       * Verifies index uniqueness (`indisunique = true` for `user_email_key` and `session_token_key`, `false` for foreign key and lookup indexes). Same-name non-unique indexes are rejected fail-closed.
+       * Strictly rejects partial indexes: asserts `indpred IS NULL` (`is_partial = false`). Any index definition containing a `WHERE` predicate (such as `UNIQUE (email) WHERE false`) is rejected fail-closed.
+       * Strictly rejects expression indexes: asserts `indexprs IS NULL` (`is_expression = false`).
+       * **Index Collation Validation (R12-02)**: verifies each key column uses `collname = 'default'` in namespace `pg_catalog`. Unapproved ICU collations (e.g. `public.review_casefold`) alter case-folding and uniqueness comparison semantics and are strictly rejected fail-closed.
+       * **Index Operator Class Validation (R12-02)**: verifies each key column uses `opcname = 'text_ops'` in namespace `pg_catalog`. Non-default operator classes (e.g. `varchar_ops`) are strictly rejected fail-closed.
+       * **Index Option Validation (R12-02)**: verifies each key column has `indoption = 0`. Non-zero options are rejected fail-closed.
+       * Verifies exact column count, column names, and column order extracted via `generate_series(1, ix.indnatts)` with `pg_get_indexdef(ix.indexrelid, k, true)`:
+         - `user_email_key`: exactly 1 column `['email']`. Rejects composite indexes (such as `(email, name)`).
+         - `session_token_key`: exactly 1 column `['token']`.
+         - `session_userId_idx`: exactly 1 column `['userId']`.
+         - `account_userId_idx`: exactly 1 column `['userId']`.
+         - `verification_identifier_idx`: exactly 1 column `['identifier']`.
+         - `twoFactor_userId_idx`: exactly 1 column `['userId']`.
+     - **Enum `UserRole`**: verifies `UserRole` in `public` namespace with exact value set `['OWNER', 'MAINTAINER']`, rejecting missing or extraneous values.
+     - **Security Triggers & Trigger Functions (R13-02 / R13-03)**: queries `pg_trigger`, `pg_proc`, `pg_class`, and `pg_namespace` to verify:
+       * `trg_session_set_credential_version`: defined on `public."session"`, timing `BEFORE`, event `INSERT`, `FOR EACH ROW`, enabled `'O'`, executing `public.trg_session_set_credential_version()`, with `prosecdef = true` (`SECURITY DEFINER`) and `proconfig` containing `search_path=public, pg_catalog`.
+       * `trg_account_password_sync_credential_version`: defined on `public."account"`, timing `AFTER`, event `UPDATE`, `FOR EACH ROW`, enabled `'O'`, executing `public.trg_account_password_sync_credential_version()`, with `prosecdef = true` (`SECURITY DEFINER`) and `proconfig` containing `search_path=public, pg_catalog`.
+       * Rejects missing, disabled (`enabled !== 'O'`), altered, or unconfigured triggers/functions fail-closed without recording false completed history.
+
+5. **Non-Destructive Upgrade, Post-DDL Recovery & Idempotent Resume Semantics (F01 / F05 / R12-03 / R13-02)**:
+   - **Non-Destructive Upgrade from Prior Canonical Schema (47 columns) or Incomplete Version Schemas (49 columns without triggers)**:
+     * If the target database has the prior canonical schema (47 columns) or lacks the required atomic security triggers:
+       - Executes forward migration `20261114000000_credential_version` non-destructively in an atomic transaction.
+       - Verifies physical schema equivalence in-transaction (including columns, defaults, indexes, collations, and both security triggers).
+       - Safely records both migrations `20261111000000_init_auth` and `20261114000000_credential_version` in `_prisma_migrations`.
+       - Pre-existing user and session records receive default `credentialVersion = 1`, and all pre-existing sentinel data remains completely undamaged.
+   - **SQL-Committed / History-Missing State**: If DDL committed successfully but history recording previously failed (e.g. transient failure, permission fault):
+     * Detects existing managed entities without completed migration history.
+     * Performs full semantic schema verification across all 6 tables, 49 columns, constraints, foreign keys, indexes, and enum type.
+     * If equivalent: safely resumes history recording via `prisma migrate resolve --applied 20261111000000_init_auth` and `prisma migrate resolve --applied 20261114000000_credential_version` without re-executing DDL (`recovered: true`).
+     * If conflicting or partial: refuses fail-closed without recording history, dropping tables, or damaging sentinel data.
+   - **Already-Completed State**: If both migrations are already recorded as applied in `_prisma_migrations`, verifies semantic schema equivalence and returns cleanly (`alreadyCompleted: true`).
+
+6. **Scoped Migration History Recording**:
+   - Only after semantic schema verification passes, executes `npx prisma migrate resolve --applied 20261111000000_init_auth` and `npx prisma migrate resolve --applied 20261114000000_credential_version` passing the canonical validated target URL and sanitized environment.
+   - Executes `npx prisma migrate status` passing the canonical target URL to confirm migration history is clean.
+
+### 6.3 Post-Baseline Verification
+Confirm that Prisma reports no pending migrations:
+```powershell
+npx prisma migrate deploy
+```
+Expected output: `No pending migrations to apply`.
+
+### 6.4 Failure & Conflict Safety Guarantee
+If an incompatible conflicting entity exists (e.g. pre-existing `user` table with different structure), the transaction aborts and rolls back immediately (or schema equivalence check refuses). The script exits with code 1, `_prisma_migrations` does not record the migration, and pre-existing data remains intact. Once the collision is resolved, re-running `baseline-identity.ts` completes cleanly.

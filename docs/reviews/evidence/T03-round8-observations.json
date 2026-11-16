@@ -1,0 +1,153 @@
+{
+  "review": "T03 round 8",
+  "decision": "CHANGES_REQUESTED",
+  "date": "2026-11-14",
+  "timezone": "Africa/Cairo",
+  "fixedPoint": "55fa7276a8dca353de00083e4c08e7919cbf1585",
+  "inspectedImplementation": "4a8d17848b16ebaab17f86e3ae9ac9c495e74ab2",
+  "submittedHead": "fec77f58c72ef6918d8241862655ac1954a3024a",
+  "acceptedMain": "e598c1649b82f34ea94338cda5ef25da32b5299f",
+  "observations": {
+    "targetPolicy": {
+      "portZeroRejected": true,
+      "fixedModes": [
+        {
+          "mode": "require",
+          "driverSsl": {
+            "rejectUnauthorized": false
+          }
+        },
+        {
+          "mode": "verify-full",
+          "driverSsl": {
+            "rejectUnauthorized": true
+          }
+        }
+      ],
+      "ambiguous": [
+        {
+          "query": "sslmode=disable&sslmode=verify-full",
+          "accepted": true,
+          "driverSsl": false,
+          "canonicalQuery": "?sslmode=disable",
+          "connectionAttempted": false
+        },
+        {
+          "query": "SSLMODE=verify-full",
+          "accepted": true,
+          "driverSsl": false,
+          "canonicalQuery": "",
+          "connectionAttempted": false
+        }
+      ]
+    },
+    "schema_index": {
+      "verifierEquivalent": true,
+      "verifierErrors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "sentinelRetained": true,
+      "concreteState": {
+        "duplicateEmailsPersisted": 2
+      }
+    },
+    "schema_default": {
+      "verifierEquivalent": true,
+      "verifierErrors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "sentinelRetained": true,
+      "concreteState": {
+        "column_default": "false"
+      }
+    },
+    "schema_foreign_key": {
+      "verifierEquivalent": true,
+      "verifierErrors": [],
+      "baselineSuccess": true,
+      "recovered": true,
+      "completedHistory": 1,
+      "sentinelRetained": true,
+      "concreteState": {
+        "definition": "FOREIGN KEY (\"userId\") REFERENCES unrelated_user_target(id) ON UPDATE CASCADE ON DELETE CASCADE"
+      }
+    }
+  },
+  "trustProvider": {
+    "currentProviderBaseURL": "http://127.0.0.1:3000",
+    "requestedProtocol": "https",
+    "priorHttpAndHttpsSignedCookieSignOutAssertionsReached": true
+  },
+  "checks": {
+    "pinnedInstallExit": 0,
+    "earlyUnitAttempt": "NOT READY: attempted before installation completed; vitest unavailable; rerun passed",
+    "unit": {
+      "passed": 96,
+      "exit": 0
+    },
+    "lintExit": 0,
+    "typecheckExit": 0,
+    "freshMigrationExit": 0,
+    "integrationInitial": {
+      "failed": 1,
+      "cause": "Readiness requires literal lawoffice_test/lawoffice_user; initial owned fixture used other synthetic names",
+      "passed": 54,
+      "exit": 1
+    },
+    "readinessCorrectedFixture": {
+      "location": "Same run-owned container",
+      "passed": 4,
+      "exit": 0
+    },
+    "uniqueIntegrationCasesPassedAcrossRuns": 55,
+    "observationalProbes": {
+      "passed": 4,
+      "exit": 0,
+      "meaning": "Assertions reproduce defects, not acceptance"
+    },
+    "httpsProviderRegression": {
+      "expectedFailure": 1,
+      "deselected": 37,
+      "prerequisitePassed": 1,
+      "exit": 1
+    },
+    "hostedCI": {
+      "browser": 30,
+      "applicationRun": 43484656513,
+      "defaultBuild": "PASS; logs inspected",
+      "job": 132089781490,
+      "planningRun": 43484656559,
+      "startupDefaultBuildId": "E9OdRPlUZ8q5M0S0wtU34",
+      "integration": 55,
+      "unit": 96
+    },
+    "localBrowser": "NOT RUN this round",
+    "localDefaultBuild": "NOT RUN; integration startup built test-only webpack",
+    "physicalTTY": "NOT RUN"
+  },
+  "independentAxes": {
+    "standards": "Unavailable: fresh child usage-limit error; no report",
+    "spec": "Unavailable: fresh child usage-limit error; no report"
+  },
+  "graph": {
+    "manifest": "D:/Lawyer/work/graphify/4a8d17848b16-f1f46c43/SOURCE.json",
+    "estimatedReturnedTokens": 1575,
+    "complete": true,
+    "sha256": "37C44294A6A08C5C3EE5B916B2AF0F1B142F2D425633CECDA1D5EE3F1973FC3A",
+    "nodes": 17,
+    "mode": "local-code-only-no-label",
+    "edges": 28,
+    "requestedBudget": 1400,
+    "source": "4a8d17848b16ebaab17f86e3ae9ac9c495e74ab2",
+    "query": "verifySchemaEquivalence"
+  },
+  "resource": {
+    "label": "lawoffice.review=t03-round8",
+    "removed": true,
+    "existingContainerPreserved": "lawoffice-postgres-test:5433",
+    "realClientDataUsed": false,
+    "container": "3e5a5a81db45ff394330637945be37b527c73725e815d1ff17b3a962404d7f0c"
+  }
+}
