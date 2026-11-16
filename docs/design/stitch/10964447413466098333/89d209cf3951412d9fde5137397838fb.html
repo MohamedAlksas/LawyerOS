@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>شاشة بيانات الجلسة - نظام إدارة المكتب الرقمي</title>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+              "on-secondary-fixed": "#0a1e26",
+              "on-primary-fixed": "#001f29",
+              "primary-container": "#14566b",
+              "primary-fixed": "#baeaff",
+              "on-error-container": "#93000a",
+              "on-secondary-container": "#52656f",
+              "error": "#ba1a1a",
+              "outline": "#70787c",
+              "tertiary-container": "#075b41",
+              "primary-fixed-dim": "#96cfe7",
+              "surface-tint": "#29657b",
+              "surface-bright": "#f5faff",
+              "surface-variant": "#d1e5f4",
+              "on-primary": "#ffffff",
+              "surface-container-highest": "#d1e5f4",
+              "on-tertiary-fixed": "#002115",
+              "surface-container-high": "#d7ebfa",
+              "inverse-primary": "#96cfe7",
+              "secondary-fixed-dim": "#b5cad5",
+              "on-tertiary-fixed-variant": "#005139",
+              "on-primary-fixed-variant": "#024d62",
+              "on-secondary": "#ffffff",
+              "background": "#f5faff",
+              "tertiary": "#00422d",
+              "surface-container-lowest": "#ffffff",
+              "on-primary-container": "#91cae2",
+              "tertiary-fixed-dim": "#8dd5b4",
+              "surface-container-low": "#e9f5ff",
+              "secondary": "#4e616b",
+              "on-secondary-fixed-variant": "#374953",
+              "on-tertiary": "#ffffff",
+              "on-surface-variant": "#40484c",
+              "inverse-surface": "#20333e",
+              "on-error": "#ffffff",
+              "error-container": "#ffdad6",
+              "tertiary-fixed": "#a8f2cf",
+              "surface-dim": "#c9ddec",
+              "surface": "#f5faff",
+              "on-surface": "#0a1e28",
+              "on-background": "#0a1e28",
+              "secondary-container": "#cee3ef",
+              "primary": "#003e4f",
+              "surface-container": "#ddf1ff",
+              "inverse-on-surface": "#e3f3ff",
+              "on-tertiary-container": "#88d1af",
+              "secondary-fixed": "#d1e6f1",
+              "outline-variant": "#c0c8cc"
+            },
+            "borderRadius": {
+              "DEFAULT": "0.125rem",
+              "lg": "0.25rem",
+              "xl": "0.5rem",
+              "full": "0.75rem"
+            },
+            "spacing": {
+              "gutter-desktop": "1.5rem",
+              "space-lg": "1.5rem",
+              "space-md": "1rem",
+              "margin-desktop": "2rem",
+              "space-xl": "2rem",
+              "gutter": "1rem",
+              "margin": "1rem",
+              "space-xs": "0.375rem",
+              "space-sm": "0.5rem"
+            },
+            "fontFamily": {
+              "headline-lg": ["Noto Sans"],
+              "body-lg": ["Noto Sans"],
+              "display": ["Noto Sans"],
+              "body-sm": ["Noto Sans"],
+              "label-md": ["Noto Sans"],
+              "label-sm": ["Noto Sans"],
+              "body-sm-medium": ["Noto Sans"],
+              "headline-lg-mobile": ["Noto Sans"],
+              "headline-md": ["Noto Sans"],
+              "headline-sm": ["Noto Sans"],
+              "body-lg-medium": ["Noto Sans"]
+            },
+            "fontSize": {
+              "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+              "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+              "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+              "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+              "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+              "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+              "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+              "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+              "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+              "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+              "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }]
+            }
+          }
+        }
+      }
+    </script>
+</head>
+<body class="bg-[#F4F6F7] text-on-surface font-body-lg antialiased min-h-screen flex flex-col">
+<!-- TopNavBar Component -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest dark:bg-inverse-surface border-b border-outline-variant dark:border-outline flex items-center justify-between px-gutter-desktop pr-[248px]">
+<div class="flex items-center gap-space-md">
+<span class="font-headline-md text-headline-md text-primary dark:text-inverse-primary">نظام إدارة المكتب الرقمي</span>
+</div>
+<div class="flex items-center gap-space-md">
+<div class="relative hidden md:flex items-center">
+<input class="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-1.5 text-body-sm w-64 text-on-surface focus:outline-none focus:border-primary" placeholder="بحث في الدعاوى والموكلين..." type="text"/>
+<span class="material-symbols-outlined absolute left-2.5 text-outline text-sm">search</span>
+</div>
+<button class="bg-[#14566B] text-white h-[44px] px-5 rounded-lg font-label-md hover:bg-[#0F3F4F] active:bg-[#0B2F3B] transition-colors flex items-center gap-2 cursor-pointer">
+<span class="material-symbols-outlined">add</span>
+                جلسة جديدة
+            </button>
+<button class="bg-white border border-[#14566B] text-[#14566B] h-[44px] px-4 rounded-lg font-label-md hover:bg-[#F4F6F7] transition-colors flex items-center gap-2 cursor-pointer">
+<span class="material-symbols-outlined">upload_file</span>
+                إيداع مستند
+            </button>
+<div class="flex items-center gap-2 mr-2">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary p-2">notifications</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary p-2">help_outline</span>
+<div class="w-9 h-9 rounded-full bg-surface-variant flex items-center justify-center text-primary font-bold overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="صورة الملف الشخصي للمحامي أحمد ممدوح، محامي نقض وإستئناف، يرتدي بدلة داكنة رسمية بملامح جادة ومهنية، بخلفية مكتب محاماة أنيق ومضاء بنور النهار المعتدل." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBWSAfATGL-bcRVRmRwLaSEL_y39wdpsoDLl890uy7av9J37jDaA5qsAk8jQrP-dZtXrhabNp0WbPKBYtQRGRz-hYFWCgRjAUSRWeicjYKHSfWiXLRMTp9NNbVG0SrhTWUt-CMpgwAVfXN5nHGA_yEDx0FaQvm_bZYdtai1LLEOuqKIiRRPiXjll7czJU1rKTcuy4u52889tCU1gSMWJ1hTGiyLE95Mr-QaqtsRTMplmfsXGceCLvOUJBwBsuLqBfcT7tgMcemusBVG"/>
+</div>
+</div>
+</div>
+</header>
+<div class="flex flex-1">
+<!-- SideNavBar Component -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest dark:bg-inverse-surface border-l border-outline-variant dark:border-outline flex flex-col justify-between py-space-lg px-space-md">
+<div class="flex flex-col gap-space-lg">
+<!-- Header -->
+<div class="flex items-center gap-3 px-2">
+<div class="w-10 h-10 rounded-full bg-primary-container text-white flex items-center justify-center font-bold">
+<img class="w-full h-full rounded-full object-cover" data-alt="صورة المحامي الشخصية للأستاذ أحمد ممدوح، محام بالنقض والاستئناف، يرتدي بدلة رسمية سوداء وربطة عنق أنيقة، بإضاءة استوديو ناعمة وواضحة." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCF6qwgeB5EXX8u0vLCFZOBrg4NBhk0TUf9dIFo_pIWNMMGAAFFL8rJUGFTly5Lx4vTLM4L7EAfD1BR_zg6X2cpeUL893Icq6O_M-jWmU9oqPKEKhUWv1BWsfSggjj_PlPKtd0Xu5ZZHWMgKolhcbdFGLKlo6RAvB573o6a2-hSC_xtTaaPDTanjg-sDCVbn8V5_Dk_Nbmb6dg97Q1NDeVtTdoWHfHnqjI9gGtQO_Hwy6JDG-MH-48zVz4i5vMyQVDCAmegNdLPv2en"/>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-sm text-headline-sm text-primary dark:text-inverse-primary">مكتب الأستاذ أحمد ممدوح</span>
+<span class="text-body-sm text-on-surface-variant">المحامي بالنقض والاستئناف</span>
+</div>
+</div>
+<!-- Navigation Links -->
+<nav class="flex flex-col gap-1 mt-2">
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary dark:text-inverse-primary bg-surface-container-low dark:bg-primary-container border-r-4 border-primary dark:border-inverse-primary font-label-md text-label-md rounded-l-lg" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<div class="flex flex-col gap-2">
+<button class="w-full bg-[#14566B] text-white h-[44px] rounded-lg font-label-md hover:bg-[#0F3F4F] transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">add_circle</span>
+                    إضافة قضية جديدة
+                </button>
+<div class="border-t border-outline-variant my-2"></div>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-surface-container rounded-lg font-label-md" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-error hover:bg-error-container/20 rounded-lg font-label-md" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 mr-[232px] p-8 max-w-[1400px]">
+<!-- Trial Watermark / Demo Banner -->
+<div class="bg-secondary-container text-on-secondary-container px-4 py-2 rounded-lg mb-6 flex items-center justify-between border border-outline-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined">info</span>
+<span class="font-label-md">بيانات تجريبية</span>
+</div>
+<span class="text-body-sm">نظام إدارة المكتب الرقمي - نسخة العرض الإدارية</span>
+</div>
+<!-- Header & Case Title -->
+<div class="bg-white border border-[#D5DFE3] rounded-lg p-6 mb-6">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-[#D5DFE3]">
+<div>
+<div class="flex items-center gap-3 mb-2">
+<span class="bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] px-3 py-0.5 rounded text-body-sm font-medium">جلسة قادمة</span>
+<span class="text-on-surface-variant text-body-sm">رقم الدعوى الأساسي:</span>
+<span class="font-headline-sm text-primary">1234 لسنة 2026 تجاري كلي الجيزة</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface">مرافعة أولى وتقديم مستندات دفاع في دعوى منازعات تجارية</h1>
+</div>
+<div class="flex items-center gap-3">
+<button class="bg-[#14566B] text-white h-[44px] px-5 rounded-lg font-label-md hover:bg-[#0F3F4F] transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined">print</span>
+                            طباعة الرول
+                        </button>
+<button class="bg-white border border-[#14566B] text-[#14566B] h-[44px] px-4 rounded-lg font-label-md hover:bg-[#F4F6F7] transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined">edit</span>
+                            تعديل الجلسة
+                        </button>
+</div>
+</div>
+<!-- Session Metadata Grid -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 pt-6">
+<div class="flex items-start gap-3">
+<div class="p-2.5 bg-surface-container-low rounded-lg text-primary">
+<span class="material-symbols-outlined">event</span>
+</div>
+<div>
+<span class="text-body-sm text-on-surface-variant block">موعد الجلسة</span>
+<span class="font-label-md text-on-surface">الثلاثاء، 24 مارس 2026</span>
+<span class="text-body-sm text-on-surface-variant block">الساعة 9:00 صباحاً</span>
+</div>
+</div>
+<div class="flex items-start gap-3">
+<div class="p-2.5 bg-surface-container-low rounded-lg text-primary">
+<span class="material-symbols-outlined">gavel</span>
+</div>
+<div>
+<span class="text-body-sm text-on-surface-variant block">المحكمة والدائرة</span>
+<span class="font-label-md text-on-surface">محكمة الجيزة الابتدائية</span>
+<span class="text-body-sm text-on-surface-variant block">الدائرة (7) تجاري كلي</span>
+</div>
+</div>
+<div class="flex items-start gap-3">
+<div class="p-2.5 bg-surface-container-low rounded-lg text-primary">
+<span class="material-symbols-outlined">room</span>
+</div>
+<div>
+<span class="text-body-sm text-on-surface-variant block">قاعة الانعقاد</span>
+<span class="font-label-md text-on-surface">قاعة رقم 4 - الدور الثاني</span>
+<span class="text-body-sm text-on-surface-variant block">مجمع محاكم الجيزة</span>
+</div>
+</div>
+<div class="flex items-start gap-3">
+<div class="p-2.5 bg-surface-container-low rounded-lg text-primary">
+<span class="material-symbols-outlined">person_pin</span>
+</div>
+<div>
+<span class="text-body-sm text-on-surface-variant block">المحامي الحاضر</span>
+<span class="font-label-md text-on-surface">الأستاذ / أحمد ممدوح</span>
+<span class="text-body-sm text-on-surface-variant block">صفحة الحضور: أصلي عن المدعي</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Mandatory Professional & Procedural Alert -->
+<div class="bg-[#FDF1F1] border border-[#F1A5A9] rounded-lg p-5 mb-6 flex items-start gap-4">
+<span class="material-symbols-outlined text-error text-2xl mt-0.5">error</span>
+<div>
+<h3 class="font-label-md text-[#A4262C] mb-1">تنبيه مهني وإجرائي ملزم</h3>
+<p class="text-body-sm text-[#A4262C]">يجب إيداع أصل المستندات ومذكرة الدفاع الختامية قبل بدء الجلسة بـ 48 ساعة طبقاً لقرار رئيس المحكمة الابتدائية، مع ضرورة سداد رسوم جدول الرول وتأكيد حضور المحامي بالجدول الإلكتروني.</p>
+</div>
+</div>
+<!-- Main Asymmetric Grid Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+<!-- Right Column: Objective & Procedural Prep (2 cols) -->
+<div class="lg:col-span-2 flex flex-col gap-6">
+<!-- Session Purpose & Prep Card -->
+<div class="bg-white border border-[#D5DFE3] rounded-lg p-6">
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-4 pb-2 border-b border-[#D5DFE3] flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">task</span>
+                            الغرض المطلوب والتحضير الإجرائي للجلسة
+                        </h2>
+<div class="space-y-4">
+<div class="bg-[#F8FAFB] p-4 rounded border border-[#D5DFE3]">
+<span class="font-label-md text-primary block mb-1">الغرض الأساسي من الجلسة:</span>
+<p class="text-body-lg text-on-surface">التعقيب على تقرير الخبير الهندسي المقدم في الدعوى، وتقديم حافظة مستندات تحتوي على الفواتير الأصلية ومحاضر التسليم والاستلام.</p>
+</div>
+<h3 class="font-label-md text-on-surface pt-2">متطلبات فتح الرول ومستندات الحضور:</h3>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+<label class="flex items-center gap-3 p-3 bg-white border border-[#D5DFE3] rounded cursor-pointer hover:bg-[#F8FAFB]">
+<input checked="" class="w-5 h-5 text-[#14566B] border-[#4D606A] rounded focus:ring-0" type="checkbox"/>
+<span class="text-body-sm font-medium text-on-surface">توكيل رسمي عام قضخصي ساري</span>
+</label>
+<label class="flex items-center gap-3 p-3 bg-white border border-[#D5DFE3] rounded cursor-pointer hover:bg-[#F8FAFB]">
+<input checked="" class="w-5 h-5 text-[#14566B] border-[#4D606A] rounded focus:ring-0" type="checkbox"/>
+<span class="text-body-sm font-medium text-on-surface">أصل الصحيفة المعلنة ومحضر الإعلان</span>
+</label>
+<label class="flex items-center gap-3 p-3 bg-white border border-[#D5DFE3] rounded cursor-pointer hover:bg-[#F8FAFB]">
+<input class="w-5 h-5 text-[#14566B] border-[#4D606A] rounded focus:ring-0" type="checkbox"/>
+<span class="text-body-sm font-medium text-on-surface">مذكرة الدفاع المطبوعة (3 نسخ)</span>
+</label>
+<label class="flex items-center gap-3 p-3 bg-white border border-[#D5DFE3] rounded cursor-pointer hover:bg-[#F8FAFB]">
+<input checked="" class="w-5 h-5 text-[#14566B] border-[#4D606A] rounded focus:ring-0" type="checkbox"/>
+<span class="text-body-sm font-medium text-on-surface">إيصال سداد رسوم إيداع المستندات</span>
+</label>
+</div>
+</div>
+</div>
+<!-- Previous Sessions Ledgers Table -->
+<div class="bg-white border border-[#D5DFE3] rounded-lg p-6">
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-4 pb-2 border-b border-[#D5DFE3] flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">history</span>
+                            عرض نتائج الجلسات السابقة
+                        </h2>
+<div class="overflow-x-auto">
+<table class="w-full text-right border-collapse">
+<thead>
+<tr class="bg-[#F4F6F7] text-[#4D606A] border-b border-[#D5DFE3] h-[40px] text-body-sm">
+<th class="px-4 font-semibold">تاريخ الجلسة</th>
+<th class="px-4 font-semibold">القرار الصادر</th>
+<th class="px-4 font-semibold">المحامي الحاضر</th>
+<th class="px-4 font-semibold">تأجيل إلى</th>
+</tr>
+</thead>
+<tbody>
+<tr class="hover:bg-[#F8FAFB] border-b border-[#D5DFE3] h-[48px] text-body-sm">
+<td class="px-4 text-on-surface font-medium">10 فبراير 2026</td>
+<td class="px-4 text-on-surface">إحالة الدعوى إلى مكتب خبراء وزارة العدل</td>
+<td class="px-4 text-on-surface-variant">أ. أحمد ممدوح</td>
+<td class="px-4 text-primary font-medium">24 مارس 2026</td>
+</tr>
+<tr class="hover:bg-[#F8FAFB] border-b border-[#D5DFE3] h-[48px] text-body-sm">
+<td class="px-4 text-on-surface font-medium">15 يناير 2026</td>
+<td class="px-4 text-on-surface">تصريح للمدعي بإعلان الشركاء وتقديم المستندات</td>
+<td class="px-4 text-on-surface-variant">أ. محمد عادل</td>
+<td class="px-4 text-primary font-medium">10 فبراير 2026</td>
+</tr>
+<tr class="hover:bg-[#F8FAFB] border-b border-[#D5DFE3] h-[48px] text-body-sm">
+<td class="px-4 text-on-surface font-medium">20 ديسمبر 2025</td>
+<td class="px-4 text-on-surface">التأجيل للإطلاع وإعلان المدعى عليه بالطلبات الختامية</td>
+<td class="px-4 text-on-surface-variant">أ. أحمد ممدوح</td>
+<td class="px-4 text-primary font-medium">15 يناير 2026</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Left Column: Case Parties & Quick Actions (1 col) -->
+<div class="flex flex-col gap-6">
+<!-- Case Parties Card -->
+<div class="bg-white border border-[#D5DFE3] rounded-lg p-6">
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-4 pb-2 border-b border-[#D5DFE3] flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">groups</span>
+                            أطراف الدعوى
+                        </h2>
+<div class="space-y-4">
+<div>
+<span class="text-body-sm text-on-surface-variant block mb-1">المدعي (الموكل):</span>
+<div class="bg-[#F4F6F7] p-3 rounded border border-[#D5DFE3] flex items-center justify-between">
+<span class="font-label-md text-on-surface">شركة النظائر للتجارة والمقاولات</span>
+<span class="bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] text-xs px-2 py-0.5 rounded">موكل أصلي</span>
+</div>
+</div>
+<div>
+<span class="text-body-sm text-on-surface-variant block mb-1">المدعى عليه:</span>
+<div class="bg-[#F4F6F7] p-3 rounded border border-[#D5DFE3] flex items-center justify-between">
+<span class="font-label-md text-on-surface">شركة الأفق للاستثمار العقاري</span>
+<span class="text-on-surface-variant text-xs">خصم رئيسي</span>
+</div>
+</div>
+<div class="pt-2">
+<span class="text-body-sm text-on-surface-variant block mb-1">الخبراء أو الجهات المنتدبة:</span>
+<div class="bg-surface-container-low p-3 rounded border border-outline-variant text-body-sm text-on-surface">
+                                    مكتب خبراء الجيزة - الهيئة الهندسة (مكلف بتقديم التقرير الفني)
+                                </div>
+</div>
+</div>
+</div>
+<!-- Quick Task Delegation & Notes -->
+<div class="bg-white border border-[#D5DFE3] rounded-lg p-6">
+<h2 class="font-headline-sm text-headline-sm text-on-surface mb-4 pb-2 border-b border-[#D5DFE3] flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">note_alt</span>
+                            ملاحظات سريعة وتكليف المكتب
+                        </h2>
+<textarea class="w-full bg-white border border-[#D5DFE3] rounded-lg p-3 text-body-sm text-on-surface focus:outline-none focus:border-primary mb-4 resize-none" placeholder="اكتب ملاحظاتك الإجرائية هنا لتظهر لفريق العمل بالمكتب..." rows="4">متابعة استلام التقرير الهندسي من خبير الدعوى قبل جلسة 24 مارس بثلاثة أيام على الأقل ليتسنى مراجعته مع الاستشاري الفني.</textarea>
+<button class="w-full bg-[#14566B] text-white h-[44px] rounded-lg font-label-md hover:bg-[#0F3F4F] transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">save</span>
+                            حفظ الملاحظة وإرسال التنبيه
+                        </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

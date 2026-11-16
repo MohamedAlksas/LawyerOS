@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+
+<html class="h-full" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>S02 — لوحة المتابعة</title>
+<!-- Google Fonts: Noto Sans Arabic & Noto Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&amp;family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-error": "#ffffff",
+            "surface-container-low": "#e9f5ff",
+            "on-tertiary-fixed": "#002115",
+            "primary-fixed": "#baeaff",
+            "secondary-fixed": "#d1e6f1",
+            "outline-variant": "#c0c8cc",
+            "surface-container-lowest": "#ffffff",
+            "surface-variant": "#d1e5f4",
+            "on-surface-variant": "#40484c",
+            "error": "#ba1a1a",
+            "tertiary": "#00422d",
+            "on-secondary-fixed-variant": "#374953",
+            "surface-bright": "#f5faff",
+            "tertiary-fixed": "#a8f2cf",
+            "surface-container-highest": "#d1e5f4",
+            "secondary": "#4e616b",
+            "primary": "#003e4f",
+            "outline": "#70787c",
+            "on-secondary": "#ffffff",
+            "tertiary-container": "#075b41",
+            "surface-dim": "#c9ddec",
+            "inverse-on-surface": "#e3f3ff",
+            "on-primary": "#ffffff",
+            "background": "#f5faff",
+            "surface-container-high": "#d7ebfa",
+            "on-background": "#0a1e28",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#001f29",
+            "surface": "#f5faff",
+            "primary-container": "#14566b",
+            "surface-tint": "#29657b",
+            "error-container": "#ffdad6",
+            "inverse-surface": "#20333e",
+            "on-primary-container": "#91cae2",
+            "on-surface": "#0a1e28",
+            "on-secondary-container": "#52656f",
+            "on-error-container": "#93000a",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "on-tertiary-container": "#88d1af",
+            "inverse-primary": "#96cfe7",
+            "secondary-container": "#cee3ef",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-secondary-fixed": "#0a1e26",
+            "surface-container": "#ddf1ff",
+            "primary-fixed-dim": "#96cfe7",
+            "secondary-fixed-dim": "#b5cad5",
+            "on-primary-fixed-variant": "#024d62"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "space-md": "1rem",
+            "space-sm": "0.5rem",
+            "space-xl": "2rem",
+            "gutter-desktop": "1.5rem",
+            "space-lg": "1.5rem",
+            "margin": "1rem",
+            "space-xs": "0.375rem",
+            "margin-desktop": "2rem",
+            "gutter": "1rem"
+          },
+          "fontFamily": {
+            "body-sm-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-lg-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "display": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-lg-mobile": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"]
+          },
+          "fontSize": {
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Noto Sans Arabic', 'Noto Sans', sans-serif;
+      background-color: #F4F6F7;
+      color: #172A35;
+      -webkit-font-smoothing: antialiased;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+      font-size: 20px;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    /* Restrained flat focus states */
+    button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid #14566B;
+      outline-offset: 2px;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#F4F6F7] text-[#172A35] flex flex-row overflow-x-hidden selection:bg-[#E9F2F5] selection:text-[#14566B]">
+<!-- RIGHT PERSISTENT SIDEBAR (width 232px, genuine RTL fixed rail) -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] bg-white border-l border-[#D5DFE3] z-40 flex flex-col justify-between select-none">
+<!-- Top Identity & Navigation Cluster -->
+<div class="flex flex-col">
+<!-- Workspace Brand / Identity Block -->
+<div class="h-[64px] border-b border-[#D5DFE3] px-4 flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-8 h-8 rounded-[6px] bg-[#14566B] flex items-center justify-center text-white font-bold text-sm tracking-wide">
+            LO
+          </div>
+<div class="flex flex-col">
+<span class="font-headline-sm text-sm font-bold text-[#172A35] leading-tight">مكتب المحاماة</span>
+<span class="text-[12px] font-mono tracking-tight text-[#4D606A] leading-tight mt-0.5">LawOffice OS</span>
+</div>
+</div>
+</div>
+<!-- Navigation Links -->
+<nav class="py-3 px-2 flex flex-col gap-1">
+<!-- 1. Active: لوحة المتابعة -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#14566B] bg-[#E9F2F5] border-r-4 border-[#14566B] font-label-md text-sm font-semibold rounded-l-[4px] transition-colors" href="#dashboard">
+<span class="material-symbols-outlined text-[#14566B]">calendar_today</span>
+<span>لوحة المتابعة</span>
+</a>
+<!-- 2. ملفات المكتب -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#matters">
+<span class="material-symbols-outlined text-[#4D606A]">folder_open</span>
+<span>ملفات المكتب</span>
+</a>
+<!-- 3. الجلسات والمواعيد -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#hearings">
+<span class="material-symbols-outlined text-[#4D606A]">calendar_month</span>
+<span>الجلسات والمواعيد</span>
+</a>
+<!-- 4. المهام الإجرائية -->
+<a class="flex items-center justify-between px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#tasks">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-[#4D606A]">assignment_late</span>
+<span>المهام الإجرائية</span>
+</div>
+<span class="bg-[#FDF1F1] text-[#A4262C] border border-[#F1A5A9] text-xs font-mono px-1.5 py-0.5 rounded font-semibold">2</span>
+</a>
+<!-- 5. الأطراف والموكلون -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#clients">
+<span class="material-symbols-outlined text-[#4D606A]">groups</span>
+<span>الأطراف والموكلون</span>
+</a>
+<!-- 6. المستندات -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#docs">
+<span class="material-symbols-outlined text-[#4D606A]">description</span>
+<span>المستندات</span>
+</a>
+<!-- 7. الحسابات والمالية -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#accounts">
+<span class="material-symbols-outlined text-[#4D606A]">account_balance_wallet</span>
+<span>الحسابات والمالية</span>
+</a>
+<!-- 8. التقارير -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#reports">
+<span class="material-symbols-outlined text-[#4D606A]">analytics</span>
+<span>التقارير</span>
+</a>
+<!-- 9. الإعدادات -->
+<a class="flex items-center gap-2.5 px-3 py-2.5 text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-label-md text-sm font-medium rounded-[4px] transition-colors" href="#settings">
+<span class="material-symbols-outlined text-[#4D606A]">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Sidebar Footer / Practitioner Indicator -->
+<div class="p-3 border-t border-[#D5DFE3] bg-[#F8FAFB] flex flex-col gap-2">
+<div class="flex items-center justify-between text-xs text-[#4D606A] px-1">
+<span class="flex items-center gap-1.5 font-medium">
+<span class="w-2 h-2 rounded-full bg-[#176449]"></span>
+<span>يتطلب الاتصال بالإنترنت</span>
+</span>
+<a class="text-[#14566B] hover:underline" href="#help" title="الدعم والمساعدة">
+<span class="material-symbols-outlined text-[16px]">help</span>
+</a>
+</div>
+<div class="pt-1.5 border-t border-[#E5ECEE] flex items-center justify-between px-1">
+<span class="text-xs text-[#4D606A]">جلسة العمل: أ. أحمد ممدوح</span>
+<span class="text-xs font-mono text-[#70787C]">1440w</span>
+</div>
+</div>
+</aside>
+<!-- MAIN VIEWPORT CONTAINER (offset by sidebar width 232px on the right) -->
+<div class="mr-[232px] w-[calc(100%-232px)] min-h-screen flex flex-col">
+<!-- TOP UTILITY BAR (height 64px, flat ruled, sticky) -->
+<header class="sticky top-0 z-30 h-[64px] bg-white border-b border-[#D5DFE3] px-8 flex items-center justify-between">
+<!-- Global Search Field -->
+<div class="relative w-full max-w-[440px]">
+<span class="absolute inset-y-0 right-0 flex items-center pr-3.5 pointer-events-none text-[#70787C]">
+<span class="material-symbols-outlined text-[20px]">search</span>
+</span>
+<input class="w-full h-[40px] pr-10 pl-3.5 bg-white border border-[#D5DFE3] rounded-[6px] text-sm text-[#172A35] placeholder-[#70787C] focus:bg-white focus:border-[#14566B] focus:ring-0 transition-colors" placeholder="ابحث عن ملف أو طرف أو رقم قضية..." type="search"/>
+</div>
+<!-- Quick Actions and Profile Capsule -->
+<div class="flex items-center gap-3">
+<!-- Quick Add Secondary Button -->
+<button class="min-h-[44px] px-3.5 bg-white border border-[#14566B] text-[#14566B] hover:bg-[#F4F6F7] rounded-[6px] text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+<span>+ إضافة</span>
+</button>
+<div class="h-6 w-[1px] bg-[#D5DFE3] mx-1"></div>
+<!-- Utility Icons -->
+<button aria-label="الإشعارات" class="w-10 h-10 flex items-center justify-center text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] rounded-[6px] transition-colors relative" type="button">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-2.5 left-2.5 w-2 h-2 rounded-full bg-[#A4262C]"></span>
+</button>
+<button aria-label="المساعدة" class="w-10 h-10 flex items-center justify-center text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] rounded-[6px] transition-colors" type="button">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<!-- Lawyer Profile Capsule -->
+<div class="flex items-center gap-2.5 pr-2 pl-3 py-1.5 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px]">
+<div class="w-7 h-7 rounded-[4px] bg-[#14566B] text-white flex items-center justify-center font-bold text-xs">
+            أم
+          </div>
+<div class="flex flex-col text-right">
+<span class="text-xs font-semibold text-[#172A35] leading-tight">المحامي أحمد ممدوح</span>
+<span class="text-[11px] text-[#4D606A] leading-tight">النقض والاستئناف</span>
+</div>
+</div>
+</div>
+</header>
+<!-- MAIN OPERATIONS WORKBENCH CONTENT CANVAS -->
+<main class="flex-1 p-8 bg-[#F4F6F7]">
+<div class="max-w-[1240px] mx-auto flex flex-col gap-6">
+<!-- PAGE HEADER & OPERATIONAL BAR -->
+<div class="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-col gap-4">
+<div class="flex items-start justify-between">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2.5">
+<h1 class="font-headline-lg text-headline-lg font-bold text-[#172A35]">لوحة المتابعة</h1>
+<!-- Test Data Notice Badge -->
+<span class="bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] text-xs font-medium px-2 py-0.5 rounded-[4px] flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">dataset</span>
+                  بيانات تجريبية
+                </span>
+</div>
+<div class="flex items-center gap-3 text-sm text-[#4D606A]">
+<span class="font-medium text-[#172A35]">الأربعاء، ١١ نوفمبر ٢٠٢٦</span>
+<span class="text-[#D5DFE3]">•</span>
+<span>متابعة الجلسات والمهام المقررة اليوم</span>
+</div>
+</div>
+<!-- Operational Status Metric Pill -->
+<div class="flex items-center gap-2 bg-[#F4F6F7] border border-[#D5DFE3] px-3.5 py-2 rounded-[6px] text-sm text-[#4D606A]">
+<span class="material-symbols-outlined text-[18px] text-[#14566B]">event_available</span>
+<span>دفتر الجلسات اليومي: <strong class="text-[#172A35] font-bold">٣ جلسات مُدرجة</strong></span>
+</div>
+</div>
+<!-- Quick Action Buttons Bar (Formal Standard Arabic, Flat 44px Height Targets) -->
+<div class="pt-3 border-t border-[#D5DFE3] flex flex-wrap items-center gap-2.5">
+<span class="text-sm font-semibold text-[#4D606A] ml-1">إجراء سريع:</span>
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[#14566B] text-[18px]">gavel</span>
+<span>تسجيل نتيجة جلسة</span>
+</button>
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[#14566B] text-[18px]">upload_file</span>
+<span>إيداع مستند</span>
+</button>
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[#14566B] text-[18px]">payments</span>
+<span>تسجيل دفعة أتعاب</span>
+</button>
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-medium flex items-center gap-2 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[#14566B] text-[18px]">add_task</span>
+<span>إضافة مهمة إجرائية</span>
+</button>
+</div>
+</div>
+<!-- SPLIT TWO-COLUMN GRID (2/3 Dominant Right Column, 1/3 Focused Left Column) -->
+<div class="grid grid-cols-12 gap-6 items-start">
+<!-- DOMINANT RIGHT COLUMN (8 of 12 columns = ~2/3) -->
+<div class="col-span-12 lg:col-span-8 flex flex-col gap-6">
+<!-- TODAY'S HEARINGS SECTION (جلسات اليوم) -->
+<section class="bg-white border border-[#D5DFE3] rounded-[6px] overflow-hidden">
+<!-- Header Bar -->
+<div class="p-4 px-5 border-b border-[#D5DFE3] flex items-center justify-between bg-white">
+<div class="flex items-center gap-2.5">
+<h2 class="font-headline-sm text-base font-bold text-[#172A35]">جلسات اليوم</h2>
+<span class="bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] text-xs font-semibold px-2 py-0.5 rounded-[4px]">
+                    ٣ جلسات
+                  </span>
+</div>
+<!-- Secondary Print Docket Action -->
+<button class="min-h-[38px] px-3 bg-white border border-[#D5DFE3] hover:bg-[#F8FAFB] text-[#4D606A] hover:text-[#172A35] rounded-[6px] text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer" title="طباعة كشف رول الجلسات" type="button">
+<span class="material-symbols-outlined text-[18px]">print</span>
+<span>طباعة كشف الجلسات</span>
+</button>
+</div>
+<!-- Agenda List (Ruled ledger rows with vertical time rail) -->
+<div class="divide-y divide-[#D5DFE3]">
+<!-- Row 1: 09:30 ص -->
+<article class="p-5 hover:bg-[#F8FAFB] transition-colors flex items-start gap-4">
+<!-- Time Rail (Right Side) -->
+<div class="w-[84px] shrink-0 pt-0.5 border-l border-[#D5DFE3] pl-3 flex flex-col">
+<span class="font-mono text-base font-bold text-[#14566B]">09:30 ص</span>
+<span class="text-xs text-[#70787C] mt-0.5">رول مبكر</span>
+</div>
+<!-- Matter & Court Content -->
+<div class="flex-1 flex flex-col gap-2">
+<div class="flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-2">
+<h3 class="font-headline-sm text-base font-bold text-[#172A35]">مطالبة مالية — ملف رقم</h3>
+<!-- Internal code isolated with bdi -->
+<bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-2 py-0.5 rounded border border-[#C2D9E2]" dir="ltr">LO-2026-001</bdi>
+</div>
+<span class="bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] text-xs px-2 py-0.5 rounded-[4px] font-medium">جلسة مرافعة</span>
+</div>
+<!-- Court Reference -->
+<div class="text-sm text-[#4D606A] flex items-center gap-2 flex-wrap">
+<span class="text-[#70787C]">الرقم القضائي:</span>
+<bdi class="font-mono font-semibold text-[#172A35]" dir="ltr">00128 / 2026</bdi>
+<span class="text-[#D5DFE3]">—</span>
+<span class="font-medium text-[#172A35]">محكمة شمال الجيزة</span>
+<span class="text-[#D5DFE3]">—</span>
+<span>الدائرة ٣ تجاري كلي</span>
+</div>
+<!-- Preparation Note Box -->
+<div class="mt-1 bg-[#F4F6F7] border border-[#D5DFE3] px-3 py-2 rounded-[4px] flex items-center justify-between gap-2">
+<div class="flex items-center gap-2 text-sm text-[#172A35]">
+<span class="material-symbols-outlined text-[18px] text-[#14566B]">info</span>
+<span>ملاحظة التحضير: <strong>مراجعة أصل المستندات ومذكرة الدفاع قبل الجلسة</strong></span>
+</div>
+<span class="text-xs text-[#70787C]">مرفق حافظة مستندات أصلية</span>
+</div>
+<!-- Actions Bar -->
+<div class="pt-2 flex items-center gap-3">
+<!-- Contextual Primary Action Button -->
+<button class="min-h-[44px] px-4 bg-[#14566B] hover:bg-[#0F3F4F] text-white rounded-[6px] text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[18px]">edit_note</span>
+<span>تسجيل نتيجة الجلسة</span>
+</button>
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#F4F6F7] rounded-[6px] text-sm font-medium transition-colors cursor-pointer" type="button">
+                        فتح ملف المكتب
+                      </button>
+</div>
+</div>
+</article>
+<!-- Row 2: 11:00 ص -->
+<article class="p-5 hover:bg-[#F8FAFB] transition-colors flex items-start gap-4">
+<!-- Time Rail (Right Side) -->
+<div class="w-[84px] shrink-0 pt-0.5 border-l border-[#D5DFE3] pl-3 flex flex-col">
+<span class="font-mono text-base font-bold text-[#14566B]">11:00 ص</span>
+<span class="text-xs text-[#70787C] mt-0.5">الدور الثاني</span>
+</div>
+<!-- Matter & Court Content -->
+<div class="flex-1 flex flex-col gap-2">
+<div class="flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-2">
+<h3 class="font-headline-sm text-base font-bold text-[#172A35]">استئناف مدني — ملف رقم</h3>
+<!-- Internal code isolated with bdi -->
+<bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-2 py-0.5 rounded border border-[#C2D9E2]" dir="ltr">LO-2026-002</bdi>
+</div>
+<span class="bg-[#F4F6F7] border border-[#D5DFE3] text-[#4D606A] text-xs px-2 py-0.5 rounded-[4px] font-medium">تقديم مذكرات</span>
+</div>
+<!-- Court Reference -->
+<div class="text-sm text-[#4D606A] flex items-center gap-2 flex-wrap">
+<span class="text-[#70787C]">الرقم القضائي:</span>
+<bdi class="font-mono font-semibold text-[#172A35]" dir="ltr">00412 / 2026</bdi>
+<span class="text-[#D5DFE3]">—</span>
+<span class="font-medium text-[#172A35]">محكمة استئناف القاهرة</span>
+<span class="text-[#D5DFE3]">—</span>
+<span>دائرة ٧ مدني مستأنف</span>
+</div>
+<!-- Preparation Note Box -->
+<div class="mt-1 bg-[#F4F6F7] border border-[#D5DFE3] px-3 py-2 rounded-[4px] flex items-center justify-between gap-2">
+<div class="flex items-center gap-2 text-sm text-[#172A35]">
+<span class="material-symbols-outlined text-[18px] text-[#176449]">task_alt</span>
+<span>ملاحظة التحضير: <strong>المذكرة معتمدة وجاهزة للتقديم بالجلسة</strong></span>
+</div>
+<span class="text-xs text-[#70787C]">نسختان معتمدتان</span>
+</div>
+<!-- Actions Bar -->
+<div class="pt-2 flex items-center gap-3">
+<!-- Secondary Outline Action -->
+<button class="min-h-[44px] px-4 bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#F4F6F7] rounded-[6px] text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[18px]">folder_open</span>
+<span>فتح ملف المكتب</span>
+</button>
+<button class="min-h-[44px] px-3.5 text-[#4D606A] hover:text-[#172A35] text-sm font-medium transition-colors cursor-pointer" type="button">
+                        تسجيل النتيجة لاحقاً
+                      </button>
+</div>
+</div>
+</article>
+<!-- Row 3: الساعة غير محددة -->
+<article class="p-5 hover:bg-[#F8FAFB] transition-colors flex items-start gap-4">
+<!-- Time Rail (Right Side) -->
+<div class="w-[84px] shrink-0 pt-0.5 border-l border-[#D5DFE3] pl-3 flex flex-col">
+<span class="text-xs font-semibold text-[#7A4A00] leading-snug bg-[#FFF7E6] px-1.5 py-1 rounded border border-[#E0B46A] text-center">
+                      الساعة غير محددة
+                    </span>
+<span class="text-xs text-[#70787C] mt-1 text-center">مقر مكتب الخبراء</span>
+</div>
+<!-- Matter & Court Content -->
+<div class="flex-1 flex flex-col gap-2">
+<div class="flex flex-wrap items-center justify-between gap-2">
+<div class="flex items-center gap-2">
+<h3 class="font-headline-sm text-base font-bold text-[#172A35]">إثبات حالة — ملف رقم</h3>
+<!-- Internal code isolated with bdi -->
+<bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-2 py-0.5 rounded border border-[#C2D9E2]" dir="ltr">LO-2026-003</bdi>
+</div>
+<span class="bg-[#F4F6F7] border border-[#D5DFE3] text-[#4D606A] text-xs px-2 py-0.5 rounded-[4px] font-medium">معاينة ومثول</span>
+</div>
+<!-- Court Reference -->
+<div class="text-sm text-[#4D606A] flex items-center gap-2 flex-wrap">
+<span class="text-[#70787C]">الجهة:</span>
+<span class="font-medium text-[#172A35]">مكتب خبراء وزارة العدل — الجيزة</span>
+<span class="text-[#D5DFE3]">—</span>
+<span>مباشرة أعمال الانتقال والمعاينة</span>
+</div>
+<!-- Preparation Note Box -->
+<div class="mt-1 bg-[#F4F6F7] border border-[#D5DFE3] px-3 py-2 rounded-[4px] flex items-center justify-between gap-2">
+<div class="flex items-center gap-2 text-sm text-[#172A35]">
+<span class="material-symbols-outlined text-[18px] text-[#7A4A00]">schedule</span>
+<span>ملاحظة التحضير: <strong>التنسيق المسبق مع الموكل للحضور وسداد أمانة الخبير</strong></span>
+</div>
+<span class="text-xs text-[#70787C]">اتصال هاتفي مطلوب</span>
+</div>
+<!-- Actions Bar -->
+<div class="pt-2 flex items-center gap-3">
+<!-- Secondary Outline Action -->
+<button class="min-h-[44px] px-4 bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#F4F6F7] rounded-[6px] text-sm font-medium flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[18px]">folder_open</span>
+<span>فتح ملف المكتب</span>
+</button>
+<button class="min-h-[44px] px-3.5 text-[#4D606A] hover:text-[#172A35] text-sm font-medium transition-colors cursor-pointer" type="button">
+                        تحديد الموعد
+                      </button>
+</div>
+</div>
+</article>
+</div>
+</section>
+<!-- UPCOMING NEXT DAYS HORIZON (الأيام القادمة) -->
+<section class="bg-white border border-[#D5DFE3] rounded-[6px] p-5">
+<div class="flex items-center justify-between pb-3 mb-3 border-b border-[#D5DFE3]">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#14566B]">date_range</span>
+<h2 class="font-headline-sm text-sm font-bold text-[#172A35]">الأيام القادمة (استشراف الأجندة)</h2>
+</div>
+<a class="text-sm font-semibold text-[#14566B] hover:underline flex items-center gap-1" href="#hearings">
+<span>عرض الأجندة الكاملة</span>
+<span class="material-symbols-outlined text-[16px]">arrow_back</span>
+</a>
+</div>
+<!-- Horizon Strip Items -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+<!-- Day Item 1 -->
+<div class="p-3.5 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[4px] flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="text-sm font-bold text-[#172A35] flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#14566B]"></span>
+                      الخميس، ١٢ نوفمبر
+                    </span>
+<span class="text-xs font-medium text-[#7A4A00] bg-[#FFF7E6] px-1.5 py-0.5 rounded border border-[#E0B46A]">جلسة واحدة</span>
+</div>
+<div class="text-sm text-[#4D606A] flex flex-col gap-0.5">
+<span class="font-medium text-[#172A35]">محكمة عابدين الجزئية — الدائرة ٢ إيجارات</span>
+<div class="text-xs flex items-center gap-1">
+<span>ملف</span>
+<bdi class="font-mono" dir="ltr">LO-2026-007</bdi>
+<span>• إعادة إعلان بالطلبات العارضة</span>
+</div>
+</div>
+</div>
+<!-- Day Item 2 -->
+<div class="p-3.5 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[4px] flex flex-col gap-2">
+<div class="flex items-center justify-between">
+<span class="text-sm font-bold text-[#172A35] flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#4D606A]"></span>
+                      الأحد، ١٥ نوفمبر
+                    </span>
+<span class="text-xs font-medium text-[#176449] bg-[#EDF7F2] px-1.5 py-0.5 rounded border border-[#82C5A5]">إيداع مأمورية</span>
+</div>
+<div class="text-sm text-[#4D606A] flex flex-col gap-0.5">
+<span class="font-medium text-[#172A35]">محكمة الجيزة الابتدائية — قلم كتاب الخبراء</span>
+<div class="text-xs flex items-center gap-1">
+<span>ملف</span>
+<bdi class="font-mono" dir="ltr">LO-2026-009</bdi>
+<span>• إيداع تقرير الخبير وسداد الرسوم</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- NARROW LEFT COLUMN (4 of 12 columns = ~1/3) -->
+<div class="col-span-12 lg:col-span-4 flex flex-col gap-6">
+<!-- CARD 1: CRITICAL LEGAL DEADLINES (مواعيد قانونية تحتاج إلى مراجعة) -->
+<section class="bg-white border-2 border-[#E0B46A] rounded-[6px] overflow-hidden">
+<!-- Header -->
+<div class="p-4 bg-[#FFFDF7] border-b border-[#E0B46A] flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#7A4A00]">warning</span>
+<h2 class="font-headline-sm text-sm font-bold text-[#7A4A00]">مواعيد قانونية تحتاج إلى مراجعة</h2>
+</div>
+<span class="bg-[#FFF7E6] text-[#7A4A00] text-xs font-bold px-2 py-0.5 rounded border border-[#E0B46A]">
+                  مسودة غير معتمدة
+                </span>
+</div>
+<!-- Notice Content -->
+<div class="p-4 flex flex-col gap-3">
+<div class="flex items-start gap-2.5">
+<div class="w-2 h-2 rounded-full bg-[#7A4A00] mt-2 shrink-0"></div>
+<div class="flex flex-col gap-1">
+<span class="text-xs font-bold text-[#7A4A00]">موعد مقترح يحتاج إلى مراجعة</span>
+<p class="text-sm text-[#172A35] leading-relaxed">
+                      ملف <bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-1.5 py-0.5 rounded" dir="ltr">LO-2026-004</bdi>: موعد طعن مقترح مستخرج من منطوق الحكم الابتدائي، يتطلب مراجعة تاريخ الإعلان واعتماد الأستاذ ممدوح لتثبيت الميعاد الإجرائي النهائي.
+                    </p>
+</div>
+</div>
+<div class="p-2.5 bg-[#FFF9ED] border border-[#F0D09B] rounded-[4px] text-xs text-[#7A4A00]">
+<p class="leading-normal">
+                    تنبيه: يتوجب التمييز بين اعتماد الموعد القانوني وتسجيل إتمام الإجراء بعد قيده رسمياً لدى قلم الكتاب.
+                  </p>
+</div>
+<!-- Focused Action Button -->
+<button class="w-full min-h-[44px] bg-[#14566B] hover:bg-[#0F3F4F] text-white rounded-[6px] text-sm font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer mt-1" type="button">
+<span class="material-symbols-outlined text-[18px]">verified</span>
+<span>مراجعة الموعد واعتماده</span>
+</button>
+</div>
+</section>
+<!-- CARD 2: PROCEDURAL TASKS (مهام إجرائية متأخرة) -->
+<section class="bg-white border border-[#D5DFE3] rounded-[6px] overflow-hidden">
+<!-- Header -->
+<div class="p-4 border-b border-[#D5DFE3] flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#A4262C]">assignment_late</span>
+<h2 class="font-headline-sm text-sm font-bold text-[#172A35]">مهام إجرائية متأخرة</h2>
+</div>
+<span class="bg-[#FDF1F1] border border-[#F1A5A9] text-[#A4262C] text-xs font-mono font-bold px-2 py-0.5 rounded">
+                  ٢ مهمة
+                </span>
+</div>
+<!-- Procedural Tasks -->
+<div class="divide-y divide-[#D5DFE3]">
+<!-- Task 1 -->
+<div class="p-4 hover:bg-[#F8FAFB] transition-colors flex flex-col gap-2.5">
+<div class="flex items-start justify-between gap-2">
+<span class="text-sm font-bold text-[#172A35] leading-snug">استخراج صورة رسمية من الحكم</span>
+<span class="text-xs font-medium text-[#A4262C] bg-[#FDF1F1] px-1.5 py-0.5 rounded border border-[#F1A5A9] shrink-0">
+                      متأخر عن الموعد المحدد
+                    </span>
+</div>
+<div class="text-sm text-[#4D606A] flex items-center gap-2">
+<span>ملف المكتب:</span>
+<bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-1.5 py-0.5 rounded" dir="ltr">LO-2026-001</bdi>
+<span class="text-[#D5DFE3]">•</span>
+<span>قلم صور محكمة الجيزة</span>
+</div>
+<div class="pt-1 flex items-center justify-end">
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[16px]">sync</span>
+<span>تحديث الموقف الإجرائي</span>
+</button>
+</div>
+</div>
+<!-- Task 2 -->
+<div class="p-4 hover:bg-[#F8FAFB] transition-colors flex flex-col gap-2.5">
+<div class="flex items-start justify-between gap-2">
+<span class="text-sm font-bold text-[#172A35] leading-snug">إعلان الخصم بالصحيفة المعدلة</span>
+<span class="text-xs font-medium text-[#A4262C] bg-[#FDF1F1] px-1.5 py-0.5 rounded border border-[#F1A5A9] shrink-0">
+                      تجاوز موعد المحضرين
+                    </span>
+</div>
+<div class="text-sm text-[#4D606A] flex items-center gap-2">
+<span>ملف المكتب:</span>
+<bdi class="font-mono text-xs bg-[#E9F2F5] text-[#14566B] px-1.5 py-0.5 rounded" dir="ltr">LO-2026-005</bdi>
+<span class="text-[#D5DFE3]">•</span>
+<span>قلم محضرين الدقي</span>
+</div>
+<div class="pt-1 flex items-center justify-end">
+<button class="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" type="button">
+<span class="material-symbols-outlined text-[16px]">edit_calendar</span>
+<span>تسجيل المتابعة</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+<!-- PRACTICE DAILY NOTE PAD (مذكرة للمكتب) -->
+<section class="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex flex-col gap-2.5">
+<div class="flex items-center justify-between">
+<span class="text-sm font-bold text-[#172A35] flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px] text-[#14566B]">stylus_note</span>
+                  مذكرة للمكتب
+                </span>
+</div>
+<textarea class="w-full text-sm text-[#172A35] bg-[#F8FAFB] border border-[#D5DFE3] rounded-[4px] p-2.5 placeholder-[#70787C] focus:bg-white focus:border-[#14566B] focus:ring-0 resize-none leading-relaxed" placeholder="اكتب ملاحظة مهنية أو تكليفاً لمتابعة قلم الكتاب أو الموكل..." rows="3"></textarea>
+<div class="flex items-center justify-between pt-1">
+<span class="text-xs text-[#70787C]">يتطلب الاتصال بالنظام لحفظ التعديلات</span>
+<button class="min-h-[38px] px-4 bg-white border border-[#14566B] hover:bg-[#F4F6F7] text-[#14566B] text-sm font-medium rounded-[4px] transition-colors cursor-pointer" type="button">
+                  حفظ الملاحظة
+                </button>
+</div>
+</section>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

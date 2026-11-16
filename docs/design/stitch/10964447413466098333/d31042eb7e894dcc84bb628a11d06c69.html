@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+
+<html class="h-full" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>S11b — اتفاق الأتعاب المهنية | نظام LawOffice OS</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Noto Sans Arabic Font -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration verbatim -->
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-primary": "#ffffff",
+            "surface-bright": "#f5faff",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "inverse-primary": "#96cfe7",
+            "background": "#f5faff",
+            "surface-tint": "#29657b",
+            "surface-dim": "#c9ddec",
+            "on-surface": "#0a1e28",
+            "outline-variant": "#c0c8cc",
+            "primary": "#003e4f",
+            "on-secondary-fixed": "#0a1e26",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-error-container": "#93000a",
+            "surface-container": "#ddf1ff",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-container": "#075b41",
+            "outline": "#70787c",
+            "on-secondary": "#ffffff",
+            "on-surface-variant": "#40484c",
+            "inverse-on-surface": "#e3f3ff",
+            "primary-container": "#14566b",
+            "surface": "#f5faff",
+            "secondary-container": "#cee3ef",
+            "secondary-fixed": "#d1e6f1",
+            "on-tertiary-fixed": "#002115",
+            "error": "#ba1a1a",
+            "on-primary-fixed-variant": "#024d62",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-high": "#d7ebfa",
+            "tertiary": "#00422d",
+            "on-background": "#0a1e28",
+            "primary-fixed": "#baeaff",
+            "inverse-surface": "#20333e",
+            "on-tertiary-container": "#88d1af",
+            "secondary": "#4e616b",
+            "on-error": "#ffffff",
+            "error-container": "#ffdad6",
+            "on-secondary-fixed-variant": "#374953",
+            "tertiary-fixed": "#a8f2cf",
+            "surface-variant": "#d1e5f4",
+            "primary-fixed-dim": "#96cfe7",
+            "surface-container-low": "#e9f5ff",
+            "on-secondary-container": "#52656f",
+            "surface-container-highest": "#d1e5f4",
+            "on-primary-fixed": "#001f29",
+            "on-tertiary": "#ffffff",
+            "on-primary-container": "#91cae2"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter": "1rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem",
+            "space-sm": "0.5rem",
+            "margin-desktop": "2rem",
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "space-xs": "0.375rem"
+          },
+          "fontFamily": {
+            "body-lg-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-sm-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-lg-mobile": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "display": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"]
+          },
+          "fontSize": {
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Noto Sans Arabic', sans-serif;
+      background-color: #F4F6F7;
+      color: #172A35;
+    }
+    .custom-border {
+      border-color: #D5DFE3;
+    }
+    input, select, textarea {
+      font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #14566B !important;
+      box-shadow: 0 0 0 1px #14566B !important;
+    }
+    /* Material symbols vertical alignment */
+    .material-symbols-outlined {
+      font-size: 20px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body class="bg-[#F4F6F7] text-on-surface antialiased min-h-screen flex flex-col">
+<!-- ==================== TOP NAVIGATION BAR ==================== -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b custom-border flex items-center justify-between px-gutter-desktop pr-[248px]">
+<!-- Right side: Title & Demo Data Indicator -->
+<div class="flex items-center gap-space-md">
+<span class="font-headline-sm text-headline-sm text-primary font-bold">نظام إدارة المكتب الرقمي</span>
+<span class="h-4 w-[1px] bg-outline-variant"></span>
+<!-- Test Data Badge -->
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[12px] font-medium bg-[#FFF7E6] text-[#7A4A00] border border-[#E0B46A]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#7A4A00]"></span>
+        بيانات تجريبية
+      </span>
+<span class="text-xs text-on-surface-variant font-medium">S11b — بيئة التحرير المعتمدة</span>
+</div>
+<!-- Left side: Actions & Profile -->
+<div class="flex items-center gap-space-md">
+<!-- Search Input Container -->
+<div class="relative w-64 hidden xl:block">
+<input class="w-full h-[38px] pl-9 pr-3 text-body-sm bg-[#FFFFFF] border custom-border rounded text-on-surface placeholder:text-outline focus:border-primary-container" placeholder="بحث سريع برقم الملف أو الموكل..." type="text"/>
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+</div>
+<button class="w-[38px] h-[38px] flex items-center justify-center rounded border custom-border bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container transition-colors" title="إشعارات الجلسات" type="button">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="w-[38px] h-[38px] flex items-center justify-center rounded border custom-border bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container transition-colors" title="المساعدة والدعم" type="button">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<!-- Quick Action Buttons -->
+<button class="h-[38px] px-3.5 flex items-center gap-1.5 text-body-sm font-label-md text-primary-container bg-surface-container-lowest border border-primary-container rounded hover:bg-[#F4F6F7] transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="description">description</span>
+<span>إيداع مستند</span>
+</button>
+<button class="h-[38px] px-3.5 flex items-center gap-1.5 text-body-sm font-label-md text-on-primary bg-primary-container rounded hover:bg-[#0F3F4F] transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+<span>جلسة جديدة</span>
+</button>
+<!-- User avatar snippet -->
+<div class="flex items-center gap-2 pr-2 border-r custom-border">
+<div class="w-8 h-8 rounded bg-surface-variant border custom-border flex items-center justify-center text-primary font-bold text-xs">
+          أم
+        </div>
+</div>
+</div>
+</header>
+<!-- ==================== PERSISTENT RIGHT SIDEBAR (232px) ==================== -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l custom-border flex flex-col justify-between py-space-lg px-space-md select-none">
+<!-- Top Branding & Practitioner Info -->
+<div>
+<div class="pb-space-md border-b custom-border">
+<div class="flex items-center gap-space-sm">
+<div class="w-10 h-10 rounded bg-primary-container text-on-primary flex items-center justify-center font-bold text-sm">
+            م.م
+          </div>
+<div class="flex flex-col overflow-hidden">
+<span class="font-headline-sm text-headline-sm text-primary truncate font-bold leading-tight">مكتب الأستاذ أحمد ممدوح</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate">المحامي بالنقض والاستئناف</span>
+</div>
+</div>
+<button class="w-full mt-4 h-[38px] px-3 flex items-center justify-center gap-1.5 rounded bg-primary-container text-on-primary font-label-md text-label-md hover:bg-[#0F3F4F] transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+<span>إضافة قضية جديدة</span>
+</button>
+</div>
+<!-- Navigation Tabs (With Tab 5: السجلات والمالية Active) -->
+<nav class="mt-space-md flex flex-col gap-1">
+<!-- 1: جدول الجلسات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface rounded transition-colors duration-150" href="#">
+<span class="material-symbols-outlined text-outline" data-icon="calendar_month">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<!-- 2: ملفات القضايا -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface rounded transition-colors duration-150" href="#">
+<span class="material-symbols-outlined text-outline" data-icon="folder_open">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<!-- 3: دليل الموكلين -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface rounded transition-colors duration-150" href="#">
+<span class="material-symbols-outlined text-outline" data-icon="groups">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<!-- 4: المهام الإجرائية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface rounded transition-colors duration-150" href="#">
+<span class="material-symbols-outlined text-outline" data-icon="assignment_late">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<!-- 5: السجلات والمالية (ACTIVE) -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-surface-container-low border-r-4 border-primary font-label-md text-label-md rounded-l" href="#">
+<span class="material-symbols-outlined text-primary font-bold" data-icon="account_balance_wallet" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<!-- 6: الإعدادات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface rounded transition-colors duration-150" href="#">
+<span class="material-symbols-outlined text-outline" data-icon="settings">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Footer Links -->
+<div class="pt-space-md border-t custom-border flex flex-col gap-1">
+<a class="flex items-center gap-space-sm px-space-md py-2 text-on-surface-variant hover:text-on-surface font-body-sm text-body-sm rounded hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined text-outline text-[18px]" data-icon="help">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-2 text-error hover:bg-error-container/40 font-body-sm text-body-sm rounded transition-colors" href="#">
+<span class="material-symbols-outlined text-error text-[18px]" data-icon="logout">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- ==================== MAIN CONTENT CANVAS ==================== -->
+<main class="pr-[232px] flex-1 pb-16">
+<div class="max-w-[1360px] mx-auto px-gutter-desktop py-space-lg">
+<!-- Breadcrumb and Page Header -->
+<div class="mb-space-lg">
+<div class="flex items-center gap-2 text-body-sm text-on-surface-variant mb-1.5">
+<a class="hover:text-primary transition-colors" href="#">السجلات والمالية</a>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_left">chevron_left</span>
+<a class="hover:text-primary transition-colors" href="#">سجل اتفاقات الأتعاب المهنية</a>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_left">chevron_left</span>
+<span class="text-on-surface font-medium">اتفاق أتعاب مهنية جديد (S11b)</span>
+</div>
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-primary font-bold tracking-tight">
+              اتفاق أتعاب مهنية جديد (Fee Agreement)
+            </h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">
+              توثيق الشروط المالية والتعاقدية الملزمة لملف المكتب وتحديد جدول استحقاق الدفعات طبقاً لقانون المحاماة المصري.
+            </p>
+</div>
+<!-- Document Nature Indicator / Watermark State -->
+<div class="flex items-center gap-2 bg-[#FFFFFF] border custom-border px-3 py-2 rounded">
+<span class="material-symbols-outlined text-primary-container" data-icon="lock_clock">lock_clock</span>
+<div class="text-right">
+<span class="block text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">حالة المستند المحاسبي</span>
+<span class="block font-label-md text-label-md text-primary">مسودة تحريرية قبل القيد النهائي</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Critical Read-Only Ledger Alert Notice -->
+<div class="mb-space-lg bg-[#EDF7F2] border border-[#82C5A5] rounded-[6px] p-space-md flex items-start gap-3">
+<span class="material-symbols-outlined text-[#176449] mt-0.5 shrink-0" data-icon="gavel" style="font-variation-settings: 'FILL' 1;">gavel</span>
+<div class="text-right">
+<h2 class="font-label-md text-label-md text-[#176449] font-bold">
+            حجية القيد المحاسبي والأثر القانوني للترحيل
+          </h2>
+<p class="font-body-sm text-body-sm text-[#00422d] mt-1 leading-relaxed">
+            وفقاً لضوابط التدقيق المالي لمكاتب المحاماة، بمجرد اعتماد وترحيل هذا الاتفاق، يتم إدراجه كقيد دفتري ثابت 
+            <strong class="font-bold underline">للقراءة فقط (Read-only)</strong> في سجلات الموكل، ولا يجوز حذفه أو تعديل أرقامه يدوياً على الإطلاق. أي تعديل مستقبلي يستوجب إصدار «ملحق تعديل أتعاب مسبب» بموافقة الطرفين.
+          </p>
+</div>
+</div>
+<!-- Main Two-Column Operational Layout -->
+<form class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start" id="feeAgreementForm">
+<!-- RIGHT/PRIMARY WORKSPACE (Form Fields & Installments - 8 Columns) -->
+<div class="lg:col-span-8 flex flex-col gap-space-lg">
+<!-- Section 1: Matter & Party Identification -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-space-md">
+<div class="border-b custom-border pb-3 mb-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="folder_special">folder_special</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">1. تحديد الملف الإجرائي والموكل المسؤول</h3>
+</div>
+<span class="text-xs bg-surface-container-low text-primary px-2 py-0.5 rounded font-medium border border-outline-variant">بيانات إلزامية</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+<!-- Field 1: Matter Selection -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="matterSelect">
+                  ملف المكتب المرتبط (Matter) <span class="text-error">*</span>
+</label>
+<div class="relative">
+<select class="w-full h-[44px] bg-[#FFFFFF] border custom-border rounded px-3 text-body-sm text-on-surface appearance-none focus:border-primary-container" id="matterSelect">
+<option selected="" value="LO-2026-001">LO-2026-001 — شركة النيل للمقاولات العامة (دعوى تعويض تجاري)</option>
+<option value="LO-2026-008">LO-2026-008 — ورثة محمود الألفي (قسمة تركة وتصفية شركة)</option>
+<option value="LO-2026-014">LO-2026-014 — البنك الأهلي المتحد ضد مصنع الدلتا (تنفيذ سند إذني)</option>
+<option value="LO-2026-022">LO-2026-022 — المهندس شريف حسان (بطلان قرار مجلس إدارة)</option>
+</select>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="expand_more">expand_more</span>
+</div>
+<p class="font-body-sm text-[12px] text-on-surface-variant mt-1">الدائرة: الدائرة 4 مدني كلي جنوب القاهرة - محكمة باب الخلق.</p>
+</div>
+<!-- Field 2: Responsible Payer -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="payerName">
+                  الموكل المسؤول عن السداد والالتزام <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] bg-[#FFFFFF] border custom-border rounded px-3 text-body-sm text-on-surface focus:border-primary-container" id="payerName" type="text" value="شركة النيل للمقاولات العامة والتوريدات (يمثلها: أ. فريد عزت الجيار)"/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="badge">badge</span>
+</div>
+<p class="font-body-sm text-[12px] text-on-surface-variant mt-1">بموجب التوكيل الرسمي العام رقم 4125 لسنة 2024 توثيق الأهرام النموذجي.</p>
+</div>
+<!-- Field 3: Execution Date -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="agreementDate">
+                  تاريخ تحرير الاتفاق وسريانه <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] bg-[#FFFFFF] border custom-border rounded px-3 text-body-sm text-on-surface focus:border-primary-container" id="agreementDate" type="date" value="2026-03-30"/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="calendar_today">calendar_today</span>
+</div>
+</div>
+<!-- Field 4: Court Branch / Jurisdiction Context -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="courtRef">
+                  رقم الدعوى المقيدة / جدول المحكمة
+                </label>
+<input class="w-full h-[44px] bg-[#FFFFFF] border custom-border rounded px-3 text-body-sm text-on-surface focus:border-primary-container" id="courtRef" placeholder="إذا كانت مقيدة بالفعل أو تُترك خالية للتحضير" type="text" value="دعوى رقم 894 لسنة 2026 تجاري كلي القاهرة"/>
+</div>
+</div>
+</div>
+<!-- Section 2: Scope of Work Formulation -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-space-md">
+<div class="border-b custom-border pb-3 mb-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="edit_note">edit_note</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">2. صياغة نطاق العمل المهني والتمثيل القضائي</h3>
+</div>
+<span class="text-xs text-on-surface-variant">الصياغة المعتمدة لدفوع المحاماة</span>
+</div>
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="scopeText">
+                توصيف المهام المغطاة بموجب هذا الاتفاق <span class="text-error">*</span>
+</label>
+<textarea class="w-full bg-[#FFFFFF] border custom-border rounded p-3 text-body-sm text-on-surface leading-relaxed focus:border-primary-container resize-y" id="scopeText" rows="4">يتعهد الأستاذ أحمد ممدوح المحامي بالنقض بدراسة المستندات وإعداد وقيد صحيفة الدعوى رقم 894 لسنة 2026 تجاري كلي القاهرة والمرافعة والحضور بكافة الجلسات المقررة، وإيداع المذكرات وحوافظ المستندات، ومتابعة مأمورية مكتب خبراء وزارة العدل المختص حتى صدور الحكم المنهي للخصومة في المرحلة الابتدائية (أول درجة). ولا يشمل هذا الاتفاق مرحلة الاستئناف العالي أو الطعن بالنقض أو رسوم الخبراء وأمانات المحكمة القضائية.</textarea>
+<div class="mt-2 flex items-center justify-between text-[12px] text-on-surface-variant">
+<span>تنبيه: نفقات التقاضي والرسوم القضائية الحكومية تسدد على حدة من واقع إيصالات سداد الخزينة ولا تعتبر جزءاً من أتعاب المحاماة.</span>
+<span class="font-mono">314 حرف</span>
+</div>
+</div>
+</div>
+<!-- Section 3: Professional Fees Value & Tafqeet -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-space-md">
+<div class="border-b custom-border pb-3 mb-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="payments">payments</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">3. القيمة الإجمالية والتفقيط المعتمد</h3>
+</div>
+<span class="text-xs font-bold text-primary px-2 py-0.5 bg-surface-container rounded border custom-border">العملة: الجنيه المصري (EGP)</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-space-md items-start">
+<!-- Numerical Amount -->
+<div class="md:col-span-4">
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="totalAmount">
+                  إجمالي قيمة الأتعاب (رقماً) <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] bg-[#FFFFFF] border custom-border rounded pl-14 pr-3 text-headline-sm font-bold text-primary font-mono focus:border-primary-container" id="totalAmount" type="text" value="15,000"/>
+<span class="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-body-sm text-on-surface-variant">ج.م</span>
+</div>
+<span class="text-[12px] text-on-surface-variant mt-1 block">شاملة أعمال التحضير والمرافعة</span>
+</div>
+<!-- Tafqeet (Written in Arabic words) -->
+<div class="md:col-span-8">
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="tafqeetText">
+                  تفقيط المبلغ كتابة بالحروف العربية <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] bg-[#F4F6F7] border custom-border rounded px-3 text-body-sm font-semibold text-[#172A35] cursor-default focus:border-outline" id="tafqeetText" readonly="" type="text" value="خمسة عشر ألف جنيه مصري لا غير"/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-tertiary-container" data-icon="verified">verified</span>
+</div>
+<span class="text-[12px] text-on-surface-variant mt-1 block">صيغة تفقيط محاسبية قطعية تمنع أي التباس في دفاتر السداد.</span>
+</div>
+</div>
+</div>
+<!-- Section 4: Structured Installment Schedule (جدولة الأقساط) -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-space-md">
+<div class="border-b custom-border pb-3 mb-4 flex items-center justify-between">
+<div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="receipt_long">receipt_long</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">4. جدولة سداد الدفعات والأقساط المستحقة</h3>
+</div>
+<p class="text-body-sm text-on-surface-variant text-[13px] mt-0.5">ربط سداد الدفعات بالمراحل الإجرائية للدعوى المنظورة</p>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-xs text-on-surface-variant">مطابقة الحصص:</span>
+<span class="px-2 py-0.5 bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] font-bold text-xs rounded">
+                  متطابق 15,000 / 15,000 ج.م
+                </span>
+</div>
+</div>
+<!-- Installments Ledger Table -->
+<div class="border custom-border rounded overflow-hidden">
+<table class="w-full text-right border-collapse">
+<thead>
+<tr class="bg-[#F4F6F7] border-b custom-border text-on-surface-variant font-label-md text-[13px] h-[40px]">
+<th class="px-4 w-12 text-center">#</th>
+<th class="px-4">البيان / المرحلة الإجرائية المرتبطة</th>
+<th class="px-4 w-40">تاريخ الاستحقاق التقريبي</th>
+<th class="px-4 w-36 text-left">قيمة الدفعة</th>
+<th class="px-3 w-16 text-center">إجراء</th>
+</tr>
+</thead>
+<tbody class="divide-y custom-border text-body-sm">
+<!-- Installment 1 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 text-center font-bold text-on-surface-variant">1</td>
+<td class="px-4 font-medium text-on-surface">
+                      الدفعة الأولى: مقدم أتعاب عند قيد الصحيفة وسداد الرسوم
+                    </td>
+<td class="px-4 text-on-surface-variant font-mono text-[13px]">
+                      2026-04-05
+                    </td>
+<td class="px-4 text-left font-bold font-mono text-primary">
+                      5,000 ج.م
+                    </td>
+<td class="px-3 text-center">
+<button class="text-outline hover:text-error transition-colors p-1" title="حذف الدفعة" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="delete">delete</span>
+</button>
+</td>
+</tr>
+<!-- Installment 2 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 text-center font-bold text-on-surface-variant">2</td>
+<td class="px-4 font-medium text-on-surface">
+                      الدفعة الثانية: عقب ورود تقرير الخبير ومناقشته بالجلسة
+                    </td>
+<td class="px-4 text-on-surface-variant font-mono text-[13px]">
+                      2026-07-15
+                    </td>
+<td class="px-4 text-left font-bold font-mono text-primary">
+                      5,000 ج.م
+                    </td>
+<td class="px-3 text-center">
+<button class="text-outline hover:text-error transition-colors p-1" title="حذف الدفعة" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="delete">delete</span>
+</button>
+</td>
+</tr>
+<!-- Installment 3 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 text-center font-bold text-on-surface-variant">3</td>
+<td class="px-4 font-medium text-on-surface">
+                      الدفعة الثالثة: عند حجز الدعوى للحكم بختام المرافعة
+                    </td>
+<td class="px-4 text-on-surface-variant font-mono text-[13px]">
+                      2026-10-20
+                    </td>
+<td class="px-4 text-left font-bold font-mono text-primary">
+                      5,000 ج.م
+                    </td>
+<td class="px-3 text-center">
+<button class="text-outline hover:text-error transition-colors p-1" title="حذف الدفعة" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="delete">delete</span>
+</button>
+</td>
+</tr>
+</tbody>
+<tfoot>
+<tr class="bg-[#F4F6F7] border-t custom-border font-bold">
+<td class="px-4 py-2 text-right text-on-surface" colspan="3">مجموع الدفعات المجدولة</td>
+<td class="px-4 py-2 text-left text-primary font-mono">15,000 ج.م</td>
+<td></td>
+</tr>
+</tfoot>
+</table>
+</div>
+<!-- Add Installment Trigger -->
+<div class="mt-3 flex items-center justify-between">
+<button class="h-[36px] px-3 border custom-border bg-[#FFFFFF] rounded text-body-sm font-label-md text-primary-container hover:bg-[#F4F6F7] flex items-center gap-1.5 transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="add_circle">add_circle</span>
+<span>إضافة قسط / دفعة جديدة</span>
+</button>
+<span class="text-[12px] text-on-surface-variant">عدد الأقساط الحالية: 3 دفعات متساوية</span>
+</div>
+</div>
+</div>
+<!-- LEFT/SECONDARY SIDE PANEL: AUDIT SUMMARY & SUBMISSION (4 Columns) -->
+<div class="lg:col-span-4 flex flex-col gap-space-lg sticky top-[80px]">
+<!-- Review Summary Panel (ملخص المراجعة الإجرائية والمالية) -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-space-md">
+<div class="border-b custom-border pb-3 mb-3 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-icon="fact_check">fact_check</span>
+<h3 class="font-headline-sm text-headline-sm text-on-surface font-bold">ملخص المراجعة والترحيل</h3>
+</div>
+<span class="font-mono text-xs text-on-surface-variant">REV-2026-B</span>
+</div>
+<!-- Financial Impact Ledger Simulation -->
+<div class="space-y-3 pt-1">
+<div class="bg-[#F4F6F7] p-3 rounded border custom-border">
+<span class="block text-[12px] text-on-surface-variant mb-1">الأثر المحاسبي الفوري على ذمة الموكل:</span>
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface">إثبات مديونية أتعاب مستحقة</span>
+<span class="font-bold text-primary font-mono">15,000 ج.م</span>
+</div>
+<div class="mt-2 pt-2 border-t custom-border text-[11px] text-on-surface-variant leading-tight">
+<span class="inline-block w-1.5 h-1.5 rounded-full bg-secondary align-middle ml-1"></span>
+<strong>قاعدة الاستحقاق المهني:</strong> لا يُقيد هذا المبلغ كإيراد نقدي فعلي في ميزانية المكتب إلا عند تحصيله الفعلي بموجب سند قبض رسمي.
+                </div>
+</div>
+<!-- Parameter Verification Checklist -->
+<div class="space-y-2 py-1">
+<div class="flex items-center justify-between text-body-sm">
+<span class="text-on-surface-variant">الملف الإجرائي:</span>
+<span class="font-bold text-primary font-mono text-[13px]">LO-2026-001</span>
+</div>
+<div class="flex items-center justify-between text-body-sm">
+<span class="text-on-surface-variant">الموكل المدين:</span>
+<span class="font-medium text-on-surface truncate max-w-[170px]" title="شركة النيل للمقاولات">شركة النيل للمقاولات</span>
+</div>
+<div class="flex items-center justify-between text-body-sm">
+<span class="text-on-surface-variant">عدد أقساط السداد:</span>
+<span class="font-medium text-on-surface">3 دفعات مرحلية</span>
+</div>
+<div class="flex items-center justify-between text-body-sm">
+<span class="text-on-surface-variant">الضريبة المضافة:</span>
+<span class="text-on-surface-variant text-[13px]">تُحسب بالجدول الضريبي</span>
+</div>
+</div>
+<!-- Formal Statement Warning -->
+<div class="p-3 bg-[#FFF7E6] border border-[#E0B46A] rounded text-[12px] text-[#7A4A00] leading-normal">
+<div class="flex items-center gap-1 font-bold mb-1">
+<span class="material-symbols-outlined text-[16px]" data-icon="report_problem">report_problem</span>
+<span>تأكيد الإغلاق الدفتري:</span>
+</div>
+                عقد الاتفاق بمجرد حفظه وترحيله يعد وثيقة محاسبية غير قابلة للتعديل اليدوي لاحقاً، وأي تعديل يستلزم ملحق تعديل أتعاب بموافقة الموكل.
+              </div>
+<!-- Verification Checkbox -->
+<div class="pt-2">
+<label class="flex items-start gap-2 cursor-pointer select-none">
+<input checked="" class="mt-1 w-4 h-4 rounded text-primary-container border-outline focus:ring-0" id="legalConfirm" type="checkbox"/>
+<span class="font-body-sm text-[12px] text-on-surface leading-tight">
+                    أقر أنا الأستاذ أحمد ممدوح المحامي بصحة وتطابق بنود ونطاق هذا الاتفاق مع ملف الدعوى والتفويض الممنوح.
+                  </span>
+</label>
+</div>
+<!-- Action Triggers -->
+<div class="pt-3 border-t custom-border flex flex-col gap-2.5">
+<!-- Primary Action: 44px height -->
+<button class="w-full h-[44px] px-5 rounded-[6px] bg-primary-container text-on-primary font-label-md text-label-md flex items-center justify-center gap-2 hover:bg-[#0F3F4F] active:bg-[#0B2F3B] transition-colors focus:ring-2 focus:ring-primary-container focus:ring-offset-2" type="submit">
+<span class="material-symbols-outlined text-[20px]" data-icon="task_alt">task_alt</span>
+<span>اعتماد وترحيل اتفاق الأتعاب</span>
+</button>
+<!-- Secondary Action: Save Draft -->
+<button class="w-full h-[44px] px-5 rounded-[6px] bg-[#FFFFFF] border border-primary-container text-primary-container font-label-md text-label-md flex items-center justify-center gap-2 hover:bg-[#F4F6F7] transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]" data-icon="save">save</span>
+<span>حفظ كمسودة غير مرحلة</span>
+</button>
+<!-- Cancel / Revert -->
+<button class="w-full h-[38px] px-4 text-body-sm text-outline hover:text-error transition-colors flex items-center justify-center" type="button">
+                  إلغاء التحرير والعودة للقائمة
+                </button>
+</div>
+</div>
+</div>
+<!-- Court Reference Quick Summary Card -->
+<div class="bg-[#FFFFFF] border custom-border rounded-[6px] p-4 text-right">
+<div class="flex items-center gap-2 text-on-surface-variant font-label-md text-[13px] mb-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="info">info</span>
+<span>سند الاستحقاق في قانون المحاماة</span>
+</div>
+<p class="font-body-sm text-[12px] text-on-surface-variant leading-relaxed">
+              المادة (82) من القانون 17 لسنة 1983: يتقاضى المحامي أتعاباً وفقاً للاتفاق المكتوب مع موكله، ويثبت هذا الاتفاق كتابةً، وتعتبر أتعاب المحامي ديناً ممتازاً طبقاً للمادة (84).
+            </p>
+</div>
+</div>
+</form>
+</div>
+</main>
+<!-- Lightweight Inline Interaction Script -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('feeAgreementForm');
+      const confirmCheck = document.getElementById('legalConfirm');
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (!confirmCheck.checked) {
+          alert('يجب الإقرار بصحة وتطابق بنود الاتفاق قبل الترحيل المحاسبي.');
+          return;
+        }
+
+        const confirmSubmit = confirm('تنبيه نهائي: هل أنت متأكد من ترحيل اتفاق الأتعاب بمبلغ 15,000 ج.م؟ سيصبح القيد ثابتاً للقراءة فقط (Read-only) ولا يمكن حذفه.');
+        if (confirmSubmit) {
+          alert('تم اعتماد وترحيل اتفاق الأتعاب بنجاح تحت رقم مستندي: FA-2026-089.');
+        }
+      });
+    });
+  </script>
+</body></html>

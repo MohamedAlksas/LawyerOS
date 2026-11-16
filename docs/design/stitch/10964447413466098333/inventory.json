@@ -1,0 +1,722 @@
+[
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/15022922477182156184:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/15022922477182156184"
+    },
+    "name": "projects/10964447413466098333/screens/424f49b475804e60ac5ca9d3728ee17c",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_000660273aff82f7044f7920fd20ae29:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/424f49b475804e60ac5ca9d3728ee17c/fileEntries/screenshot"
+    },
+    "title": "تسجيل الدخول — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "4536",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/17416340445367243305:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/17416340445367243305"
+    },
+    "name": "projects/10964447413466098333/screens/6d4b6e33595a4c6aa7042eb636f68de3",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_0006602741b0a2ba05f13a797f3a473a:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/6d4b6e33595a4c6aa7042eb636f68de3/fileEntries/screenshot"
+    },
+    "title": "ملف المكتب — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/6334022549092704890:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/6334022549092704890"
+    },
+    "name": "projects/10964447413466098333/screens/7fd4c08aee624224b2256fe1c77d896d",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_000660273ae0bcc604e75191fc153fe6:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/7fd4c08aee624224b2256fe1c77d896d/fileEntries/screenshot"
+    },
+    "title": "التحقق من الهوية — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2218",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/8d80a72726f846f7bb671cf47f322a93:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/8d80a72726f846f7bb671cf47f322a93"
+    },
+    "name": "projects/10964447413466098333/screens/da0f53e655cd4dedac4dba6155e79a96",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/cd11cab8ad06471ab63c3ecb9c0918c1:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/cd11cab8ad06471ab63c3ecb9c0918c1"
+    },
+    "title": "المواعيد القانونية — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/2be2e2aa4c9345bba2433c05675fe9c2:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/2be2e2aa4c9345bba2433c05675fe9c2"
+    },
+    "name": "projects/10964447413466098333/screens/5ec7ac52bccf4c25bda54a76d63bd463",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/011b060a52cb4e36a65bf569f250d9c7:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/011b060a52cb4e36a65bf569f250d9c7"
+    },
+    "title": "S01b — التحقق من الهوية",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2688",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/ba580f6cd02846dab64a08cb70209281:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/ba580f6cd02846dab64a08cb70209281"
+    },
+    "name": "projects/10964447413466098333/screens/70208806e98247de86dcc65f88463ad8",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/b5dafb5f6be14775861dd587aa0482ce:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/b5dafb5f6be14775861dd587aa0482ce"
+    },
+    "title": "بيانات الجلسة — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3568",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/bce5a0d6e0d041b69e16b51a2a7b13bd:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/bce5a0d6e0d041b69e16b51a2a7b13bd"
+    },
+    "name": "projects/10964447413466098333/screens/1f2e77ba1edd437a9506633f3f491992",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/78a436a51ed0402cad7f1146cdf7c577:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/78a436a51ed0402cad7f1146cdf7c577"
+    },
+    "title": "تسجيل نتيجة الجلسة — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2758",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/790fde8e52694df5abfc23655a535337:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/790fde8e52694df5abfc23655a535337"
+    },
+    "name": "projects/10964447413466098333/screens/3e3da1020cd342e1928969dcb906dbf6",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/35d1b197c3eb443f9db38819e6520eb1:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/35d1b197c3eb443f9db38819e6520eb1"
+    },
+    "title": "جدول الجلسات والمواعيد — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3448",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/f3d511a52e414dc8a1cede8f0f82b71c:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/f3d511a52e414dc8a1cede8f0f82b71c"
+    },
+    "name": "projects/10964447413466098333/screens/62619a3f7a124e7dbcc0c12f3d774f0a",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/361c5c02ac134bea85e8d6d01bd2aa95:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/361c5c02ac134bea85e8d6d01bd2aa95"
+    },
+    "title": "S07 — جدول الجلسات والمواعيد",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3470",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/afabd9e7ddc246188ebf76070acb744d:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/afabd9e7ddc246188ebf76070acb744d"
+    },
+    "name": "projects/10964447413466098333/screens/6cab756139244333926ba03dc0929db6",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/19964506f3fb4e0e90208230f6ff23d2:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/19964506f3fb4e0e90208230f6ff23d2"
+    },
+    "title": "S04 — ملف المكتب",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/3847753282561772194:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/3847753282561772194"
+    },
+    "name": "projects/10964447413466098333/screens/8411f703badc4f0eaba81d93929834fe",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_000660274153a2f804e75191fc153fe6:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/8411f703badc4f0eaba81d93929834fe/fileEntries/screenshot"
+    },
+    "title": "إنشاء ملف مكتب — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/0becdacd76984d63a1d29fb79f9f6b40:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/0becdacd76984d63a1d29fb79f9f6b40"
+    },
+    "name": "projects/10964447413466098333/screens/3ac9b8ceeafc43418f199de2846e3a87",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/2cb0e43268f14e66912fb9d32bca617a:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/2cb0e43268f14e66912fb9d32bca617a"
+    },
+    "title": "S11e — تصحيح عملية مالية",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3560",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/6f8abb94fe7b43ffad0532bb788682ad:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/screens/6f8abb94fe7b43ffad0532bb788682ad/fileEntries/html"
+    },
+    "name": "projects/10964447413466098333/screens/6f8abb94fe7b43ffad0532bb788682ad",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_0006602a7dbf66a3023bdbe6b00c93ca:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/6f8abb94fe7b43ffad0532bb788682ad/fileEntries/screenshot"
+    },
+    "title": "S10c — معاينة المستند",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3320",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/2b29df9d04434a0aaa97321e68115b0e:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/screens/2b29df9d04434a0aaa97321e68115b0e/fileEntries/html"
+    },
+    "name": "projects/10964447413466098333/screens/2b29df9d04434a0aaa97321e68115b0e",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_0006602a7dfd99e6023bdbe6b00c93ca:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/2b29df9d04434a0aaa97321e68115b0e/fileEntries/screenshot"
+    },
+    "title": "S10b — رفع مستند",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/5aef0a4801914dd09416c6f8d5c14c01:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/5aef0a4801914dd09416c6f8d5c14c01"
+    },
+    "name": "projects/10964447413466098333/screens/f5121cf7b0f049b1929c82686417540c",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/0cd724cef3244e3bbf513f55d936a312:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/0cd724cef3244e3bbf513f55d936a312"
+    },
+    "title": "S01a — تسجيل الدخول",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3568",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/e4d31399530f4a98af981c5c5a887cb5:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/e4d31399530f4a98af981c5c5a887cb5"
+    },
+    "name": "projects/10964447413466098333/screens/e8cb885a4e1547f1976448a4538b9f55",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/dbb28004bb514ee7af385a1e462be720:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/dbb28004bb514ee7af385a1e462be720"
+    },
+    "title": "S08b — المواعيد القانونية",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2632",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/732e06249e474a23ae50f21a23395f9d:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/732e06249e474a23ae50f21a23395f9d"
+    },
+    "name": "projects/10964447413466098333/screens/89d209cf3951412d9fde5137397838fb",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/4129be8c94ac45a7a0ad446f519ddf05:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/4129be8c94ac45a7a0ad446f519ddf05"
+    },
+    "title": "بيانات الجلسة — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/c9e697e9c50147f4b3460625af9367ac:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/c9e697e9c50147f4b3460625af9367ac"
+    },
+    "name": "projects/10964447413466098333/screens/f14fffec39ea43a5ad28f19adcf43cb6",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/b7794a94e2f74c5d95aed2597e4ef304:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/b7794a94e2f74c5d95aed2597e4ef304"
+    },
+    "title": "S06a — بيانات الجلسة",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/0494a3b510e54d50b9e5ba674afa6578:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/0494a3b510e54d50b9e5ba674afa6578"
+    },
+    "name": "projects/10964447413466098333/screens/97ab7d89cce24d6bbfb28e71d393255e",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/26d9b506f9534376b7953ab9e8ba41b2:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/26d9b506f9534376b7953ab9e8ba41b2"
+    },
+    "title": "S03b — إنشاء ملف مكتب",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3750",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/11252971519342642380:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/11252971519342642380"
+    },
+    "name": "projects/10964447413466098333/screens/cb6b14e633f14eb2a051a60bf965517e",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_00066027417d284f05f13a797f3a473a:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/cb6b14e633f14eb2a051a60bf965517e/fileEntries/screenshot"
+    },
+    "title": "ملفات المكتب — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2936",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/3634569036349246514:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/3634569036349246514"
+    },
+    "name": "projects/10964447413466098333/screens/74e1bc1cc3b24456911453e7a51ebb59",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/643dc60f328c4db8a4388c8b2c085a97:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/643dc60f328c4db8a4388c8b2c085a97"
+    },
+    "title": "القضية القضائية — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2534",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/a829ee3406664a4c8021a36eb96d204e:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/a829ee3406664a4c8021a36eb96d204e"
+    },
+    "name": "projects/10964447413466098333/screens/2741ba93db164e6ba84d3b1dc4015e52",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/fad38db784c2475ca588aae28897ed26:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/fad38db784c2475ca588aae28897ed26"
+    },
+    "title": "المهام الإجرائية — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3394",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/a7664e6e1ba34761ad45442a801506e3:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/a7664e6e1ba34761ad45442a801506e3"
+    },
+    "name": "projects/10964447413466098333/screens/1eeb88ebd3114678857d90dfc2364a41",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/a3fa6c23167841ecbc2e9bb202081d89:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/a3fa6c23167841ecbc2e9bb202081d89"
+    },
+    "title": "S06b — تسجيل نتيجة الجلسة",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3110",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/d05c0434a1af497f92e4865d0970666c:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/d05c0434a1af497f92e4865d0970666c"
+    },
+    "name": "projects/10964447413466098333/screens/d77335a2493a499eb0bedc2bdc213b61",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/9dbc91fd588d40e88ec80375197b1c2a:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/9dbc91fd588d40e88ec80375197b1c2a"
+    },
+    "title": "تسجيل نتيجة الجلسة — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2262",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/b060e647f47541c59d96e6c1db87b3b2:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/b060e647f47541c59d96e6c1db87b3b2"
+    },
+    "name": "projects/10964447413466098333/screens/263afe56d5d34fc5bc090b0541ff5796",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/8b4d5c353555470eb2e1adae5b4a86d7:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/8b4d5c353555470eb2e1adae5b4a86d7"
+    },
+    "title": "S08a — المهام الإجرائية",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3528",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/3ff2a5c9f3ad4322bda0bbe11b3f4151:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/3ff2a5c9f3ad4322bda0bbe11b3f4151"
+    },
+    "name": "projects/10964447413466098333/screens/b52152ab09d54846b6898d68b44c1677",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/79eb4f2e37be4f02b591c4d3044492cc:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/79eb4f2e37be4f02b591c4d3044492cc"
+    },
+    "title": "S11d — تسجيل مصروف",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/ab5ece5e90364ae4992ec06337783b8b:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/ab5ece5e90364ae4992ec06337783b8b"
+    },
+    "name": "projects/10964447413466098333/screens/32e09555cc05408a9b97005540ec6fd7",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/672c788b86884f0c8ad1228306963191:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/672c788b86884f0c8ad1228306963191"
+    },
+    "title": "S11a — الحسابات",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2048",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/893725ddd3f745aabe126d30620cf6e4:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/893725ddd3f745aabe126d30620cf6e4"
+    },
+    "name": "projects/10964447413466098333/screens/7e8644ef457c4d4ca3189a668d4c4d55",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/928ef4b8eb3b463dab9154d03e0c4297:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/928ef4b8eb3b463dab9154d03e0c4297"
+    },
+    "title": "S03a — ملفات المكتب",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2590",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/f2e48ed014444c228cffc8121cf8649a:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/f2e48ed014444c228cffc8121cf8649a"
+    },
+    "name": "projects/10964447413466098333/screens/ebfce8bea59a464ea2d24687543f5d86",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/72c3797956c1463d9557cbdaeb6d30c7:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/72c3797956c1463d9557cbdaeb6d30c7"
+    },
+    "title": "S09a — الأطراف",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2534",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/13265469631652651051:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/13265469631652651051"
+    },
+    "name": "projects/10964447413466098333/screens/05beab390fca4bf29826ed4ac95e7a91",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/d03db253c8744064b43f4caaa8d5124c:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/d03db253c8744064b43f4caaa8d5124c"
+    },
+    "title": "النهارده — LawOffice OS",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3146",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/65164775b2e14bce8d032584ed916402:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/screens/65164775b2e14bce8d032584ed916402/fileEntries/html"
+    },
+    "name": "projects/10964447413466098333/screens/65164775b2e14bce8d032584ed916402",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_0006602a7dddc869023bdbe6b00c93ca:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/65164775b2e14bce8d032584ed916402/fileEntries/screenshot"
+    },
+    "title": "S10a — المستندات",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "4242",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/182f65f718044048981994348f8b8efd:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/182f65f718044048981994348f8b8efd"
+    },
+    "name": "projects/10964447413466098333/screens/465177246bd0469faebdac405cf3a9ed",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/6a5c2e8300f247f88d535bd020eb37d4:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/6a5c2e8300f247f88d535bd020eb37d4"
+    },
+    "title": "S05 — القضية القضائية",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "4128",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/c9f567c51590495ca74e90575effb4f9:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/c9f567c51590495ca74e90575effb4f9"
+    },
+    "name": "projects/10964447413466098333/screens/c9995ffef9fe496783ff738cefdfd56e",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/19eb585b68754648b56cc3f3285ba4b6:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/19eb585b68754648b56cc3f3285ba4b6"
+    },
+    "title": "S11c — تسجيل مقبوضات",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "3340",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/25525bdbd0254c28b872209cf2ae75c9:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/25525bdbd0254c28b872209cf2ae75c9"
+    },
+    "name": "projects/10964447413466098333/screens/d31042eb7e894dcc84bb628a11d06c69",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/e6cfa12e954d448abcd341ccdcb14d37:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/e6cfa12e954d448abcd341ccdcb14d37"
+    },
+    "title": "S11b — اتفاق الأتعاب",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "2700",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/0d7ae0192df044c5a8965eae772852d9:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/files/0d7ae0192df044c5a8965eae772852d9"
+    },
+    "name": "projects/10964447413466098333/screens/aa569cb252a14924b610a09335fcc396",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/85b68ef596f94ff1a8e2a5290cf179a5:download",
+      "mimeType": "png",
+      "name": "projects/10964447413466098333/files/85b68ef596f94ff1a8e2a5290cf179a5"
+    },
+    "title": "S02 — لوحة المتابعة",
+    "width": "2560",
+    "error": null
+  },
+  {
+    "project": "10964447413466098333",
+    "deviceType": "DESKTOP",
+    "height": "5090",
+    "htmlCode": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/9b299a6bf17e4bb3a6b315da4191eb0d:download",
+      "mimeType": "text/html",
+      "name": "projects/10964447413466098333/screens/9b299a6bf17e4bb3a6b315da4191eb0d/fileEntries/html"
+    },
+    "name": "projects/10964447413466098333/screens/9b299a6bf17e4bb3a6b315da4191eb0d",
+    "screenType": "DESIGN",
+    "screenshot": {
+      "downloadUrl": "https://stitch.googleapis.com/v1/projects/10964447413466098333/files/screenshot_0006602a7f7a1e0604e75191fc153fe6:download",
+      "mimeType": "image/png",
+      "name": "projects/10964447413466098333/screens/9b299a6bf17e4bb3a6b315da4191eb0d/fileEntries/screenshot"
+    },
+    "title": "S09b — بيانات الطرف",
+    "width": "2560",
+    "error": null
+  }
+]
