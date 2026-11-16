@@ -1,8 +1,8 @@
 # LawOffice OS — T04 Interface Contract
 
-**Document Version:** 1.0.0  
-**Date:** 2026-11-16  
-**Status:** Canonical Interface Contract for T04 Parallel Execution  
+**Document Version:** 1.1.0 (Round 1 Corrections)  
+**Date:** 2026-11-17  
+**Status:** Canonical Interface Contract for T04 Parallel Execution & Acceptance  
 **Base Commit:** `ca2819421d78a385841618505c8f8165f0b69b9e` (`origin/main`, T03 accepted and merged)  
 **Gemini Branch & Worktree:** `feature/t04-arabic-pwa-shell` (`D:/Lawyer/work/t04-gemini`)  
 **OpenCode Branch & Worktree:** `feature/t04-browser-verification` (`D:/Lawyer/work/t04-opencode`)  
@@ -27,7 +27,7 @@ Only the following routes are active and functional in T04:
 - `/login`: Lawyer authentication screen (S01, established in T03).
 - `/verify`: MFA OTP verification screen (established in T03).
 - `/settings/security`: Security settings, password change, and MFA management (established in T03).
-- `/offline`: Public static offline fallback view (or `/offline.html`).
+- `/offline`: Public static offline fallback view (and `/offline.html`).
 
 ### 2.2 Future Modules (Unimplemented in T04)
 Per `AGENTS.md`, `PRODUCT.md`, and `docs/tasks/T04.md`:
@@ -44,10 +44,11 @@ Per `AGENTS.md`, `PRODUCT.md`, and `docs/tasks/T04.md`:
 - `<meta name="theme-color" content="#14566B">`.
 - `<link rel="manifest" href="/manifest.webmanifest">`.
 
-### 3.2 Typography & Local Font
+### 3.2 Typography, Provenance & Licensing
 - Primary Font Family: `'Noto Sans Arabic', Tahoma, Arial, sans-serif`.
 - Font files bundled locally under `public/fonts/` (zero external CDN requests).
 - Declared in `src/app/globals.css` with `@font-face` and `font-display: swap`.
+- License and Provenance: Complete SIL Open Font License Version 1.1 text and Noto Project Authors provenance preserved in `public/fonts/OFL.txt`.
 
 ### 3.3 BiDi (Bidirectional) Text Isolation
 - Egyptian Arabic is the primary language.
@@ -57,12 +58,12 @@ Per `AGENTS.md`, `PRODUCT.md`, and `docs/tasks/T04.md`:
 
 ---
 
-## 4. Semantic Landmarks and Responsive Shell Layout
+## 4. Semantic Landmarks, Responsive Shell Layout, and Modal Isolation
 
 The application shell provides responsive scaffolding across three primary viewports:
-- **Desktop (1440px target, min-width: 1024px)**: Fixed 232px right-side sidebar navigation.
-- **Tablet (768px target, min-width: 640px and max-width: 1023px)**: Header with hamburger button that opens an accessible modal slide-over drawer.
-- **Mobile (390px target, max-width: 639px)**: Fixed bottom navigation bar with accessible icons and labels; header with user status and breadcrumb.
+- **Desktop (1440px target, min-width: 1024px)**: Fixed 232px right-side sidebar navigation (`desktop-sidebar.tsx`).
+- **Tablet (768px target, min-width: 640px and max-width: 1023px)**: Header with hamburger button that opens an accessible modal slide-over drawer (`tablet-drawer.tsx`).
+- **Mobile (390px target, max-width: 639px)**: Fixed bottom navigation bar with accessible icons and labels (`mobile-bottom-nav.tsx`); header with user status and breadcrumb.
 
 ### 4.1 Accessibility & Landmark Selectors
 
@@ -76,14 +77,14 @@ The application shell provides responsive scaffolding across three primary viewp
 | **Tablet Drawer** | `<div role="dialog">` | `aria-modal="true"`, `aria-label="قائمة التنقل"`, `id="tablet-drawer"` | `data-testid="tablet-drawer"` | Modal slide-over drawer for tablet viewports; traps focus, closes on `Escape` or backdrop click. |
 | **Drawer Close** | `<button>` | `type="button"`, `aria-label="إغلاق القائمة"` | `data-testid="drawer-close-button"` | Closes the tablet drawer and restores focus to the toggle button. |
 | **Drawer Backdrop** | `<div>` | `aria-hidden="true"` | `data-testid="drawer-backdrop"` | Semi-transparent overlay behind the drawer. |
-| **Mobile Bottom Nav**| `<nav>` | `role="navigation"`, `aria-label="التنقل السفلي"` | `data-testid="mobile-bottom-nav"` | Fixed bottom navigation bar on mobile viewports (<640px). |
+| **Mobile Bottom Nav**| `<nav>` | `role="navigation"`, `aria-label="التنقل السفلي"` | `data-testid="mobile-bottom-nav"` | Fixed bottom navigation bar on mobile viewports (<640px). Minimum label size `0.875rem` (`text-sm`). |
 | **Main Content** | `<main>` | `id="main-content"`, `role="main"` | `data-testid="main-content"` | Primary document content area. |
 | **User Identity Badge**| `<div>` or `<a>`| `aria-label="حساب المستخدم"` | `data-testid="user-identity-badge"` | Displays authenticated lawyer's name/email and link to `/settings/security`. |
 | **Connectivity Banner**| `<div>` | `role="status"`, `aria-live="polite"` | `data-testid="connectivity-banner"` | Appears when network connection is lost (`navigator.onLine === false`). |
 
 ### 4.2 Navigation Items & Active State
 Every navigation link provides:
-- Meaningful Egyptian Arabic label.
+- Meaningful Egyptian Arabic label (Mobile essential labels meet `DESIGN.md` minimum of `0.875rem`).
 - `href` pointing to an available route (`/`, `/settings/security`, etc.).
 - Active link marked with `aria-current="page"`.
 - Focusable with visible focus ring (`ring-2 ring-[#14566B] ring-offset-2`).
@@ -92,32 +93,56 @@ Every navigation link provides:
 Navigation routes:
 1. **الرئيسية / اليوم (Home / Today)**: `href="/"`, icon: Calendar/Today icon, testid: `nav-link-home`.
 2. **إعدادات الأمان (Security Settings)**: `href="/settings/security"`, icon: Shield/Lock icon, testid: `nav-link-security`.
-3. **تسجيل الخروج (Sign Out)**: Action button triggering Better Auth signout, testid: `nav-button-logout`.
+3. **تسجيل الخروج (Sign Out)**: Action button triggering confirmed Better Auth signout, testid: `nav-button-logout`.
+
+### 4.3 Modal Background Isolation Contract (R04-02)
+To guarantee rigorous accessibility and prevent background interaction when any modal layer is open (e.g. Recovery Codes dialog or Tablet Slide-over Drawer):
+1. **Background Exclusion:**
+   - The primary application content container (`#app-shell-content`, encompassing Header, User Identity Badge, Sidebar, Main Content, and Mobile Bottom Nav) must have `inert={true}` and `aria-hidden="true"` applied whenever a modal dialog is active.
+   - Programmatic focus calls to background elements (such as `user-identity-badge`) must be strictly rejected by the browser runtime while the modal is open.
+2. **Non-Inert Modal Mount:**
+   - Active modal dialogs mount outside `#app-shell-content` (as siblings or via portal into `document.body`) so that the modal itself is never trapped inside an inert ancestor.
+3. **Focus Lifecycle & Containment:**
+   - On open: Focus moves automatically to the primary action/field in the modal without arbitrary delays.
+   - During interaction: Tab and Shift+Tab wrap strictly within focusable elements inside the dialog.
+   - On close: Pressing `Escape` or clicking the backdrop dismisses the dialog and restores focus reliably to the trigger control that opened it.
+
+### 4.4 Confirmed Logout Contract (R04-01)
+To prevent phantom logouts where the UI navigates away while the server session remains active:
+1. **Pending State & Throttling:**
+   - When the user activates `nav-button-logout`:
+   - Duplicate clicks are prevented: the button enters pending state (`disabled`, `aria-busy="true"`).
+2. **Failure Handling & Arabic Feedback:**
+   - The handler calls Better Auth `signOut()`.
+   - If the request fails (e.g. server returns 500/503 or throws a network error):
+     - The application MUST NOT navigate to `/login`.
+     - In the drawer, the drawer MUST NOT close.
+     - The component displays clear Arabic error feedback:
+       `"تعذر تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً."` (`role="alert"`, `data-testid="logout-error-alert"`).
+     - The user is allowed to retry the logout operation.
+3. **Confirmed Success:**
+   - ONLY when `signOut()` confirms successful server-side revocation (`!error`) does the application redirect to `/login`.
 
 ---
 
 ## 5. Design Tokens (Authoritative `DESIGN.md`)
 
-- **Primary Brand Color:** `#14566B` (deep teal / petrol blue) — used for primary actions, active navigation indicator, brand header accents.
-- **Page Background:** `#F4F6F7` (soft cool grey) — high contrast, calm legal reading surface.
-- **Card / Surface Background:** `#FFFFFF` (clean white) with soft border `#D5DFE3`.
-- **Text Color (Primary):** `#172A35` (deep charcoal navy) — ensures WCAG AAA contrast on `#FFFFFF` (ratio > 11:1).
-- **Text Color (Secondary / Muted):** `#4D606A` (slate grey) — WCAG AA compliant on white (ratio > 4.5:1).
-- **Border / Divider:** `#D5DFE3`.
-- **Status Colors:**
-  - Danger / Error: `#A4262C` (crimson red)
-  - Warning: `#7A4A00` (amber / bronze)
-  - Success: `#176449` (forest green)
-- **Border Radius:** `rounded-[6px]` (6px radius throughout).
-- **Interactive States:**
-  - Focus Ring: `ring-2 ring-[#14566B] ring-offset-2` (2px solid, 2px offset).
-  - Hover: subtle surface darken or primary tint (`hover:bg-[#E8EEF1]`).
-  - Active: `bg-[#14566B] text-white`.
-  - Reduced Motion: `@media (prefers-reduced-motion: reduce)` disables smooth slide transitions.
+- **Primary Brand / Deep Teal:** `#14566B` (hover: `#0F4354`, active/selected: `#14566B`, tint: `#E8F1F3`).
+- **Surface / Background:** `#F4F6F7` (app shell background), `#FFFFFF` (card / sidebar / dialog background).
+- **Text & Neutral Contrast:**
+  - Dark Primary Text: `#172A35` (meets WCAG AAA >10:1 on white).
+  - Muted Secondary Text: `#4D606A` (meets WCAG AA >4.5:1 on white).
+  - Borders: `#D5DFE3` (dividers and card borders).
+- **Status & Alerts:**
+  - Warning Banner: `#7A4A00` text on `#FFF8E1` background with `#FFE082` border.
+  - Destructive / Error: `#A4262C` text on `#FDF3F2` background with `#F8D7DA` border.
+  - Success: `#176449` text on `#E8F5E9` background with `#C8E6C9` border.
+- **Focus Rings:** `outline-none ring-2 ring-[#14566B] ring-offset-2`.
+- **Motion:** Standard transitions `150ms ease-in-out`; `@media (prefers-reduced-motion: reduce)` disables all transitions and animations (`transition: none !important`).
 
 ---
 
-## 6. Real State Specifications
+## 6. Real State Specifications & Reproducible Triggers (R04-04)
 
 ### 6.1 S02 Empty State (Home `/`)
 When an authenticated lawyer lands on `/`:
@@ -129,32 +154,44 @@ When an authenticated lawyer lands on `/`:
   - Button/Link: `"مراجعة إعدادات الأمان"` (Review Security Settings) -> `href="/settings/security"`, testid: `empty-state-security-action`.
 - **Invariant:** NO mock numbers, fake hearings, dummy financial balances, or fictional client statistics.
 
-### 6.2 Loading State
-- Containers undergoing asynchronous data retrieval render a skeleton placeholder or spinner.
-- Container attributes: `role="status"`, `aria-busy="true"`, `aria-label="جاري التحميل..."`, `data-testid="loading-indicator"`.
+### 6.2 Loading State (R04-04)
+- **Presentation Primitive (`src/components/presentation-state.tsx`):**
+  - Component: `<LoadingIndicator />`
+  - Attributes: `role="status"`, `aria-busy="true"`, `aria-label="جارٍ التحميل..."`, `data-testid="loading-indicator"`.
+- **Reproducible Triggers on Current Surfaces:**
+  1. **Route Transition Boundary:** `src/app/loading.tsx` renders `<LoadingIndicator />` during Next.js server component resolution.
+  2. **Dashboard Status Widget on `/`:** The dashboard agenda status widget (`src/components/dashboard-status.tsx`) executes an initial asynchronous readiness/session verification. While the request is in-flight, it renders `<LoadingIndicator />`. Once settled, the indicator disappears and the settled empty state is revealed.
 
-### 6.3 Error and Retry State
-- Recoverable errors render:
-  - Error container: `role="alert"`, `data-testid="error-container"`.
-  - Clear Arabic error description.
-  - Retry button: `<button type="button" data-testid="error-retry-button">إعادة المحاولة</button>`.
+### 6.3 Recoverable Error and Retry State (R04-04)
+- **Presentation Primitive (`src/components/presentation-state.tsx`):**
+  - Component: `<ErrorContainer />`
+  - Attributes: `role="alert"`, `data-testid="error-container"`.
+  - Retry Action: `<button type="button" data-testid="error-retry-button">إعادة المحاولة</button>`.
+- **Reproducible Triggers on Current Surfaces:**
+  1. **Route Error Boundary:** `src/app/error.tsx` renders `<ErrorContainer />` with `reset()` bound to `error-retry-button`.
+  2. **Dashboard Status Retrieval Failure on `/`:** If the asynchronous status check on `/` encounters a network error (e.g. simulated network failure or 500 error in Playwright route intercept):
+     - It renders `<ErrorContainer />` displaying `"تعذر تحميل بيانات لوحة المتابعة. يرجى التحقق من الاتصال والمحاولة مجدداً."`.
+     - Clicking `error-retry-button` retries the asynchronous fetch. When the simulated network failure is cleared, the retry succeeds, `<ErrorContainer />` is hidden, and settled content appears.
 
 ### 6.4 Disconnected (Offline) Banner
 - Monitored via `window.addEventListener('online')` / `window.addEventListener('offline')` and `navigator.onLine`.
 - When offline:
   - Element: `<div role="status" aria-live="polite" data-testid="connectivity-banner" className="...">`.
   - Exact Arabic text: `"النت مقطوع. التعديلات مش محفوظة"`.
-  - Fixed or top-pinned visible alert styling (warning/danger background, high contrast).
+  - Top-pinned visible alert styling (warning background, high contrast).
   - Automatically dismisses when `online` event fires.
 
-### 6.5 Session Expiry Feedback
-- When an API call returns `401 Unauthorized` or session cookie is invalid:
-  - User is redirected to `/login?error=session_expired`.
+### 6.5 Session Expiry Feedback & Return Destination (R04-06)
+- **Expiry Detection:** When a session is revoked or expired:
+  - User is redirected to `/login?error=session_expired&returnTo=<validated-local-path>`.
   - Login page renders alert message: `"انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى."` (`data-testid="session-expired-alert"`).
+- **Return Destination Validation:**
+  - `returnTo` must be an explicitly validated local route (starting with a single `/`, strictly rejecting `//`, `/\`, `javascript:`, or protocol strings `://`).
+  - The validated destination is preserved through password entry and MFA verification (`/verify?returnTo=...`), navigating to the originally requested route (e.g. `/settings/security`) upon successful re-authentication.
 
 ---
 
-## 7. PWA Manifest and Static Public Assets
+## 7. PWA Manifest and Static Public Assets (R04-05)
 
 ### 7.1 Web App Manifest
 - Path: `/manifest.webmanifest` (served as `application/manifest+json`).
@@ -200,27 +237,32 @@ When an authenticated lawyer lands on `/`:
   }
   ```
 
-### 7.2 Service Worker & Privacy Invariants (`docs/SECURITY_OPERATIONS.md`)
-- **Strict Public-Assets-Only Policy:**
-  - If a Service Worker is registered (`public/sw.js`), it MUST maintain an explicit static allowlist:
-    - `/` (only the public shell or fallback)
-    - `/offline` or `/offline.html`
+### 7.2 Service Worker & Zero-Trust Privacy Invariants (R04-05)
+- **Same-Origin Requirement:**
+  - `public/sw.js` must strictly ignore any cross-origin requests (`url.origin !== self.location.origin`).
+- **Enumerated Public-Only Allowlist:**
+  - `public/sw.js` caches ONLY explicitly enumerated, unauthenticated public static assets:
     - `/manifest.webmanifest`
-    - `/icons/*`
-    - `/fonts/*`
-    - Bundled static CSS/JS chunks (`/_next/static/*`)
-  - **Forbidden Caching (Zero-Trust):**
-    - MUST NOT cache any `/api/*` endpoints.
-    - MUST NOT cache `/login`, `/verify`, or authenticated dynamic pages containing client data.
-    - MUST NOT store sensitive client documents, session tokens, passwords, MFA secrets, or financial records in `CacheStorage`, `localStorage`, `sessionStorage`, or `IndexedDB`.
-    - Service worker network fetch handler must use Network-Only for all API and non-allowlisted routes.
-- **Offline Fallback Page (`/offline.html` or `/offline`):**
-  - Informative static Arabic page explaining that the system is offline and no changes will be made or saved while disconnected.
-  - Zero confidential or authenticated data leaked into the offline page.
+    - `/offline.html`
+    - `/icons/icon.svg`
+    - `/icons/icon-192.png`
+    - `/icons/icon-512.png`
+    - `/icons/icon-maskable.png`
+    - `/fonts/noto-sans-arabic-400.woff2`
+    - `/fonts/noto-sans-arabic-latin.woff2`
+- **Strictly Forbidden Caching (Zero-Trust):**
+  - Authenticated `/` (Home page) MUST NOT be cached in `CacheStorage`. Stale contract allowances for caching `/` are revoked.
+  - MUST NOT cache any `/api/*` endpoints.
+  - MUST NOT cache `/login`, `/verify`, or `/settings/*`.
+  - MUST NOT store sensitive client documents, session tokens, passwords, MFA secrets, or financial records in `CacheStorage`, `localStorage`, `sessionStorage`, or `IndexedDB`.
+  - Unallowlisted paths use Network-Only with zero caching.
+- **Offline Navigation Fallback:**
+  - For requests with `mode === 'navigate'`, if network fetch fails, serve `/offline.html`.
+  - `/offline.html` and `/offline` must contain zero private lawyer or client data.
 
 ---
 
-## 8. Test Environment and Port Allocation
+## 8. Test Environment, Port Allocation & Discovery Routing (R04-03)
 
 - **Gemini Worktree (`D:/Lawyer/work/t04-gemini`)**:
   - Application Server: `http://localhost:3100` (port 3100)
@@ -230,8 +272,11 @@ When an authenticated lawyer lands on `/`:
   - Browser Suite Server: `http://localhost:3204` (port 3204)
   - Dedicated Playwright config: `playwright.t04.config.ts`
   - `BETTER_AUTH_URL=http://localhost:3204`
-  - Synthetic database: separate test database (never shared concurrently with Gemini port 3100).
-- **Rule:** Both suites run strictly against synthetic fixtures; process cleanup must terminate only task-owned PIDs.
+  - Synthetic database: separate test database (`lawoffice_t04_opencode_test`).
+- **Playwright Suite Routing & Discovery:**
+  - `playwright.config.ts` (port 3100) executes T03 auth browser regressions (`auth*.spec.ts`).
+  - `playwright.t04.config.ts` (port 3204) executes T04 shell, presentation, and PWA specs (`t04-*.spec.ts`) with project viewport grep tags (`@desktop`, `@tablet`, `@mobile`, `@once`, `@shell`, `@matrix`).
+  - Canonical `npm run test:e2e` and hosted CI must execute both suites with appropriate project routing so that no viewport tag collisions occur.
 
 ---
 
@@ -239,13 +284,13 @@ When an authenticated lawyer lands on `/`:
 
 | Acceptance ID | Specification Requirement | Verification Method |
 |---|---|---|
-| **T04-01** | Desktop right navigation (232px), tablet drawer, mobile bottom bar with available routes only. | Visual/DOM verification at 1440px, 768px, 390px; active link states; no dummy links. |
-| **T04-02** | `lang="ar-EG"`, `dir="rtl"`, local licensed font, BiDi isolation (`<bdi>`/`dir="ltr"`), Cairo timezone. | Inspect root HTML, computed styles, font requests (local only), mixed-text rendering. |
-| **T04-03** | 390px, 768px, 1440px viewports; 200% text scaling without horizontal clipping; touch targets ≥ 44×44px. | Playwright responsive viewport tests, CSS overflow check at 200% font zoom, bounding box checks. |
-| **T04-04** | Keyboard tab order, drawer focus trap & Escape restoration, semantic landmarks, WCAG AA contrast. | Tab sequence automation, Escape key dispatch, Axe / Lighthouse accessibility audit. |
-| **T04-05** | Real empty state S02 on `/`, loading indicator, recoverable error/retry, offline banner (`"النت مقطوع"`), session expiry redirect. | DOM assertions for S02 copy; simulate `offline` event and check banner; simulate 401 redirect. |
-| **T04-06** | Valid `/manifest.webmanifest`, reachable icons (192, 512, maskable, svg), standalone display. | Manifest fetch and JSON validation; verify icon HTTP 200 responses and dimensions. |
-| **T04-07** | Strict public-assets-only storage/cache; zero client data, auth tokens, or API responses in CacheStorage/Storage. | Inspect browser storage and CacheStorage after navigating authenticated routes; verify API exclusion. |
+| **T04-01** | Desktop right navigation (232px), tablet drawer, mobile bottom bar with available routes only. Confirmed logout handling (R04-01). | Visual/DOM verification at 1440px, 768px, 390px; active link states; error alert on failed logout without redirect. |
+| **T04-02** | `lang="ar-EG"`, `dir="rtl"`, local licensed font, BiDi isolation (`<bdi>`/`dir="ltr"`), Cairo timezone. Full font license (R04-07). | Inspect root HTML, computed styles, font requests (local only), mixed-text rendering, `OFL.txt` content. |
+| **T04-03** | 390px, 768px, 1440px viewports; 200% text scaling without horizontal clipping; touch targets ≥ 44×44px; mobile label size ≥ 0.875rem (R04-07). | Playwright responsive viewport tests, CSS overflow check at 200% font zoom, bounding box checks, font size checks. |
+| **T04-04** | Keyboard tab order, drawer/dialog focus containment, Escape restoration, semantic landmarks, WCAG AA contrast. Complete shell inert modal isolation (R04-02). | Tab sequence automation, background focus exclusion assertion on `user-identity-badge`, Escape key dispatch. |
+| **T04-05** | Real empty state S02 on `/`, genuine loading indicator, recoverable error/retry, offline banner (`"النت مقطوع"`), session expiry return destination (R04-04, R04-06). | DOM assertions for S02 copy; pending-to-settled and error-to-retry tests on `/`; expiry return navigation test. |
+| **T04-06** | Valid `/manifest.webmanifest`, reachable icons (192, 512, maskable, svg), standalone display. Local browser installability observation (R04-08). | Manifest fetch and JSON validation; verify icon HTTP 200 responses; browser installability API observation. |
+| **T04-07** | Strict same-origin public-assets-only storage/cache; zero client data, auth tokens, or API responses in CacheStorage/Storage; `/` excluded from cache (R04-05). | Inspect browser storage and CacheStorage after navigating authenticated routes; verify API and `/` exclusion. |
 | **T04-08** | No mockup account autofill, invented security claims, or false sync guarantees. | Static inspection and browser text content audit. |
 | **T04-09** | Existing T03 auth, MFA, Origin/Host guards, session lifecycle, and migration tests pass unchanged. | Full execution of existing integration and unit test suite. |
-| **T04-10** | Exact-head integrated tests, native Agency support reviews returned and reconciled, coherent PR. | Final consolidated test run on combined checkpoint and documented submission. |
+| **T04-10** | Exact-head integrated tests, native Agency support reviews returned and reconciled, coherent PR. | Final consolidated test run on combined checkpoint and documented submission report. |
