@@ -1,0 +1,133 @@
+/**
+ * T04 interface-contract constants.
+ *
+ * Every value here is copied from `docs/assignments/T04-interface-contract.md`
+ * (v1.0.0, commit 69950dc). Tests import these names instead of scattering
+ * Arabic copy and test ids, so a contract revision has one place to update.
+ */
+
+export const T04_TEST_IDS = {
+  skipLink: 'skip-to-content',
+  appHeader: 'app-header',
+  drawerToggle: 'drawer-toggle-button',
+  desktopSidebar: 'desktop-sidebar',
+  desktopNav: 'desktop-nav',
+  tabletDrawer: 'tablet-drawer',
+  drawerClose: 'drawer-close-button',
+  drawerBackdrop: 'drawer-backdrop',
+  mobileBottomNav: 'mobile-bottom-nav',
+  mainContent: 'main-content',
+  userIdentityBadge: 'user-identity-badge',
+  connectivityBanner: 'connectivity-banner',
+  emptyState: 'dashboard-empty-state',
+  emptyStateSecurityAction: 'empty-state-security-action',
+  loadingIndicator: 'loading-indicator',
+  errorContainer: 'error-container',
+  errorRetryButton: 'error-retry-button',
+  sessionExpiredAlert: 'session-expired-alert',
+  navHome: 'nav-link-home',
+  navSecurity: 'nav-link-security',
+  navLogout: 'nav-button-logout',
+} as const;
+
+export type T04TestId = (typeof T04_TEST_IDS)[keyof typeof T04_TEST_IDS];
+
+export const T04_ROUTES = {
+  home: '/',
+  login: '/login',
+  verify: '/verify',
+  security: '/settings/security',
+  offline: '/offline',
+  offlineHtml: '/offline.html',
+  manifest: '/manifest.webmanifest',
+} as const;
+
+/** Routes that exist and are reachable in T04 (section 2.1). */
+export const T04_AVAILABLE_ROUTES: readonly string[] = [
+  T04_ROUTES.home,
+  T04_ROUTES.login,
+  T04_ROUTES.verify,
+  T04_ROUTES.security,
+  T04_ROUTES.offline,
+  T04_ROUTES.offlineHtml,
+];
+
+/** The only destinations the navigation shell may expose (section 4.2). */
+export const T04_ALLOWED_NAV_HREFS: readonly string[] = [T04_ROUTES.home, T04_ROUTES.security];
+
+/**
+ * Business modules that are strictly unbuilt in T04 (section 2.2). The shell
+ * must not link to them and pretend they open a working screen.
+ */
+export const T04_FORBIDDEN_MODULE_ROUTES: readonly string[] = [
+  '/matters',
+  '/proceedings',
+  '/hearings',
+  '/finance',
+  '/clients',
+  '/today',
+  '/agenda',
+  '/tasks',
+  '/deadlines',
+  '/documents',
+  '/search',
+  '/reports',
+  '/settings',
+];
+
+export const T04_COPY = {
+  desktopNavLabel: 'التنقل الرئيسي',
+  bottomNavLabel: 'التنقل السفلي',
+  drawerLabel: 'قائمة التنقل',
+  openDrawer: 'فتح القائمة',
+  closeDrawer: 'إغلاق القائمة',
+  signOut: 'تسجيل الخروج',
+  emptyStateHeading: 'مكتب المحامي — لوحة المتابعة',
+  emptyStateSecurityAction: 'مراجعة إعدادات الأمان',
+  sessionExpired: 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.',
+  offlineBanner: 'النت مقطوع. التعديلات مش محفوظة',
+  loadingLabel: 'جاري التحميل...',
+  errorRetry: 'إعادة المحاولة',
+} as const;
+
+/** Contract section 7.1, authoritative manifest values. */
+export const T04_MANIFEST = {
+  path: T04_ROUTES.manifest,
+  name: 'مكتب المحامي — LawOffice OS',
+  shortName: 'مكتب المحامي',
+  description: 'نظام إدارة مكتب المحاماة — النسخة التشغيلية الأولى',
+  startUrl: '/',
+  display: 'standalone',
+  orientation: 'any',
+  dir: 'rtl',
+  lang: 'ar-EG',
+  backgroundColor: '#F4F6F7',
+  themeColor: '#14566B',
+  icons: [
+    { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: '/icons/icon-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    { src: '/icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+  ],
+} as const;
+
+/**
+ * Service-worker allowlist from contract section 7.2. `/` is on the contract's
+ * list even though section 2.1 calls `/` authenticated; the privacy test checks
+ * any cached `/` body for identity/private markers rather than assuming safety.
+ */
+export const T04_SW_ALLOWED_PATHS: readonly RegExp[] = [
+  /^\/$/,
+  /^\/offline(?:\.html)?$/,
+  /^\/manifest\.webmanifest$/,
+  /^\/icons\//,
+  /^\/fonts\//,
+  /^\/_next\/static\//,
+];
+
+export const T04_SW_FORBIDDEN_PATHS: readonly RegExp[] = [
+  /^\/api\//,
+  /^\/login(?:\/|$)/,
+  /^\/verify(?:\/|$)/,
+  /^\/settings(?:\/|$)/,
+];
