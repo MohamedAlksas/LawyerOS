@@ -16,6 +16,12 @@ export default async function HomePage() {
       if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
         redirect('/login?error=session_expired');
       }
+      const { headers } = await import('next/headers');
+      const reqHeaders = await headers();
+      const cookie = reqHeaders.get('cookie') || '';
+      if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
+        redirect('/login?error=session_expired');
+      }
       redirect('/login');
     }
     throw error;

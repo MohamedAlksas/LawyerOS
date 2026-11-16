@@ -42,9 +42,6 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     throw new AuthenticationError('UNAUTHENTICATED', 'يجب تسجيل الدخول للوصول إلى هذه الشاشة.');
   }
 
-  const cookieHeader = headers.get('cookie') || '';
-  const hasSessionCookie = /(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookieHeader);
-
   const auth = getAuth();
   let sessionData;
   try {
@@ -56,16 +53,10 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
       },
     });
   } catch {
-    if (hasSessionCookie) {
-      throw new AuthenticationError('SESSION_EXPIRED', 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.');
-    }
     throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
   }
 
   if (!sessionData || !sessionData.session || !sessionData.user) {
-    if (hasSessionCookie) {
-      throw new AuthenticationError('SESSION_EXPIRED', 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.');
-    }
     throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
   }
 

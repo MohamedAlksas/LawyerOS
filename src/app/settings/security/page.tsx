@@ -20,16 +20,22 @@ export default async function SecuritySettingsPage() {
       if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
         redirect('/login?error=session_expired');
       }
+      const { headers } = await import('next/headers');
+      const reqHeaders = await headers();
+      const cookie = reqHeaders.get('cookie') || '';
+      if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
+        redirect('/login?error=session_expired');
+      }
       redirect('/login');
     }
     if (error instanceof AuthorizationError) {
       return (
-        <main className="min-h-screen bg-[#F4F6F7] p-6" dir="rtl" lang="ar-EG">
+        <div className="min-h-screen bg-[#F4F6F7] p-6" dir="rtl" lang="ar-EG">
           <div className="max-w-4xl mx-auto bg-white p-6 rounded border border-red-200 text-[#A4262C]">
             <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
             <p>لا تمتلك الصلاحيات الكافية لإدارة إعدادات الأمان والجلسات.</p>
           </div>
-        </main>
+        </div>
       );
     }
     throw error;
