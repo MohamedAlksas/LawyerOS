@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>بيانات الجلسة — LawOffice OS</title>
+<!-- Tailwind CSS Config and CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+              "on-primary-fixed-variant": "#024d62",
+              "on-secondary-container": "#52656f",
+              "on-secondary": "#ffffff",
+              "secondary-container": "#cee3ef",
+              "secondary-fixed": "#d1e6f1",
+              "primary-fixed": "#baeaff",
+              "on-tertiary": "#ffffff",
+              "surface-container-lowest": "#ffffff",
+              "secondary-fixed-dim": "#b5cad5",
+              "inverse-on-surface": "#e3f3ff",
+              "surface": "#f5faff",
+              "error-container": "#ffdad6",
+              "primary-fixed-dim": "#96cfe7",
+              "on-primary": "#ffffff",
+              "inverse-surface": "#20333e",
+              "on-primary-fixed": "#001f29",
+              "surface-container-low": "#e9f5ff",
+              "primary": "#003e4f",
+              "secondary": "#4e616b",
+              "outline-variant": "#c0c8cc",
+              "surface-dim": "#c9ddec",
+              "tertiary-fixed": "#a8f2cf",
+              "tertiary": "#00422d",
+              "surface-tint": "#29657b",
+              "on-error": "#ffffff",
+              "error": "#ba1a1a",
+              "tertiary-fixed-dim": "#8dd5b4",
+              "tertiary-container": "#075b41",
+              "on-tertiary-fixed": "#002115",
+              "on-surface-variant": "#40484c",
+              "surface-bright": "#f5faff",
+              "surface-container-highest": "#d1e5f4",
+              "on-background": "#0a1e28",
+              "primary-container": "#14566b",
+              "inverse-primary": "#96cfe7",
+              "on-error-container": "#93000a",
+              "on-tertiary-container": "#88d1af",
+              "surface-variant": "#d1e5f4",
+              "background": "#f5faff",
+              "on-surface": "#0a1e28",
+              "surface-container": "#ddf1ff",
+              "on-secondary-fixed-variant": "#374953",
+              "on-primary-container": "#91cae2",
+              "on-tertiary-fixed-variant": "#005139",
+              "outline": "#70787c",
+              "on-secondary-fixed": "#0a1e26",
+              "surface-container-high": "#d7ebfa"
+            },
+            "borderRadius": {
+              "DEFAULT": "0.125rem",
+              "lg": "0.25rem",
+              "xl": "0.5rem",
+              "full": "0.75rem"
+            },
+            "spacing": {
+              "gutter": "1rem",
+              "margin": "1rem",
+              "space-sm": "0.5rem",
+              "margin-desktop": "2rem",
+              "space-lg": "1.5rem",
+              "space-md": "1rem",
+              "space-xl": "2rem",
+              "space-xs": "0.375rem",
+              "gutter-desktop": "1.5rem"
+            },
+            "fontFamily": {
+              "headline-sm": ["Noto Sans"],
+              "body-sm": ["Noto Sans"],
+              "label-md": ["Noto Sans"],
+              "headline-lg-mobile": ["Noto Sans"],
+              "body-lg": ["Noto Sans"],
+              "headline-lg": ["Noto Sans"],
+              "display": ["Noto Sans"],
+              "headline-md": ["Noto Sans"],
+              "body-sm-medium": ["Noto Sans"],
+              "body-lg-medium": ["Noto Sans"],
+              "label-sm": ["Noto Sans"]
+            },
+            "fontSize": {
+              "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+              "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+              "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+              "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+              "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+              "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+              "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+              "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+              "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+              "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+              "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }]
+            }
+          }
+        }
+      }
+    </script>
+<!-- Google Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@100..900&display=swap" rel="stylesheet"/>
+<style>
+      body {
+        font-family: 'Noto Sans', sans-serif;
+        background-color: #f5faff;
+        color: #0a1e28;
+      }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col">
+<!-- TopNavBar -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b border-outline-variant flex items-center justify-between px-gutter-desktop pr-[248px]">
+<div class="flex items-center gap-space-md">
+<span class="font-headline-md text-headline-md text-primary">نظام إدارة المكتب الرقمي</span>
+</div>
+<div class="flex items-center gap-space-md">
+<button class="flex items-center gap-space-xs px-space-md py-space-xs bg-primary-container text-on-primary-container rounded-lg font-label-md text-label-md hover:bg-primary transition-colors cursor-pointer">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+                جلسة جديدة
+            </button>
+<button class="flex items-center gap-space-xs px-space-md py-space-xs bg-surface-container-low text-primary rounded-lg font-label-md text-label-md hover:bg-surface-container transition-colors cursor-pointer">
+<span class="material-symbols-outlined" data-icon="upload_file">upload_file</span>
+                إيداع مستند
+            </button>
+<div class="flex items-center gap-space-sm mr-space-md border-r border-outline-variant pr-space-md">
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors" data-icon="search">search</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors" data-icon="help_outline">help_outline</span>
+<img class="w-9 h-9 rounded-full object-cover border border-outline-variant" data-alt="صورة شخصية رسمية للمحامي أحمد ممدوح مرتدياً بدلة سوداء وربطة عنق داخل بيئة عمل مكتب قانوني حديثة ومنظمة، بإضاءة متوازنة." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAoghTZST7jRzOKiBbXeskI_bM0lV4vfOZuUW_Zf5TlVg600RKEqfKkk-bECh_PuRSpX4d0q5VzcbFWWHZGJ9xThYf_XuoCukI3ycfpv9UmvOe5txT_0jYsgHw5yJ4tNuy-DJg0s7vpzQTIREwbyB9VJAsu6ujS8zgdQDpWhYLG6dp4V1vrxY7NSrlZCKeU5AB1d8SIvvgI9aS7lC0HeUhKdBMrKpMcEWtXNTXJhRkTxlp-1okUIHYgJFIZuzpSDrO9AO0PZf_b8fJ5"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l border-outline-variant flex flex-col justify-between py-space-lg px-space-md">
+<div class="flex flex-col gap-space-lg">
+<div class="flex flex-col gap-space-xs">
+<h1 class="font-headline-md text-headline-md text-primary">مكتب الأستاذ أحمد ممدوح</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">المحامي بالنقض والاستئناف</p>
+</div>
+<nav class="flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-surface-container-low border-r-4 border-primary font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="calendar_month">calendar_month</span>
+                    جدول الجلسات
+                </a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="folder_open">folder_open</span>
+                    ملفات القضايا
+                </a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="groups">groups</span>
+                    دليل الموكلين
+                </a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="assignment_late">assignment_late</span>
+                    المهام الإجرائية
+                </a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="account_balance_wallet">account_balance_wallet</span>
+                    السجلات والمالية
+                </a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                    الإعدادات
+                </a>
+</nav>
+</div>
+<div class="flex flex-col gap-space-md">
+<button class="w-full py-space-sm px-space-md bg-primary text-on-primary rounded-lg font-label-md text-label-md hover:bg-on-primary-fixed-variant transition-colors cursor-pointer">
+                إضافة قضية جديدة
+            </button>
+<div class="border-t border-outline-variant pt-space-md flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-sm py-xs text-on-surface-variant font-label-md text-label-md hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+                    الدعم والمساعدة
+                </a>
+<a class="flex items-center gap-space-sm px-space-sm py-xs text-error font-label-md text-label-md hover:bg-error-container transition-colors rounded" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+                    تسجيل الخروج
+                </a>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="mr-[232px] flex-1 p-space-xl flex flex-col gap-space-xl">
+<!-- Header with Breadcrumbs & Title -->
+<div class="flex flex-col gap-space-sm">
+<nav class="flex items-center gap-space-xs font-body-sm text-on-surface-variant">
+<a class="hover:text-primary transition-colors" href="#">ملفات المكتب</a>
+<span class="material-symbols-outlined text-[16px]" data-icon="chevron_left">chevron_left</span>
+<a class="hover:text-primary transition-colors" href="#">LO-2026-001</a>
+<span class="material-symbols-outlined text-[16px]" data-icon="chevron_left">chevron_left</span>
+<a class="hover:text-primary transition-colors" href="#">القضية رقم 1234 لسنة 2026</a>
+<span class="material-symbols-outlined text-[16px]" data-icon="chevron_left">chevron_left</span>
+<span class="text-primary font-medium">بيانات الجلسة</span>
+</nav>
+<div class="flex items-center justify-between">
+<h1 class="font-headline-lg text-headline-lg text-primary">بيانات الجلسة — LawOffice OS</h1>
+<!-- Action Bar -->
+<div class="flex items-center gap-space-md">
+<button class="flex items-center gap-space-xs px-space-md py-2 bg-error text-on-error rounded-lg font-label-md text-label-md hover:bg-opacity-90 transition-colors cursor-pointer shadow-sm">
+<span class="material-symbols-outlined" data-icon="cancel">cancel</span>
+                        إلغاء الجلسة
+                    </button>
+<button class="flex items-center gap-space-xs px-space-md py-2 bg-surface text-primary border border-primary rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors cursor-pointer">
+<span class="material-symbols-outlined" data-icon="edit_calendar">edit_calendar</span>
+                        تعديل الموعد
+                    </button>
+<button class="flex items-center gap-space-xs px-space-md py-2 bg-primary text-on-primary rounded-lg font-label-md text-label-md hover:bg-on-primary-fixed-variant transition-colors cursor-pointer shadow-sm">
+<span class="material-symbols-outlined" data-icon="task_alt">task_alt</span>
+                        تسجيل نتيجة الجلسة
+                    </button>
+</div>
+</div>
+</div>
+<!-- Warning Banner -->
+<div class="bg-[#FFF7E6] border border-[#E0B46A] rounded-lg p-space-md flex items-start gap-space-md text-[#7A4A00]">
+<span class="material-symbols-outlined text-[24px] mt-0.5" data-icon="warning">warning</span>
+<div class="flex flex-col gap-1">
+<span class="font-label-md text-label-md">تنبيه مهني وإجرائي ملزم</span>
+<p class="font-body-sm text-body-sm leading-relaxed">
+                    لا يتم تأجيل الجلسة أو تدوين أي قرار بالغياب إلا بإثبات قرار الدائرة الرسمي بمحضر الجلسة المكتوب والمعتمد من قاضي الدائرة وأمين السجل، مع ضرورة الالتزام بحضور المحامي أو وكيله القانوني في المواعيد المقررة قانوناً تفادياً للجزاءات الإجرائية.
+                </p>
+</div>
+</div>
+<!-- Bento Grid / Main Content Layout -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-space-xl">
+<!-- Section 1: بيانات المحكمة والانعقاد -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between border-b border-outline-variant pb-space-sm">
+<h2 class="font-headline-sm text-headline-sm text-primary flex items-center gap-space-sm">
+<span class="material-symbols-outlined" data-icon="gavel">gavel</span>
+                        بيانات المحكمة والانعقاد
+                    </h2>
+<span class="px-2.5 py-1 bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] rounded text-xs font-medium">جلسة قادمة</span>
+</div>
+<div class="grid grid-cols-2 gap-space-md">
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">المحكمة والائرة القضائية</span>
+<span class="font-body-sm-medium text-on-surface">محكمة جنوب القاهرة الابتدائية - الدائرة (11) مدني كلي</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">تاريخ الانعقاد</span>
+<span class="font-body-sm-medium text-on-surface">الخميس، 12 مارس 2026</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">الوقت المحدد</span>
+<div class="flex items-center gap-space-sm">
+<span class="font-body-sm-medium text-on-surface">10:00 صباحاً</span>
+<span class="px-2 py-0.5 bg-secondary-container text-on-secondary-container rounded font-label-sm text-label-sm border border-outline-variant">الساعة غير محددة (جلسة صباحية عامة)</span>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">صفة الحضور المقررة للمكتب</span>
+<span class="font-body-sm-medium text-primary">وكيل عن المدعي (أصلي)</span>
+</div>
+</div>
+</div>
+<!-- Section 2: ملخص قيد الدعوى القضائية -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between border-b border-outline-variant pb-space-sm">
+<h2 class="font-headline-sm text-headline-sm text-primary flex items-center gap-space-sm">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+                        ملخص قيد الدعوى القضائية
+                    </h2>
+<span class="font-body-sm text-on-surface-variant">رقم الملف: LO-2026-001</span>
+</div>
+<div class="grid grid-cols-2 gap-space-md">
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">المدعى</span>
+<span class="font-body-sm-medium text-on-surface">شركة النيل للإستثمار العقاري (ش.م.م)</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">المدعى عليه</span>
+<span class="font-body-sm-medium text-on-surface">ورثة المرحوم / محمد عبد الله إبراهيم</span>
+</div>
+<div class="flex flex-col gap-1 col-span-2">
+<span class="font-body-sm text-on-surface-variant">موضوع النزاع</span>
+<span class="font-body-sm-medium text-on-surface">دعوى صحة ونفاذ عقد بيع ابتدائي مع طلب تسليم وتسجيل العقار محل النزاع ودفع التعويضات اللازمة عن التأخير.</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">رقم القيد الدفتري</span>
+<span class="font-body-sm-medium text-on-surface">1234 لسنة 2026 مدني كلي جنوب القاهرة</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="font-body-sm text-on-surface-variant">أمين سر الدائرة</span>
+<span class="font-body-sm-medium text-on-surface">الأستاذ / محمود حسن السيد</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Section 3: الغرض المطلوب والتحضير الإجرائي للجلسة -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-lg flex flex-col gap-space-md">
+<div class="border-b border-outline-variant pb-space-sm">
+<h2 class="font-headline-sm text-headline-sm text-primary flex items-center gap-space-sm">
+<span class="material-symbols-outlined" data-icon="checklist">checklist</span>
+                    الغرض المطلوب والتحضير الإجرائي للجلسة
+                </h2>
+</div>
+<div class="flex flex-col gap-space-sm">
+<div class="flex items-center justify-between p-3 bg-surface-container-low rounded border border-outline-variant">
+<div class="flex items-center gap-space-md">
+<input checked="" class="w-5 h-5 border-1.5 border-outline rounded text-primary focus:ring-primary" type="checkbox"/>
+<span class="font-body-sm-medium text-on-surface">تقديم حافظة مستندات تتضمن أصل عقد البيع الابتدائي وشهادات التحديث العقاري.</span>
+</div>
+<span class="px-2 py-1 bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] rounded text-xs font-medium">مكتمل</span>
+</div>
+<div class="flex items-center justify-between p-3 bg-surface-container-low rounded border border-outline-variant">
+<div class="flex items-center gap-space-md">
+<input checked="" class="w-5 h-5 border-1.5 border-outline rounded text-primary focus:ring-primary" type="checkbox"/>
+<span class="font-body-sm-medium text-on-surface">سداد الأمانة القضائية المقررة لمكتب الخبراء الحسابيين وهندسة المباني.</span>
+</div>
+<span class="px-2 py-1 bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] rounded text-xs font-medium">مكتمل</span>
+</div>
+<div class="flex items-center justify-between p-3 bg-surface-container-low rounded border border-outline-variant">
+<div class="flex items-center gap-space-md">
+<input class="w-5 h-5 border-1.5 border-outline rounded text-primary focus:ring-primary" type="checkbox"/>
+<span class="font-body-sm-medium text-on-surface">إعلان الشهدود لسماع شهادتهم حول واقعة التسليم والاستلام الفعلية.</span>
+</div>
+<span class="px-2 py-1 bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] rounded text-xs font-medium">قيد الإجراء</span>
+</div>
+</div>
+</div>
+<!-- Section 4: سجل نتائج الجلسات السابقة -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-lg flex flex-col gap-space-md">
+<div class="border-b border-outline-variant pb-space-sm">
+<h2 class="font-headline-sm text-headline-sm text-primary flex items-center gap-space-sm">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+                    سجل نتائج الجلسات السابقة (سجل مدونة رسمية لجلستين سابقتين)
+                </h2>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-right border-collapse">
+<thead>
+<tr class="bg-surface-container-low text-on-surface-variant font-label-md text-label-md h-[40px] border-b border-outline-variant">
+<th class="px-space-md">تاريخ الجلسة</th>
+<th class="px-space-md">رقم الرول</th>
+<th class="px-space-md">قرار الدائرة الرسمي</th>
+<th class="px-space-md">المحامي الحاضر</th>
+<th class="px-space-md">ملاحظات ومستندات مودعة</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-on-surface">
+<tr class="h-[48px] border-b border-outline-variant hover:bg-surface-container-low transition-colors">
+<td class="px-space-md">15 يناير 2026</td>
+<td class="px-space-md">14</td>
+<td class="px-space-md">تأجيل لجلسة اليوم لإعلان الخصوم وتقديم المستندات.</td>
+<td class="px-space-md">الأستاذ / أحمد ممدوح</td>
+<td class="px-space-md text-on-surface-variant">تم إيداع صورة ضوئية من التوكيل الرسمي.</td>
+</tr>
+<tr class="h-[48px] border-b border-outline-variant hover:bg-surface-container-low transition-colors">
+<td class="px-space-md">12 فبراير 2026</td>
+<td class="px-space-md">22</td>
+<td class="px-space-md">إحالة الدعوى لمكتب الخبراء وندب خبير لمعاينة العقار.</td>
+<td class="px-space-md">الأستاذ / محمد صلاح</td>
+<td class="px-space-md text-on-surface-variant">سداد رسوم الأمانة القضائية بالخزينة.</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="mr-[232px] py-space-md px-space-xl border-t border-outline-variant flex items-center justify-between text-on-surface-variant font-body-sm bg-surface-container-lowest">
+<div>
+            جميع الحقوق محفوظة © 2026 — نظام إدارة المكتب الرقمي (LawOffice OS)
+        </div>
+<div class="flex items-center gap-space-sm">
+<span class="px-2 py-0.5 bg-surface-container text-on-surface rounded font-label-sm text-label-sm border border-outline-variant">بيانات تجريبية</span>
+<span>الإصدار 2.4.0</span>
+</div>
+</footer>
+</body></html>

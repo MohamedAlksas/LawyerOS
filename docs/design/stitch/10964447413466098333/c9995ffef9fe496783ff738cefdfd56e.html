@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>S11c — تسجيل مقبوضات | نظام إدارة المكتب الرقمي</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts: Noto Sans Arabic -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-primary": "#ffffff",
+            "surface-bright": "#f5faff",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "inverse-primary": "#96cfe7",
+            "background": "#f4f6f7",
+            "surface-tint": "#29657b",
+            "surface-dim": "#c9ddec",
+            "on-surface": "#0a1e28",
+            "outline-variant": "#d5dfe3",
+            "primary": "#003e4f",
+            "on-secondary-fixed": "#0a1e26",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-error-container": "#93000a",
+            "surface-container": "#ddf1ff",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-container": "#075b41",
+            "outline": "#70787c",
+            "on-secondary": "#ffffff",
+            "on-surface-variant": "#40484c",
+            "inverse-on-surface": "#e3f3ff",
+            "primary-container": "#14566b",
+            "surface": "#f5faff",
+            "secondary-container": "#cee3ef",
+            "secondary-fixed": "#d1e6f1",
+            "on-tertiary-fixed": "#002115",
+            "error": "#ba1a1a",
+            "on-primary-fixed-variant": "#024d62",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-high": "#d7ebfa",
+            "tertiary": "#00422d",
+            "on-background": "#0a1e28",
+            "primary-fixed": "#baeaff",
+            "inverse-surface": "#20333e",
+            "on-tertiary-container": "#88d1af",
+            "secondary": "#4e616b",
+            "on-error": "#ffffff",
+            "error-container": "#ffdad6",
+            "on-secondary-fixed-variant": "#374953",
+            "tertiary-fixed": "#a8f2cf",
+            "surface-variant": "#d1e5f4",
+            "primary-fixed-dim": "#96cfe7",
+            "surface-container-low": "#e9f5ff",
+            "on-secondary-container": "#52656f",
+            "surface-container-highest": "#d1e5f4",
+            "on-primary-fixed": "#001f29",
+            "on-tertiary": "#ffffff",
+            "on-primary-container": "#91cae2"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.375rem", /* 6px as per design spec */
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter": "1rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem",
+            "space-sm": "0.5rem",
+            "margin-desktop": "2rem",
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "space-xs": "0.375rem"
+          },
+          "fontFamily": {
+            "sans": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "body-lg-medium": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "headline-md": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "body-lg": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "label-md": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "body-sm": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "body-sm-medium": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "label-sm": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "headline-sm": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "headline-lg-mobile": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "display": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"],
+            "headline-lg": ["'Noto Sans Arabic'", "Noto Sans", "sans-serif"]
+          },
+          "fontSize": {
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    body {
+      background-color: #f4f6f7;
+      color: #0a1e28;
+      font-family: 'Noto Sans Arabic', sans-serif;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-background text-on-surface antialiased flex flex-col font-sans selection:bg-primary-container selection:text-white">
+<!-- ==================== TOP NAVIGATION BAR ==================== -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b border-outline-variant flex items-center justify-between px-gutter-desktop pr-[248px]">
+<!-- Right side: Product Title & Active Context -->
+<div class="flex items-center gap-space-md">
+<span class="font-headline-md text-headline-md text-primary tracking-tight">نظام إدارة المكتب الرقمي</span>
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xl bg-surface-container-high text-primary font-label-sm text-label-sm border border-outline-variant/60">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+        سند قبض مالي وارد
+      </span>
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 font-label-sm text-label-sm font-medium">
+<span class="material-symbols-outlined text-[15px]" data-icon="science">science</span>
+        بيانات تجريبية
+      </span>
+</div>
+<!-- Left side: Actions & User Meta -->
+<div class="flex items-center gap-space-md">
+<!-- Search Field (Contextual) -->
+<div class="relative w-64">
+<input class="w-full h-[38px] bg-background text-on-surface rounded-xl border border-outline-variant pr-9 pl-3 text-body-sm focus:border-primary-container focus:ring-1 focus:ring-primary-container text-right placeholder:text-outline" placeholder="بحث برقم السند أو اسم الموكل..." type="text"/>
+<span class="material-symbols-outlined absolute right-2.5 top-[10px] text-outline text-[18px]" data-icon="search">search</span>
+</div>
+<!-- Quick Action CTA -->
+<div class="flex items-center gap-space-sm">
+<button class="h-[38px] px-3.5 rounded-xl bg-primary-container text-white font-label-md text-label-md hover:bg-[#0f3f4f] transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="add">add</span>
+<span>جلسة جديدة</span>
+</button>
+<button class="h-[38px] px-3.5 rounded-xl bg-white border border-primary-container text-primary-container font-label-md text-label-md hover:bg-background transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="upload_file">upload_file</span>
+<span>إيداع مستند</span>
+</button>
+</div>
+<!-- Icon Actions -->
+<div class="flex items-center gap-1 border-r border-outline-variant pr-2 mr-1">
+<button class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded-xl transition-colors relative" title="الإشعارات">
+<span class="material-symbols-outlined text-[20px]" data-icon="notifications">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-error"></span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded-xl transition-colors" title="المساعدة">
+<span class="material-symbols-outlined text-[20px]" data-icon="help_outline">help_outline</span>
+</button>
+</div>
+<!-- User Avatar / Profile -->
+<div class="flex items-center gap-2 pr-1">
+<div class="w-9 h-9 rounded-full bg-primary-container/10 border border-primary-container/30 flex items-center justify-center text-primary-container font-bold text-sm">
+          أم
+        </div>
+</div>
+</div>
+</header>
+<!-- ==================== FIXED RIGHT SIDEBAR ==================== -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l border-outline-variant flex flex-col justify-between py-space-lg px-space-md select-none">
+<!-- Top Branding & Practitioner Info -->
+<div>
+<div class="pb-space-md border-b border-outline-variant mb-space-md">
+<div class="flex items-center gap-2.5 mb-2">
+<div class="w-10 h-10 rounded-xl bg-primary-container flex items-center justify-center text-white font-bold text-lg shadow-sm">
+<span class="material-symbols-outlined text-[22px]" data-icon="gavel">gavel</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-headline-sm text-primary leading-tight">مكتب الأستاذ أحمد ممدوح</h1>
+<p class="font-body-sm text-body-sm text-outline text-[12px] leading-tight mt-0.5">المحامي بالنقض والاستئناف</p>
+</div>
+</div>
+<button class="w-full mt-2 h-[38px] rounded-xl bg-primary-container text-white font-label-md text-label-md hover:bg-[#0f3f4f] transition-colors flex items-center justify-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="note_add">note_add</span>
+<span>إضافة قضية جديدة</span>
+</button>
+</div>
+<!-- Navigation Tabs (6 tabs, with tab 5 "السجلات والمالية" active) -->
+<nav class="space-y-1">
+<!-- 1. جدول الجلسات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="calendar_month">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<!-- 2. ملفات القضايا -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="folder_open">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<!-- 3. دليل الموكلين -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="groups">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<!-- 4. المهام الإجرائية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="assignment_late">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<!-- 5. السجلات والمالية (ACTIVE) -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-surface-container-low border-r-4 border-primary font-label-md text-label-md rounded-l-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="account_balance_wallet" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<!-- 6. الإعدادات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Footer Tabs -->
+<div class="pt-space-md border-t border-outline-variant space-y-1">
+<a class="flex items-center gap-space-sm px-space-md py-2 text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-2 text-error font-label-md text-label-md hover:bg-red-50 transition-colors rounded-xl" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="logout">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- ==================== MAIN WORKSPACE CANVAS ==================== -->
+<main class="mr-[232px] p-space-xl flex-1 flex flex-col gap-space-lg">
+<!-- Breadcrumb & Top Bar of Workspace -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-outline-variant">
+<div>
+<div class="flex items-center gap-2 text-body-sm text-on-surface-variant mb-1">
+<span class="hover:text-primary cursor-pointer">الإدارة المالية</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_left">chevron_left</span>
+<span class="hover:text-primary cursor-pointer">حسابات وأمانات الموكلين</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_left">chevron_left</span>
+<span class="text-primary font-medium">سند قبض جديد (S11c)</span>
+</div>
+<h2 class="font-headline-lg text-headline-lg text-primary flex items-center gap-2.5">
+<span>تسجيل سند مقبوضات مالية</span>
+<span class="text-xs px-2.5 py-0.5 rounded-full bg-surface-container-high text-primary font-label-sm border border-outline-variant">
+            رقم السند المبدئي: RC-2026-0489
+          </span>
+</h2>
+<p class="font-body-sm text-body-sm text-secondary mt-1">
+          نظام رقابي صارم للفصل الحسابي بين «أتعاب المكتب المهنية» و«أموال أمانات الموكلين» لتجنب الخلط المحاسبي وضمان دقة الذمة المالية.
+        </p>
+</div>
+<!-- Action Buttons Top Bar -->
+<div class="flex items-center gap-3">
+<button class="h-[44px] px-5 rounded-xl bg-white border border-outline text-secondary font-label-md text-label-md hover:bg-background transition-colors flex items-center gap-2" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="close">close</span>
+<span>إلغاء والعودة للحسابات</span>
+</button>
+<button class="h-[44px] px-6 rounded-xl bg-primary-container text-white font-label-md text-label-md hover:bg-[#0f3f4f] active:bg-[#0b2f3b] transition-colors flex items-center gap-2 shadow-sm" id="submitReceiptBtn" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span>تأكيد وترحيل سند القبض</span>
+</button>
+</div>
+</div>
+<!-- Strict Separation Policy Alert Banner -->
+<div class="bg-surface-container-low border border-outline-variant p-4 rounded-xl flex items-start gap-3.5">
+<span class="material-symbols-outlined text-primary-container text-[24px] mt-0.5" data-icon="verified_user">verified_user</span>
+<div class="text-body-sm text-on-surface">
+<span class="font-label-md text-primary-container block mb-0.5">ضابط الرقابة والنزاهة المحاسبية (ميثاق شرف المهنة وقانون المحاماة):</span>
+        أموال أمانات الموكلين المودعة للمصاريف القضائية لا تُعد إيراداً للمكتب بأي حال، وتظل معلقة كأمانة تحت تصرف ملف الدعوى. لا يُرحل أي قرش كإيراد مهني إلا إذا تم تحديد البند كـ «أتعاب مسددة» بصورة صريحة.
+      </div>
+</div>
+<!-- MAIN TWO-COLUMN CONTENT GRID -->
+<div class="grid grid-cols-12 gap-space-lg items-start">
+<!-- RIGHT COLUMN (8 COLUMNS): ENTRY FORM & ALLOCATION MATRIX -->
+<div class="col-span-12 lg:col-span-8 flex flex-col gap-space-lg">
+<!-- SECTION 1: الأساسيات وبيانات السند -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-space-lg">
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant mb-space-md">
+<h3 class="font-headline-sm text-headline-sm text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" data-icon="receipt_long">receipt_long</span>
+<span>1. البيانات الأساسية لسند القبض</span>
+</h3>
+<span class="font-label-sm text-outline">تاريخ القيد المالي: 24 فبراير 2026</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+<!-- حقل: القائم بالسداد -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="payer_name">
+                اسم القائم بالسداد (الموكل أو وكيله) <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded-xl text-on-surface font-body-sm text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="payer_name" type="text" value="الحاج محمود عبد الرازق الشناوي"/>
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-outline text-[20px]" data-icon="person">person</span>
+</div>
+<span class="font-label-sm text-outline text-[12px]">صفته: الموكل أصالة عن نفسه في الدعوى المدنية</span>
+</div>
+<!-- حقل: الملف المرتبط -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="case_ref">
+                ملف المكتب المرتبط <span class="text-error">*</span>
+</label>
+<div class="relative">
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded-xl text-on-surface font-body-sm text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container appearance-none" id="case_ref">
+<option selected="" value="LO-2026-001">LO-2026-001 | ورثة الشناوي ضد شركة النيل للتعمير (مدني كلي)</option>
+<option value="LO-2026-002">LO-2026-002 | جنحة شيك بدون رصيد - قسم الدقي</option>
+<option value="LO-2025-089">LO-2025-089 | نزاع عمالي مستأنف - محكمة جنوب القاهرة</option>
+</select>
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-outline text-[20px] pointer-events-none" data-icon="unfold_more">unfold_more</span>
+</div>
+<span class="font-label-sm text-outline text-[12px]">الدائرة: 14 مدني كلي جنوب القاهرة - رول 18</span>
+</div>
+<!-- حقل: تاريخ القبض الفعلي -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="receipt_date">
+                تاريخ القبض الفعلي <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded-xl text-on-surface font-body-sm text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="receipt_date" type="date" value="2026-02-24"/>
+</div>
+<span class="font-label-sm text-outline text-[12px]">اليوم المتفق عليه مع الموكل بالمكتب</span>
+</div>
+<!-- حقل: المبلغ الإجمالي المستلم -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="total_amount">
+                المبلغ الإجمالي المستلم (بالجنيه المصري) <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 bg-surface-container-low border border-primary-container font-headline-sm text-headline-sm text-primary font-bold text-left pl-14 focus:ring-1 focus:ring-primary-container" id="total_amount" step="100" type="number" value="5000"/>
+<span class="absolute left-3 top-2.5 font-label-md text-primary font-bold">ج.م</span>
+</div>
+<span class="font-label-sm text-primary-container font-medium text-[12px]">فقط خمسة آلاف جنيه مصري لا غير</span>
+</div>
+<!-- حقل: وسيلة الاستلام -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="payment_method">
+                وسيلة الاستلام <span class="text-error">*</span>
+</label>
+<div class="relative">
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded-xl text-on-surface font-body-sm text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container appearance-none" id="payment_method">
+<option selected="" value="cash">نقداً بالخزينة الحديدية بالمكتب</option>
+<option value="bank_transfer">تحويل بنكي لحظي (InstaPay / الأهلي)</option>
+<option value="cheque">شيك مصرفي مسحوب على بنك مصر</option>
+</select>
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-outline text-[20px] pointer-events-none" data-icon="payments">payments</span>
+</div>
+</div>
+<!-- حقل: حساب الإيداع والخزينة المستلمة -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="vault_destination">
+                حساب الإيداع / الخزينة المستلمة <span class="text-error">*</span>
+</label>
+<div class="relative">
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded-xl text-on-surface font-body-sm text-right focus:border-primary-container focus:ring-1 focus:ring-primary-container appearance-none" id="vault_destination">
+<option selected="" value="safe_main">الخزينة الرئيسية للمكتب (الدرج الحديدي A-1)</option>
+<option value="cib_account">الحساب الجاري المهني - البنك التجاري الدولي (CIB)</option>
+<option value="nbe_client_escrow">حساب أمانات الموكلين المنفصل - البنك الأهلي المصري</option>
+</select>
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-outline text-[20px] pointer-events-none" data-icon="point_of_sale">point_of_sale</span>
+</div>
+</div>
+</div>
+</div>
+<!-- SECTION 2: مصفوفة تخصيص وتوزيع المبلغ (ALLOCATION MATRIX) -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-space-lg">
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant mb-4">
+<div>
+<h3 class="font-headline-sm text-headline-sm text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" data-icon="pie_chart">pie_chart</span>
+<span>2. تخصيص وتوزيع المبلغ المستلم (Allocation Matrix)</span>
+</h3>
+<p class="font-body-sm text-body-sm text-secondary mt-0.5">
+                وزّع المبلغ المقبوض (5,000 ج.م) بدقة وفقاً لطبيعة المطالبة المالية مع الالتزام بالفصل التام:
+              </p>
+</div>
+<!-- Real-time Balance Status Badge -->
+<div class="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 font-label-md text-label-md" id="balanceBadge">
+<span class="material-symbols-outlined text-[18px]" data-icon="check_circle">check_circle</span>
+<span>المبالغ متطابقة تماماً (100%)</span>
+</div>
+</div>
+<!-- Allocation Inputs Table / Rows -->
+<div class="space-y-3.5">
+<!-- بند 1: سداد أتعاب مهنية (إيراد مكتب) -->
+<div class="p-3.5 rounded-xl border border-outline-variant bg-white hover:bg-background/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3">
+<div class="flex items-start gap-3">
+<div class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center text-primary-container mt-0.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="work">work</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-on-surface">1. سداد أتعاب مهنية مستحقة للمكتب</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-100 text-emerald-900 border border-emerald-300">إيراد فعلي للمكتب</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline text-[12px] mt-0.5">
+                    الدفعة الثانية المستحقة عن إعداد صحيفة الاستئناف والمرافعة أمام محكمة استئناف القاهرة.
+                  </p>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-label-sm text-outline text-[13px]">المبلغ المخصص:</span>
+<div class="relative w-36">
+<input class="w-full h-[40px] px-3 bg-white border border-outline-variant rounded-xl text-left font-bold text-on-surface pl-10 focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="alloc_fees" min="0" oninput="recalculateAllocation()" type="number" value="0"/>
+<span class="absolute left-2.5 top-2 text-xs font-bold text-outline">ج.م</span>
+</div>
+</div>
+</div>
+<!-- بند 2: استرداد مصروفات قضائية مسددة مسبقاً -->
+<div class="p-3.5 rounded-xl border border-outline-variant bg-white hover:bg-background/40 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3">
+<div class="flex items-start gap-3">
+<div class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center text-primary-container mt-0.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="replay">replay</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-on-surface">2. استرداد مصروفات قضائية مسددة سلفاً</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-900 border border-blue-300">تسوية عهدة مكتب</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline text-[12px] mt-0.5">
+                    إعادة سداد رسوم إعلان الصحيفة والانتقال المسددة من خزينة المكتب بإيصال رقم #842.
+                  </p>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-label-sm text-outline text-[13px]">المبلغ المخصص:</span>
+<div class="relative w-36">
+<input class="w-full h-[40px] px-3 bg-white border border-outline-variant rounded-xl text-left font-bold text-on-surface pl-10 focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="alloc_expenses" min="0" oninput="recalculateAllocation()" type="number" value="0"/>
+<span class="absolute left-2.5 top-2 text-xs font-bold text-outline">ج.م</span>
+</div>
+</div>
+</div>
+<!-- بند 3: إيداع أمانة موكل (أموال موكلين تحت الحساب للأمانات والمصاريف) -->
+<div class="p-3.5 rounded-xl border-2 border-primary-container bg-surface-container-low/40 flex flex-col md:flex-row md:items-center justify-between gap-3">
+<div class="flex items-start gap-3">
+<div class="w-8 h-8 rounded-lg bg-primary-container flex items-center justify-center text-white mt-0.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="lock">lock</span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-primary font-bold">3. إيداع أمانة موكل لمصروفات وأتعاب خبراء النزاع</span>
+<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">أمانة قانونية (لا تعتبر إيراداً مطلقاً)</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-[12px] mt-0.5">
+                    مبلغ مخصص تحت حساب أمانة الخبير الهندسي المنتدب في الدعوى ورسوم استخراج الصور الرسمية.
+                  </p>
+</div>
+</div>
+<div class="flex items-center gap-2 self-end md:self-center">
+<span class="font-label-sm text-primary-container font-bold text-[13px]">المبلغ المخصص:</span>
+<div class="relative w-36">
+<input class="w-full h-[40px] px-3 bg-white border-2 border-primary-container rounded-xl text-left font-bold text-primary pl-10 focus:ring-1 focus:ring-primary-container" id="alloc_escrow" min="0" oninput="recalculateAllocation()" type="number" value="5000"/>
+<span class="absolute left-2.5 top-2 text-xs font-bold text-primary">ج.م</span>
+</div>
+</div>
+</div>
+<!-- بند 4: الفائض المالي غير المخصص (ضابط تلقائي) -->
+<div class="p-3 rounded-xl border border-dashed border-outline bg-background/60 flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<span class="material-symbols-outlined text-outline text-[20px]" data-icon="account_balance">account_balance</span>
+<div>
+<span class="font-label-md text-label-md text-secondary">رصيد أمانة عامة معلقة للموكل (في حال وجود فائض غير مخصص)</span>
+<p class="font-body-sm text-body-sm text-outline text-[11px]">أي مبلغ مقبوض غير مخصص صراحة في الأوجه الثلاثة يوضع هنا إلزامياً ولا يتحول لإيراد أتعاب.</p>
+</div>
+</div>
+<div class="text-left">
+<span class="font-headline-sm text-headline-sm text-secondary font-bold" id="alloc_unassigned">0</span>
+<span class="font-label-sm text-outline mr-1">ج.م</span>
+</div>
+</div>
+</div>
+<!-- Allocation Reconciliation Box -->
+<div class="mt-4 pt-3.5 border-t border-outline-variant flex flex-col md:flex-row items-center justify-between gap-3 text-body-sm">
+<div class="flex items-center gap-4">
+<div>
+<span class="text-outline text-xs block">المبلغ المقبوض الكلي:</span>
+<span class="font-bold text-on-surface text-[15px]">5,000 ج.م</span>
+</div>
+<span class="text-outline">=</span>
+<div>
+<span class="text-outline text-xs block">إجمالي التخصيصات الموزعة:</span>
+<span class="font-bold text-primary-container text-[15px]" id="total_allocated_display">5,000 ج.م</span>
+</div>
+<span class="text-outline">|</span>
+<div>
+<span class="text-outline text-xs block">الفارق الحسابي:</span>
+<span class="font-bold text-emerald-700 text-[15px]" id="diff_display">0 ج.م (مطابق تماماً)</span>
+</div>
+</div>
+<div class="text-xs text-outline flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px] text-emerald-600" data-icon="rule">rule</span>
+<span>قاعدة التحقق: لا يمكن ترحيل السند في حال وجود فارق بين الإجمالي والتخصيص.</span>
+</div>
+</div>
+</div>
+<!-- SECTION 3: لوحة الأثر المالي قبل الترحيل (IMPACT REVIEW) -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-space-lg">
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant mb-4">
+<h3 class="font-headline-sm text-headline-sm text-primary flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]" data-icon="account_tree">account_tree</span>
+<span>3. لوحة الأثر المالي للقيد قبل الترحيل (Financial Impact Review)</span>
+</h3>
+<span class="text-xs px-2.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-medium">
+              محاكاة أثر القيد المزدوج
+            </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<!-- أثر 1: الخزينة النقدية للمكتب -->
+<div class="p-3.5 rounded-xl border border-outline-variant bg-background">
+<div class="flex items-center justify-between mb-2">
+<span class="text-xs font-semibold text-secondary">رصيد الخزينة المستلمة</span>
+<span class="material-symbols-outlined text-primary-container text-[18px]" data-icon="savings">savings</span>
+</div>
+<div class="flex items-baseline gap-1.5 mb-1">
+<span class="text-xs text-emerald-600 font-bold">+5,000</span>
+<span class="font-headline-md text-headline-md text-on-surface font-bold">24,350</span>
+<span class="text-xs text-outline">ج.م</span>
+</div>
+<p class="text-[12px] text-outline leading-tight">
+                زيادة فورية في النقدية السائلة بالخزينة الحديدية للمكتب (A-1).
+              </p>
+</div>
+<!-- أثر 2: رصيد أمانات الموكل المتاحة للصرف -->
+<div class="p-3.5 rounded-xl border-2 border-primary-container/40 bg-surface-container-low/30">
+<div class="flex items-center justify-between mb-2">
+<span class="text-xs font-bold text-primary-container">أمانات الموكل (ملف LO-2026-001)</span>
+<span class="material-symbols-outlined text-primary-container text-[18px]" data-icon="lock_clock">lock_clock</span>
+</div>
+<div class="flex items-baseline gap-1.5 mb-1">
+<span class="text-xs text-emerald-600 font-bold">+5,000</span>
+<span class="font-headline-md text-headline-md text-primary font-bold">3,800</span>
+<span class="text-xs text-outline">ج.م</span>
+</div>
+<p class="text-[12px] text-on-surface-variant leading-tight">
+                كان الرصيد السابق عجزاً قدره (-1,200 ج.م)، وأصبح الآن فائض أمانة متاح للصرف قدره 3,800 ج.م.
+              </p>
+</div>
+<!-- أثر 3: أرباح وأتعاب المكتب المهنية -->
+<div class="p-3.5 rounded-xl border border-outline-variant bg-background">
+<div class="flex items-center justify-between mb-2">
+<span class="text-xs font-semibold text-secondary">أرباح وإيرادات أتعاب المكتب</span>
+<span class="material-symbols-outlined text-outline text-[18px]" data-icon="bar_chart">bar_chart</span>
+</div>
+<div class="flex items-baseline gap-1.5 mb-1">
+<span class="text-xs text-outline font-bold">0.00</span>
+<span class="font-headline-md text-headline-md text-secondary font-bold">لا يوجد أثر</span>
+<span class="text-xs text-outline"></span>
+</div>
+<p class="text-[12px] text-outline leading-tight">
+                لم يتحقق أي ربح أو إيراد مهني للمكتب؛ المبلغ بالكامل أمانة مودعة تحت تصرف مصاريف النزاع.
+              </p>
+</div>
+</div>
+</div>
+</div>
+<!-- LEFT COLUMN (4 COLUMNS): ADMINISTRATIVE RECEIPT PREVIEW -->
+<div class="col-span-12 lg:col-span-4 flex flex-col gap-space-md">
+<!-- معاينة إيصال الاستلام الإداري الداخلي -->
+<div class="bg-surface-container-lowest border-2 border-outline-variant rounded-xl p-space-md shadow-sm sticky top-[80px]">
+<div class="flex items-center justify-between pb-2.5 border-b border-outline-variant mb-3">
+<span class="font-label-md text-label-md text-primary flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="print">print</span>
+<span>معاينة إيصال الاستلام الإداري</span>
+</span>
+<span class="text-[11px] px-2 py-0.5 rounded bg-surface-container text-primary font-mono">
+              نسخة داخلية
+            </span>
+</div>
+<!-- Document Voucher Paper Appearance -->
+<div class="bg-background border border-outline-variant p-4 rounded-xl text-on-surface font-sans text-right space-y-3">
+<!-- Header of Voucher -->
+<div class="text-center border-b border-outline pb-3">
+<h4 class="font-headline-sm text-headline-sm text-primary font-bold">مكتب الأستاذ أحمد ممدوح</h4>
+<p class="text-[11px] text-secondary font-medium mt-0.5">المحامي بالنقض والدستورية العليا — القاهرة</p>
+<div class="inline-block mt-2 px-3 py-1 bg-white border border-outline-variant rounded-lg">
+<span class="font-bold text-xs text-primary">إيصال استلام نقدية إداري رقم: RC-2026-0489</span>
+</div>
+</div>
+<!-- Receipt Meta -->
+<div class="text-xs space-y-2 py-1">
+<div class="flex justify-between">
+<span class="text-outline">التاريخ المحرر:</span>
+<span class="font-medium text-on-surface font-mono">2026/02/24 م</span>
+</div>
+<div class="flex justify-between">
+<span class="text-outline">استلمنا من السيد/ة:</span>
+<span class="font-bold text-on-surface">محمود عبد الرازق الشناوي</span>
+</div>
+<div class="flex justify-between">
+<span class="text-outline">مبلغ وقدره:</span>
+<span class="font-bold text-primary text-sm">5,000.00 ج.م</span>
+</div>
+<div class="text-[11px] text-outline text-left font-serif">
+                (فقط خمسة آلاف جنيه مصري لا غير)
+              </div>
+<div class="flex justify-between border-t border-outline-variant pt-2">
+<span class="text-outline">ملف القضية:</span>
+<span class="font-medium text-on-surface">LO-2026-001 (ورثة الشناوي)</span>
+</div>
+<div class="flex justify-between">
+<span class="text-outline">وسيلة الدفع:</span>
+<span class="font-medium text-on-surface">نقداً بالخزينة الحديدية</span>
+</div>
+</div>
+<!-- Allocation Summary in Voucher -->
+<div class="bg-white border border-outline-variant rounded p-2.5 text-xs space-y-1.5">
+<span class="font-bold text-primary block text-[11px] mb-1">بيان تفصيل المبلغ المقبوض:</span>
+<div class="flex justify-between text-outline">
+<span>- أتعاب مهنية مستحقة:</span>
+<span class="font-mono">0.00 ج.م</span>
+</div>
+<div class="flex justify-between text-outline">
+<span>- استرداد مصروفات قضائية مسددة:</span>
+<span class="font-mono">0.00 ج.م</span>
+</div>
+<div class="flex justify-between text-primary font-bold border-t border-dashed border-outline-variant pt-1">
+<span>- أمانة موكل تحت الحساب (أمانة خبير):</span>
+<span class="font-mono">5,000.00 ج.م</span>
+</div>
+</div>
+<!-- Signatures Section -->
+<div class="pt-2 border-t border-outline-variant grid grid-cols-2 text-center text-[11px]">
+<div>
+<span class="text-outline block mb-5">توقيع المستلم (المكتب):</span>
+<span class="font-bold text-on-surface underline decoration-dotted">أحمد ممدوح المحامي</span>
+</div>
+<div>
+<span class="text-outline block mb-5">توقيع المودع / المسدد:</span>
+<span class="font-bold text-on-surface">....................</span>
+</div>
+</div>
+<!-- Legal Compliance Notice (MANDATORY) -->
+<div class="mt-3 p-2.5 rounded bg-amber-50/70 border border-amber-300 text-amber-900 text-[11px] leading-normal text-center">
+<span class="material-symbols-outlined text-[15px] inline align-text-top text-amber-800" data-icon="info">info</span>
+<span class="font-semibold block mb-0.5">تنبيه قانوني هام:</span>
+              إيصال استلام إداري داخلي لإثبات المعاملات المهنية، ولا يمثل وثيقة معتمدة ضريبياً أو فـاتورة إلكترونية صادرة لمصلحة الضرائب المصرية.
+            </div>
+</div>
+<!-- Quick Receipt Actions -->
+<div class="mt-3 grid grid-cols-2 gap-2">
+<button class="h-[36px] bg-white border border-outline-variant rounded-xl text-primary font-label-sm text-label-sm hover:bg-background transition-colors flex items-center justify-center gap-1" type="button">
+<span class="material-symbols-outlined text-[16px]" data-icon="print">print</span>
+<span>طباعة فورية</span>
+</button>
+<button class="h-[36px] bg-white border border-outline-variant rounded-xl text-primary font-label-sm text-label-sm hover:bg-background transition-colors flex items-center justify-center gap-1" type="button">
+<span class="material-symbols-outlined text-[16px]" data-icon="share">share</span>
+<span>إرسال واتساب للموكل</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Sticky Bottom Execution Bar for Safety and Clarity -->
+<div class="mt-4 p-4 bg-surface-container-lowest border border-outline-variant rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+<div class="flex items-center gap-3 text-body-sm text-on-surface">
+<span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+<span>جاهز للترحيل: سيتم تدوين القيد في سجل اليومية العامة، وتغذية بطاقة أمانات الموكل بالملف رقم <strong>LO-2026-001</strong>.</span>
+</div>
+<div class="flex items-center gap-3 w-full sm:w-auto">
+<button class="w-full sm:w-auto h-[44px] px-6 rounded-xl bg-white border border-primary-container text-primary-container font-label-md text-label-md hover:bg-background transition-colors" type="button">
+          حفظ كمسودة غير مرحلة
+        </button>
+<button class="w-full sm:w-auto h-[44px] px-8 rounded-xl bg-primary-container text-white font-label-md text-label-md hover:bg-[#0f3f4f] transition-colors flex items-center justify-center gap-2" onclick="confirmBooking()" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="task_alt">task_alt</span>
+<span>تأكيد وترحيل سند القبض</span>
+</button>
+</div>
+</div>
+</main>
+<!-- Interactive JavaScript for Live Allocation Calculation & Compliance -->
+<script>
+    function recalculateAllocation() {
+      const totalAmount = parseFloat(document.getElementById('total_amount').value) || 0;
+      const fees = parseFloat(document.getElementById('alloc_fees').value) || 0;
+      const expenses = parseFloat(document.getElementById('alloc_expenses').value) || 0;
+      const escrow = parseFloat(document.getElementById('alloc_escrow').value) || 0;
+
+      const sumAllocated = fees + expenses + escrow;
+      const diff = totalAmount - sumAllocated;
+
+      const totalDisplay = document.getElementById('total_allocated_display');
+      const diffDisplay = document.getElementById('diff_display');
+      const unassignedDisplay = document.getElementById('alloc_unassigned');
+      const balanceBadge = document.getElementById('balanceBadge');
+
+      totalDisplay.textContent = sumAllocated.toLocaleString('ar-EG') + ' ج.م';
+
+      if (diff === 0) {
+        diffDisplay.textContent = '0 ج.م (مطابق تماماً)';
+        diffDisplay.className = 'font-bold text-emerald-700 text-[15px]';
+        unassignedDisplay.textContent = '0';
+        balanceBadge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-800 font-label-md text-label-md';
+        balanceBadge.innerHTML = '<span class="material-symbols-outlined text-[18px]">check_circle</span><span>المبالغ متطابقة تماماً (100%)</span>';
+      } else if (diff > 0) {
+        diffDisplay.textContent = 'فائض ' + diff.toLocaleString('ar-EG') + ' ج.م كأمانة معلقة';
+        diffDisplay.className = 'font-bold text-amber-700 text-[15px]';
+        unassignedDisplay.textContent = diff.toLocaleString('ar-EG');
+        balanceBadge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 font-label-md text-label-md';
+        balanceBadge.innerHTML = '<span class="material-symbols-outlined text-[18px]">info</span><span>يوجد فائض غير مخصص يُرحل كأمانة</span>';
+      } else {
+        diffDisplay.textContent = 'عجز تخصيص (' + Math.abs(diff).toLocaleString('ar-EG') + ' ج.م) تجاوز الإجمالي!';
+        diffDisplay.className = 'font-bold text-error text-[15px]';
+        unassignedDisplay.textContent = 'تجاوز';
+        balanceBadge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-xl bg-red-50 border border-red-300 text-error font-label-md text-label-md';
+        balanceBadge.innerHTML = '<span class="material-symbols-outlined text-[18px]">error</span><span>المبالغ المخصصة أكبر من المقبوض!</span>';
+      }
+    }
+
+    function confirmBooking() {
+      const fees = parseFloat(document.getElementById('alloc_fees').value) || 0;
+      const escrow = parseFloat(document.getElementById('alloc_escrow').value) || 0;
+      const expenses = parseFloat(document.getElementById('alloc_expenses').value) || 0;
+      const totalAmount = parseFloat(document.getElementById('total_amount').value) || 0;
+      
+      if (fees + escrow + expenses > totalAmount) {
+        alert('تنبيه نظام: المبالغ المخصصة تتجاوز إجمالي المبلغ المقبوض. يرجى ضبط التوزيع المحاسبي.');
+        return;
+      }
+
+      alert('تم بنجاح ترحيل سند القبض رقم RC-2026-0489.\n\n- أمانة الموكل المودعة: ' + escrow.toLocaleString('ar-EG') + ' ج.م\n- أتعاب المكتب: ' + fees.toLocaleString('ar-EG') + ' ج.م\n- رصيد الأمانات الجديد لملف الدعوى: 3,800 ج.م');
+    }
+
+    // Attach listener to total amount change as well
+    document.getElementById('total_amount').addEventListener('input', recalculateAllocation);
+  </script>
+</body></html>

@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+
+<html class="h-full" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>شاشة S03a — ملفات المكتب | نظام إدارة المكتب الرقمي</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-tertiary-container": "#88d1af",
+            "error-container": "#ffdad6",
+            "outline-variant": "#c0c8cc",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "primary-fixed": "#baeaff",
+            "tertiary-container": "#075b41",
+            "surface-container": "#ddf1ff",
+            "tertiary-fixed": "#a8f2cf",
+            "secondary": "#4e616b",
+            "on-tertiary-fixed": "#002115",
+            "inverse-surface": "#20333e",
+            "error": "#ba1a1a",
+            "surface-dim": "#c9ddec",
+            "on-error-container": "#93000a",
+            "on-surface": "#0a1e28",
+            "inverse-primary": "#96cfe7",
+            "secondary-container": "#cee3ef",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-secondary": "#ffffff",
+            "surface-container-low": "#e9f5ff",
+            "on-primary": "#ffffff",
+            "inverse-on-surface": "#e3f3ff",
+            "secondary-fixed": "#d1e6f1",
+            "on-surface-variant": "#40484c",
+            "surface-container-high": "#d7ebfa",
+            "on-secondary-fixed-variant": "#374953",
+            "background": "#f5faff",
+            "surface-variant": "#d1e5f4",
+            "primary": "#003e4f",
+            "primary-fixed-dim": "#96cfe7",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-highest": "#d1e5f4",
+            "on-secondary-container": "#52656f",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#001f29",
+            "on-error": "#ffffff",
+            "on-primary-fixed-variant": "#024d62",
+            "on-background": "#0a1e28",
+            "tertiary": "#00422d",
+            "surface-bright": "#f5faff",
+            "on-secondary-fixed": "#0a1e26",
+            "on-primary-container": "#91cae2",
+            "surface-tint": "#29657b",
+            "surface-container-lowest": "#ffffff",
+            "outline": "#70787c",
+            "primary-container": "#14566b",
+            "surface": "#f5faff"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "margin-desktop": "2rem",
+            "space-sm": "0.5rem",
+            "gutter": "1rem",
+            "space-xs": "0.375rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem"
+          },
+          "fontFamily": {
+            "body-lg": ["Noto Sans"],
+            "label-md": ["Noto Sans"],
+            "headline-lg-mobile": ["Noto Sans"],
+            "display": ["Noto Sans"],
+            "headline-md": ["Noto Sans"],
+            "body-sm-medium": ["Noto Sans"],
+            "body-sm": ["Noto Sans"],
+            "body-lg-medium": ["Noto Sans"],
+            "label-sm": ["Noto Sans"],
+            "headline-lg": ["Noto Sans"],
+            "headline-sm": ["Noto Sans"]
+          },
+          "fontSize": {
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-surface antialiased font-body-sm text-body-sm min-h-screen flex flex-col">
+<!-- Right SideNav Component (Fixed 232px, RTL Right) -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l border-outline-variant flex flex-col justify-between py-space-lg px-space-md">
+<!-- Brand / Lawyer Header -->
+<div class="flex flex-col gap-space-md">
+<div class="flex items-center gap-space-sm pb-space-md border-b border-outline-variant">
+<div class="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center text-primary font-headline-sm text-headline-sm">
+<span class="material-symbols-outlined">balance</span>
+</div>
+<div class="flex flex-col overflow-hidden">
+<span class="font-headline-sm text-headline-sm text-primary truncate">مكتب الأستاذ أحمد ممدوح</span>
+<span class="font-label-sm text-label-sm text-secondary truncate">المحامي بالنقض والاستئناف</span>
+</div>
+</div>
+<!-- Action: إضافة قضية جديدة -->
+<button class="w-full h-[44px] bg-primary-container text-on-primary rounded-lg font-label-md text-label-md flex items-center justify-center gap-space-sm hover:bg-primary transition-colors duration-150" type="button">
+<span class="material-symbols-outlined text-[18px]">add</span>
+<span>إضافة قضية جديدة</span>
+</button>
+<!-- Main Navigation Menu -->
+<nav class="flex flex-col gap-1 mt-2">
+<!-- 0: جدول الجلسات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<!-- 1: ملفات القضايا (Active) -->
+<a aria-current="page" class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-surface-container-low border-r-4 border-primary font-label-md text-label-md rounded-l-lg" href="#">
+<span class="material-symbols-outlined">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<!-- 2: دليل الموكلين -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<!-- 3: المهام الإجرائية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<!-- 4: السجلات والمالية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<!-- 5: الإعدادات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Sidebar Footer -->
+<div class="flex flex-col gap-1 pt-space-md border-t border-outline-variant">
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded-lg" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- TopNavBar Component (Sticky top, offset by right rail) -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b border-outline-variant flex items-center justify-between px-gutter-desktop pr-[248px]">
+<!-- Brand / Product Identity Title -->
+<div class="flex items-center gap-space-md">
+<h1 class="font-headline-md text-headline-md text-primary font-bold">نظام إدارة المكتب الرقمي</h1>
+<!-- Demo Data Badge -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-label-sm font-label-sm bg-surface-container-low text-primary border border-outline-variant">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+        بيئة تجريبية معتمدة
+      </span>
+</div>
+<!-- Actions & Global Utility Search -->
+<div class="flex items-center gap-space-md">
+<!-- Search Input in Top Bar -->
+<div class="relative w-64">
+<input class="w-full h-[40px] pl-9 pr-3 rounded-lg border border-outline-variant bg-surface-container-lowest font-body-sm text-body-sm text-on-surface placeholder:text-outline focus:border-primary-container focus:ring-1 focus:ring-primary-container" placeholder="بحث سريع برقم الملف أو الكود..." type="text"/>
+<span class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
+</div>
+<!-- Action Buttons -->
+<button class="h-[40px] px-3.5 bg-surface-container-lowest border border-primary-container text-primary-container rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors duration-150 flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[18px]">upload_file</span>
+<span>إيداع مستند</span>
+</button>
+<button class="h-[40px] px-3.5 bg-primary-container text-on-primary rounded-lg font-label-md text-label-md hover:bg-primary transition-colors duration-150 flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[18px]">add_circle</span>
+<span>جلسة جديدة</span>
+</button>
+<!-- Utility Icons -->
+<div class="flex items-center gap-1 border-r border-outline-variant pr-2 mr-1">
+<button aria-label="الإشعارات" class="w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors" type="button">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button aria-label="المساعدة" class="w-10 h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors" type="button">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+</div>
+<!-- Profile Avatar -->
+<div class="flex items-center gap-2 pr-1">
+<div class="w-9 h-9 rounded-lg bg-primary text-on-primary flex items-center justify-center font-label-md text-label-md font-bold">
+          أم
+        </div>
+</div>
+</div>
+</header>
+<!-- Main Canvas Container (Pr-[248px] offset for RTL SideNav) -->
+<main class="flex-1 pr-[248px] px-margin-desktop py-space-xl bg-background">
+<div class="max-w-[1360px] mx-auto flex flex-col gap-space-lg">
+<!-- Breadcrumbs & Screen Level Header -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md border-b border-outline-variant pb-space-lg">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2 font-label-sm text-label-sm text-secondary">
+<span>ملفات القضايا</span>
+<span class="material-symbols-outlined text-[14px]">chevron_left</span>
+<span class="text-primary font-medium">سجل ملفات المكتب</span>
+</div>
+<div class="flex items-center gap-space-md">
+<h2 class="font-headline-lg text-headline-lg text-primary font-bold">ملفات المكتب</h2>
+<!-- Quick Subtitle Info -->
+<span class="text-secondary font-body-sm text-body-sm">سجل إدارة ومتابعة الملفات القضائية والتنظيم الورقي بالمقر</span>
+</div>
+</div>
+<!-- Metric Counter Cards -->
+<div class="flex items-center gap-space-sm">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2 flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-surface-container-low text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">folder</span>
+</div>
+<div>
+<span class="block font-label-sm text-label-sm text-secondary">الملفات الجارية</span>
+<span class="block font-headline-sm text-headline-sm text-primary font-bold">٢٨ ملفاً نشطاً</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2 flex items-center gap-3">
+<div class="w-9 h-9 rounded-lg bg-surface-container-high text-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">archive</span>
+</div>
+<div>
+<span class="block font-label-sm text-label-sm text-secondary">الملفات المؤرشفة</span>
+<span class="block font-headline-sm text-headline-sm text-on-surface font-bold">١٤٢ ملفاً</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Advanced Filter & Search Box -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-md">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-space-md items-end">
+<!-- Filter 1: البحث برقم الملف أو اسم الموكل أو الخصم -->
+<div class="flex flex-col gap-1.5 md:col-span-2">
+<label class="font-label-md text-label-md text-on-surface" for="search-term">بحث سريع بالرقم أو الطرف</label>
+<div class="relative">
+<input class="w-full h-[44px] pr-3 pl-9 rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface font-body-sm text-body-sm placeholder:text-outline focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="search-term" placeholder="رقم الملف، كود LO، اسم الموكل، أو اسم الخصم..." type="text" value="LO-2026-001"/>
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[20px]">manage_search</span>
+</div>
+</div>
+<!-- Filter 2: حالة الملف -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="filter-status">حالة الملف القضائي</label>
+<select class="w-full h-[44px] px-3 rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface font-body-sm text-body-sm focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="filter-status">
+<option value="all">جميع الحالات</option>
+<option selected="" value="active">نشط (متداول بالجلسات)</option>
+<option value="archived">مؤرشف / منتهٍ</option>
+<option value="suspended">موقوف مؤقتاً</option>
+</select>
+</div>
+<!-- Filter 3: مكان الحفظ الورقي -->
+<div class="flex flex-col gap-1.5">
+<label class="font-label-md text-label-md text-on-surface" for="filter-location">مكان الحفظ الورقي بالمكتب</label>
+<div class="relative">
+<select class="w-full h-[44px] px-3 rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface font-body-sm text-body-sm focus:border-primary-container focus:ring-1 focus:ring-primary-container" id="filter-location">
+<option value="all">كافة الأرفف والخزائن</option>
+<option selected="" value="shelf-a">الرف أ — خزانة ٢ (الجلسات العاجلة)</option>
+<option value="shelf-b">الرف ب — خزانة ١ (القضايا التجارية)</option>
+<option value="archive-room">غرفة الحفظ العامة — قطاع ج</option>
+</select>
+</div>
+</div>
+</div>
+<!-- Filter Actions and Tags -->
+<div class="mt-space-md pt-space-sm border-t border-outline-variant flex flex-wrap items-center justify-between gap-space-sm">
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-secondary">التصفيات الحالية:</span>
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-label-sm font-label-sm bg-surface-container-low text-primary border border-outline-variant">
+<span>الحالة: نشط</span>
+<button aria-label="إلغاء التصفية" class="text-secondary hover:text-error" type="button"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</span>
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-label-sm font-label-sm bg-surface-container-low text-primary border border-outline-variant">
+<span>المكان: الرف أ — خزانة ٢</span>
+<button aria-label="إلغاء التصفية" class="text-secondary hover:text-error" type="button"><span class="material-symbols-outlined text-[14px]">close</span></button>
+</span>
+<button class="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors underline mr-2" type="button">إعادة ضبط</button>
+</div>
+<div class="flex items-center gap-2 font-label-sm text-label-sm text-secondary">
+<span>إجمالي نتائج البحث المطابقة:</span>
+<span class="font-bold text-primary">٤ ملفات</span>
+</div>
+</div>
+</section>
+<!-- Office Files Master Docket Ledger (Data Table) -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-lg overflow-hidden">
+<!-- Table Header Banner -->
+<div class="px-space-md py-space-sm border-b border-outline-variant flex items-center justify-between bg-surface-bright">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">inventory_2</span>
+<span class="font-label-md text-label-md text-primary">جدول سجل ملفات القضايا والنزاعات</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="h-8 px-2.5 text-secondary hover:text-primary hover:bg-surface-container border border-outline-variant rounded-lg font-label-sm text-label-sm flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[16px]">file_download</span>
+<span>تصدير السجل</span>
+</button>
+<button class="h-8 px-2.5 text-secondary hover:text-primary hover:bg-surface-container border border-outline-variant rounded-lg font-label-sm text-label-sm flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[16px]">print</span>
+<span>طباعة الحصر</span>
+</button>
+</div>
+</div>
+<!-- Scrollable Table Canvas -->
+<div class="overflow-x-auto">
+<table class="w-full text-right border-collapse">
+<thead>
+<tr class="h-[40px] bg-background text-secondary border-b border-outline-variant font-label-md text-label-md">
+<th class="px-space-md w-12 text-center" scope="col">
+<input aria-label="تحديد كافة الملفات" class="w-4 h-4 rounded border-outline text-primary-container focus:ring-primary-container" type="checkbox"/>
+</th>
+<th class="px-space-md" scope="col">كود ملف المكتب</th>
+<th class="px-space-md" scope="col">نوع النزاع / التصنيف</th>
+<th class="px-space-md" scope="col">الموكل</th>
+<th class="px-space-md" scope="col">الخصم</th>
+<th class="px-space-md" scope="col">مكان الحفظ الورقي</th>
+<th class="px-space-md" scope="col">الجلسة أو الموعد التالي</th>
+<th class="px-space-md" scope="col">حالة الملف</th>
+<th class="px-space-md text-center" scope="col">الإجراءات</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant font-body-sm text-body-sm text-on-surface">
+<!-- Primary Focus Item: LO-2026-001 (مطالبة مالية — ملف تجريبي) -->
+<tr class="h-[52px] bg-surface-container-low hover:bg-surface-container transition-colors duration-150">
+<td class="px-space-md text-center">
+<input aria-label="تحديد ملف LO-2026-001" checked="" class="w-4 h-4 rounded border-outline text-primary-container focus:ring-primary-container" type="checkbox"/>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold tracking-wide">LO-2026-001</span>
+<span class="text-xs text-secondary">مطالبة مالية — ملف تجريبي</span>
+</div>
+</td>
+<td class="px-space-md">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container-highest text-on-surface">
+                    تجاري ومدني
+                  </span>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-secondary">person</span>
+<span class="font-body-sm-medium text-body-sm-medium text-on-surface">موكل تجريبي ١</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">corporate_fare</span>
+<span>شركة النيل للمقاولات والاستثمار</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-primary">
+<span class="material-symbols-outlined text-[18px]">shelves</span>
+<span class="font-medium">الرف أ — خزانة ٢</span>
+</div>
+<span class="text-[11px] text-secondary">دوسيه أحمر رقم ١٤</span>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">٢٤ مارس ٢٠٢٦</span>
+<span class="text-xs text-error font-medium">جلسة استلام تقرير الخبير</span>
+</div>
+</td>
+<td class="px-space-md">
+<!-- Active Status Chip -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[4px] text-xs font-semibold bg-[#EDF7F2] text-[#176449] border border-[#82C5A5]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#176449]"></span>
+                    نشط ومتداول
+                  </span>
+</td>
+<td class="px-space-md text-center">
+<div class="flex items-center justify-center gap-1">
+<button class="h-[36px] px-3 bg-primary-container text-on-primary rounded-lg font-label-md text-label-md hover:bg-primary transition-colors flex items-center gap-1" type="button">
+<span>عرض ملف المكتب</span>
+<span class="material-symbols-outlined text-[16px]">arrow_back</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Secondary Row 2 -->
+<tr class="h-[52px] hover:bg-surface-bright transition-colors duration-150">
+<td class="px-space-md text-center">
+<input aria-label="تحديد ملف LO-2026-004" class="w-4 h-4 rounded border-outline text-primary-container focus:ring-primary-container" type="checkbox"/>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold tracking-wide">LO-2026-004</span>
+<span class="text-xs text-secondary">دعوى صحة ونفاذ عقد بيع</span>
+</div>
+</td>
+<td class="px-space-md">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container-highest text-on-surface">
+                    عقاري ومدني
+                  </span>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-secondary">person</span>
+<span class="font-body-sm-medium text-body-sm-medium text-on-surface">أشرف كمال الشناوي</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">person_outline</span>
+<span>ورثة عبد السلام المنشاوي</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[18px]">shelves</span>
+<span>الرف أ — خزانة ٢</span>
+</div>
+<span class="text-[11px] text-secondary">دوسيه أزرق رقم ٠٨</span>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">٢٨ مارس ٢٠٢٦</span>
+<span class="text-xs text-secondary">إعلان بأصل الصحيفة</span>
+</div>
+</td>
+<td class="px-space-md">
+<!-- Urgent Action Chip -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[4px] text-xs font-semibold bg-[#FDF1F1] text-[#A4262C] border border-[#F1A5A9]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#A4262C]"></span>
+                    إجراء عاجل مطلوب
+                  </span>
+</td>
+<td class="px-space-md text-center">
+<button class="h-[36px] px-3 bg-surface-container-lowest border border-primary-container text-primary-container rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors flex items-center gap-1 mx-auto" type="button">
+<span>عرض ملف المكتب</span>
+<span class="material-symbols-outlined text-[16px]">arrow_back</span>
+</button>
+</td>
+</tr>
+<!-- Secondary Row 3 -->
+<tr class="h-[52px] hover:bg-surface-bright transition-colors duration-150">
+<td class="px-space-md text-center">
+<input aria-label="تحديد ملف LO-2025-118" class="w-4 h-4 rounded border-outline text-primary-container focus:ring-primary-container" type="checkbox"/>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold tracking-wide">LO-2025-118</span>
+<span class="text-xs text-secondary">استئناف حكم تعويض عمالي</span>
+</div>
+</td>
+<td class="px-space-md">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container-highest text-on-surface">
+                    عمالي واستئناف
+                  </span>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-secondary">person</span>
+<span class="font-body-sm-medium text-body-sm-medium text-on-surface">محمود صابر الجندي</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">corporate_fare</span>
+<span>شركة الدلتا للصناعات الغذائية</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[18px]">shelves</span>
+<span>الرف أ — خزانة ٢</span>
+</div>
+<span class="text-[11px] text-secondary">دوسيه رمادي رقم ٤١</span>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-medium text-on-surface">٠٢ إبريل ٢٠٢٦</span>
+<span class="text-xs text-secondary">تقديم مذكرات الدفاع</span>
+</div>
+</td>
+<td class="px-space-md">
+<!-- Pending Session Chip -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[4px] text-xs font-semibold bg-[#FFF7E6] text-[#7A4A00] border border-[#E0B46A]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#7A4A00]"></span>
+                    جلسة قادمة
+                  </span>
+</td>
+<td class="px-space-md text-center">
+<button class="h-[36px] px-3 bg-surface-container-lowest border border-primary-container text-primary-container rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors flex items-center gap-1 mx-auto" type="button">
+<span>عرض ملف المكتب</span>
+<span class="material-symbols-outlined text-[16px]">arrow_back</span>
+</button>
+</td>
+</tr>
+<!-- Secondary Row 4 (Archived Example) -->
+<tr class="h-[52px] hover:bg-surface-bright transition-colors duration-150">
+<td class="px-space-md text-center">
+<input aria-label="تحديد ملف LO-2025-089" class="w-4 h-4 rounded border-outline text-primary-container focus:ring-primary-container" type="checkbox"/>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-secondary font-bold tracking-wide">LO-2025-089</span>
+<span class="text-xs text-secondary">فسخ عقد إيجار تجاري</span>
+</div>
+</td>
+<td class="px-space-md">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-surface-container-highest text-on-surface">
+                    إيجارات
+                  </span>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-secondary">person</span>
+<span class="font-body-sm-medium text-body-sm-medium text-secondary">فاطمة حسن الباز</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[16px]">person_outline</span>
+<span>سيد عثمان الروبي</span>
+</div>
+</td>
+<td class="px-space-md">
+<div class="flex items-center gap-1.5 text-secondary">
+<span class="material-symbols-outlined text-[18px]">inventory</span>
+<span>الرف أ — خزانة ٢</span>
+</div>
+<span class="text-[11px] text-secondary">حفظ قطاع منتهٍ</span>
+</td>
+<td class="px-space-md">
+<div class="flex flex-col">
+<span class="text-secondary">تم النطق بالحكم</span>
+<span class="text-xs text-secondary">١٥ يناير ٢٠٢٦</span>
+</div>
+</td>
+<td class="px-space-md">
+<!-- Closed Chip -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[4px] text-xs font-semibold bg-[#F4F6F7] text-[#4D606A] border border-[#D5DFE3]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#4D606A]"></span>
+                    مؤرشف / منتهٍ
+                  </span>
+</td>
+<td class="px-space-md text-center">
+<button class="h-[36px] px-3 bg-surface-container-lowest border border-outline text-secondary rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors flex items-center gap-1 mx-auto" type="button">
+<span>عرض الأرشيف</span>
+<span class="material-symbols-outlined text-[16px]">folder_zip</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Ledger Footer Pagination & Records Info -->
+<div class="px-space-md py-space-sm border-t border-outline-variant bg-surface-bright flex flex-col sm:flex-row items-center justify-between gap-space-sm">
+<div class="flex items-center gap-2 font-label-sm text-label-sm text-secondary">
+<span>عرض ١ - ٤ من أصل ٢٨ ملفاً جارياً</span>
+<span class="mx-1">|</span>
+<label class="sr-only" for="page-size-select">عدد الملفات بالصفحة</label>
+<select class="h-8 py-0 px-2 rounded border border-outline-variant bg-surface-container-lowest text-xs text-secondary focus:ring-0" id="page-size-select">
+<option>١٠ ملفات لكل صفحة</option>
+<option selected="">٢٥ ملفاً لكل صفحة</option>
+<option>٥٠ ملفاً لكل صفحة</option>
+</select>
+</div>
+<!-- Pagination Controls -->
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 rounded border border-outline-variant bg-surface-container-lowest text-secondary opacity-50 flex items-center justify-center cursor-not-allowed" disabled="" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+<button class="w-8 h-8 rounded bg-primary-container text-on-primary font-label-sm text-label-sm flex items-center justify-center" type="button">١</button>
+<button class="w-8 h-8 rounded border border-outline-variant bg-surface-container-lowest text-on-surface font-label-sm text-label-sm hover:bg-surface-container flex items-center justify-center" type="button">٢</button>
+<button class="w-8 h-8 rounded border border-outline-variant bg-surface-container-lowest text-on-surface font-label-sm text-label-sm hover:bg-surface-container flex items-center justify-center" type="button">٣</button>
+<button class="w-8 h-8 rounded border border-outline-variant bg-surface-container-lowest text-secondary flex items-center justify-center hover:bg-surface-container" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Physical Filing Desk Guidelines & Physical Archive Helper Banner -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-lg p-space-md flex flex-col md:flex-row items-start md:items-center justify-between gap-space-md">
+<div class="flex items-start gap-space-md">
+<div class="w-10 h-10 rounded-lg bg-surface-container-low text-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">qr_code_scanner</span>
+</div>
+<div>
+<h3 class="font-headline-sm text-headline-sm text-primary">المطابقة والتسجيل الورقي الفوري</h3>
+<p class="font-body-sm text-body-sm text-secondary mt-0.5">
+              كل ملف يحمل كود تعريف باركود مطابق للدوسيه المادي؛ يمكنك مسح ملصق الحافظة الورقية لفتح السجل الرقمي وتحديث محضر الجلسة تلقائياً.
+            </p>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="h-[40px] px-4 bg-surface-container-lowest border border-primary text-primary rounded-lg font-label-md text-label-md hover:bg-surface-container-low transition-colors duration-150 flex items-center gap-1.5" type="button">
+<span class="material-symbols-outlined text-[18px]">print</span>
+<span>طباعة ملصقات الأرفف والدوسيهات</span>
+</button>
+</div>
+</section>
+</div>
+</main>
+</body></html>

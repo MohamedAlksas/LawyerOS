@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+
+<html dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>شاشة المهام الإجرائية والمتابعات الميدانية - نظام إدارة المكتب الرقمي</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-secondary-fixed": "#0a1e26",
+            "on-primary-fixed": "#001f29",
+            "primary-container": "#14566b",
+            "primary-fixed": "#baeaff",
+            "on-error-container": "#93000a",
+            "on-secondary-container": "#52656f",
+            "error": "#ba1a1a",
+            "outline": "#70787c",
+            "tertiary-container": "#075b41",
+            "primary-fixed-dim": "#96cfe7",
+            "surface-tint": "#29657b",
+            "surface-bright": "#f5faff",
+            "surface-variant": "#d1e5f4",
+            "on-primary": "#ffffff",
+            "surface-container-highest": "#d1e5f4",
+            "on-tertiary-fixed": "#002115",
+            "surface-container-high": "#d7ebfa",
+            "inverse-primary": "#96cfe7",
+            "secondary-fixed-dim": "#b5cad5",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-primary-fixed-variant": "#024d62",
+            "on-secondary": "#ffffff",
+            "background": "#f5faff",
+            "tertiary": "#00422d",
+            "surface-container-lowest": "#ffffff",
+            "on-primary-container": "#91cae2",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "surface-container-low": "#e9f5ff",
+            "secondary": "#4e616b",
+            "on-secondary-fixed-variant": "#374953",
+            "on-tertiary": "#ffffff",
+            "on-surface-variant": "#40484c",
+            "inverse-surface": "#20333e",
+            "on-error": "#ffffff",
+            "error-container": "#ffdad6",
+            "tertiary-fixed": "#a8f2cf",
+            "surface-dim": "#c9ddec",
+            "surface": "#f5faff",
+            "on-surface": "#0a1e28",
+            "on-background": "#0a1e28",
+            "secondary-container": "#cee3ef",
+            "primary": "#003e4f",
+            "surface-container": "#ddf1ff",
+            "inverse-on-surface": "#e3f3ff",
+            "on-tertiary-container": "#88d1af",
+            "secondary-fixed": "#d1e6f1",
+            "outline-variant": "#c0c8cc"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter-desktop": "1.5rem",
+            "space-lg": "1.5rem",
+            "space-md": "1rem",
+            "margin-desktop": "2rem",
+            "space-xl": "2rem",
+            "gutter": "1rem",
+            "margin": "1rem",
+            "space-xs": "0.375rem",
+            "space-sm": "0.5rem"
+          },
+          "fontFamily": {
+            "headline-lg": ["Noto Sans Arabic", "Noto Sans"],
+            "body-lg": ["Noto Sans Arabic", "Noto Sans"],
+            "display": ["Noto Sans Arabic", "Noto Sans"],
+            "body-sm": ["Noto Sans Arabic", "Noto Sans"],
+            "label-md": ["Noto Sans Arabic", "Noto Sans"],
+            "label-sm": ["Noto Sans Arabic", "Noto Sans"],
+            "body-sm-medium": ["Noto Sans Arabic", "Noto Sans"],
+            "headline-lg-mobile": ["Noto Sans Arabic", "Noto Sans"],
+            "headline-md": ["Noto Sans Arabic", "Noto Sans"],
+            "headline-sm": ["Noto Sans Arabic", "Noto Sans"],
+            "body-lg-medium": ["Noto Sans Arabic", "Noto Sans"]
+          },
+          "fontSize": {
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Noto Sans Arabic', sans-serif;
+      background-color: #f5faff;
+      color: #0a1e28;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex flex-col">
+<!-- SideNavBar (Desktop Fixed Right) -->
+<nav class="hidden md:flex flex-col justify-between h-screen w-[232px] py-space-lg px-space-md bg-surface-container-lowest dark:bg-inverse-surface border-l border-outline-variant dark:border-outline fixed top-0 right-0 z-40">
+<div class="flex flex-col gap-space-lg">
+<!-- Header Brand -->
+<div class="flex flex-col gap-space-xs px-space-xs">
+<h1 class="font-headline-md text-headline-md text-primary dark:text-inverse-primary">مكتب الاستاذ أحمد ممدوح</h1>
+<p class="font-body-sm text-on-surface-variant text-xs">المحامي بالنقض والاستئناف</p>
+</div>
+<!-- Navigation Links -->
+<div class="flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 cursor-pointer active:bg-surface-container-high rounded-lg" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 cursor-pointer active:bg-surface-container-high rounded-lg" href="#">
+<span class="material-symbols-outlined">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 cursor-pointer active:bg-surface-container-high rounded-lg" href="#">
+<span class="material-symbols-outlined">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary dark:text-inverse-primary bg-surface-container-low dark:bg-primary-container border-r-4 border-primary dark:border-inverse-primary font-label-md text-label-md rounded-l-lg" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 cursor-pointer active:bg-surface-container-high rounded-lg" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant dark:text-outline-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface dark:hover:bg-primary-container/40 transition-colors duration-150 cursor-pointer active:bg-surface-container-high rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>الإعدادات</span>
+</a>
+</div>
+</div>
+<!-- Footer & CTA -->
+<div class="flex flex-col gap-space-md">
+<button class="w-full bg-primary hover:bg-[#0F3F4F] active:bg-[#0B2F3B] text-white font-label-md text-label-md py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">add</span>
+<span>إضافة قضية جديدة</span>
+</button>
+<div class="border-t border-outline-variant pt-space-md flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md py-space-xs text-on-surface-variant font-label-sm text-label-sm hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined text-sm">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-xs text-error font-label-sm text-label-sm hover:opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined text-sm">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</div>
+</nav>
+<!-- TopNavBar (Sticky Desktop) -->
+<header class="hidden md:flex items-center justify-between h-[64px] px-gutter-desktop w-full pr-[248px] bg-surface-container-lowest dark:bg-inverse-surface border-b border-outline-variant dark:border-outline sticky top-0 z-30">
+<div class="flex items-center gap-space-md">
+<span class="font-headline-sm text-headline-sm text-primary">نظام إدارة المكتب الرقمي</span>
+<span class="bg-surface-container px-2.5 py-1 rounded-full text-xs text-primary font-medium">بيانات تجريبية</span>
+</div>
+<div class="flex items-center gap-space-md">
+<!-- Search -->
+<div class="relative w-64">
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline text-sm">search</span>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded-lg pr-9 pl-3 py-1.5 text-body-sm text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="بحث في المهام أو القضايا..." type="text"/>
+</div>
+<!-- Action Buttons -->
+<button class="bg-white border border-primary text-primary hover:bg-surface-container-low px-3 py-1.5 rounded-lg text-label-md flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-sm">event</span>
+<span>جلسة جديدة</span>
+</button>
+<button class="bg-white border border-outline-variant text-on-surface-variant hover:bg-surface-container-low px-3 py-1.5 rounded-lg text-label-md flex items-center gap-1.5 transition-colors">
+<span class="material-symbols-outlined text-sm">upload_file</span>
+<span>إيداع مستند</span>
+</button>
+<!-- Icons -->
+<div class="flex items-center gap-space-xs border-r border-outline-variant pr-space-md">
+<button class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded-full transition-colors relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1.5 left-1.5 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+</div>
+<!-- Profile -->
+<div class="flex items-center gap-2 pr-space-xs border-r border-outline-variant">
+<div class="w-9 h-9 rounded-full bg-primary-container text-white flex items-center justify-center font-bold text-sm" data-alt="صورة الملف الشخصي للمحامي أحمد ممدوح ترتدي بدلة رسمية أنيقة في مكتب محاماة حديث بإضاءة طبيعية دافئة وأرفف كتب قانونية منظمة في الخلفية" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBCx_o3zVhQyxHYNTLWLeZ1HngZPnIXyRQSjybn79SDhazDJetX3Ao0LcztmCGp6ciMoPZ7FbEnzciLsC1Qkh_0a4eGDd0hlamTqr9nM_XMZ4PJTec6EEc6_UTA1XJcxxJ960yMvunTLMofZqvMfMyMOYWiojPaRhe4cSzAK3HTgTK5yW9TLieMMDRV6dlx-J3QQywyKIoln4MHvHC39nXnN5x7Ab0iVe_IqjDgtkI4vc7LD95EHbJmgVPpm7t77OjGh9dAlEN0tcQx')">
+          أم
+        </div>
+</div>
+</div>
+</header>
+<!-- Main Canvas Wrapper -->
+<main class="flex-1 md:pr-[232px] p-space-lg md:p-space-xl flex flex-col gap-space-lg">
+<!-- Page Title & Status Indicator -->
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md bg-surface-container-lowest p-space-lg rounded-xl border border-outline-variant">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-3">
+<h2 class="font-headline-lg text-headline-lg text-on-surface">المهام الإجرائية والمتابعات الميدانية</h2>
+<span class="px-2.5 py-0.5 rounded text-xs bg-amber-50 text-amber-800 border border-amber-200">وضع بيانات تجريبية</span>
+</div>
+<p class="font-body-sm text-on-surface-variant">متابعة إعلانات المحضرين، صور وأحكام المحاكم، وأمانات الخبراء بدقة متناهية.</p>
+</div>
+<div class="flex items-center gap-space-sm">
+<button class="bg-primary text-white hover:bg-[#0F3F4F] px-4 py-2 rounded-lg text-label-md flex items-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-sm">add_task</span>
+<span>إجراء إضافي جديد</span>
+</button>
+</div>
+</div>
+<!-- Statistics Bento Grid -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-space-md">
+<!-- Stat 1: Ongoing -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl border border-outline-variant flex items-center justify-between">
+<div class="flex flex-col gap-1">
+<span class="text-on-surface-variant font-body-sm">المهام الجارية حالياً</span>
+<span class="font-display text-display text-primary">24</span>
+<span class="text-xs text-emerald-600 flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">trending_up</span>
+<span>+3 منذ أمس</span>
+</span>
+</div>
+<div class="w-12 h-12 rounded-lg bg-surface-container-low text-primary flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">pending_actions</span>
+</div>
+</div>
+<!-- Stat 2: Overdue -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl border border-outline-variant flex items-center justify-between">
+<div class="flex flex-col gap-1">
+<span class="text-on-surface-variant font-body-sm">متجاوزة للأجل المقترح</span>
+<span class="font-display text-display text-error">05</span>
+<span class="text-xs text-error flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">warning</span>
+<span>تتطلب تدخلاً عاجلاً</span>
+</span>
+</div>
+<div class="w-12 h-12 rounded-lg bg-error-container text-error flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">report_problem</span>
+</div>
+</div>
+<!-- Stat 3: Completed -->
+<div class="bg-surface-container-lowest p-space-md rounded-xl border border-outline-variant flex items-center justify-between">
+<div class="flex flex-col gap-1">
+<span class="text-on-surface-variant font-body-sm">المنجزة والموثقة</span>
+<span class="font-display text-display text-tertiary">148</span>
+<span class="text-xs text-tertiary flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">task_alt</span>
+<span>بنسبة إنجاز 92%</span>
+</span>
+</div>
+<div class="w-12 h-12 rounded-lg bg-tertiary-fixed text-on-tertiary-fixed flex items-center justify-center">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">verified</span>
+</div>
+</div>
+</div>
+<!-- Quick Action / Insert New Procedure Form Section -->
+<div class="bg-surface-container-lowest p-space-lg rounded-xl border border-outline-variant flex flex-col gap-space-md">
+<div class="flex items-center justify-between border-b border-outline-variant pb-space-sm">
+<h3 class="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">post_add</span>
+<span>إدراج إجراء تنفيذي جديد</span>
+</h3>
+<span class="text-xs text-outline">حقول إدخال موثقة للسجل المكتبي</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-space-md">
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-on-surface">نوع الإجراء</label>
+<select class="bg-white border border-outline-variant rounded-lg h-[44px] px-3 text-body-sm text-on-surface focus:outline-none focus:border-primary">
+<option>إعلان محاضرين</option>
+<option>صورة رسمية من حكم</option>
+<option>أمانات وخبراء</option>
+<option>تسليم مستندات للقلم</option>
+</select>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-on-surface">رقم القضية / السنة</label>
+<input class="bg-white border border-outline-variant rounded-lg h-[44px] px-3 text-body-sm text-on-surface focus:outline-none focus:border-primary" placeholder="مثال: 1425 لسنة 2023 مدني" type="text"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-on-surface">تاريخ الاستحقاق</label>
+<input class="bg-white border border-outline-variant rounded-lg h-[44px] px-3 text-body-sm text-on-surface focus:outline-none focus:border-primary" type="date"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-md text-on-surface">درجة الأولوية</label>
+<select class="bg-white border border-outline-variant rounded-lg h-[44px] px-3 text-body-sm text-on-surface focus:outline-none focus:border-primary">
+<option class="text-error font-bold">عاجلة</option>
+<option>عادية</option>
+</select>
+</div>
+</div>
+<div class="flex justify-end gap-space-sm pt-2">
+<button class="bg-white border border-outline-variant text-on-surface-variant hover:bg-surface-container-low px-4 py-2 rounded-lg text-label-md transition-colors">إلغاء</button>
+<button class="bg-primary text-white hover:bg-[#0F3F4F] px-5 py-2 rounded-lg text-label-md transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm">save</span>
+<span>حفظ وإضافة للسجل</span>
+</button>
+</div>
+</div>
+<!-- Filter Bar & Field Procedures List -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant flex flex-col overflow-hidden">
+<!-- Toolbar & Filters -->
+<div class="p-space-md border-b border-outline-variant flex flex-col md:flex-row md:items-center justify-between gap-space-md bg-surface-container-low">
+<div class="flex items-center gap-space-xs overflow-x-auto pb-2 md:pb-0">
+<button class="bg-primary text-white px-3.5 py-1.5 rounded-lg text-label-sm font-medium whitespace-nowrap">الكل (18)</button>
+<button class="bg-white border border-outline-variant text-on-surface-variant hover:bg-surface-container px-3.5 py-1.5 rounded-lg text-label-sm whitespace-nowrap transition-colors">إعلانات المحضرين (6)</button>
+<button class="bg-white border border-outline-variant text-on-surface-variant hover:bg-surface-container px-3.5 py-1.5 rounded-lg text-label-sm whitespace-nowrap transition-colors">صور وأحكام (5)</button>
+<button class="bg-white border border-outline-variant text-on-surface-variant hover:bg-surface-container px-3.5 py-1.5 rounded-lg text-label-sm whitespace-nowrap transition-colors">أمانات وخبراء (7)</button>
+</div>
+<div class="flex items-center gap-space-sm">
+<span class="text-xs text-outline">فرز حسب:</span>
+<select class="bg-white border border-outline-variant rounded-lg text-body-sm py-1 px-2 text-on-surface">
+<option>تاريخ الاستحقاق (الأقرب)</option>
+<option>درجة الأولوية (العاجلة أولاً)</option>
+<option>رقم القضية</option>
+</select>
+</div>
+</div>
+<!-- Data Table -->
+<div class="overflow-x-auto">
+<table class="w-full text-right border-collapse">
+<thead>
+<tr class="bg-surface-container-low text-on-surface-variant font-label-md text-label-md border-b border-outline-variant h-[40px]">
+<th class="px-4 py-2">رقم القضية / المحكمة</th>
+<th class="px-4 py-2">نوع الإجراء الميداني / القلمي</th>
+<th class="px-4 py-2">تاريخ الاستحقاق</th>
+<th class="px-4 py-2">درجة الأولوية</th>
+<th class="px-4 py-2">حالة الإنجاز</th>
+<th class="px-4 py-2 text-center">الإجراءات</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<!-- Row 1 (Overdue / Urgent) -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 py-3">
+<div class="font-label-md text-on-surface">قضية رقم 412 لسنة 2023</div>
+<div class="text-xs text-outline">محكمة شمال القاهرة الابتدائية</div>
+</td>
+<td class="px-4 py-3">
+<div class="text-body-sm text-on-surface">إعلان صحيفة دعوى وإيداع أصل التكليف بالحضور</div>
+<span class="text-xs text-outline-variant">إعلانات المحضرين</span>
+</td>
+<td class="px-4 py-3">
+<span class="text-body-sm text-error font-medium">أمس (متجاوز)</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FDF1F1] border border-[#F1A5A9] text-[#A4262C]">عاجلة</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00]">قيد التنفيذ الميداني</span>
+</td>
+<td class="px-4 py-3 text-center">
+<div class="flex items-center justify-center gap-2">
+<button class="p-1 hover:bg-surface-container rounded text-primary" title="تحديث الحالة">
+<span class="material-symbols-outlined text-sm">edit</span>
+</button>
+<button class="p-1 hover:bg-surface-container rounded text-tertiary" title="توثيق الإنجاز">
+<span class="material-symbols-outlined text-sm">done_all</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 py-3">
+<div class="font-label-md text-on-surface">قضية رقم 89 لسنة 2024</div>
+<div class="text-xs text-outline">محكمة استئناف عالي قاهرة</div>
+</td>
+<td class="px-4 py-3">
+<div class="text-body-sm text-on-surface">استلام صورة رسمية معتمدة من الحكم الصادر</div>
+<span class="text-xs text-outline-variant">صور وأحكام</span>
+</td>
+<td class="px-4 py-3">
+<span class="text-body-sm text-on-surface">غداً، 15 أكتوبر</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#F4F6F7] border border-[#D5DFE3] text-[#4D606A]">عادية</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00]">جاري المراجعة بقلم الكتاب</span>
+</td>
+<td class="px-4 py-3 text-center">
+<div class="flex items-center justify-center gap-2">
+<button class="p-1 hover:bg-surface-container rounded text-primary" title="تحديث الحالة">
+<span class="material-symbols-outlined text-sm">edit</span>
+</button>
+<button class="p-1 hover:bg-surface-container rounded text-tertiary" title="توثيق الإنجاز">
+<span class="material-symbols-outlined text-sm">done_all</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 py-3">
+<div class="font-label-md text-on-surface">قضية رقم 1022 لسنة 2022</div>
+<div class="text-xs text-outline">محكمة جنوب القاهرة</div>
+</td>
+<td class="px-4 py-3">
+<div class="text-body-sm text-on-surface">سداد أمانة خبير مكتب الخبراء الهندسيين</div>
+<span class="text-xs text-outline-variant">أمانات وخبراء</span>
+</td>
+<td class="px-4 py-3">
+<span class="text-body-sm text-on-surface">خلال 3 أيام (20 أكتوبر)</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FDF1F1] border border-[#F1A5A9] text-[#A4262C]">عاجلة</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00]">في انتظار إذن الخزينة</span>
+</td>
+<td class="px-4 py-3 text-center">
+<div class="flex items-center justify-center gap-2">
+<button class="p-1 hover:bg-surface-container rounded text-primary" title="تحديث الحالة">
+<span class="material-symbols-outlined text-sm">edit</span>
+</button>
+<button class="p-1 hover:bg-surface-container rounded text-tertiary" title="توثيق الإنجاز">
+<span class="material-symbols-outlined text-sm">done_all</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 4 (Completed) -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px] bg-surface-container-low/30">
+<td class="px-4 py-3">
+<div class="font-label-md text-on-surface">قضية رقم 315 لسنة 2023</div>
+<div class="text-xs text-outline">محكمة الأسرة بمدينة نصر</div>
+</td>
+<td class="px-4 py-3">
+<div class="text-body-sm text-on-surface">قيد إعلان تسوية منازعات أسرية</div>
+<span class="text-xs text-outline-variant">إعلانات المحضرين</span>
+</td>
+<td class="px-4 py-3">
+<span class="text-body-sm text-outline">منذ 3 أيام</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#F4F6F7] border border-[#D5DFE3] text-[#4D606A]">عادية</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#EDF7F2] border border-[#82C5A5] text-[#176449]">منجزة وموثقة</span>
+</td>
+<td class="px-4 py-3 text-center">
+<div class="flex items-center justify-center gap-2">
+<button class="p-1 hover:bg-surface-container rounded text-primary" title="عرض المستند">
+<span class="material-symbols-outlined text-sm">visibility</span>
+</button>
+</div>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-[#F8FAFB] transition-colors h-[48px]">
+<td class="px-4 py-3">
+<div class="font-label-md text-on-surface">قضية رقم 774 لسنة 2023</div>
+<div class="text-xs text-outline">محكمة الجيزة الابتدائية</div>
+</td>
+<td class="px-4 py-3">
+<div class="text-body-sm text-on-surface">استخراج شهادة عدم حصول استئناف</div>
+<span class="text-xs text-outline-variant">صور وأحكام</span>
+</td>
+<td class="px-4 py-3">
+<span class="text-body-sm text-on-surface">25 أكتوبر 2024</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#F4F6F7] border border-[#D5DFE3] text-[#4D606A]">عادية</span>
+</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center px-2.5 py-0.5 rounded text-xs bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00]">قيد المتابعة الميدانية</span>
+</td>
+<td class="px-4 py-3 text-center">
+<div class="flex items-center justify-center gap-2">
+<button class="p-1 hover:bg-surface-container rounded text-primary" title="تحديث الحالة">
+<span class="material-symbols-outlined text-sm">edit</span>
+</button>
+<button class="p-1 hover:bg-surface-container rounded text-tertiary" title="توثيق الإنجاز">
+<span class="material-symbols-outlined text-sm">done_all</span>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination Footer -->
+<div class="p-space-md border-t border-outline-variant flex items-center justify-between bg-surface-container-low text-body-sm">
+<span class="text-on-surface-variant">عرض 1 إلى 5 من أصل 18 إجراء</span>
+<div class="flex items-center gap-1">
+<button class="px-3 py-1 bg-white border border-outline-variant rounded-lg text-on-surface disabled:opacity-50" disabled="">السابق</button>
+<button class="px-3 py-1 bg-primary text-white rounded-lg">1</button>
+<button class="px-3 py-1 bg-white border border-outline-variant rounded-lg text-on-surface hover:bg-surface-container">2</button>
+<button class="px-3 py-1 bg-white border border-outline-variant rounded-lg text-on-surface hover:bg-surface-container">3</button>
+<button class="px-3 py-1 bg-white border border-outline-variant rounded-lg text-on-surface hover:bg-surface-container">التالي</button>
+</div>
+</div>
+</div>
+</main>
+</body></html>
