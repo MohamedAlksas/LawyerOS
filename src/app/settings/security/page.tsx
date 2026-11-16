@@ -33,7 +33,7 @@ export default async function SecuritySettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F4F6F7] p-4 sm:p-8" dir="rtl" lang="ar-EG">
+    <main className="min-h-screen bg-[#F4F6F7] p-4 sm:p-8 overflow-x-hidden" dir="rtl" lang="ar-EG">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
           <nav className="text-xs text-[#4D606A] mb-1">الإعدادات &gt; الأمان</nav>

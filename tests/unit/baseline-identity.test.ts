@@ -7,6 +7,7 @@ import {
   verifySchemaEquivalence,
 } from '@/cli/baseline-identity';
 import type { Client } from 'pg';
+import fs from 'fs';
 
 describe('CLI Baseline Identity Unit Tests (R08)', () => {
   describe('parseCliArgs', () => {
@@ -527,10 +528,35 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
         action_timing: string;
         action_event: string;
         is_row_trigger: boolean;
+        function_body: string;
+        function_language: string;
+        provolatile: string;
+        proisstrict: boolean;
+        proleakproof: boolean;
+        pronargs: number;
+        proretset: boolean;
+        prokind: string;
+        returns_trigger: boolean;
+        trigger_type: number;
+        unconditional: boolean;
+        argument_count: number;
+        argument_bytes: string;
+        not_constraint: boolean;
+        no_transition_tables: boolean;
+        update_columns: string[];
       }
 
+      const bodies = [...fs.readFileSync('prisma/migrations/20261114000000_credential_version/migration.sql', 'utf8')
+        .matchAll(/AS \$\$([\s\S]*?)\$\$;/g)].map((match) => match[1]);
+      const functionAttributes = {
+        function_language: 'plpgsql', provolatile: 'v', proisstrict: false,
+        proleakproof: false, pronargs: 0, proretset: false, prokind: 'f', returns_trigger: true,
+        unconditional: true, argument_count: 0, argument_bytes: '', not_constraint: true,
+        no_transition_tables: true,
+      };
       const triggers: MockTrigger[] = [
         {
+          ...functionAttributes, function_body: bodies[0], trigger_type: 7, update_columns: [],
           trigger_name: 'trg_session_set_credential_version',
           table_name: 'session',
           enabled: 'O',
@@ -543,6 +569,7 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
           is_row_trigger: true,
         },
         {
+          ...functionAttributes, function_body: bodies[1], trigger_type: 17, update_columns: ['password'],
           trigger_name: 'trg_account_password_sync_credential_version',
           table_name: 'account',
           enabled: 'O',
@@ -562,6 +589,9 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
     function createMockClient(catalog: ReturnType<typeof buildValidCatalog>) {
       return {
         query: async (sql: string) => {
+          if (sql.includes('FROM pg_trigger')) {
+            return { rows: catalog.triggers };
+          }
           if (sql.includes('pg_enum')) {
             return { rows: catalog.enums };
           }
@@ -966,7 +996,7 @@ describe('CLI Baseline Identity Unit Tests (R08)', () => {
       const res = await verifySchemaEquivalence(client);
       expect(res.equivalent).toBe(false);
       expect(res.errors).toContain(
-        "Trigger function 'public.trg_account_password_sync_credential_version' missing safe search_path config (expected containing 'search_path=public, pg_catalog', got: [search_path=decoy,public])"
+        "Trigger function 'public.trg_account_password_sync_credential_version' missing safe search_path config (expected exactly 'search_path=public, pg_catalog', got: [search_path=decoy,public])"
       );
     });
   });

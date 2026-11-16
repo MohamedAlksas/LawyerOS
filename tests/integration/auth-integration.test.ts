@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
@@ -68,6 +68,7 @@ async function generateTotpCode(secret: string): Promise<string> {
 }
 
 async function clearGlobalSingletons(): Promise<void> {
+  await globalThis.__lawoffice_prisma?.$disconnect();
   await closeDbPool().catch(() => {});
   const g = globalThis as Record<string, unknown>;
   delete g.__lawoffice_pg_pool;
@@ -3558,6 +3559,206 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       getEnv(true);
     }
   });
+});
+
+describe('R14 atomic credential rotation and application namespace isolation', () => {
+  const password = 'SyntheticR14Password2026!';
+  const newPassword = 'SyntheticR14Replacement2026!';
+  let baseUrl: string;
+  let originalPgOptions: string | undefined;
+  let fixture: Awaited<ReturnType<typeof createDedicatedTestDatabase>>;
+  let owner: Awaited<ReturnType<typeof provisionOwner>>;
+  let ownedRole: string | undefined;
+
+  function request(endpoint: string, body: Record<string, unknown>, cookie = '') {
+    const origin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    return new NextRequest(`${origin}/api/auth/${endpoint}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin, ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function responseCookie(response: Response, name: string): string {
+    const header = response.headers.getSetCookie().find((value) =>
+      value.startsWith(`better-auth.${name}=`) && !value.includes('Max-Age=0')
+    );
+    expect(header).toBeDefined();
+    return header!.split(';')[0];
+  }
+
+  async function signIn(currentPassword = password) {
+    return authRoutePOST(request('sign-in/email', { email: owner.user.email, password: currentPassword }));
+  }
+
+  async function login(currentPassword = password) {
+    const challenge = await signIn(currentPassword);
+    expect(challenge.status).toBe(200);
+    const verification = await authRoutePOST(request('two-factor/verify-totp', {
+      code: await generateTotpCode(owner.totpSecret),
+    }, responseCookie(challenge, 'two_factor')));
+    expect(verification.status).toBe(200);
+    const cookie = responseCookie(verification, 'session_token');
+    expect((await requireActor({ headers: new Headers({ cookie }) })).id).toBe(owner.user.id);
+    return cookie;
+  }
+
+  beforeEach(async () => {
+    baseUrl = process.env.TEST_DATABASE_URL!;
+    originalPgOptions = process.env.PGOPTIONS;
+    delete process.env.PGOPTIONS;
+    await clearGlobalSingletons();
+    fixture = await createDedicatedTestDatabase();
+    process.env.TEST_DATABASE_URL = fixture.url;
+    getEnv(true);
+    for (const migration of ['20261111000000_init_auth', '20261114000000_credential_version']) {
+      await fixture.pool.query(fs.readFileSync(path.resolve('prisma/migrations', migration, 'migration.sql'), 'utf8'));
+    }
+    owner = await provisionOwner({ name: 'مالك اختبار المعاملات', email: 'r14.owner@synthetic.invalid', password });
+    await confirmOwnerProvisioning(owner.user.id, await generateTotpCode(owner.totpSecret));
+  }, 30000);
+
+  afterEach(async () => {
+    await clearGlobalSingletons();
+    if (fixture) await fixture.drop();
+    if (ownedRole) {
+      const admin = new Pool({ connectionString: baseUrl });
+      try {
+        // Only this test's randomly named role; its exclusively owned database is already gone.
+        await admin.query(`DROP ROLE "${ownedRole}"`);
+      } finally {
+        await admin.end();
+        ownedRole = undefined;
+      }
+    }
+    process.env.TEST_DATABASE_URL = baseUrl;
+    if (originalPgOptions === undefined) delete process.env.PGOPTIONS;
+    else process.env.PGOPTIONS = originalPgOptions;
+    getEnv(true);
+  }, 30000);
+
+  it.each(['replacement insert', 'session revocation'] as const)(
+    'R14 atomic rotation rolls back %s failure and permits a coherent retry',
+    async (fault) => {
+      const sessionA = await login();
+      const sessionB = await login();
+      const before = (await fixture.pool.query('SELECT password FROM public.account WHERE "userId"=$1', [owner.user.id])).rows[0];
+      const sessionsBefore = (await fixture.pool.query('SELECT id FROM public.session WHERE "userId"=$1 ORDER BY id', [owner.user.id])).rows;
+      const pending = await signIn();
+      expect(pending.status).toBe(200);
+      const pendingCookie = responseCookie(pending, 'two_factor');
+      const verificationBefore = (await fixture.pool.query('SELECT id FROM public.verification ORDER BY id')).rows;
+
+      await fixture.pool.query(fault === 'replacement insert' ? `
+        CREATE FUNCTION public.r14_rotation_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF (SELECT "credentialVersion" FROM public."user" WHERE id=NEW."userId") > 1 THEN
+            RAISE EXCEPTION 'synthetic replacement insertion fault';
+          END IF;
+          RETURN NEW;
+        END; $$;
+        CREATE TRIGGER r14_rotation_fault BEFORE INSERT ON public.session
+        FOR EACH ROW EXECUTE FUNCTION public.r14_rotation_fault();
+      ` : `
+        CREATE FUNCTION public.r14_rotation_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'synthetic revocation fault'; END; $$;
+        CREATE TRIGGER r14_rotation_fault BEFORE DELETE ON public.session
+        FOR EACH ROW EXECUTE FUNCTION public.r14_rotation_fault();
+      `);
+      try {
+        const result = await authRoutePOST(request('change-password', { currentPassword: password, newPassword }, sessionA));
+        expect(result.status).toBe(500);
+        expect(result.headers.getSetCookie().some((value) => value.startsWith('better-auth.session_token=') && !value.includes('Max-Age=0'))).toBe(false);
+        expect((await fixture.pool.query('SELECT password FROM public.account WHERE "userId"=$1', [owner.user.id])).rows[0].password).toBe(before.password);
+        expect((await fixture.pool.query('SELECT "credentialVersion" FROM public."user" WHERE id=$1', [owner.user.id])).rows[0].credentialVersion).toBe(1);
+        expect((await fixture.pool.query('SELECT id FROM public.session WHERE "userId"=$1 ORDER BY id', [owner.user.id])).rows).toEqual(sessionsBefore);
+        expect((await fixture.pool.query('SELECT id FROM public.verification ORDER BY id')).rows).toEqual(verificationBefore);
+        expect((await requireActor({ headers: new Headers({ cookie: sessionA }) })).id).toBe(owner.user.id);
+        expect((await requireActor({ headers: new Headers({ cookie: sessionB }) })).id).toBe(owner.user.id);
+      } finally {
+        await fixture.pool.query('DROP TRIGGER r14_rotation_fault ON public.session; DROP FUNCTION public.r14_rotation_fault();');
+      }
+      // A failed rotation preserves the old credential and denies the uncommitted new one.
+      expect((await signIn(newPassword)).status).toBe(401);
+      await login();
+      const retry = await authRoutePOST(request('change-password', { currentPassword: password, newPassword }, sessionA));
+      expect(retry.status).toBe(200);
+      const replacement = responseCookie(retry, 'session_token');
+      expect((await requireActor({ headers: new Headers({ cookie: replacement }) })).id).toBe(owner.user.id);
+      expect((await fixture.pool.query('SELECT "credentialVersion" FROM public."user" WHERE id=$1', [owner.user.id])).rows[0].credentialVersion).toBe(2);
+      for (const oldCookie of [sessionA, sessionB]) {
+        await expect(requireActor({ headers: new Headers({ cookie: oldCookie }) })).rejects.toThrow();
+      }
+      const oldProof = await authRoutePOST(request('two-factor/verify-totp', { code: await generateTotpCode(owner.totpSecret) }, pendingCookie));
+      expect(oldProof.status).not.toBe(200);
+      expect((await signIn()).status).toBe(401);
+      await login(newPassword);
+    }, 30000
+  );
+
+  it.each(['PGOPTIONS', 'database default', 'role default'] as const)(
+    'R14 fresh application connections isolate both security triggers under %s',
+    async (setting) => {
+      await fixture.pool.query(`
+        CREATE SCHEMA review_decoy;
+        CREATE TABLE review_decoy."user" (LIKE public."user" INCLUDING ALL);
+        INSERT INTO review_decoy."user" SELECT * FROM public."user";
+        UPDATE review_decoy."user" SET "credentialVersion"=999;
+        CREATE TABLE review_decoy.session (LIKE public.session INCLUDING ALL);
+        CREATE TABLE review_decoy.account (LIKE public.account INCLUDING ALL);
+        INSERT INTO review_decoy.account SELECT * FROM public.account;
+        CREATE TABLE review_decoy.verification (LIKE public.verification INCLUDING ALL);
+        INSERT INTO review_decoy.verification (id,identifier,value,"expiresAt","createdAt","updatedAt")
+        VALUES ('r14-decoy','2fa-cred-ver-r14-decoy','999',NOW()+interval '1 hour',NOW(),NOW());
+      `);
+      const databaseName = new URL(fixture.url).pathname.slice(1);
+      if (setting === 'PGOPTIONS') process.env.PGOPTIONS = '-c search_path=review_decoy,public';
+      if (setting === 'database default') {
+        await fixture.pool.query(`ALTER DATABASE "${databaseName}" SET search_path=review_decoy,public`);
+      }
+      if (setting === 'role default') {
+        ownedRole = `r14_app_${crypto.randomUUID().replace(/-/g, '')}`;
+        await fixture.pool.query(`CREATE ROLE "${ownedRole}" LOGIN PASSWORD 'synthetic-r14-role';
+          GRANT USAGE ON SCHEMA public,review_decoy TO "${ownedRole}";
+          GRANT ALL ON ALL TABLES IN SCHEMA public,review_decoy TO "${ownedRole}";
+          GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "${ownedRole}";
+          ALTER ROLE "${ownedRole}" SET search_path=review_decoy,public;`);
+        const appUrl = new URL(fixture.url);
+        appUrl.username = ownedRole;
+        appUrl.password = 'synthetic-r14-role';
+        process.env.TEST_DATABASE_URL = appUrl.toString();
+      }
+      // Discard every application singleton, so the actual provider and Prisma use new connections.
+      await clearGlobalSingletons();
+      getEnv(true);
+      const prisma = getPrismaClient();
+      const actualPath = await prisma.$queryRawUnsafe<Array<{ search_path: string }>>('SHOW search_path');
+      expect(actualPath[0].search_path.split(',').map((schema) => schema.trim())).toEqual(['review_decoy', 'public']);
+      const unqualified = await prisma.$queryRawUnsafe<Array<{ credentialVersion: number }>>('SELECT "credentialVersion" FROM "user"');
+      expect(unqualified[0].credentialVersion).toBe(999);
+      const session = await login();
+      const pending = await signIn();
+      const pendingCookie = responseCookie(pending, 'two_factor');
+      expect((await fixture.pool.query('SELECT "credentialVersion" FROM public.session WHERE "userId"=$1', [owner.user.id])).rows.every((row) => row.credentialVersion === 1)).toBe(true);
+      const rotation = await authRoutePOST(request('change-password', { currentPassword: password, newPassword }, session));
+      expect(rotation.status).toBe(200);
+      const replacement = responseCookie(rotation, 'session_token');
+      expect((await requireActor({ headers: new Headers({ cookie: replacement }) })).id).toBe(owner.user.id);
+      expect((await fixture.pool.query('SELECT "credentialVersion" FROM public."user" WHERE id=$1', [owner.user.id])).rows[0].credentialVersion).toBe(2);
+      const sessions = (await fixture.pool.query('SELECT "credentialVersion" FROM public.session WHERE "userId"=$1', [owner.user.id])).rows;
+      expect(sessions).toEqual([{ credentialVersion: 2 }]);
+      expect((await fixture.pool.query("SELECT count(*)::int n FROM public.verification WHERE identifier LIKE '2fa-cred-ver-%'")).rows[0].n).toBe(0);
+      await expect(requireActor({ headers: new Headers({ cookie: session }) })).rejects.toThrow();
+      expect((await authRoutePOST(request('two-factor/verify-totp', { code: await generateTotpCode(owner.totpSecret) }, pendingCookie))).status).not.toBe(200);
+      expect((await signIn()).status).toBe(401);
+      await login(newPassword);
+      expect((await fixture.pool.query('SELECT "credentialVersion" FROM review_decoy."user"')).rows[0].credentialVersion).toBe(999);
+      expect((await fixture.pool.query("SELECT count(*)::int n FROM review_decoy.verification WHERE id='r14-decoy'")).rows[0].n).toBe(1);
+      const decoyPassword = (await fixture.pool.query('SELECT password FROM review_decoy.account')).rows[0].password;
+      const { verifyPassword } = await import('better-auth/crypto');
+      expect(await verifyPassword({ hash: decoyPassword, password })).toBe(true);
+    }, 30000
+  );
 });
 
 describe('Test Target Validation & Isolation Guard (R07)', () => {

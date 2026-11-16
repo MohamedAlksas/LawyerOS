@@ -320,7 +320,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     : `حالة الحماية: قيد الإعداد (${actor.name})`}
                 </div>
                 <div className="text-xs text-[#4D606A]">
-                  الحساب: <bdi dir="ltr">{actor.email}</bdi> • تطبيق المصادقة (TOTP) + رموز الاسترداد
+                  الحساب: <bdi dir="ltr" className="break-all">{actor.email}</bdi> • تطبيق المصادقة (TOTP) + رموز الاسترداد
                 </div>
               </div>
             </div>
@@ -375,7 +375,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                   session.isCurrent ? 'bg-blue-50/40' : 'bg-white'
                 }`}
               >
-                <div className="space-y-1">
+                <div className="space-y-1 min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-[#172A35]">
                       {session.isCurrent ? 'الجلسة الحالية' : 'جلسة متصلة'}
@@ -388,11 +388,11 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                   </div>
 
                   <div className="text-xs text-[#4D606A] flex flex-wrap gap-x-4 gap-y-1">
-                    <span>
-                      المتصفح: <bdi dir="ltr">{session.userAgent}</bdi>
+                    <span className="min-w-0 break-all">
+                      المتصفح: <bdi dir="ltr" className="break-all">{session.userAgent}</bdi>
                     </span>
-                    <span>
-                      عنوان IP: <bdi dir="ltr">{session.ipAddress}</bdi>
+                    <span className="min-w-0 break-all">
+                      عنوان IP: <bdi dir="ltr" className="break-all">{session.ipAddress}</bdi>
                     </span>
                     <span>
                       آخر نشاط (توقيت القاهرة): {formatCairoDate(session.updatedAt)}

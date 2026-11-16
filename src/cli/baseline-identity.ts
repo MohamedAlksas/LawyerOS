@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 
 export interface BaselineOptions {
   targetUrl: string;
@@ -958,6 +959,23 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       pn.nspname AS function_schema,
       p.prosecdef,
       p.proconfig,
+      p.prosrc AS function_body,
+      l.lanname AS function_language,
+      p.provolatile,
+      p.proisstrict,
+      p.proleakproof,
+      p.pronargs,
+      p.proretset,
+      p.prokind,
+      p.prorettype = 'pg_catalog.trigger'::regtype AS returns_trigger,
+      t.tgtype::int AS trigger_type,
+      t.tgqual IS NULL AS unconditional,
+      t.tgnargs::int AS argument_count,
+      encode(t.tgargs, 'hex') AS argument_bytes,
+      t.tgconstraint = 0 AS not_constraint,
+      t.tgoldtable IS NULL AND t.tgnewtable IS NULL AS no_transition_tables,
+      ARRAY(SELECT a.attname::text FROM unnest(t.tgattr) WITH ORDINALITY AS col(attnum, ord)
+        JOIN pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = col.attnum ORDER BY col.ord) AS update_columns,
       CASE
         WHEN (t.tgtype & 2) <> 0 THEN 'BEFORE'
         ELSE 'AFTER'
@@ -972,6 +990,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     JOIN pg_class c ON c.oid = t.tgrelid
     JOIN pg_namespace cn ON cn.oid = c.relnamespace
     JOIN pg_proc p ON p.oid = t.tgfoid
+    JOIN pg_language l ON l.oid = p.prolang
     JOIN pg_namespace pn ON pn.oid = p.pronamespace
     WHERE cn.nspname = 'public'
       AND NOT t.tgisinternal
@@ -990,10 +1009,14 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       actionTiming: string;
       actionEvent: string;
       isRowTrigger: boolean;
+      definition: (typeof trgRes.rows)[number];
     }
   >();
 
   for (const row of trgRes.rows) {
+    if (foundTriggers.has(row.trigger_name)) {
+      errors.push(`Duplicate security trigger '${row.trigger_name}'`);
+    }
     foundTriggers.set(row.trigger_name, {
       tableName: row.table_name,
       enabled: String(row.enabled),
@@ -1004,6 +1027,7 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
       actionTiming: row.action_timing,
       actionEvent: row.action_event,
       isRowTrigger: Boolean(row.is_row_trigger),
+      definition: row,
     });
   }
 
@@ -1036,6 +1060,13 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     },
   };
 
+  // Use the shipped migration as the body contract. Compare text conservatively:
+  // changing whitespace inside a SQL string/comment can change behavior, so only
+  // line endings and outer whitespace are normalized. Unknown rewrites fail closed.
+  const canonicalSql = fs.readFileSync(
+    path.resolve(process.cwd(), 'prisma/migrations/20261114000000_credential_version/migration.sql'), 'utf8'
+  );
+  const normalizeBody = (body: string) => body.replace(/\r\n/g, '\n').trim();
   for (const [trgName, expected] of Object.entries(expectedTriggers)) {
     const found = foundTriggers.get(trgName);
     if (!found) {
@@ -1065,13 +1096,34 @@ export async function verifySchemaEquivalence(client: Client): Promise<{ equival
     if (!found.prosecdef) {
       errors.push(`Trigger function '${expected.functionSchema}.${expected.functionName}' must be SECURITY DEFINER`);
     }
-    const hasSafeSearchPath = found.proconfig.some((c) =>
-      c.replace(/\s+/g, ' ').includes(expected.expectedConfigSubstring)
-    );
+    const hasSafeSearchPath = found.proconfig.length === 1 &&
+      found.proconfig[0] === expected.expectedConfigSubstring;
     if (!hasSafeSearchPath) {
       errors.push(
-        `Trigger function '${expected.functionSchema}.${expected.functionName}' missing safe search_path config (expected containing '${expected.expectedConfigSubstring}', got: [${found.proconfig.join(', ')}])`
+        `Trigger function '${expected.functionSchema}.${expected.functionName}' missing safe search_path config (expected exactly '${expected.expectedConfigSubstring}', got: [${found.proconfig.join(', ')}])`
       );
+    }
+    const definition = found.definition;
+    const canonicalBody = canonicalSql.match(new RegExp(
+      `CREATE OR REPLACE FUNCTION public\\.${expected.functionName}\\(\\)[\\s\\S]*?AS \\$\\$([\\s\\S]*?)\\$\\$;`
+    ))?.[1];
+    if (!canonicalBody || typeof definition.function_body !== 'string' ||
+        normalizeBody(definition.function_body) !== normalizeBody(canonicalBody)) {
+      errors.push(`Trigger function '${expected.functionName}' body differs from canonical migration`);
+    }
+    if (definition.function_language !== 'plpgsql' || definition.provolatile !== 'v' ||
+        definition.proisstrict !== false || definition.proleakproof !== false ||
+        Number(definition.pronargs) !== 0 || definition.proretset !== false ||
+        definition.prokind !== 'f' || definition.returns_trigger !== true) {
+      errors.push(`Trigger function '${expected.functionName}' signature or execution attributes differ from canonical migration`);
+    }
+    const expectedColumns = expected.table === 'account' ? ['password'] : [];
+    if (Number(definition.trigger_type) !== (expected.table === 'account' ? 17 : 7) ||
+        definition.unconditional !== true || Number(definition.argument_count) !== 0 ||
+        definition.argument_bytes !== '' || definition.not_constraint !== true ||
+        definition.no_transition_tables !== true ||
+        JSON.stringify(parsePgStringArray(definition.update_columns)) !== JSON.stringify(expectedColumns)) {
+      errors.push(`Trigger '${trgName}' event, columns, predicate or arguments differ from canonical migration`);
     }
   }
 
@@ -1155,11 +1207,19 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
 
     if (hasMigrationsTable) {
       const appliedCheck = await client.query(`
-        SELECT migration_name
+        SELECT migration_name, checksum, finished_at
         FROM _prisma_migrations
-        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;
+        WHERE rolled_back_at IS NULL;
       `);
       for (const r of appliedCheck.rows) {
+        if (['20261111000000_init_auth', '20261114000000_credential_version'].includes(r.migration_name)) {
+          const migrationBytes = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations', r.migration_name, 'migration.sql'));
+          const checksum = createHash('sha256').update(migrationBytes).digest('hex');
+          if (r.checksum !== checksum || !r.finished_at || appliedSet.has(r.migration_name)) {
+            throw new Error(`Unsupported migration history for '${r.migration_name}': checksum mismatch, unfinished or duplicate entry. Refusing schema changes; inspect and resolve the history manually.`);
+          }
+        }
+        if (!r.finished_at) continue;
         appliedSet.add(r.migration_name);
       }
 

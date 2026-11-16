@@ -1,12 +1,12 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Request, type Locator } from '@playwright/test';
 import { hashPassword, symmetricEncrypt } from 'better-auth/crypto';
 import { createOTP } from '@better-auth/utils/otp';
 import { base32 } from '@better-auth/utils/base32';
-import { randomUUID, randomBytes } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { createValidatedTestPool, cleanupTrackedFixtures } from '../helpers/test-db';
 
 const runId = `${Date.now()}.${randomUUID().slice(0, 8)}`;
-const TEST_EMAIL = `lawyer.r11.${runId}@office.eg`;
+let testEmail: string;
 const TEST_PASSWORD = 'E2EPassword2026!';
 const TOTP_SECRET = 'SZ7CE4ZHNWC37XUUQ5S4HNQLL6SNJ6XT';
 const BACKUP_CODE = 'bkp01-code2';
@@ -28,12 +28,12 @@ test.beforeEach(async () => {
       data: JSON.stringify([BACKUP_CODE, 'bkp02-code3', 'bkp03-code4']),
     });
 
-    if (!testUserId) {
+    testEmail = `lawyer.r14.${runId}.${randomUUID()}@office.eg`;
       testUserId = randomUUID();
       trackedFixtureUserIds.push(testUserId);
       await client.query(
         'INSERT INTO "user" (id, name, email, "emailVerified", role, "twoFactorEnabled", "createdAt", "updatedAt") VALUES ($1, $2, $3, true, $4, true, NOW(), NOW())',
-        [testUserId, 'المحامي التجريبي للمرحلة 11', TEST_EMAIL, 'OWNER']
+        [testUserId, 'المحامي التجريبي للمرحلة 14', testEmail, 'OWNER']
       );
       await client.query(
         'INSERT INTO "account" (id, "userId", "providerId", "accountId", password, "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, NOW(), NOW())',
@@ -43,16 +43,6 @@ test.beforeEach(async () => {
         'INSERT INTO "twoFactor" (id, "userId", secret, "backupCodes", verified) VALUES ($1, $2, $3, $4, true)',
         [randomUUID(), testUserId, encryptedSecret, encryptedBackupCodes]
       );
-    } else {
-      await client.query('UPDATE "account" SET password = $1 WHERE "userId" = $2', [
-        hashedPassword,
-        testUserId,
-      ]);
-      await client.query(
-        'UPDATE "twoFactor" SET secret = $1, "backupCodes" = $2, verified = true, "failedVerificationCount" = 0, "lockedUntil" = null WHERE "userId" = $3',
-        [encryptedSecret, encryptedBackupCodes, testUserId]
-      );
-    }
   } finally {
     client.release();
     await pool.end();
@@ -70,7 +60,7 @@ test.afterAll(async () => {
 
 async function loginAndCompleteMfa(page: Page) {
   await page.goto('/login');
-  await page.fill('#email', TEST_EMAIL);
+  await page.fill('#email', testEmail);
   await page.fill('#password', TEST_PASSWORD);
   await page.click('button[type="submit"]');
 
@@ -84,6 +74,104 @@ async function loginAndCompleteMfa(page: Page) {
   await page.click('button[type="submit"]');
 
   await page.waitForURL((url: URL) => !url.pathname.includes('/verify') && !url.pathname.includes('/login'));
+}
+
+const regenerateLabel = 'إعادة توليد رموز الاسترداد';
+const generateLabel = 'توليد رموز جديدة';
+const savedLabel = 'تم الحفظ والإغلاق';
+
+function isRecoveryAction(request: Request): boolean {
+  return request.method() === 'POST' &&
+    new URL(request.url()).pathname === '/settings/security' &&
+    Boolean(request.headers()['next-action']);
+}
+
+async function storedRecoveryCodes(): Promise<string> {
+  const { pool } = createValidatedTestPool();
+  try {
+    const result = await pool.query<{ backupCodes: string }>(
+      'SELECT "backupCodes" FROM "twoFactor" WHERE "userId" = $1', [testUserId]
+    );
+    expect(result.rowCount).toBe(1);
+    return result.rows[0].backupCodes;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function installActionConsumptionObserver(page: Page) {
+  // Observe the actual browser reader reaching EOF, not only network arrival.
+  // The action payload and its authentication semantics are left unchanged.
+  await page.addInitScript(() => {
+    const state = window as unknown as { completedActionBodies: number };
+    state.completedActionBodies = 0;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args);
+      const headers = new Headers(args[1]?.headers);
+      if (!headers.has('next-action') || !response.body) return response;
+      const observedBody = response.body.pipeThrough(new TransformStream({
+        transform(chunk, controller) { controller.enqueue(chunk); },
+        flush() { state.completedActionBodies += 1; },
+      }));
+      return new Response(observedBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    };
+  });
+}
+
+async function waitForActionConsumption(page: Page, count: number) {
+  await page.waitForFunction((expected) =>
+    (window as unknown as { completedActionBodies: number }).completedActionBodies === expected,
+  count);
+  // Let React render the consumed action result before checking absence of stale UI.
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
+async function assertDialogReflow(page: Page, dialog: Locator) {
+  await expect(dialog).toBeVisible();
+  const geometry = await dialog.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return {
+      left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+      width: innerWidth, height: innerHeight,
+      dialogScroll: element.scrollWidth, dialogClient: element.clientWidth,
+      documentScroll: document.documentElement.scrollWidth,
+      documentClient: document.documentElement.clientWidth,
+    };
+  });
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.width + 1);
+  expect(geometry.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.height + 1);
+  expect(geometry.dialogScroll).toBeLessThanOrEqual(geometry.dialogClient + 1);
+  expect(geometry.documentScroll).toBeLessThanOrEqual(geometry.documentClient + 1);
+
+  // Vertical scrolling is allowed. Every relevant control/text must be reachable,
+  // horizontally contained, and hit-testable rather than merely present.
+  const contents = dialog.locator('h3, p, input, button, [role="alert"], [dir="ltr"] > div');
+  for (const item of await contents.all()) {
+    await item.scrollIntoViewIfNeeded();
+    await expect(item).toBeInViewport();
+    const reachable = await item.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const parentBox = element.closest('[role="dialog"]')!.getBoundingClientRect();
+      const hit = document.elementFromPoint((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+      return box.left >= parentBox.left && box.right <= parentBox.right + 1 &&
+        (element === hit || element.contains(hit));
+    });
+    expect(reachable).toBe(true);
+  }
+  const controls = dialog.locator('button:not([disabled]), input:not([disabled])');
+  await controls.first().focus();
+  for (let i = 0; i <= await controls.count(); i++) {
+    await page.keyboard.press('Tab');
+    expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  }
 }
 
 test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence (R11-04)', () => {
@@ -166,309 +254,204 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     expect(alertText).not.toContain('stack');
   });
 
-  test('Latin, Arabic-Indic, and Persian OTP input, leading zeroes, complete long/malformed/paste feedback and protected login', async ({ page, context }) => {
-    // Grant clipboard permissions for genuine clipboard paste testing
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-
+  test('OTP validation rejects malformed, short and long codes', async ({ page }) => {
     await page.goto('/login');
-    await page.fill('#email', TEST_EMAIL);
+    await page.fill('#email', testEmail);
     await page.fill('#password', TEST_PASSWORD);
-    await page.click('button[type="submit"]');
-
+    await page.locator('button[type="submit"]').click();
     await page.waitForURL('**/verify*');
-    await expect(page.locator('h1')).toContainText('التحقق الثنائي');
-
-    // 1. Malformed non-digit letters feedback
-    await page.fill('#totpCode', 'abc123');
-    await page.click('button[type="submit"]');
-    let alert = page.locator('div[role="alert"]:not(#__next-route-announcer__)');
-    await expect(alert).toBeVisible();
-    await expect(alert).toContainText('رمز التحقق يجب أن يحتوي على أرقام فقط.');
-
-    // 2. Too short feedback (< 6 digits)
-    await page.fill('#totpCode', '123');
-    await page.click('button[type="submit"]');
-    alert = page.locator('div[role="alert"]:not(#__next-route-announcer__)');
-    await expect(alert).toBeVisible();
-    await expect(alert).toContainText('رمز التحقق غير مكتمل');
-
-    // 3. Too long feedback (> 6 digits)
-    await page.fill('#totpCode', '1234567');
-    await page.click('button[type="submit"]');
-    alert = page.locator('div[role="alert"]:not(#__next-route-announcer__)');
-    await expect(alert).toBeVisible();
-    await expect(alert).toContainText('رمز التحقق يجب ألا يتجاوز 6 أرقام.');
-
-    // 4. Invalid 6-digit code feedback
-    await page.fill('#totpCode', '999999');
-    await page.click('button[type="submit"]');
-    alert = page.locator('div[role="alert"]:not(#__next-route-announcer__)');
-    await expect(alert).toBeVisible();
-    await expect(alert).toContainText('رمز التحقق غير صحيح أو انتهت صلاحيته.');
-
-    // 5. Deterministic genuine Base32 secret whose current window TOTP code starts with '0'
-    let zeroSecretB32 = '';
-    let leadingZeroTotp = '';
-    for (let i = 0; i < 100; i++) {
-      const raw = randomBytes(20);
-      const b32 = base32.encode(raw).replace(/=/g, '');
-      const otp = createOTP(raw, { period: 30, digits: 6 });
-      const code = await otp.totp();
-      if (code.startsWith('0')) {
-        zeroSecretB32 = b32;
-        leadingZeroTotp = code;
-        break;
-      }
+    for (const [input, message] of [
+      ['abc123', 'رمز التحقق يجب أن يحتوي على أرقام فقط.'],
+      ['123', 'رمز التحقق غير مكتمل'],
+      ['1234567', 'رمز التحقق يجب ألا يتجاوز 6 أرقام.'],
+    ]) {
+      await page.locator('#totpCode').fill(input);
+      await page.locator('button[type="submit"]').click();
+      await expect(page.locator('main div[role="alert"]')).toContainText(message);
     }
-    expect(leadingZeroTotp.startsWith('0')).toBe(true);
-
-    // Update user's twoFactor secret in PostgreSQL to the verified leading-zero secret
-    const { pool, env } = createValidatedTestPool();
-    const client = await pool.connect();
-    try {
-      const encryptedSecret = await symmetricEncrypt({
-        key: env.BETTER_AUTH_SECRET,
-        data: 'base32:' + zeroSecretB32,
-      });
-      await client.query(
-        'UPDATE "twoFactor" SET secret = $1, verified = true, "failedVerificationCount" = 0, "lockedUntil" = null WHERE "userId" = $2',
-        [encryptedSecret, testUserId]
-      );
-    } finally {
-      client.release();
-      await pool.end();
-    }
-
-    // 6. Test genuine clipboard paste via navigator.clipboard and native keyboard shortcut
-    await page.locator('#totpCode').fill('');
-    await page.evaluate((text) => navigator.clipboard.writeText(text), leadingZeroTotp);
-    await page.locator('#totpCode').focus();
-    const pasteKey = process.platform === 'darwin' ? 'Meta+v' : 'Control+v';
-    await page.keyboard.press(pasteKey);
-    await expect(page.locator('#totpCode')).toHaveValue(leadingZeroTotp);
-    await expect(page.locator('text=6/6')).toBeVisible();
-
-    // 7. Test Eastern Arabic-Indic numerals with leading zero (٠xxxxx)
-    const easternArabicLeadingZero = leadingZeroTotp.replace(/\d/g, (d) =>
-      String.fromCharCode(0x0660 + parseInt(d, 10))
-    );
-    expect(easternArabicLeadingZero.startsWith('٠')).toBe(true);
-    await page.fill('#totpCode', easternArabicLeadingZero);
-    await expect(page.locator('#totpCode')).toHaveValue(easternArabicLeadingZero);
-
-    // 8. Test Persian numerals with leading zero (۰xxxxx) and authenticate
-    const persianLeadingZero = leadingZeroTotp.replace(/\d/g, (d) =>
-      String.fromCharCode(0x06f0 + parseInt(d, 10))
-    );
-    expect(persianLeadingZero.startsWith('۰')).toBe(true);
-    await page.fill('#totpCode', persianLeadingZero);
-    await page.click('button[type="submit"]');
-
-    // Successfully authenticates and navigates to protected application
-    await page.waitForURL((url: URL) => !url.pathname.includes('/verify') && !url.pathname.includes('/login'));
-
-    await page.goto('/settings/security');
-    await expect(page.locator('h1')).toContainText('الأمان وإدارة الجلسات');
+    const otp = createOTP(base32.decode(TOTP_SECRET), { period: 30, digits: 6 });
+    const counter = Math.floor(Date.now() / 30000);
+    const valid = await Promise.all([-1, 0, 1, 2].map((offset) => otp.hotp(counter + offset)));
+    let wrong = '000000';
+    while (valid.includes(wrong)) wrong = String(Number(wrong) + 1).padStart(6, '0');
+    await page.locator('#totpCode').fill(wrong);
+    await page.locator('button[type="submit"]').click();
+    await expect(page.locator('main div[role="alert"]')).toContainText('رمز التحقق غير صحيح أو انتهت صلاحيته.');
   });
 
-  test('committed generation response held across dismissal and reopen', async ({ page }) => {
-    await loginAndCompleteMfa(page);
-
-    await page.goto('/settings/security');
-    await expect(page.locator('h1')).toContainText('الأمان وإدارة الجلسات');
-
-    // 1. Test committed delayed success response across dismissal and reopen
-    await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
-    const dialog = page.locator('div[role="dialog"]');
-    await expect(dialog).toBeVisible();
-
-    // Fill valid current password
-    await page.fill('#currentPassword', TEST_PASSWORD);
-
-    // Set up route interception barrier using route.fetch() to observe backend execution/commit
-    let releaseBarrier: (() => void) | null = null;
-    const responseBarrier = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-
-    await page.route('**/*', async (route) => {
-      const req = route.request();
-      const url = req.url();
-      const isAction =
-        req.method() === 'POST' &&
-        (url.includes('/settings/security') || url.includes('generate-backup-codes'));
-      if (isAction) {
-        // Fetch real backend response first (observes backend execution and commit)
-        const response = await route.fetch();
-        // Hold response at barrier
-        await responseBarrier;
-        await route.fulfill({ response });
-      } else {
-        await route.continue().catch(() => {});
-      }
-    });
-
-    // Actually submit the request to generate backup codes
-    await page.click('button[type="submit"]:has-text("توليد رموز جديدة")');
-
-    // While response is held in-flight at barrier, dismiss modal via Escape key
-    await page.keyboard.press('Escape');
-    await expect(dialog).not.toBeVisible();
-
-    // Reopen modal
-    await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
-    await expect(dialog).toBeVisible();
-
-    // Assert modal is reset with empty password and enabled submit button
-    await expect(page.locator('#currentPassword')).toHaveValue('');
-    await expect(dialog.locator('button[type="submit"]:has-text("توليد رموز جديدة")')).toBeEnabled();
-
-    // Release the held backend response
-    if (releaseBarrier) {
-      (releaseBarrier as () => void)();
-    }
-    await page.waitForTimeout(600);
-
-    // Assert late response is discarded:
-    // Zero recovery codes rendered (count === 0), no confirmation button rendered
-    expect(await dialog.locator('button:has-text("تم الحفظ بنجاح، إغلاق النافذة")').count()).toBe(0);
-    expect(await dialog.locator('code').count()).toBe(0);
-
-    // 2. Test late expected error handling across dismissal and reopen
-    await page.unroute('**/*');
-
-    let releaseErrBarrier: (() => void) | null = null;
-    const errorBarrier = new Promise<void>((resolve) => {
-      releaseErrBarrier = resolve;
-    });
-
-    await page.route('**/*', async (route) => {
-      const req = route.request();
-      const url = req.url();
-      const isAction =
-        req.method() === 'POST' &&
-        (url.includes('/settings/security') || url.includes('generate-backup-codes'));
-      if (isAction) {
-        const response = await route.fetch();
-        await errorBarrier;
-        await route.fulfill({ response });
-      } else {
-        await route.continue().catch(() => {});
-      }
-    });
-
-    // Enter wrong password
-    await page.fill('#currentPassword', 'WrongPass999!');
-    await page.click('button[type="submit"]:has-text("توليد رموز جديدة")');
-
-    // Dismiss modal while error response is held
-    await page.keyboard.press('Escape');
-    await expect(dialog).not.toBeVisible();
-
-    // Reopen modal
-    await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
-    await expect(dialog).toBeVisible();
-
-    // Release error barrier
-    if (releaseErrBarrier) {
-      (releaseErrBarrier as () => void)();
-    }
-    await page.waitForTimeout(600);
-
-    // Assert late error is discarded: no alert shown, password input is empty, and new attempt can be made
-    expect(await dialog.locator('div[role="alert"]').count()).toBe(0);
-    await expect(page.locator('#currentPassword')).toHaveValue('');
-    await expect(dialog.locator('button[type="submit"]:has-text("توليد رموز جديدة")')).toBeEnabled();
-
-    await page.unroute('**/*');
-  });
-
-  test('responsive reflow with focus containment, Escape key, and 200% text scaling across 1440px, 768px, and 390px viewports', async ({ page }) => {
-    await loginAndCompleteMfa(page);
-
-    const viewports = [
-      { width: 1440, height: 900, name: 'desktop' },
-      { width: 768, height: 1024, name: 'tablet' },
-      { width: 390, height: 844, name: 'mobile' },
-    ];
-
-    for (const vp of viewports) {
-      await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto('/settings/security');
-      await expect(page.locator('h1')).toContainText('الأمان وإدارة الجلسات');
-
-      // Verify RTL layout attribute
-      const mainEl = page.locator('main');
-      await expect(mainEl).toHaveAttribute('dir', 'rtl');
-
-      // Open the modal dialog
-      await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
-      const dialog = page.locator('div[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Test focus containment inside dialog (Tab cycling stays within dialog elements)
-      await page.locator('#currentPassword').focus();
-      for (let i = 0; i < 5; i++) {
-        await page.keyboard.press('Tab');
-        const isContained = await dialog.evaluate((el) => el.contains(document.activeElement));
-        expect(isContained).toBe(true);
-      }
-
-      // Test Escape key dismisses the dialog
-      await page.keyboard.press('Escape');
-      await expect(dialog).not.toBeVisible();
-
-      // Reopen dialog to test 200% text scaling on dialog, inputs, and error alerts
-      await page.click('button:has-text("إعادة توليد رموز الاسترداد")');
-      await expect(dialog).toBeVisible();
-
-      // Trigger an error alert in modal
-      await page.fill('#currentPassword', 'WrongPass123!');
-      await page.click('button[type="submit"]:has-text("توليد رموز جديدة")');
-      const alert = dialog.locator('div[role="alert"]');
-      await expect(alert).toBeVisible();
-
-      // Apply 200% text scaling on the security modal dialog
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = '200%';
-      });
-      await page.waitForTimeout(100);
-
-      // Verify dialog and alert remain visible and properly reflowed without overflow clipping
-      await expect(dialog).toBeVisible();
-      await expect(alert).toBeVisible();
-      await expect(dialog.locator('#currentPassword')).toBeVisible();
-      await expect(dialog.locator('button[type="submit"]')).toBeVisible();
-
-      // Reset zoom
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = '';
-      });
-
-      // Dismiss dialog
-      await page.keyboard.press('Escape');
-      await expect(dialog).not.toBeVisible();
-
-      // Test 200% text scaling on login screen
+  for (const numeral of [{ name: 'Latin', zero: 0x30 }, { name: 'Arabic-Indic', zero: 0x0660 }, { name: 'Persian', zero: 0x06f0 }]) {
+    test('authenticates genuine leading-zero ' + numeral.name + ' TOTP with native paste', async ({ page, context }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
       await page.goto('/login');
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = '200%';
+      await page.fill('#email', testEmail);
+      await page.fill('#password', TEST_PASSWORD);
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL('**/verify*');
+      // Deterministic fixture search at real time. Provider +/-1 verification keeps
+      // this genuine code valid across the next 30-second boundary.
+      const counter = Math.floor(Date.now() / 30000);
+      let secret: Uint8Array = new Uint8Array();
+      let code = '';
+      for (let candidate = 0; candidate < 10000; candidate++) {
+        secret = createHash('sha256').update('r14:' + counter + ':' + candidate).digest();
+        code = await createOTP(secret, { period: 30, digits: 6 }).hotp(counter);
+        if (code.startsWith('0')) break;
+      }
+      expect(code).toMatch(/^0[0-9]{5}$/);
+      const { pool, env } = createValidatedTestPool();
+      try {
+        const encrypted = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'base32:' + base32.encode(secret).replace(/=/g, '') });
+        await pool.query('UPDATE "twoFactor" SET secret = $1 WHERE "userId" = $2', [encrypted, testUserId]);
+      } finally { await pool.end(); }
+      const localized = code.replace(/[0-9]/g, (digit) => String.fromCharCode(numeral.zero + Number(digit)));
+      expect(localized.startsWith(String.fromCharCode(numeral.zero))).toBe(true);
+      await page.evaluate((text) => navigator.clipboard.writeText(text), localized);
+      await page.locator('#totpCode').focus();
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+v' : 'Control+v');
+      await expect(page.locator('#totpCode')).toHaveValue(localized);
+      await expect(page.getByText('6/6', { exact: true })).toBeVisible();
+      expect(Math.floor(Date.now() / 30000) - counter).toBeLessThanOrEqual(1);
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL((url) => !['/login', '/verify'].includes(url.pathname));
+      await page.goto('/settings/security');
+      await expect(page.getByRole('heading', { level: 1 })).toContainText('الأمان وإدارة الجلسات');
+    });
+  }
+
+  for (const result of ['success', 'error'] as const) {
+    test('discards committed held ' + result + ' after dismissal and permits a fresh retry', async ({ page }) => {
+      await installActionConsumptionObserver(page);
+      await loginAndCompleteMfa(page);
+      await page.goto('/settings/security');
+      await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+      const dialog = page.getByRole('dialog');
+      const before = await storedRecoveryCodes();
+      let release!: () => void;
+      const hold = new Promise<void>((resolve) => { release = resolve; });
+      let complete!: () => void;
+      let fail!: (error: unknown) => void;
+      const committed = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+      let intercepted = 0;
+      await page.route('**/settings/security', async (route) => {
+        if (!isRecoveryAction(route.request())) return route.continue();
+        intercepted++;
+        try {
+          const response = await route.fetch();
+          expect(response.status()).toBe(200);
+          const body = await response.text();
+          if (result === 'success') {
+            expect(body).toContain('"success":true');
+            expect(body).toContain('"backupCodes":[');
+            expect(await storedRecoveryCodes()).not.toBe(before);
+          } else {
+            expect(body).toContain('"success":false');
+            expect(body).toContain('INVALID_PASSWORD');
+            expect(await storedRecoveryCodes()).toBe(before);
+          }
+          complete();
+          await hold;
+          await route.fulfill({ response });
+        } catch (error) { fail(error); throw error; }
       });
+      try {
+        await dialog.getByLabel('كلمة المرور الحالية').fill(result === 'success' ? TEST_PASSWORD : 'WrongPass999!');
+        await dialog.getByRole('button', { name: generateLabel, exact: true }).click();
+        await committed;
+        expect(intercepted).toBe(1);
+        await expect(dialog.getByRole('button', { name: 'جارٍ التحقق...' })).toBeDisabled();
+        await page.keyboard.press('Escape');
+        await expect(dialog).not.toBeVisible();
+        await expect(page.getByRole('button', { name: regenerateLabel, exact: true })).toBeFocused();
+        await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+        await expect(dialog.getByLabel('كلمة المرور الحالية')).toHaveValue('');
+        const delivered = page.waitForResponse((response) => isRecoveryAction(response.request()));
+        release();
+        expect(await (await delivered).finished()).toBeNull();
+        await waitForActionConsumption(page, 1);
+        await expect(dialog.getByRole('alert')).toHaveCount(0);
+        await expect(dialog.getByRole('button', { name: savedLabel })).toHaveCount(0);
+        await expect(dialog.locator('[dir="ltr"]')).toHaveCount(0);
+        await expect(dialog.getByLabel('كلمة المرور الحالية')).toHaveValue('');
+      } finally { release(); await page.unroute('**/settings/security'); }
+      // The next genuine action on the same client queue also proves the earlier
+      // action completed and did not leave the modal stuck or stale.
+      await dialog.getByLabel('كلمة المرور الحالية').fill(TEST_PASSWORD);
+      await dialog.getByRole('button', { name: generateLabel, exact: true }).click();
+      await expect(dialog.getByRole('button', { name: savedLabel })).toBeVisible();
+      await expect(dialog.locator('[dir="ltr"] > div')).toHaveCount(10);
+      await waitForActionConsumption(page, 2);
+      await expect(dialog.getByRole('alert')).toHaveCount(0);
+      await dialog.getByRole('button', { name: savedLabel }).click();
+      await expect(dialog).not.toBeVisible();
+    });
+  }
 
-      // Verify zero horizontal scroll overflow blowout on login page
-      const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-      const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
-      expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+  test('navigation after backend commit discards held recovery response', async ({ page }) => {
+    await loginAndCompleteMfa(page);
+    await page.goto('/settings/security');
+    const before = await storedRecoveryCodes();
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    let complete!: () => void;
+    let fail!: (error: unknown) => void;
+    const committed = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    let delivered!: () => void;
+    const delivery = new Promise<void>((resolve) => { delivered = resolve; });
+    await page.route('**/settings/security', async (route) => {
+      if (!isRecoveryAction(route.request())) return route.continue();
+      try {
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        expect(await response.text()).toContain('"success":true');
+        expect(await storedRecoveryCodes()).not.toBe(before);
+        complete();
+        await hold;
+        await route.fulfill({ response }).catch((error: Error) => {
+          expect(error.message).toMatch(/closed|cancel|invalid interception|target/i);
+        });
+        delivered();
+      } catch (error) { fail(error); throw error; }
+    });
+    try {
+      await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+      await page.getByLabel('كلمة المرور الحالية').fill(TEST_PASSWORD);
+      await page.getByRole('button', { name: generateLabel, exact: true }).click();
+      await committed;
+      await page.goto('/');
+      release();
+      await delivery;
+    } finally { release(); await page.unroute('**/settings/security'); }
+    await page.goto('/settings/security');
+    await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+    await expect(page.getByLabel('كلمة المرور الحالية')).toHaveValue('');
+    await expect(page.getByRole('button', { name: savedLabel })).toHaveCount(0);
+  });
 
-      await expect(page.locator('#email')).toBeVisible();
-      await expect(page.locator('#password')).toBeVisible();
-      await expect(page.locator('button[type="submit"]')).toBeVisible();
-
-      // Reset zoom
-      await page.evaluate(() => {
-        document.documentElement.style.fontSize = '';
-      });
-    }
+  test('security dialog error and success reflow at 200% with keyboard focus and Escape', async ({ page }, testInfo) => {
+    await loginAndCompleteMfa(page);
+    await page.goto('/settings/security');
+    await expect(page.locator('main')).toHaveAttribute('dir', 'rtl');
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByLabel('كلمة المرور الحالية')).toBeFocused();
+    await dialog.getByLabel('كلمة المرور الحالية').fill('WrongPass999!');
+    await dialog.getByRole('button', { name: generateLabel, exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('كلمة المرور الحالية غير صحيحة');
+    await assertDialogReflow(page, dialog);
+    await page.screenshot({ path: 'work/t03-r14-fix/dialog-error-' + testInfo.project.name + '.png' });
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole('button', { name: regenerateLabel, exact: true })).toBeFocused();
+    await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
+    await dialog.getByLabel('كلمة المرور الحالية').fill(TEST_PASSWORD);
+    await dialog.getByRole('button', { name: generateLabel, exact: true }).click();
+    await expect(dialog.getByRole('button', { name: savedLabel })).toBeVisible();
+    await expect(dialog.locator('[dir="ltr"] > div')).toHaveCount(10);
+    await assertDialogReflow(page, dialog);
+    await page.screenshot({ path: 'work/t03-r14-fix/dialog-success-' + testInfo.project.name + '.png' });
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole('button', { name: regenerateLabel, exact: true })).toBeFocused();
   });
 });
-

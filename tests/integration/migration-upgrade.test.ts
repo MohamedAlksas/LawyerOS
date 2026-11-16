@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import crypto from 'crypto';
+import fs from 'fs';
 import {
   provisionOwner,
   confirmOwnerProvisioning,
@@ -55,6 +56,129 @@ function runPrismaCli(args: string[], dbUrl: string) {
     encoding: 'utf-8',
   });
 }
+
+describe('Security trigger drift rejection (R14-01)', () => {
+  it('refuses changed recorded migration checksums before accepting completed history', async () => {
+    const db = await createDedicatedTestDatabase();
+    try {
+      await runIdentityBaseline({ targetUrl: db.url, silent: true });
+      await db.pool.query("UPDATE _prisma_migrations SET checksum = repeat('0', 64) WHERE migration_name = '20261111000000_init_auth'");
+      await expect(runIdentityBaseline({ targetUrl: db.url, silent: true })).rejects.toThrow(/Unsupported migration history/);
+      expect((await db.pool.query('SELECT checksum FROM _prisma_migrations WHERE migration_name = $1', ['20261111000000_init_auth'])).rows[0].checksum).toBe('0'.repeat(64));
+    } finally {
+      await db.drop();
+    }
+  }, 60000);
+  it.each(['unmanaged', 'completed'] as const)('rejects altered security behavior in %s history without certifying it', async (history) => {
+    const db = await createDedicatedTestDatabase();
+    const initSql = fs.readFileSync('prisma/migrations/20261111000000_init_auth/migration.sql', 'utf8');
+    const forwardSql = fs.readFileSync('prisma/migrations/20261114000000_credential_version/migration.sql', 'utf8');
+    try {
+      await db.pool.query(initSql);
+      await db.pool.query(forwardSql);
+      if (history === 'completed') await runIdentityBaseline({ targetUrl: db.url, silent: true });
+      const alterations = [
+        `CREATE OR REPLACE FUNCTION public.trg_account_password_sync_credential_version() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_catalog AS $$ BEGIN RETURN NEW; END; $$`,
+        `DROP TRIGGER trg_account_password_sync_credential_version ON public.account; CREATE TRIGGER trg_account_password_sync_credential_version AFTER UPDATE OF password ON public.account FOR EACH ROW WHEN(false) EXECUTE FUNCTION public.trg_account_password_sync_credential_version()`,
+        `DROP TRIGGER trg_account_password_sync_credential_version ON public.account; CREATE TRIGGER trg_account_password_sync_credential_version AFTER UPDATE OF scope ON public.account FOR EACH ROW EXECUTE FUNCTION public.trg_account_password_sync_credential_version()`,
+        `DROP TRIGGER trg_session_set_credential_version ON public.session; CREATE TRIGGER trg_session_set_credential_version BEFORE INSERT OR UPDATE ON public.session FOR EACH ROW EXECUTE FUNCTION public.trg_session_set_credential_version()`,
+        `DROP TRIGGER trg_session_set_credential_version ON public.session; CREATE TRIGGER trg_session_set_credential_version BEFORE INSERT ON public.session FOR EACH ROW EXECUTE FUNCTION public.trg_session_set_credential_version('unexpected')`,
+        `ALTER FUNCTION public.trg_session_set_credential_version() SET search_path = public, pg_catalog, decoy`,
+      ];
+      for (const sql of alterations) {
+        await db.pool.query(sql);
+        await expect(runIdentityBaseline({ targetUrl: db.url, silent: true }), sql).rejects.toThrow(/verification failed|incompatible/);
+        if (history === 'unmanaged') {
+          expect((await db.pool.query("SELECT to_regclass('public._prisma_migrations') AS history")).rows[0].history).toBeNull();
+        } else {
+          expect((await db.pool.query('SELECT count(*)::int n FROM _prisma_migrations WHERE finished_at IS NOT NULL')).rows[0].n).toBe(2);
+        }
+        await db.pool.query(forwardSql);
+      }
+    } finally {
+      await db.drop();
+    }
+  }, 90000);
+});
+
+describe('Historical identity data upgrade (R14 retained-data evidence)', () => {
+  it.each(['unmanaged-baseline', 'managed-baseline', 'managed-deploy'] as const)('retains real credentials/MFA and rejects stale proof through %s', async (mode) => {
+    const previousTestUrl = process.env.TEST_DATABASE_URL;
+    const db = await createDedicatedTestDatabase();
+    const initialSql = fs.readFileSync('prisma/migrations/20261111000000_init_auth/migration.sql');
+    // Exact bytes independently verified against f2b53f9's canonical migration.
+    const historicalChecksum = '82d4054e5cc3b74064296e86b83c18b5d5a0e414e9c5560653e26862a7aff0bf';
+    expect(crypto.createHash('sha256').update(initialSql).digest('hex')).toBe(historicalChecksum);
+    const { hashPassword, symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
+    const password = 'HistoricalSyntheticPassword2026!';
+    const secret = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    const userId = crypto.randomUUID();
+    const email = `historical.${userId}@office.eg`;
+    const env = getEnv();
+    const passwordHash = await hashPassword(password);
+    const encryptedSecret = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: `base32:${secret}` });
+    const encryptedRecovery = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: JSON.stringify(['synthetic-backup']) });
+    const staleToken = crypto.randomUUID();
+    const staleChallenge = `2fa-${crypto.randomUUID()}`;
+    try {
+      await db.pool.query(initialSql.toString('utf8'));
+      await db.pool.query(`CREATE TABLE retained_sentinel (note TEXT NOT NULL); INSERT INTO retained_sentinel VALUES ('preserved');`);
+      await db.pool.query(`INSERT INTO public."user" (id,name,email,"emailVerified",role,"twoFactorEnabled","createdAt","updatedAt") VALUES ($1,'Historical synthetic owner',$2,true,'OWNER',true,NOW()-interval '1 hour',NOW())`, [userId,email]);
+      await db.pool.query(`INSERT INTO public.account (id,"userId","accountId","providerId",password,"createdAt","updatedAt") VALUES ($1,$2,$2,'credential',$3,NOW()-interval '1 hour',NOW())`, [crypto.randomUUID(),userId,passwordHash]);
+      await db.pool.query(`INSERT INTO public."twoFactor" (id,"userId",secret,"backupCodes",verified) VALUES ($1,$2,$3,$4,true)`, [crypto.randomUUID(),userId,encryptedSecret,encryptedRecovery]);
+      await db.pool.query(`INSERT INTO public.office_bootstrap (id,"isClosed","closedAt","ownerId") VALUES ('singleton',true,NOW(),$1)`, [userId]);
+      await db.pool.query(`INSERT INTO public.session (id,"userId",token,"expiresAt","createdAt","updatedAt") VALUES ($1,$2,$3,NOW()+interval '1 hour',NOW()-interval '10 minutes',NOW())`, [crypto.randomUUID(),userId,staleToken]);
+      await db.pool.query(`INSERT INTO public.verification (id,identifier,value,"expiresAt","createdAt","updatedAt") VALUES ($1,$2,$3,NOW()+interval '10 minutes',NOW()-interval '10 minutes',NOW())`, [crypto.randomUUID(),staleChallenge,userId]);
+      let initialHistory: unknown;
+      if (mode !== 'unmanaged-baseline') {
+        const resolved = runPrismaCli(['migrate','resolve','--applied','20261111000000_init_auth'], db.url);
+        expect(resolved.status, resolved.stderr).toBe(0);
+        initialHistory = (await db.pool.query('SELECT * FROM _prisma_migrations WHERE migration_name = $1', ['20261111000000_init_auth'])).rows[0];
+        expect((initialHistory as { checksum: string }).checksum).toBe(historicalChecksum);
+      }
+      if (mode === 'managed-deploy') {
+        const deployed = runPrismaCli(['migrate','deploy'], db.url);
+        expect(deployed.status, deployed.stderr).toBe(0);
+      }
+      expect((await runIdentityBaseline({ targetUrl: db.url, silent: true })).success).toBe(true);
+      expect(runPrismaCli(['migrate','deploy'], db.url).status).toBe(0);
+      if (initialHistory) {
+        expect((await db.pool.query('SELECT * FROM _prisma_migrations WHERE migration_name = $1', ['20261111000000_init_auth'])).rows[0]).toEqual(initialHistory);
+      }
+      expect((await db.pool.query('SELECT note FROM retained_sentinel')).rows).toEqual([{ note: 'preserved' }]);
+      expect((await db.pool.query('SELECT password FROM public.account WHERE "userId"=$1',[userId])).rows[0].password).toBe(passwordHash);
+      const mfa = (await db.pool.query('SELECT secret,"backupCodes",verified FROM public."twoFactor" WHERE "userId"=$1',[userId])).rows[0];
+      expect(mfa).toEqual({ secret: encryptedSecret, backupCodes: encryptedRecovery, verified: true });
+      expect(await symmetricDecrypt({ key:env.BETTER_AUTH_SECRET, data:mfa.secret })).toBe(`base32:${secret}`);
+      expect((await db.pool.query('SELECT "ownerId","isClosed" FROM public.office_bootstrap')).rows[0]).toEqual({ ownerId:userId, isClosed:true });
+      expect((await db.pool.query('SELECT count(*)::int n FROM public.session')).rows[0].n).toBe(1);
+      await clearGlobalSingletons();
+      process.env.TEST_DATABASE_URL = db.url;
+      getEnv(true);
+      await expect(requireActor({headers:makeSessionHeaders(staleToken)})).rejects.toThrow();
+      const origin = new URL(env.BETTER_AUTH_URL).origin;
+      const post = (endpoint: string, body: unknown, cookie?: string) => authRoutePOST(new NextRequest(`${origin}/api/auth/${endpoint}`, {
+        method:'POST', headers:{'content-type':'application/json', origin, ...(cookie ? {cookie} : {})}, body:JSON.stringify(body),
+      }));
+      const staleCookie = `better-auth.two_factor=${signSessionTokenCookie(staleChallenge,env.BETTER_AUTH_SECRET)}`;
+      expect((await post('two-factor/verify-totp',{code:await generateTotpCode(secret)},staleCookie)).status).toBe(401);
+      const signIn = await post('sign-in/email',{email,password});
+      expect(signIn.status).toBe(200);
+      const challenge = signIn.headers.getSetCookie().find((c) => c.startsWith('better-auth.two_factor='));
+      expect(challenge).toBeDefined();
+      const completed = await post('two-factor/verify-totp',{code:await generateTotpCode(secret)},challenge!.split(';')[0]);
+      expect(completed.status).toBe(200);
+      const session = completed.headers.getSetCookie().find((c) => c.startsWith('better-auth.session_token='));
+      expect(session).toBeDefined();
+      expect((await requireActor({headers:new Headers({cookie:session!.split(';')[0]})})).id).toBe(userId);
+    } finally {
+      await clearGlobalSingletons();
+      process.env.TEST_DATABASE_URL = previousTestUrl;
+      getEnv(true);
+      await db.drop();
+    }
+  }, 90000);
+});
 
 describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T03 / R08)', () => {
   let dedicated: { url: string; pool: Pool; drop: () => Promise<void> };
