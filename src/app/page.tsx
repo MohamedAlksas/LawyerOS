@@ -1,36 +1,92 @@
-export default function HomePage() {
+﻿import React from 'react';
+import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { requireActor } from '@/modules/identity/require-actor';
+import { AuthenticationError } from '@/modules/identity/types';
+
+export default async function HomePage() {
+  let actor;
+  try {
+    actor = await requireActor();
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      if (error.code === 'MFA_REQUIRED') {
+        redirect('/verify');
+      }
+      redirect('/login');
+    }
+    throw error;
+  }
+
+  // Format current Cairo time in Egyptian Arabic
+  const todayFormatted = new Intl.DateTimeFormat('ar-EG', {
+    timeZone: 'Africa/Cairo',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date());
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-900">
-      <div className="max-w-2xl w-full bg-white rounded-xl shadow-sm border border-slate-200 p-8 space-y-6 text-center">
-        <header className="space-y-2">
-          <span className="inline-block px-3 py-1 text-xs font-semibold tracking-wider text-slate-700 bg-slate-100 rounded-full">
-            المرحلة التأسيسية — M0 / T01
-          </span>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
-            نظام إدارة مكتب المحاماة — LawOffice OS
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Dashboard Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-[#D5DFE3]">
+        <div>
+          <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
+            مكتب المحامي — لوحة المتابعة
           </h1>
-          <p className="text-sm sm:text-base text-slate-600">
-            واجهة أولية لمطابقة بيئة العمل والتوافق التقني
+          <p className="text-sm text-[#4D606A] mt-1">
+            أهلاً بك، <span className="font-semibold text-[#172A35]">{actor.name}</span>
           </p>
-        </header>
-
-        <section className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-right text-xs sm:text-sm text-amber-900 leading-relaxed space-y-2">
-          <p className="font-semibold text-amber-950">
-            ملاحظة تنظيمية:
-          </p>
-          <p>
-            هذه الصفحة هي واجهة مبدئية محددة لإثبات جاهزية حزمة الأدوات (Next.js + React 19 + TypeScript Strict + Tailwind CSS).
-          </p>
-          <p>
-            لا تتضمن هذه المرحلة أي سجلات وهمية أو وحدات عمل تطبيقية (مثل الموكلين، ملفات القضايا، الجلسات، أو الحسابات المالية)، حيث ستُبنى هذه الوحدات تباعاً في المهام القادمة وفقاً لخطة العمل المعتمدة.
-          </p>
-        </section>
-
-        <footer className="text-xs text-slate-400 pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>الترميز: lang=ar-EG | dir=rtl</span>
-          <span>الإصدار: 0.1.0 (T01 Foundation)</span>
-        </footer>
+        </div>
+        <div className="text-xs font-medium text-[#4D606A] bg-white border border-[#D5DFE3] px-3 py-1.5 rounded-[6px] self-start sm:self-auto shadow-xs">
+          <span>{todayFormatted}</span>
+        </div>
       </div>
-    </main>
+
+      {/* S02 Genuine Empty State Container */}
+      <div
+        data-testid="dashboard-empty-state"
+        className="bg-white rounded-[6px] border border-[#D5DFE3] p-8 sm:p-12 text-center shadow-xs space-y-6"
+      >
+        <div
+          className="w-16 h-16 mx-auto rounded-full bg-[#F4F6F7] border border-[#D5DFE3] flex items-center justify-center text-3xl select-none"
+          aria-hidden="true"
+        >
+          📂
+        </div>
+
+        <div className="max-w-md mx-auto space-y-2">
+          <h2 className="text-lg font-bold text-[#172A35]">
+            لا توجد قضايا أو جلسات مسجلة حالياً
+          </h2>
+          <p className="text-sm text-[#4D606A] leading-relaxed">
+            نظام إدارة المكتب في مرحلته التشغيلية الأولى (M1). سيتم تفعيل وحدات إدارة ملفات القضايا والجلسات ومواعيد المحاكم في المراحل التالية وفق خطة العمل المعتمدة.
+          </p>
+        </div>
+
+        {/* Primary Action */}
+        <div className="pt-2">
+          <Link
+            href="/settings/security"
+            data-testid="empty-state-security-action"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px]"
+          >
+            <span aria-hidden="true">🛡️</span>
+            <span>مراجعة إعدادات الأمان</span>
+          </Link>
+        </div>
+
+        {/* Real Session Identity Note */}
+        <div className="pt-4 border-t border-[#D5DFE3] text-xs text-[#4D606A] flex flex-wrap items-center justify-center gap-1 sm:gap-2">
+          <span>الحساب التشغيلي:</span>
+          <bdi dir="ltr" className="font-mono text-[#172A35] font-medium">
+            {actor.email}
+          </bdi>
+          <span className="text-slate-300">•</span>
+          <span>الدور: {actor.role === 'OWNER' ? 'مدير المكتب (المالك)' : 'مستخدم'}</span>
+        </div>
+      </div>
+    </div>
   );
 }
