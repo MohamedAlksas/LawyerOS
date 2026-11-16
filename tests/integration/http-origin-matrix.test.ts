@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, execFile, type ChildProcess } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import net from 'net';
 import http from 'http';
 import { Pool } from 'pg';
@@ -21,6 +22,13 @@ async function clearGlobalSingletons(): Promise<void> {
   delete g.__lawoffice_auth;
 }
 
+const RESERVED_NEXT_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109,
+  110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530,
+  531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045,
+  5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080,
+]);
+
 function getFreeLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -29,7 +37,7 @@ function getFreeLoopbackPort(): Promise<number> {
       const port = (srv.address() as net.AddressInfo).port;
       srv.close((err) => {
         if (err) return reject(err);
-        if (port >= 6665 && port <= 6669) resolve(getFreeLoopbackPort());
+        if (port < 1024 || RESERVED_NEXT_PORTS.has(port)) resolve(getFreeLoopbackPort());
         else resolve(port);
       });
     });
@@ -241,14 +249,16 @@ async function getSecurityStateSnapshot(pool: Pool, userId: string): Promise<Sec
 }
 
 function assertSecurityStateUnchanged(before: SecurityStateSnapshot, after: SecurityStateSnapshot): void {
-  // Compare values strictly in memory without printing sensitive hashes/secrets
+  // Compare non-sensitive fields directly
   expect(after.user.credentialVersion).toBe(before.user.credentialVersion);
   expect(after.user.twoFactorEnabled).toBe(before.user.twoFactorEnabled);
-  expect(after.account.passwordHash).toBe(before.account.passwordHash);
+
+  // Compare sensitive values using labeled boolean equality so failure diagnostics remain redacted
+  expect(after.account.passwordHash === before.account.passwordHash).toBe(true);
 
   if (before.twoFactor && after.twoFactor) {
-    expect(after.twoFactor.secret).toBe(before.twoFactor.secret);
-    expect(after.twoFactor.backupCodes).toBe(before.twoFactor.backupCodes);
+    expect(after.twoFactor.secret === before.twoFactor.secret).toBe(true);
+    expect(after.twoFactor.backupCodes === before.twoFactor.backupCodes).toBe(true);
     expect(after.twoFactor.verified).toBe(before.twoFactor.verified);
     expect(after.twoFactor.failedVerificationCount).toBe(before.twoFactor.failedVerificationCount);
     expect(after.twoFactor.lockedUntil).toBe(before.twoFactor.lockedUntil);
@@ -259,7 +269,7 @@ function assertSecurityStateUnchanged(before: SecurityStateSnapshot, after: Secu
   expect(after.sessions.length).toBe(before.sessions.length);
   for (let i = 0; i < before.sessions.length; i++) {
     expect(after.sessions[i].id).toBe(before.sessions[i].id);
-    expect(after.sessions[i].token).toBe(before.sessions[i].token);
+    expect(after.sessions[i].token === before.sessions[i].token).toBe(true);
     expect(after.sessions[i].credentialVersion).toBe(before.sessions[i].credentialVersion);
     expect(after.sessions[i].expiresAt).toBe(before.sessions[i].expiresAt);
   }
@@ -268,7 +278,7 @@ function assertSecurityStateUnchanged(before: SecurityStateSnapshot, after: Secu
   for (let i = 0; i < before.verifications.length; i++) {
     expect(after.verifications[i].id).toBe(before.verifications[i].id);
     expect(after.verifications[i].identifier).toBe(before.verifications[i].identifier);
-    expect(after.verifications[i].value).toBe(before.verifications[i].value);
+    expect(after.verifications[i].value === before.verifications[i].value).toBe(true);
     expect(after.verifications[i].expiresAt).toBe(before.verifications[i].expiresAt);
   }
 }
@@ -347,7 +357,32 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       await clearGlobalSingletons();
     }
 
-    // 4. Allocate port and start production Next.js server
+    // 4. Ensure production build exists; if missing, build fallback before launching server child
+    const buildIdPath = path.resolve(process.cwd(), '.next/BUILD_ID');
+    if (!fs.existsSync(buildIdPath)) {
+      await new Promise<void>((resolve, reject) => {
+        const build = spawn(process.execPath, [nextBin, 'build'], {
+          cwd: process.cwd(),
+          windowsHide: true,
+          env: {
+            ...process.env,
+            NODE_ENV: 'production',
+            DATABASE_URL: dedicatedDb.url,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let buildOutput = '';
+        build.stdout?.on('data', (d) => { buildOutput += d.toString(); });
+        build.stderr?.on('data', (d) => { buildOutput += d.toString(); });
+        build.on('error', reject);
+        build.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error(`Fallback next build failed with exit code ${code}: ${buildOutput}`));
+        });
+      });
+    }
+
+    // 5. Allocate port and start production Next.js server
     serverPort = await getFreeLoopbackPort();
     trustedOrigin = `http://127.0.0.1:${serverPort}`;
 
@@ -374,10 +409,21 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
 
     expect(serverChild.pid).toBeDefined();
 
-    // 5. Poll readiness probe
+    let serverOutput = '';
+    let serverExitCode: number | null = null;
+    serverChild.stdout?.on('data', (d) => { serverOutput += d.toString(); });
+    serverChild.stderr?.on('data', (d) => { serverOutput += d.toString(); });
+    serverChild.on('exit', (code) => { serverExitCode = code; });
+
+    // 6. Poll readiness probe
     const startTime = Date.now();
     let isReady = false;
     while (Date.now() - startTime < 30000) {
+      if (serverExitCode !== null) {
+        throw new Error(
+          `Production Next.js server child exited prematurely with code ${serverExitCode}. Output:\n${serverOutput}`
+        );
+      }
       try {
         const res = await makeRequest(serverPort, { path: '/api/health/ready' });
         if (res.status === 200) {
@@ -392,8 +438,11 @@ describe('Production HTTP Origin Matrix & Request Security Guard (T03 Acceptance
       }
       await new Promise((r) => setTimeout(r, 250));
     }
+    if (!isReady && serverExitCode !== null) {
+      throw new Error(`Production Next.js server child exited with code ${serverExitCode}. Output:\n${serverOutput}`);
+    }
     expect(isReady).toBe(true);
-  }, 45000);
+  }, 120000);
 
   afterAll(async () => {
     await clearGlobalSingletons();

@@ -73,11 +73,11 @@ jobs:
       - name: Run unit tests
         run: npm run test
 
-      - name: Run integration tests
-        run: npm run test:integration
-
       - name: Production build
         run: npm run build
+
+      - name: Run integration tests
+        run: npm run test:integration
 
       - name: Run Playwright E2E tests
         run: npm run test:e2e
