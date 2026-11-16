@@ -78,6 +78,9 @@ function createAuthInstance() {
       },
     },
     advanced: {
+      ...(env.NODE_ENV === 'production'
+        ? { disableOriginCheck: false, disableCSRFCheck: false }
+        : {}),
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',
@@ -97,6 +100,10 @@ function createAuthInstance() {
           max: 50,
         },
         '/two-factor/verify-backup-code': {
+          window: 10,
+          max: 50,
+        },
+        '/change-password': {
           window: 10,
           max: 50,
         },

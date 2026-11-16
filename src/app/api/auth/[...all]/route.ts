@@ -195,6 +195,20 @@ export async function POST(request: NextRequest) {
 
       const allowedOrigins = getTrustedOrigins();
 
+      const host = request.headers.get('host');
+      if (host) {
+        const isTrustedHost = Array.from(allowedOrigins).some((to) => {
+          try {
+            return new URL(to).host === host;
+          } catch {
+            return false;
+          }
+        });
+        if (!isTrustedHost) {
+          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        }
+      }
+
       if (origin === 'null') {
         let reqOrigin: string;
         try {
@@ -203,22 +217,10 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
 
-        const host = request.headers.get('host');
-        const isTrustedHost = host
-          ? Array.from(allowedOrigins).some((to) => {
-              try {
-                return new URL(to).host === host;
-              } catch {
-                return false;
-              }
-            })
-          : true;
-
         // R12-04: Validate complete inferred destination origin (scheme, host, port) from request.url
         // Reject untrusted scheme/destination even if Host header matches a trusted host,
         // and reject untrusted Host header even if request.url was constructed with trusted base
         if (
-          !isTrustedHost ||
           !allowedOrigins.has(reqOrigin) ||
           request.headers.get('sec-fetch-site') !== 'same-origin'
         ) {

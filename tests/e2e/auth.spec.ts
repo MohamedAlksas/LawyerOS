@@ -256,7 +256,12 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
 
     // Context A changes password
     const newPassword = 'NewSecretPassword2026!#';
+    const origin = new URL(pageA.url()).origin;
     const pwChangeRes = await pageA.request.post('/api/auth/change-password', {
+      headers: {
+        origin,
+        referer: pageA.url(),
+      },
       data: {
         currentPassword: TEST_PASSWORD,
         newPassword: newPassword,
@@ -271,6 +276,10 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
 
     // Restore original password for clean teardown
     await pageA.request.post('/api/auth/change-password', {
+      headers: {
+        origin,
+        referer: pageA.url(),
+      },
       data: {
         currentPassword: newPassword,
         newPassword: TEST_PASSWORD,
