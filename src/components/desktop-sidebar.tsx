@@ -34,6 +34,7 @@ export function DesktopSidebar() {
   };
 
   const isHomeActive = pathname === '/';
+  const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
 
   return (
@@ -58,6 +59,21 @@ export function DesktopSidebar() {
           >
             <span aria-hidden="true" className="text-base">📅</span>
             <span>الرئيسية / اليوم</span>
+          </Link>
+
+          {/* Parties Directory */}
+          <Link
+            href="/parties"
+            data-testid="nav-link-parties"
+            aria-current={isPartiesActive ? 'page' : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+              isPartiesActive
+                ? 'bg-[#14566B] text-white shadow-xs'
+                : 'text-[#172A35] hover:bg-[#E8EEF1]'
+            }`}
+          >
+            <span aria-hidden="true" className="text-base">👥</span>
+            <span>دليل الأطراف</span>
           </Link>
 
           {/* Security Settings */}

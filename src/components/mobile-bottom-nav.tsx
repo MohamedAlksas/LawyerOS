@@ -12,6 +12,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
+  const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
 
   return (
@@ -33,6 +34,20 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
       >
         <span aria-hidden="true" className="text-lg">📅</span>
         <span className="text-sm leading-tight mt-0.5">الرئيسية</span>
+      </Link>
+
+      {/* Parties Link */}
+      <Link
+        href="/parties"
+        data-testid="nav-link-parties"
+        aria-label="الأطراف"
+        aria-current={isPartiesActive ? 'page' : undefined}
+        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+          isPartiesActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
+        }`}
+      >
+        <span aria-hidden="true" className="text-lg">👥</span>
+        <span className="text-sm leading-tight mt-0.5">الأطراف</span>
       </Link>
 
       {/* Security Link */}
