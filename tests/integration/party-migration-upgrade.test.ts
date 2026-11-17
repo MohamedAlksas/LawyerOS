@@ -1,7 +1,26 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { execSync } from 'child_process';
+import path from 'path';
+import { spawnSync } from 'child_process';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 import { setupTestEncryptionKeys } from '../helpers/party-test-helper';
+
+function runPrismaMigrateDeploy(dbUrl: string) {
+  const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
+  const res = spawnSync(process.execPath, [prismaJs, 'migrate', 'deploy'], {
+    env: {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+      NODE_ENV: 'test',
+    },
+    encoding: 'utf-8',
+  });
+  if (res.status !== 0) {
+    throw new Error(
+      `Prisma migrate deploy failed with status ${res.status}:\nSTDOUT: ${res.stdout}\nSTDERR: ${res.stderr}`
+    );
+  }
+  return res;
+}
 
 describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
   beforeAll(() => {
@@ -14,14 +33,7 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
 
     try {
       // 2. Run prisma migrate deploy against the clean database
-      execSync('npx.cmd prisma migrate deploy', {
-        env: {
-          ...process.env,
-          DATABASE_URL: dedicated.url,
-          NODE_ENV: 'test',
-        },
-        stdio: 'pipe',
-      });
+      runPrismaMigrateDeploy(dedicated.url);
 
       // 3. Connect to the migrated database and verify tables and indexes exist
       const client = await dedicated.pool.connect();
@@ -122,14 +134,7 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
       }
 
       // 2. Run migrate deploy to upgrade database to T05
-      execSync('npx.cmd prisma migrate deploy', {
-        env: {
-          ...process.env,
-          DATABASE_URL: dedicated.url,
-          NODE_ENV: 'test',
-        },
-        stdio: 'pipe',
-      });
+      runPrismaMigrateDeploy(dedicated.url);
 
       // 3. Verify pre-existing auth records are preserved intact
       const clientAfter = await dedicated.pool.connect();
