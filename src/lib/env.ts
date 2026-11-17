@@ -224,6 +224,8 @@ const baseEnvSchema = z.object({
     .string()
     .url('BETTER_AUTH_URL must be a valid URL')
     .default('http://127.0.0.1:3000'),
+  PARTY_IDENTITY_ENCRYPTION_KEY: z.string().optional(),
+  PARTY_IDENTITY_KEY_ID: z.string().optional(),
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;

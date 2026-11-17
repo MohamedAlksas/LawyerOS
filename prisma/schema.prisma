@@ -99,3 +99,169 @@ model OfficeBootstrap {
 
   @@map("office_bootstrap")
 }
+
+enum PartyKind {
+  PERSON
+  ORGANIZATION
+}
+
+enum IdentificationType {
+  NATIONAL_ID
+  PASSPORT
+  COMMERCIAL_REG
+  TAX_CARD
+  OTHER
+}
+
+enum CommunicationChannel {
+  PHONE
+  IN_PERSON
+  WHATSAPP
+  EMAIL
+  OTHER
+}
+
+enum PoAType {
+  GENERAL
+  SPECIAL
+  LITIGATION
+  COMMERCIAL
+  OTHER
+}
+
+enum PoAReviewStatus {
+  UNREVIEWED
+  VALID
+  EXPIRED
+  REVOKED
+  DEFECTIVE
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+model Party {
+  id                      String              @id @default(uuid())
+  kind                    PartyKind
+  name                    String
+  nameNormalized          String
+  primaryPhone            String?
+  primaryPhoneNormalized  String?
+  additionalPhones        String[]            @default([])
+  email                   String?
+  address                 String?
+  notes                   String?
+  archivedAt              DateTime?
+  version                 Int                 @default(1)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  createdById             String
+  updatedById             String
+
+  identities              PartyIdentity[]
+  communicationNotes      CommunicationNote[]
+  powersOfAttorney        PowerOfAttorney[]
+
+  @@index([nameNormalized])
+  @@index([primaryPhoneNormalized])
+  @@index([archivedAt])
+  @@map("party")
+}
+
+model PartyIdentity {
+  id                 String             @id @default(uuid())
+  partyId            String
+  identificationType IdentificationType
+  ciphertext         String             // Base64 encoded encrypted payload
+  iv                 String             // Base64 encoded 12-byte initialization vector
+  authTag            String             // Base64 encoded 16-byte authentication tag
+  keyId              String
+  encryptionVersion  Int                @default(1)
+  lastFour           String             // Trailing 4 digits for display masking
+  createdAt          DateTime           @default(now())
+  createdById        String
+
+  party              Party              @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@map("party_identity")
+}
+
+model CommunicationNote {
+  id                 String               @id @default(uuid())
+  partyId            String
+  matterId           String?              // Optional reference reserved for T06; unlinked in T05
+  communicationAt    DateTime             // Absolute instant (timestamptz)
+  channel            CommunicationChannel
+  summary            String
+  followUpRequired   Boolean              @default(false)
+  followUpDate       DateTime?            // Date-only representation for follow up
+  createdAt          DateTime             @default(now())
+  createdById        String
+
+  party              Party                @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId, communicationAt])
+  @@map("communication_note")
+}
+
+model PowerOfAttorney {
+  id                 String          @id @default(uuid())
+  partyId            String
+  poaNumberText      String          // Case/record number preserving leading zeros
+  poaYearLabel       String          // e.g. "2026"
+  notarizationOffice String          // Issuing Real Estate Registration / Notarization office
+  poaType            PoAType
+  issueDate          DateTime?       // Date-only stored as midnight UTC
+  humanReviewStatus  PoAReviewStatus @default(UNREVIEWED)
+  humanReviewedAt    DateTime?
+  humanReviewedById  String?
+  notes              String?
+  version            Int             @default(1)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  createdById        String
+  updatedById        String
+
+  party              Party           @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@index([poaNumberText, poaYearLabel])
+  @@map("power_of_attorney")
+}
+
+model AuditEvent {
+  id                 String   @id @default(uuid())
+  userId             String
+  action             String   // e.g. "CREATE_PARTY", "UPDATE_PARTY", "REVEAL_IDENTITY"
+  entityType         String   // e.g. "Party", "PartyIdentity"
+  entityId           String
+  changedFields      Json?    // Redacted payload changes (never full identity, never keys)
+  reason             String?
+  requestId          String?
+  createdAt          DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_event")
+}
+
+model IdempotencyRecord {
+  id                 String            @id @default(uuid())
+  actorId            String
+  commandType        String            // e.g. "saveParty", "savePowerOfAttorney"
+  key                String
+  payloadHash        String            // SHA-256 of canonical normalized payload
+  status             IdempotencyStatus @default(IN_PROGRESS)
+  resultType         String?
+  resultId           String?
+  resultPayload      Json?             // Redacted result summary (never raw secrets)
+  createdAt          DateTime          @default(now())
+  completedAt        DateTime?
+
+  @@unique([actorId, commandType, key])
+  @@index([createdAt])
+  @@map("idempotency_record")
+}

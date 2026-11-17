@@ -1421,6 +1421,24 @@ export async function runIdentityBaseline(options: BaselineOptions): Promise<Bas
       resolveMigration('20261114000000_credential_version');
     }
 
+    // Deploy any forward migrations (e.g. 20261117000000_parties_communication_poa)
+    const deployResult = spawnSync(
+      process.execPath,
+      [prismaJs, 'migrate', 'deploy'],
+      {
+        env: cleanEnv,
+        encoding: 'utf-8',
+      }
+    );
+
+    if (deployResult.status !== 0) {
+      throw new Error(
+        `Prisma migrate deploy failed during forward migration step (status ${deployResult.status}): ${
+          deployResult.stderr || deployResult.stdout || 'Unknown error'
+        }`
+      );
+    }
+
     // 5. Verify migration status reports clean state
     const statusResult = spawnSync(
       process.execPath,
