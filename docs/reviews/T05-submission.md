@@ -7,6 +7,7 @@
 **Base Checkpoint (Accepted T04 / origin/main):** `63388fd4d17b92ddbda40906c16dfeda155fa9bf`  
 **Inspected Implementation Checkpoint:** `11546e851ee9675c2f80c907e68c4bd9d59f15a5`  
 **Discovery Refinement Checkpoint:** `baebdaa7fe5c43d2c8031e4e2a39446d3289063d`  
+**Cross-Platform Fix & Renewed Audit Checkpoint:** `a6de37539daf547efc2ac6ccb133f29c4ef54d3d`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`
 
 ---
@@ -18,10 +19,16 @@ This submission delivers the completed implementation, security verification, an
 - **Phase A — Backend Implementation (`agency-backend-architect`)**: Implemented Prisma models (`Party`, `PartyIdentity`, `CommunicationNote`, `PowerOfAttorney`, `AuditEvent`, `IdempotencyRecord`) and migration `20261117000000_parties_communication_poa`; AES-256-GCM authenticated encryption with 12-byte random IV and AAD context binding (`partyId:${partyId}:type:${identificationType}`); atomic transaction rollback Seam; redacted immutable audit logging; scoped idempotency with deterministic SHA-256 payload hashing; optimistic concurrency control (`expectedVersion`); and normalized Arabic/Indic search and phone indexing. Verified by 187 unit tests and 33 party integration tests against live PostgreSQL.
 - **Phase B — Frontend Implementation (`agency-frontend-developer`)**: Built Egyptian Arabic RTL S09 screens: Party Directory (`/parties`) with responsive table/card reflow, debounced search, and pagination; Create Party (`/parties/new`) with client/server validation and non-blocking duplicate warnings; Party Profile (`/parties/[id]`) with masked identity, audited reveal toggle, communication notes timeline, and POA metadata cards; and Edit Party (`/parties/[id]/edit`) with optimistic concurrency banners. Verified by 12 multi-viewport Playwright E2E tests (Desktop 1440, Tablet 768, Mobile 390) and `impeccable detect` audit (0 mechanical design defects).
 - **Phase C — Independent Support Audits**:
-  - **Independent Application Security Specialist (`agency-application-security-engineer`)**: Audited server-side session authorization (`OWNER` check derived exclusively from verified Better Auth session), zero client identity spoofing, AES-256-GCM context binding, fail-closed decryption, zero plaintext identity storage, DTO masking (`lastFour`), and zero sensitive data in browser storage. **Verdict: ACCEPT**.
-  - **Independent Test Automation Specialist (`agency-test-automation-engineer`)**: Audited test matrix alignment across `T05-01` to `T05-15`, test discipline (0 hard sleeps, 0 skips, 0 fixmes), discovery isolation, and live PostgreSQL integration. **Verdict: ACCEPT**.
+  - **Independent Application Security Specialist (`agency-application-security-engineer`)**: Audited server-side session authorization (`OWNER` check derived exclusively from verified Better Auth session), zero client identity spoofing, AES-256-GCM context binding, fail-closed decryption, zero plaintext identity storage, DTO masking (`lastFour`), and zero sensitive data in browser storage. **Verdict: ACCEPT** at checkpoint `11546e851ee9675c2f80c907e68c4bd9d59f15a5`.
+  - **Independent Test Automation Specialist (`agency-test-automation-engineer`)**: Audited test matrix alignment across `T05-01` to `T05-15`, test discipline (0 hard sleeps, 0 skips, 0 fixmes), discovery isolation, and live PostgreSQL integration. **Initial Verdict: ACCEPT** at checkpoint `11546e851ee9675c2f80c907e68c4bd9d59f15a5`.
+- **Cross-Platform Correction & Renewed Audit Loop**:
+  - On initial push `932df70`, hosted CI run `44130516289` failed in `tests/integration/party-migration-upgrade.test.ts` on lines 17 and 125 due to a Windows-only `npx.cmd` subprocess invocation.
+  - Subprocess invocation was refactored into `runPrismaMigrateDeploy`, using `process.execPath` (Node) with pinned local Prisma (`node_modules/prisma/build/index.js`), preserving environment isolation (`DATABASE_URL: dedicated.url`), strict exit status checking (`res.status === 0`), and error output capture.
+  - Reconciled `vitest.config.mjs` test discovery exclusion (`exclude: ['**/tests/e2e/**', 'tests/e2e/**', '**/node_modules/**']`).
+  - **Renewed Independent Test Support Audit**: Conducted by `agency-test-automation-engineer` on corrected checkpoint `a6de37539daf547efc2ac6ccb133f29c4ef54d3d`. **Renewed Verdict: ACCEPT**.
+  - **Hosted CI Rerun**: Successfully pushed and verified green on GitHub Actions run `44154477389` (all check runs passed).
 
-### Combined Verification Summary
+### Verification Summary
 - **Typecheck**: 0 errors (`npm run typecheck`).
 - **Lint**: 0 errors, 0 warnings (`npm run lint`).
 - **Unit Tests**: 187/187 passed across 12 test files (`npm test`).
@@ -30,7 +37,8 @@ This submission delivers the completed implementation, security verification, an
 - **T05 E2E Browser Tests**: 12/12 passed across Desktop (1440), Tablet (768), and Mobile (390) (`npm run test:e2e:t05`).
 - **T04 PWA Shell Regression E2E**: 46/46 passed across all viewports (`npm run test:e2e:t04`).
 - **T03 Auth & MFA Regression E2E**: 60/60 passed across all viewports (`npm run test:e2e:t03`).
-- **Total Tests Passed**: **449 / 449 (100% Pass Rate, 0 failures, 0 skipped, 0 fixmes)**.
+- **Total Local Tests Passed**: **449 / 449 (100% Pass Rate, 0 failures, 0 skipped, 0 fixmes)**.
+- **Hosted GitHub Actions CI**: **GREEN / SUCCESS** across all workflows on Draft PR #12.
 
 ---
 
@@ -47,12 +55,12 @@ This submission delivers the completed implementation, security verification, an
 | **T05-07** | **Identity Encryption & Storage Privacy** | AES-256-GCM authenticated encryption in `src/lib/crypto/party-identity.ts` with 12-byte random IV, 16-byte auth tag, and AAD context binding (`partyId:${partyId}:type:${identificationType}`). Zero plaintext identity numbers stored in PostgreSQL. DTOs expose only masked `lastFour`. Audited reveal requires explicit action and logs audit event before returning plaintext. Browser storage audit confirms zero secret leakage in localStorage, sessionStorage, or cookies. Verified in `tests/unit/party-identity-crypto.test.ts`, `tests/integration/party-identity-storage.test.ts`, and `tests/e2e/t05-accessibility.spec.ts`. | **PASS** |
 | **T05-08** | **Disaster Recovery & Key Custody** | Process restart / restored context with matching key (`k2026_01`) successfully decrypts synthetic identity records. Missing or wrong key fails closed with `CryptoDecryptionError` without corrupting database records. Key IDs recorded; actual keys loaded from environment and never logged. Optional key absence permits identity-free party creation. Verified in `tests/integration/party-key-recovery.test.ts` (2/2 passed). | **PASS** |
 | **T05-09** | **Communication Notes & Powers of Attorney** | Implemented `addCommunicationNote` (channel, summary, optional follow-up, Cairo instant timestamp) and `savePowerOfAttorney` (number, year, issuing office, review status, optional date-only issue date). Nonexistent party IDs reject fail-closed. Speculative matter/proceeding links rejected. Date-only fields do not shift across timezone boundaries. Verified in `tests/integration/party-communication-poa.test.ts` (3/3 passed) and `tests/e2e/t05-parties.spec.ts`. | **PASS** |
-| **T05-10** | **Schema Migrations & Upgrade Safety** | Migration `20261117000000_parties_communication_poa` applies cleanly via `prisma migrate deploy`. Non-destructive upgrade of pre-existing T03 database populated with synthetic users and sessions preserves existing records, login capability, and security triggers while enabling new Party writes. Verified in `tests/integration/party-migration-upgrade.test.ts` (2/2 passed) and `tests/integration/migration-upgrade.test.ts` (27/27 passed). | **PASS** |
+| **T05-10** | **Schema Migrations & Upgrade Safety** | Migration `20261117000000_parties_communication_poa` applies cleanly via cross-platform `runPrismaMigrateDeploy`. Non-destructive upgrade of pre-existing T03 database populated with synthetic users and sessions preserves existing records, login capability, and security triggers while enabling new Party writes. Verified in `tests/integration/party-migration-upgrade.test.ts` (2/2 passed) and `tests/integration/migration-upgrade.test.ts` (27/27 passed). | **PASS** |
 | **T05-11** | **Operational Browser Journeys** | Full operational lifecycle verified in Playwright across Desktop (1440), Tablet (768), and Mobile (390): create party -> view profile -> reveal/hide identity -> add communication note -> add POA -> edit party -> search/filter -> duplicate warning -> deliberate distinct creation -> concurrency conflict handling. Verified in `tests/e2e/t05-parties.spec.ts` (3 passed). | **PASS** |
 | **T05-12** | **Arabic RTL UI & Accessibility** | Strict `dir="rtl"` and `lang="ar-EG"` declared on document and all party screens. Phone numbers, emails, and reference codes isolated via `<bdi dir="ltr">`. Interactive touch targets ≥ 44×44px. Narrow 320px viewport reflows with zero horizontal document scroll overflow. 200% font zoom reflows cleanly without clipping. Verified in `tests/e2e/t05-accessibility.spec.ts` (9 passed across 3 viewports). | **PASS** |
 | **T05-13** | **Regression Suite Preservation** | All pre-existing T03 and T04 suites executed alongside T05 with zero regressions: T03 auth & MFA E2E (60/60 passed), T04 PWA shell E2E (46/46 passed), T03 HTTP origin matrix (22/22 passed), T03 baseline & triggers (27/27 passed). Port isolation maintained: 3100 (T03), 3204 (T04), 3205 (T05). Verified in `npm run test:e2e:t03` and `npm run test:e2e:t04`. | **PASS** |
-| **T05-14** | **Independent Review & Boundaries** | Full T05 diff and codebase audited independently by native Application Security Specialist (verdict: ACCEPT) and Test Automation Specialist (verdict: ACCEPT). Strict single-writer boundaries maintained throughout; test seams cleanly isolated without production backdoors. | **PASS** |
-| **T05-15** | **Delivery & CI Verification** | All test scripts, strict typechecking, linting, and production build pass locally. CI workflow `.github/workflows/ci.yml` updated with synthetic encryption keys and T05 test commands. Hosted GitHub Actions runs verified green. | **PASS** |
+| **T05-14** | **Independent Review & Boundaries** | Full T05 diff and codebase audited independently by native Application Security Specialist (verdict: ACCEPT) and Test Automation Specialist (renewed verdict: ACCEPT on `a6de375`). Strict single-writer boundaries maintained throughout; test seams cleanly isolated without production backdoors. | **PASS** |
+| **T05-15** | **Delivery & CI Verification** | All local checks pass (187 unit, 144 integration, 118 E2E). Both hosted GitHub Actions workflows verified green on PR #12 head commit `a6de375`: `validate-planning` (run 44154477612, SUCCESS) and `Lint, Test, and Build` (run 44154477389 / job 134291382870, SUCCESS). | **PASS** |
 
 ---
 
@@ -78,16 +86,19 @@ All four specialist profiles were executed through distinct native sessions unde
 | **Phase A — Backend Implementation Lead** | `agency-backend-architect` (`.agents/agents/agency-backend-architect.md`) | `b4688fd5-7e74-4db4-a187-c47d8946104a` | `E357ED74D54D358E903F14F2F2C4A79E77E9B71C59CFEC3F1FD319B29CBA14B4` | `src/modules/parties/`, `src/lib/crypto/`, `src/lib/audit.ts`, `src/lib/idempotency.ts`, `prisma/schema.prisma`, migrations, unit/integration backend tests | `aa301dc` | **COMPLETE** — Authored models, migrations, domain services, crypto envelope, audit/idempotency, and 33 PostgreSQL integration tests. |
 | **Phase B — Frontend Implementation Lead** | `agency-frontend-developer` (`.agents/agents/agency-frontend-developer.md`) | `6249c0a3-b226-49fd-8bc7-ba3d33754a13` | `D893C2C1CD277F52595F4ABE77F8775B81A69B6D5E61CEE15061476F38943496` | `src/app/(app)/parties/`, `src/components/parties/`, navigation shell updates, `playwright.t05.config.ts`, `tests/e2e/t05-*.spec.ts` | `11eee67` | **COMPLETE** — Authored S09 Directory, Create, Edit, and Profile screens; verified 0 mechanical defects via Impeccable; passed 12/12 multi-viewport E2E tests. |
 | **Phase C — Independent Security Support** | `agency-application-security-engineer` (`.agents/agents/agency-application-security-engineer.md`) | `0327dea2-4e3b-4f54-97e5-f7c19e01673e` | `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | Read-only security audit across full T05 diff/codebase | `11546e851ee9675c2f80c907e68c4bd9d59f15a5` | **ACCEPT** — Zero plaintext identity leakage; AES-256-GCM + AAD context binding verified; session authorization verified; storage privacy confirmed; 0 defects. |
-| **Phase C — Independent Test Support** | `agency-test-automation-engineer` (`.agents/agents/agency-test-automation-engineer.md`) | `9f4ca6e5-d34a-49cf-b14c-099fbb2ff540` | `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | Read-only audit of test matrix, test discipline, and independent execution | `11546e851ee9675c2f80c907e68c4bd9d59f15a5` | **ACCEPT** — All 15 matrix rows mapped; 0 sleeps, 0 skips, 0 fixmes; disjoint discovery verified; 449/449 tests passed. |
+| **Phase C — Independent Test Support (Initial)** | `agency-test-automation-engineer` (`.agents/agents/agency-test-automation-engineer.md`) | `9f4ca6e5-d34a-49cf-b14c-099fbb2ff540` | `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | Read-only audit of test matrix, test discipline, and independent execution | `11546e851ee9675c2f80c907e68c4bd9d59f15a5` | **ACCEPT** — All 15 matrix rows mapped; 0 sleeps, 0 skips, 0 fixmes; live PostgreSQL integration verified. |
+| **Phase C — Independent Test Support (Renewed)** | `agency-test-automation-engineer` (`.agents/agents/agency-test-automation-engineer.md`) | `9f4ca6e5-d34a-49cf-b14c-099fbb2ff540` | `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | Read-only audit of cross-platform migration fix and discovery isolation | `a6de37539daf547efc2ac6ccb133f29c4ef54d3d` | **ACCEPT** — Verified `runPrismaMigrateDeploy` cross-platform helper, `vitest.config.mjs` exclusion, and 449/449 test passes. |
 
 ---
 
 ## 5. Execution Verification Results & Exit Codes
 
+### A. Local Execution Results (Inspected SHA `a6de37539daf547efc2ac6ccb133f29c4ef54d3d`)
+
 ```
 ================================================================================
-LawOffice OS Task T05 Verification Execution
-Commit: baebdaa7fe5c43d2c8031e4e2a39446d3289063d (inspected: 11546e851ee9675c2f80c907e68c4bd9d59f15a5)
+LawOffice OS Task T05 Local Verification Execution
+Commit: a6de37539daf547efc2ac6ccb133f29c4ef54d3d
 ================================================================================
 
 1. TypeScript Strict Typecheck:
@@ -119,7 +130,7 @@ Commit: baebdaa7fe5c43d2c8031e4e2a39446d3289063d (inspected: 11546e851ee9675c2f8
    Result: Exit code 0 (15 test files passed, 144/144 tests passed)
    - tests/integration/migration-upgrade.test.ts (27 tests)
    - tests/integration/db-readiness.test.ts (4 tests)
-   - tests/integration/auth-integration.test.ts (24 tests)
+   - tests/integration/auth-integration.test.ts (55 tests)
    - tests/integration/http-origin-matrix.test.ts (22 tests)
    - tests/integration/startup-process.test.ts (3 tests)
    - tests/integration/party-migration-upgrade.test.ts (2 tests)
@@ -162,6 +173,26 @@ Commit: baebdaa7fe5c43d2c8031e4e2a39446d3289063d (inspected: 11546e851ee9675c2f8
    Result: Exit code 0 (60/60 passed across Desktop, Tablet, and Mobile viewports)
 ================================================================================
 ```
+
+### B. Hosted GitHub Actions CI Check Runs (Commit `a6de37539daf547efc2ac6ccb133f29c4ef54d3d`)
+
+| Workflow Name | Run ID | Check Run / Job ID | Status | Conclusion | URL |
+|---|---|---|---|---|---|
+| **validate-planning** | `44154477612` | `134291397815` | completed | **success** | [Workflow Run 44154477612](https://github.com/MohamedAlksas/LawyerOS/actions/runs/44154477612) |
+| **Lint, Test, and Build** | `44154477389` | `134291382870` | completed | **success** | [Job 134291382870](https://github.com/MohamedAlksas/LawyerOS/actions/runs/44154477389/job/134291382870) |
+
+- **Hosted CI Step Execution Summary (Job `134291382870`)**:
+  * Set up job & Checkout: Success
+  * Setup Node.js 22.14.0 & npm cache: Success
+  * Install dependencies (`npm ci`): Success
+  * Verify Prisma Client generation (`npx prisma generate`): Success
+  * Run ESLint (`npm run lint`): Success (0 errors, 0 warnings)
+  * Run TypeScript typecheck (`npm run typecheck`): Success (0 errors)
+  * Run Vitest Unit Tests (`npm test`): Success (12 test files, 187/187 tests passed)
+  * Run Integration Tests (`npm run test:integration`): Success (15 test files, 144/144 tests passed on Linux Ubuntu runner, including `party-migration-upgrade.test.ts`)
+  * Build application (`npm run build`): Success (12 static/dynamic routes compiled)
+  * Install Playwright browsers: Success
+  * Run Playwright E2E Tests (`npm run test:e2e`): Success (118/118 tests passed across T03, T04, and T05 suites)
 
 ---
 
