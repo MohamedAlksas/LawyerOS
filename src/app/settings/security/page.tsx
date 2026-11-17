@@ -15,18 +15,18 @@ export default async function SecuritySettingsPage() {
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify');
+        redirect('/verify?returnTo=' + encodeURIComponent('/settings/security'));
       }
       if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
-        redirect('/login?error=session_expired');
+        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
       }
       const { headers } = await import('next/headers');
       const reqHeaders = await headers();
       const cookie = reqHeaders.get('cookie') || '';
       if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
-        redirect('/login?error=session_expired');
+        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
       }
-      redirect('/login');
+      redirect('/login?returnTo=' + encodeURIComponent('/settings/security'));
     }
     if (error instanceof AuthorizationError) {
       return (

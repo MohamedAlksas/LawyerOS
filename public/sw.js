@@ -33,6 +33,11 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
+  // STRICT ZERO-TRUST: Ignore non-same-origin requests
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   // STRICT ZERO-TRUST: Never intercept or cache non-GET requests
   if (event.request.method !== "GET") {
     return;
@@ -43,43 +48,35 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // STRICT ZERO-TRUST: Never cache auth or sensitive pages
+  // STRICT ZERO-TRUST: Never cache authenticated home, auth, or sensitive pages
   if (
+    url.pathname === "/" ||
     url.pathname.startsWith("/login") ||
     url.pathname.startsWith("/verify") ||
     url.pathname.startsWith("/settings/")
   ) {
+    // For navigational requests to these pages, allow network fetch with offline fallback
+    if (event.request.mode === "navigate") {
+      event.respondWith(
+        fetch(event.request).catch(() => {
+          return caches.match("/offline.html");
+        })
+      );
+    }
     return;
   }
 
-  // Static public asset matching allowlist or Next.js static chunks
-  const isStaticAsset =
-    STATIC_ALLOWLIST.includes(url.pathname) ||
-    url.pathname.startsWith("/_next/static/") ||
-    url.pathname.startsWith("/icons/") ||
-    url.pathname.startsWith("/fonts/");
-
-  if (isStaticAsset) {
+  // Strictly enumerated public static asset matching
+  if (STATIC_ALLOWLIST.includes(url.pathname)) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
-        if (cached) {
-          return cached;
-        }
-        return fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, clone);
-            });
-          }
-          return networkResponse;
-        });
+        return cached || fetch(event.request);
       })
     );
     return;
   }
 
-  // Navigational HTML fallback
+  // Navigational HTML fallback for unlisted routes
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request).catch(() => {

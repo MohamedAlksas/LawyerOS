@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
 import {
@@ -67,23 +68,23 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
     setNewCodes(null);
     setRegenError(null);
     // Restore focus to the trigger button
-    setTimeout(() => {
+    requestAnimationFrame(() => {
       triggerButtonRef.current?.focus();
-    }, 0);
+    });
   }, []);
 
   // Trap focus and handle Escape inside recovery modal
   useEffect(() => {
     if (!showRegenModal) return;
 
-    // Focus initial interactive element
-    const timer = setTimeout(() => {
+    // Focus initial interactive element immediately
+    const frameId = requestAnimationFrame(() => {
       if (newCodes) {
         dismissCodesButtonRef.current?.focus();
       } else {
         passwordInputRef.current?.focus();
       }
-    }, 50);
+    });
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -118,7 +119,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
 
     document.addEventListener('keydown', handleKeyDown);
     return () => {
-      clearTimeout(timer);
+      cancelAnimationFrame(frameId);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [showRegenModal, newCodes, closeRegenModal]);
@@ -229,6 +230,22 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
       }
     }
   };
+
+  // Ensure full shell background isolation when recovery codes modal is open (R04-02)
+  useEffect(() => {
+    if (!showRegenModal) return;
+    const shellContent = document.getElementById('app-shell-content');
+    if (shellContent) {
+      shellContent.setAttribute('inert', '');
+      shellContent.setAttribute('aria-hidden', 'true');
+    }
+    return () => {
+      if (shellContent) {
+        shellContent.removeAttribute('inert');
+        shellContent.removeAttribute('aria-hidden');
+      }
+    };
+  }, [showRegenModal]);
 
   return (
     <>
@@ -429,9 +446,10 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
         </section>
       </div>
 
-      {/* Accessible Dialog for Regenerating Backup Codes */}
-      {showRegenModal && (
+      {/* Accessible Dialog for Regenerating Backup Codes with Shell Isolation (R04-02) */}
+      {showRegenModal && typeof document !== 'undefined' && createPortal(
         <div
+          data-testid="recovery-codes-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overflow-y-auto"
           role="presentation"
           onClick={(e) => {
@@ -488,6 +506,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     id="currentPassword"
                     type="password"
                     required
+                    autoFocus={!newCodes}
                     value={passwordForCodes}
                     onChange={(e) => setPasswordForCodes(e.target.value)}
                     className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -551,7 +570,8 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
@@ -8,14 +8,29 @@ import { signOut } from '@/lib/auth-client';
 export function DesktopSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const handleLogout = async () => {
-    try {
-      await signOut();
-    } catch {
-      // Continue to redirect even if network request fails
+    if (isLoggingOut) return;
+    if (!window.confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
+      return;
     }
-    router.push('/login');
+    setIsLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      const res = await signOut();
+      if (res?.error) {
+        setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
+        setIsLoggingOut(false);
+        return;
+      }
+      router.push('/login');
+    } catch {
+      setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
+      setIsLoggingOut(false);
+    }
   };
 
   const isHomeActive = pathname === '/';
@@ -104,15 +119,26 @@ export function DesktopSidebar() {
       </div>
 
       {/* Logout Action */}
-      <div className="pt-4 border-t border-[#D5DFE3]">
+      <div className="pt-4 border-t border-[#D5DFE3] space-y-2">
+        {logoutError && (
+          <div
+            role="alert"
+            data-testid="logout-error-alert"
+            className="p-2 text-xs text-[#A4262C] bg-red-50 border border-red-200 rounded leading-snug"
+          >
+            {logoutError}
+          </div>
+        )}
         <button
           type="button"
           data-testid="nav-button-logout"
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium text-[#A4262C] hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-2 transition-colors min-h-[44px]"
+          disabled={isLoggingOut}
+          aria-busy={isLoggingOut}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium text-[#A4262C] hover:bg-red-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-2 transition-colors min-h-[44px]"
         >
           <span aria-hidden="true" className="text-base">🚪</span>
-          <span>تسجيل الخروج</span>
+          <span>{isLoggingOut ? 'جارٍ تسجيل الخروج...' : 'تسجيل الخروج'}</span>
         </button>
       </div>
     </aside>

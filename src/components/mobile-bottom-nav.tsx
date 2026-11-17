@@ -32,7 +32,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">📅</span>
-        <span className="text-[11px] leading-tight mt-0.5">الرئيسية</span>
+        <span className="text-sm leading-tight mt-0.5">الرئيسية</span>
       </Link>
 
       {/* Security Link */}
@@ -46,7 +46,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">🛡️</span>
-        <span className="text-[11px] leading-tight mt-0.5">الأمان</span>
+        <span className="text-sm leading-tight mt-0.5">الأمان</span>
       </Link>
 
       {/* Menu / Drawer Toggle */}
@@ -58,7 +58,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         className="flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
       >
         <span aria-hidden="true" className="text-lg">☰</span>
-        <span className="text-[11px] leading-tight mt-0.5">المزيد</span>
+        <span className="text-sm leading-tight mt-0.5">المزيد</span>
       </button>
     </nav>
   );

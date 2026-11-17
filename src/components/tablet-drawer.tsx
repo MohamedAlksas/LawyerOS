@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
@@ -16,6 +16,14 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const router = useRouter();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  const handleClose = useCallback(() => {
+    setLogoutError(null);
+    setIsLoggingOut(false);
+    onClose();
+  }, [onClose]);
 
   // Focus trap & Escape key handling
   useEffect(() => {
@@ -24,33 +32,35 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     // Save previous active element to restore focus on close
     const previouslyFocused = triggerRef?.current || (document.activeElement as HTMLElement | null);
 
-    // Focus close button initially
-    const timer = setTimeout(() => {
+    // Focus close button initially via animation frame without arbitrary timeout
+    const frameId = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
-    }, 50);
+    });
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        handleClose();
         previouslyFocused?.focus();
         return;
       }
 
       if (e.key === 'Tab' && drawerRef.current) {
         const focusableElements = drawerRef.current.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         );
+        if (focusableElements.length === 0) return;
+
         const firstElement = focusableElements[0];
         const lastElement = focusableElements[focusableElements.length - 1];
 
         if (e.shiftKey) {
-          if (document.activeElement === firstElement) {
+          if (document.activeElement === firstElement || !drawerRef.current.contains(document.activeElement)) {
             e.preventDefault();
             lastElement?.focus();
           }
         } else {
-          if (document.activeElement === lastElement) {
+          if (document.activeElement === lastElement || !drawerRef.current.contains(document.activeElement)) {
             e.preventDefault();
             firstElement?.focus();
           }
@@ -61,22 +71,35 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      clearTimeout(timer);
+      cancelAnimationFrame(frameId);
       document.removeEventListener('keydown', handleKeyDown);
       previouslyFocused?.focus();
     };
-  }, [isOpen, onClose, triggerRef]);
+  }, [isOpen, handleClose, triggerRef]);
 
   if (!isOpen) return null;
 
   const handleLogout = async () => {
-    onClose();
-    try {
-      await signOut();
-    } catch {
-      // Continue navigation
+    if (isLoggingOut) return;
+    if (!window.confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
+      return;
     }
-    router.push('/login');
+    setIsLoggingOut(true);
+    setLogoutError(null);
+
+    try {
+      const res = await signOut();
+      if (res?.error) {
+        setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
+        setIsLoggingOut(false);
+        return;
+      }
+      onClose();
+      router.push('/login');
+    } catch {
+      setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
+      setIsLoggingOut(false);
+    }
   };
 
   const isHomeActive = pathname === '/';
@@ -88,7 +111,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
       <div
         data-testid="drawer-backdrop"
         aria-hidden="true"
-        onClick={onClose}
+        onClick={handleClose}
         className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
       />
 
@@ -117,7 +140,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               type="button"
               aria-label="إغلاق القائمة"
               data-testid="drawer-close-button"
-              onClick={onClose}
+              onClick={handleClose}
               className="flex items-center justify-center w-11 h-11 rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px] transition-colors"
             >
               <span className="sr-only">إغلاق القائمة</span>
@@ -203,15 +226,26 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
         </div>
 
         {/* Drawer Footer / Logout */}
-        <div className="pt-4 border-t border-[#D5DFE3]">
+        <div className="pt-4 border-t border-[#D5DFE3] space-y-2">
+          {logoutError && (
+            <div
+              role="alert"
+              data-testid="logout-error-alert"
+              className="p-2 text-xs text-[#A4262C] bg-red-50 border border-red-200 rounded leading-snug"
+            >
+              {logoutError}
+            </div>
+          )}
           <button
             type="button"
             data-testid="nav-button-logout"
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium text-[#A4262C] hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-2 transition-colors min-h-[44px]"
+            disabled={isLoggingOut}
+            aria-busy={isLoggingOut}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium text-[#A4262C] hover:bg-red-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-2 transition-colors min-h-[44px]"
           >
             <span aria-hidden="true" className="text-base">🚪</span>
-            <span>تسجيل الخروج</span>
+            <span>{isLoggingOut ? 'جارٍ تسجيل الخروج...' : 'تسجيل الخروج'}</span>
           </button>
         </div>
       </div>
