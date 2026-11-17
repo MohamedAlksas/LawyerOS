@@ -21,7 +21,7 @@
     },
     {
       "Name": "Agency-Agent-Installed-Validation.json",
-      "Length": 14818
+      "Length": 15247
     },
     {
       "Name": "Agency-Agent-Negative-Validation.json",
@@ -53,7 +53,7 @@
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1814068
+      "Length": 1814101
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
@@ -65,7 +65,7 @@
     },
     {
       "Name": "Prompt-Skill-Validation.json",
-      "Length": 7643
+      "Length": 7925
     }
   ]
 }

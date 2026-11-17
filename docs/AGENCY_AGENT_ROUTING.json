@@ -208,7 +208,7 @@
         "agency-application-security-engineer",
         "agency-test-automation-engineer"
       ],
-      "focus": "Private upload/finalization/scanning and authorized preview; inspect fail-closed validation and real negative cases."
+      "focus": "Private upload/finalization and authorized preview; inspect fail-closed content validation and real negative cases. Owner-approved ADR 0003 defers malware scanning initially."
     },
     "T12": {
       "lead": "agency-backend-architect",
