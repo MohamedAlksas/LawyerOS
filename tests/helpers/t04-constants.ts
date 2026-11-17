@@ -86,7 +86,7 @@ export const T04_COPY = {
   emptyStateSecurityAction: 'مراجعة إعدادات الأمان',
   sessionExpired: 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.',
   offlineBanner: 'النت مقطوع. التعديلات مش محفوظة',
-  loadingLabel: 'جاري التحميل...',
+  loadingLabel: 'جارٍ التحميل...',
   errorRetry: 'إعادة المحاولة',
 } as const;
 

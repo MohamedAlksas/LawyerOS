@@ -160,6 +160,7 @@ test('visible navigation targets only available routes @shell', async ({ t04Page
 
 test('active navigation state follows the current route @shell', async ({ t04Page: page }) => {
   await page.goto(T04_ROUTES.security);
+  await expectShellReady(page);
   await openNavigationIfTablet(page);
 
   const securityLinks = page.getByTestId(T04_TEST_IDS.navSecurity).filter({ visible: true });
@@ -171,6 +172,7 @@ test('active navigation state follows the current route @shell', async ({ t04Pag
   await expect(homeLinks).not.toHaveAttribute('aria-current', 'page');
 
   await page.goto(T04_ROUTES.home);
+  await expectShellReady(page);
   await openNavigationIfTablet(page);
 
   const homeOnHome = page.getByTestId(T04_TEST_IDS.navHome).filter({ visible: true });

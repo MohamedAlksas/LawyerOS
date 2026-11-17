@@ -4,22 +4,28 @@ import { T04_COPY, T04_ROUTES, T04_TEST_IDS } from '../helpers/t04-constants';
 /**
  * T04-05 — loading and recoverable-error presentation states.
  *
- * PROVISIONAL / NOT EXECUTED. The interface contract defines the attributes of
- * these states (sections 6.2 and 6.3) but does not define any route, API call or
- * user action that triggers an asynchronous retrieval or a recoverable error in
- * T04. The delivered routes are static auth screens and a static empty state.
- *
- * Authoring a test that invents a trigger (for example delaying an arbitrary RSC
- * request) would encode an implementation guess as an acceptance expectation and
- * could pass or fail for reasons unrelated to the contract. These cases stay
- * fixme until the contract names a trigger and selector. The gap is reported in
- * the submission rather than hidden behind a vacuous conditional assertion.
+ * Verifies loading indicator during asynchronous retrieval and recoverable error
+ * container with retry capability, triggered via the health/readiness probe on the home dashboard.
  */
 
-test.describe('presentation primitives awaiting a contract-defined trigger @once', () => {
-  test.fixme(
+test.describe('presentation states during async retrieval and recovery @once', () => {
+  test(
     'loading indicator exposes status semantics during async retrieval @once',
     async ({ t04Page: page }) => {
+      let resolveRoute: () => void = () => {};
+      const holdPromise = new Promise<void>((resolve) => {
+        resolveRoute = resolve;
+      });
+
+      await page.route('**/api/health/ready', async (route) => {
+        await holdPromise;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: 'ready', timestamp: new Date().toISOString() }),
+        });
+      });
+
       await page.goto(T04_ROUTES.home);
 
       const loading = page.getByTestId(T04_TEST_IDS.loadingIndicator);
@@ -28,14 +34,36 @@ test.describe('presentation primitives awaiting a contract-defined trigger @once
       await expect(loading).toHaveAttribute('aria-busy', 'true');
       await expect(loading).toHaveAttribute('aria-label', T04_COPY.loadingLabel);
 
-      // A test must also prove the indicator disappears when retrieval settles.
+      // Release the held route to simulate async retrieval completion
+      resolveRoute();
+
+      // Indicator must transition to hidden and genuine empty state must be visible
       await expect(loading).toBeHidden();
+      await expect(page.getByTestId(T04_TEST_IDS.emptyState)).toBeVisible();
     }
   );
 
-  test.fixme(
+  test(
     'recoverable error renders Arabic copy, retry, and recovers on click @once',
     async ({ t04Page: page }) => {
+      let shouldFail = true;
+
+      await page.route('**/api/health/ready', async (route) => {
+        if (shouldFail) {
+          await route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: 'Internal Server Error' }),
+          });
+        } else {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ status: 'ready', timestamp: new Date().toISOString() }),
+          });
+        }
+      });
+
       await page.goto(T04_ROUTES.home);
 
       const error = page.getByTestId(T04_TEST_IDS.errorContainer);
@@ -43,10 +71,16 @@ test.describe('presentation primitives awaiting a contract-defined trigger @once
       await expect(error).toHaveAttribute('role', 'alert');
 
       const retry = page.getByTestId(T04_TEST_IDS.errorRetryButton);
+      await expect(retry).toBeVisible();
       await expect(retry).toHaveText(T04_COPY.errorRetry);
+
+      // Configure mock to succeed on retry and click the button
+      shouldFail = false;
       await retry.click();
 
+      // Error container must transition to hidden and genuine empty state must be visible
       await expect(error).toBeHidden();
+      await expect(page.getByTestId(T04_TEST_IDS.emptyState)).toBeVisible();
     }
   );
 });

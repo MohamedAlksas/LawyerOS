@@ -81,7 +81,7 @@ test('every manifest icon is reachable and matches its declared format @once', a
   expect(maskable!.sizes).toBe('512x512');
 });
 
-test('the document links the manifest and theme colour @once', async ({ t04Page: page }) => {
+test('the document links the manifest, icons, and theme colour @once', async ({ t04Page: page }) => {
   await page.goto(T04_ROUTES.home);
 
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute(
@@ -92,4 +92,46 @@ test('the document links the manifest and theme colour @once', async ({ t04Page:
     'content',
     /^#14566B$/i
   );
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute(
+    'href',
+    '/icons/icon-192.png'
+  );
+  expect(await page.locator('link[rel="icon"]').count()).toBeGreaterThanOrEqual(1);
+});
+
+test('browser observes local PWA installability prerequisites and manifest validity @once', async ({
+  t04Page: page,
+}) => {
+  // Listen for beforeinstallprompt event hook attachment
+  await page.addInitScript(() => {
+    const win = window as unknown as { __pwaInstallPromptFired?: boolean };
+    win.__pwaInstallPromptFired = false;
+    window.addEventListener('beforeinstallprompt', () => {
+      win.__pwaInstallPromptFired = true;
+    });
+  });
+
+  await page.goto(T04_ROUTES.home);
+
+  // 1. Verify viewport meta tag satisfies PWA full-width criteria
+  const viewportMeta = page.locator('meta[name="viewport"]');
+  await expect(viewportMeta).toHaveAttribute('content', /width=device-width/);
+
+  // 2. Verify display-mode media query support in browser environment
+  const supportsDisplayMode = await page.evaluate(() => {
+    return (
+      window.matchMedia('(display-mode: standalone)').media === '(display-mode: standalone)' ||
+      window.matchMedia('(display-mode: browser)').matches
+    );
+  });
+  expect(supportsDisplayMode).toBe(true);
+
+  // 3. If running in Chromium, use Chrome DevTools Protocol to observe engine manifest evaluation
+  if (page.context().browser()?.browserType().name() === 'chromium') {
+    const cdp = await page.context().newCDPSession(page);
+    const manifestResult = await cdp.send('Page.getAppManifest');
+    expect(manifestResult.errors, 'Browser reported manifest parsing errors').toEqual([]);
+    expect(manifestResult.url).toContain(T04_MANIFEST.path);
+    expect(manifestResult.data).toBeTruthy();
+  }
 });

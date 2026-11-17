@@ -1,8 +1,9 @@
 import { test, expect } from '../helpers/t04-fixtures';
 import { T04_COPY, T04_ROUTES, T04_TEST_IDS } from '../helpers/t04-constants';
 import { expectShellReady } from '../helpers/t04-layout';
-import { countSessionsForUser, revokeAllSessionsForUser } from '../helpers/t04-auth';
+import { countSessionsForUser, currentTotp, revokeAllSessionsForUser } from '../helpers/t04-auth';
 import { expectHtmlResponse, findOfflineRoute } from '../helpers/t04-assets';
+import { sanitizeReturnTo } from '../../src/lib/sanitize-return-to';
 
 /**
  * T04-05 — genuine empty state, offline banner and server-side session expiry.
@@ -56,7 +57,7 @@ test('offline banner appears and dismisses with the real connectivity events @on
   await expect(banner).toBeHidden();
 });
 
-test('revoked session redirects to login with expiry feedback @once', async ({
+test('revoked session redirects to login with expiry feedback and returnTo @once', async ({
   t04OwnerPage: page,
   t04Owner,
 }) => {
@@ -70,7 +71,10 @@ test('revoked session redirects to login with expiry feedback @once', async ({
   await page.goto(T04_ROUTES.security);
 
   await expect(page).toHaveURL(
-    (url) => url.pathname === T04_ROUTES.login && url.searchParams.get('error') === 'session_expired'
+    (url) =>
+      url.pathname === T04_ROUTES.login &&
+      url.searchParams.get('error') === 'session_expired' &&
+      url.searchParams.get('returnTo') === T04_ROUTES.security
   );
 
   const alert = page.getByTestId(T04_TEST_IDS.sessionExpiredAlert);
@@ -97,4 +101,63 @@ test('public offline fallback is reachable and leaks no owner data @once', async
   expect(html, 'The public offline page must not contain the owner id').not.toContain(
     t04WorkerSession.owner.id
   );
+});
+
+test('login with malicious returnTo sanitizes safely to root without open redirect @once', async ({
+  browser,
+  t04Owner,
+}) => {
+  const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3204' });
+  const page = await context.newPage();
+  try {
+    // Navigate to login with protocol-relative external returnTo vector
+    await page.goto('/login?returnTo=//evil.com/phish');
+    await page.locator('#email').fill(t04Owner.email);
+    await page.locator('#password').fill(t04Owner.password);
+    await page.locator('button[type="submit"]').click();
+
+    // Verify step to 2FA does not preserve an open redirect target
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('التحقق الثنائي');
+    expect(page.url()).not.toContain('evil.com');
+
+    // Complete TOTP verification
+    const code = await currentTotp(t04Owner.totpSecret);
+    await page.locator('#totpCode').fill(code);
+    await page.locator('button[type="submit"]').click();
+
+    // Settle at local root '/' — must not redirect to evil.com
+    await page.waitForURL((url) => url.pathname === '/' && !url.hostname.includes('evil.com'));
+    expect(new URL(page.url()).origin).toBe('http://127.0.0.1:3204');
+    expect(new URL(page.url()).pathname).toBe('/');
+  } finally {
+    await context.close();
+  }
+});
+
+test('returnTo sanitization neutralizes open redirect vectors and preserves safe relative paths @once', async () => {
+  const maliciousVectors = [
+    '//evil.com',
+    '//evil.com/attack',
+    '///evil.com',
+    'javascript:alert(document.cookie)',
+    '/\\evil.com',
+    '/\\/evil.com',
+    '\\evil.com',
+    'https://evil.com',
+    'http://evil.com',
+    'data:text/html,<script>alert(1)</script>',
+    '/evil\0test',
+  ];
+
+  for (const vector of maliciousVectors) {
+    const sanitized = sanitizeReturnTo(vector);
+    expect(sanitized, `Malicious vector "${vector}" must sanitize safely to "/" without open redirect`).toBe('/');
+  }
+
+  // Safe relative paths must be preserved
+  expect(sanitizeReturnTo('/settings/security')).toBe('/settings/security');
+  expect(sanitizeReturnTo('/settings/security?tab=audit')).toBe('/settings/security?tab=audit');
+  expect(sanitizeReturnTo('/')).toBe('/');
+  expect(sanitizeReturnTo(null)).toBe('/');
+  expect(sanitizeReturnTo(undefined)).toBe('/');
 });
