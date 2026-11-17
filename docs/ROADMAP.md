@@ -54,7 +54,7 @@ An initial organizational estimate is 6–10 weeks of part-time work, including 
 
 | Task | Scope | Submission requirement |
 |---|---|---|
-| T11 Upload and preview | Quarantine, allowed formats, checksum, private storage, private ClamAV, download authorization | Reject disguised/oversized files; scanner timeout/failure/stale definitions prevent publication; prevent path traversal; reject unauthorized direct links |
+| T11 Upload and preview | Quarantine, allowed formats, checksum, private storage, download authorization; ClamAV deferred initially by ADR 0003 | Reject disguised/oversized/traversal files; atomic finalization and private authorization; truthful NOT_SCANNED_POLICY. Scanner failure/timeout/staleness tests required only upon later activation |
 | T12 Versions and paper originals | Immutable versions, paper original/location, Proceeding/Hearing links | Old versions remain; failed finalization/database writes create no broken reference; orphan cleanup respects backup pins |
 
 **Demo:** a mobile photo and a 20-page PDF, re-upload, and download without a session. Before M4 is complete, the application is experimental rather than a trusted archive.

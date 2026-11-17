@@ -56,6 +56,8 @@ Outside V1: calculating appeal periods from general rules, automatic submissions
 
 ## 6. Boundaries and evidence
 
+Initial-release owner exception: ClamAV is deferred under [ADR 0003](adr/0003-initial-malware-scan-deferral.md). File validation/privacy/finalization remain required; malware-scan status is explicitly NOT_SCANNED_POLICY, never a fabricated clean result. Scanner-specific evidence is deferred until an approved activation task.
+
 The dashboard displays actual database data; any demo data is clearly labeled and never mixed with live records. API success or a successful build is insufficient evidence of usability. The project owner's father must try the daily journeys, and the project owner must review the accounts and recovery.
 
 Before selecting an external storage location or sending a document to an AI service, the father reviews confidentiality, applicable legal and contractual obligations, and the processing location. The plan does not assume any provider automatically satisfies those obligations.

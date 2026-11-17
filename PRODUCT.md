@@ -45,4 +45,6 @@ The previous conversation, "اقتراحات نظام محاماة" (law office 
 
 ## Open Decisions
 
+Owner decision, 17 November 2026: malware scanning/ClamAV is deferred for the initial release. Private uploads still require type/size/signature validation, authorization and atomic finalization, and must be recorded as unscanned rather than CLEAN. See [ADR 0003](docs/adr/0003-initial-malware-scan-deferral.md). Future activation is a separate owner-approved assignment.
+
 The hosting and offsite backup provider and location, archive size, external notification channel and its budget, and actual printers and devices remain open. These decisions do not prevent implementing a trial version with synthetic data.
