@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { twoFactor } from '@/lib/auth-client';
 import { parseAndValidateOtp } from '@/modules/identity/otp-input';
+import { sanitizeReturnTo } from '@/lib/sanitize-return-to';
 
-export default function VerifyPage() {
+function VerifyForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
+
   const [method, setMethod] = useState<'totp' | 'backup'>('totp');
   const [totpCode, setTotpCode] = useState('');
   const [backupCode, setBackupCode] = useState('');
@@ -36,7 +40,7 @@ export default function VerifyPage() {
           return;
         }
 
-        router.push('/');
+        router.push(returnTo);
       } catch {
         setError('حدث خطأ أثناء الاتصال بالخادم للتحقق من الرمز. برجاء المحاولة مجدداً.');
         setIsLoading(false);
@@ -60,7 +64,7 @@ export default function VerifyPage() {
           return;
         }
 
-        router.push('/');
+        router.push(returnTo);
       } catch {
         setError('حدث خطأ أثناء الاتصال بالخادم للتحقق من الرمز. برجاء المحاولة مجدداً.');
         setIsLoading(false);
@@ -194,5 +198,13 @@ export default function VerifyPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function VerifyPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyForm />
+    </Suspense>
   );
 }

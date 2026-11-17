@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+
+<html class="h-full" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>نظام إدارة المكتب الرقمي - دليل الموكلين والأطراف</title>
+<!-- Google Fonts: Noto Sans Arabic -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration verbatim -->
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-tertiary-container": "#88d1af",
+            "error-container": "#ffdad6",
+            "outline-variant": "#c0c8cc",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "primary-fixed": "#baeaff",
+            "tertiary-container": "#075b41",
+            "surface-container": "#ddf1ff",
+            "tertiary-fixed": "#a8f2cf",
+            "secondary": "#4e616b",
+            "on-tertiary-fixed": "#002115",
+            "inverse-surface": "#20333e",
+            "error": "#ba1a1a",
+            "surface-dim": "#c9ddec",
+            "on-error-container": "#93000a",
+            "on-surface": "#0a1e28",
+            "inverse-primary": "#96cfe7",
+            "secondary-container": "#cee3ef",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-secondary": "#ffffff",
+            "surface-container-low": "#e9f5ff",
+            "on-primary": "#ffffff",
+            "inverse-on-surface": "#e3f3ff",
+            "secondary-fixed": "#d1e6f1",
+            "on-surface-variant": "#40484c",
+            "surface-container-high": "#d7ebfa",
+            "on-secondary-fixed-variant": "#374953",
+            "background": "#f5faff",
+            "surface-variant": "#d1e5f4",
+            "primary": "#003e4f",
+            "primary-fixed-dim": "#96cfe7",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-highest": "#d1e5f4",
+            "on-secondary-container": "#52656f",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#001f29",
+            "on-error": "#ffffff",
+            "on-primary-fixed-variant": "#024d62",
+            "on-background": "#0a1e28",
+            "tertiary": "#00422d",
+            "surface-bright": "#f5faff",
+            "on-secondary-fixed": "#0a1e26",
+            "on-primary-container": "#91cae2",
+            "surface-tint": "#29657b",
+            "surface-container-lowest": "#ffffff",
+            "outline": "#70787c",
+            "primary-container": "#14566b",
+            "surface": "#f5faff"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "margin-desktop": "2rem",
+            "space-sm": "0.5rem",
+            "gutter": "1rem",
+            "space-xs": "0.375rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem"
+          },
+          "fontFamily": {
+            "body-lg": ["Noto Sans"],
+            "label-md": ["Noto Sans"],
+            "headline-lg-mobile": ["Noto Sans"],
+            "display": ["Noto Sans"],
+            "headline-md": ["Noto Sans"],
+            "body-sm-medium": ["Noto Sans"],
+            "body-sm": ["Noto Sans"],
+            "body-lg-medium": ["Noto Sans"],
+            "label-sm": ["Noto Sans"],
+            "headline-lg": ["Noto Sans"],
+            "headline-sm": ["Noto Sans"]
+          },
+          "fontSize": {
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    body {
+      font-family: 'Noto Sans', sans-serif;
+    }
+  </style>
+<meta content="web_dashboard" name="shell-type"/></head>
+<body class="bg-surface text-on-surface min-h-screen flex flex-col antialiased selection:bg-secondary-container selection:text-primary">
+<!-- SideNavBar Component (Exact JSON specifications) -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l border-outline-variant select-none">
+<div class="flex flex-col justify-between h-full w-[232px] py-space-lg px-space-md">
+<!-- Top Section: Identity & Navigation -->
+<div class="flex flex-col gap-space-md">
+<!-- Office Identity Header -->
+<div class="flex items-center gap-space-sm pb-space-sm border-b border-outline-variant">
+<div class="w-10 h-10 rounded bg-primary-container text-on-primary flex items-center justify-center font-headline-sm text-headline-sm shrink-0">
+            م
+          </div>
+<div class="overflow-hidden">
+<h1 class="font-headline-sm text-headline-sm text-primary truncate leading-tight">مكتب الأستاذ أحمد ممدوح</h1>
+<p class="font-body-sm text-body-sm text-secondary truncate">المحامي بالنقض والاستئناف</p>
+</div>
+</div>
+<!-- Quick Primary Action -->
+<button class="w-full h-11 bg-primary text-on-primary rounded font-label-md text-label-md flex items-center justify-center gap-space-xs hover:bg-primary-container transition-colors duration-150 active:bg-primary">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+<span>إضافة قضية جديدة</span>
+</button>
+<!-- Main Navigation Links -->
+<nav class="flex flex-col gap-1 mt-2">
+<!-- Item 0: جدول الجلسات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="calendar_month">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<!-- Item 1: ملفات القضايا -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="folder_open">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<!-- Item 2: دليل الموكلين (ACTIVE: Semantic lock for الأطراف والموكلون) -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-surface-container-low border-r-4 border-primary font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px] text-primary" data-icon="groups" data-weight="fill" style="font-variation-settings: 'FILL' 1;">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<!-- Item 3: المهام الإجرائية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="assignment_late">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<!-- Item 4: السجلات والمالية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="account_balance_wallet">account_balance_wallet</span>
+<span>السجلات والمالية</span>
+</a>
+<!-- Item 5: الإعدادات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Footer Section of SideNavBar -->
+<div class="flex flex-col gap-1 pt-space-sm border-t border-outline-variant">
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant font-label-md text-label-md hover:bg-surface-container hover:text-on-surface transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-error font-label-md text-label-md hover:bg-error-container/30 transition-colors duration-150 rounded" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="logout">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- TopNavBar Component (Exact JSON specifications) -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b border-outline-variant">
+<div class="flex items-center justify-between h-[64px] px-gutter-desktop w-full pr-[248px]">
+<!-- Right Side (in RTL): Brand Title & Search Trigger -->
+<div class="flex items-center gap-space-lg">
+<span class="font-headline-sm text-headline-sm text-primary font-bold tracking-tight">نظام إدارة المكتب الرقمي</span>
+<div class="hidden lg:flex items-center gap-2 text-secondary font-body-sm text-body-sm bg-surface-container-low px-3 py-1.5 rounded border border-outline-variant">
+<span class="material-symbols-outlined text-[18px] text-primary" data-icon="balance">balance</span>
+<span>السنة القضائية 2025 - 2026</span>
+</div>
+</div>
+<!-- Left Side (in RTL): Quick Actions, Notifications, Profile -->
+<div class="flex items-center gap-space-md">
+<!-- Trailing Secondary Action -->
+<button class="h-11 px-4 border border-outline bg-surface-container-lowest text-primary rounded font-label-md text-label-md hover:bg-surface transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="upload_file">upload_file</span>
+<span>إيداع مستند</span>
+</button>
+<!-- Trailing Primary Action -->
+<button class="h-11 px-4 bg-primary text-on-primary rounded font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[18px]" data-icon="event">event</span>
+<span>جلسة جديدة</span>
+</button>
+<!-- Hairline Divider -->
+<div class="h-6 w-px bg-outline-variant"></div>
+<!-- Trailing Icon Actions -->
+<button class="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded transition-colors" title="البحث العام">
+<span class="material-symbols-outlined" data-icon="search">search</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded relative transition-colors" title="الإشعارات القضائية">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+<span class="absolute top-2 left-2 w-2 h-2 rounded-full bg-error"></span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-low rounded transition-colors" title="المساعدة">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<!-- Profile Avatar Placeholder -->
+<div class="flex items-center gap-2 pr-2 border-r border-outline-variant">
+<div class="w-9 h-9 rounded bg-surface-variant text-primary font-bold flex items-center justify-center border border-outline-variant text-sm">
+            أم
+          </div>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Operational Canvas -->
+<main class="pr-[232px] flex-1 pb-16"><div class="flex flex-col w-full">
+<!-- Top Operational Context & Breadcrumb Bar -->
+<div class="bg-surface-container-lowest px-margin-desktop py-space-md shadow-sm">
+<div class="flex flex-col gap-space-sm">
+<!-- Breadcrumb Hierarchy & System Flags -->
+<div class="flex items-center justify-between flex-wrap gap-space-sm">
+<nav aria-label="مسار التنقل" class="flex items-center gap-space-xs text-secondary font-label-sm text-label-sm">
+<a class="hover:text-primary transition-colors flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[16px]">folder_special</span>
+<span>المستندات</span>
+</a>
+<span class="text-outline-variant">/</span>
+<a class="hover:text-primary transition-colors font-medium text-on-surface-variant" href="#">LO-2026-001</a>
+<span class="text-outline-variant">/</span>
+<span class="text-primary font-semibold truncate max-w-md">عقد التوريد والمقاولة الأصلي المؤرخ 2024</span>
+</nav>
+<div class="flex items-center gap-space-sm">
+<!-- Demo Data Chip -->
+<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-secondary-container text-on-secondary-container font-label-sm text-label-sm font-semibold tracking-wide">
+<span class="material-symbols-outlined text-[15px]">science</span>
+<span>بيانات تجريبية</span>
+</span>
+<!-- Retention Status Chip -->
+<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-tertiary-container text-on-tertiary font-label-sm text-label-sm font-medium">
+<span class="material-symbols-outlined text-[15px]" style="font-variation-settings: 'FILL' 1;">verified</span>
+<span>أصل عقد محفوظ ومطابق</span>
+</span>
+</div>
+</div>
+<!-- Page Title & Operational Action Group -->
+<div class="flex items-center justify-between flex-wrap gap-space-md pt-space-xs">
+<div class="flex flex-col">
+<h1 class="font-headline-lg text-headline-lg text-primary font-bold tracking-tight">معاينة المستند وتفاصيل الإيداع</h1>
+<p class="font-body-sm text-body-sm text-secondary">فحص سلامة النسخة الرقمية الممسوحة ضوئياً وسجل الحفظ المادي بالخزينة الحديدية</p>
+</div>
+<div class="flex items-center gap-space-sm flex-wrap">
+<!-- Edit Indexing -->
+<button class="h-11 px-4 rounded-md bg-surface-container-low text-primary font-label-md text-label-md hover:bg-surface-container transition-colors flex items-center gap-2 active:bg-surface-container-high">
+<span class="material-symbols-outlined text-[18px]">edit_note</span>
+<span>تعديل بيانات الفهرسة</span>
+</button>
+<!-- Upload New Version -->
+<button class="h-11 px-4 rounded-md bg-surface-container text-primary font-label-md text-label-md hover:bg-surface-container-high transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">upload</span>
+<span>رفع إصدار أحدث (v1.1)</span>
+</button>
+<!-- Primary Download Document -->
+<button class="h-11 px-5 rounded-md bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors flex items-center gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[18px]">download</span>
+<span>تحميل المستند الأصلي (PDF)</span>
+</button>
+</div>
+</div>
+<!-- Security & Retention Notice Banner -->
+<div class="mt-space-xs px-3.5 py-2.5 rounded-md bg-surface-container-low flex items-center justify-between text-on-surface-variant font-body-sm text-body-sm">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[19px] text-primary">security</span>
+<span><strong>مستند داخلي مقيد:</strong> مصرح بتداوله حصراً لهيئة الدفاع المعتمدة بالمكتب — لا تتوفر روابط مشاركة عامة أو تصدير خارجي غير مسجل بالسجل الجنائي للمكتب.</span>
+</div>
+<span class="text-secondary font-label-sm text-label-sm hidden md:inline">مستوى السرية: 03 (سند تنفيذي أصلي)</span>
+</div>
+</div>
+</div>
+<!-- Main Canvas: Document Viewer (Right/Primary) & Ledger Info Rail (Left) -->
+<div class="p-margin-desktop grid grid-cols-1 xl:grid-cols-12 gap-gutter-desktop items-start">
+<!-- Primary Area: Document Viewer Canvas (Cols: 7 on Desktop XL) -->
+<div class="xl:col-span-7 flex flex-col gap-space-md">
+<!-- Viewer Frame Outer -->
+<div class="bg-surface-container-lowest rounded-md shadow-sm overflow-hidden flex flex-col">
+<!-- Viewer Control Deck / Toolbar -->
+<div class="bg-surface-container-low px-space-md py-space-sm flex items-center justify-between flex-wrap gap-space-sm select-none">
+<!-- Page Paging Controls -->
+<div class="flex items-center gap-2">
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-primary hover:bg-surface-container flex items-center justify-center transition-colors disabled:opacity-40" id="prev-page-btn" title="الصفحة السابقة">
+<span class="material-symbols-outlined text-[20px]">chevron_right</span>
+</button>
+<div class="flex items-center gap-1.5 px-3 py-1 bg-surface-container-lowest rounded font-label-md text-label-md text-primary">
+<span>صفحة</span>
+<span class="font-bold text-on-surface" id="current-page-num">1</span>
+<span class="text-outline">من</span>
+<span class="font-medium text-secondary">4</span>
+</div>
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-primary hover:bg-surface-container flex items-center justify-center transition-colors" id="next-page-btn" title="الصفحة التالية">
+<span class="material-symbols-outlined text-[20px]">chevron_left</span>
+</button>
+</div>
+<!-- Document Manipulation Tools -->
+<div class="flex items-center gap-1.5">
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-secondary hover:text-primary hover:bg-surface-container flex items-center justify-center transition-colors" id="zoom-in-btn" title="تكبير المستند">
+<span class="material-symbols-outlined text-[19px]">zoom_in</span>
+</button>
+<span class="font-label-sm text-label-sm text-secondary px-2 min-w-[50px] text-center" id="zoom-level-label">100%</span>
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-secondary hover:text-primary hover:bg-surface-container flex items-center justify-center transition-colors" id="zoom-out-btn" title="تصغير المستند">
+<span class="material-symbols-outlined text-[19px]">zoom_out</span>
+</button>
+<div class="h-5 w-px bg-outline-variant mx-1"></div>
+<button class="h-9 px-2.5 rounded bg-surface-container-lowest text-secondary hover:text-primary hover:bg-surface-container flex items-center gap-1 font-label-sm text-label-sm transition-colors" id="fit-width-btn" title="ملاءمة العرض">
+<span class="material-symbols-outlined text-[18px]">fit_screen</span>
+<span class="hidden sm:inline">ملء العرض</span>
+</button>
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-secondary hover:text-primary hover:bg-surface-container flex items-center justify-center transition-colors" id="rotate-btn" title="تدوير الصفحة">
+<span class="material-symbols-outlined text-[18px]">rotate_right</span>
+</button>
+<div class="h-5 w-px bg-outline-variant mx-1"></div>
+<button class="w-9 h-9 rounded bg-surface-container-lowest text-secondary hover:text-primary hover:bg-surface-container flex items-center justify-center transition-colors" title="طباعة الصفحة الحالية">
+<span class="material-symbols-outlined text-[18px]">print</span>
+</button>
+</div>
+</div>
+<!-- Rendered Contract Surface Simulation -->
+<div class="p-space-lg bg-surface-variant flex justify-center items-start overflow-x-auto min-h-[760px]">
+<!-- Authentic Egyptian Legal Document Layout Simulation (High-Def Ledger Sheet) -->
+<div class="w-full max-w-[620px] bg-surface-container-lowest shadow-md rounded-sm p-10 flex flex-col justify-between text-on-surface relative transition-transform duration-200" id="document-sheet">
+<!-- Document Ledger Watermark / Border Motif (Calm Minimalist Rule) -->
+<div class="absolute inset-4 pointer-events-none rounded-sm border border-outline-variant/50"></div>
+<!-- Page Main Content Flow -->
+<div class="flex flex-col gap-6 relative z-10">
+<!-- Legal Header Section -->
+<div class="text-center pb-4 border-b border-outline-variant">
+<p class="font-headline-sm text-headline-sm text-primary font-bold tracking-normal mb-1">بسم الله الرحمن الرحيم</p>
+<h2 class="font-headline-lg text-headline-lg font-bold text-on-surface mt-2 text-primary">عقد مقاولة وتوريد مواد إنشائية</h2>
+<p class="font-body-sm text-body-sm text-secondary mt-1">محرر وموثق بالقاهرة في يوم الخميس الموافق 15 / 08 / 2024 ميلادية</p>
+</div>
+<!-- Parties Definition Paragraph -->
+<div class="flex flex-col gap-3 font-body-sm text-body-sm leading-relaxed text-justify">
+<p>
+<strong class="font-bold text-primary">أولاً: الطرف الأول (المقاول العام):</strong>
+                  شركة النيل للمقاولات العامة والإنشاءات الهندسية (شركة مساهمة مصرية)، سجل تجاري رقم 984321 استثمار القاهرة، الكائن مقرها القانوني في: 42 شارع مراد، الجيزة. ويمثلها في التوقيع على هذا العقد المهندس / <strong class="text-on-surface">إبراهيم توفيق السيد</strong> بصفته رئيساً لمجلس الإدارة والعضو المنتدب.
+                </p>
+<p>
+<strong class="font-bold text-primary">ثانياً: الطرف الثاني (جهة الإسناد والمالك):</strong>
+                  شركة الأهرام للاستثمار العقاري والتطوير العمراني، سجل تجاري 109844 جنوب القاهرة، ويمثلها قانوناً السيد الأستاذ / <strong class="text-on-surface">طارق مصطفى البنهاوي</strong> بصفته وكيلاً مفوضاً بموجب توكيل رسمي عام رقم 4512 لسنة 2023 توثيق الأهرام النموذجي.
+                </p>
+</div>
+<!-- Preambular Recital -->
+<div class="bg-surface-container-low p-3.5 rounded text-on-surface-variant font-body-sm text-body-sm leading-relaxed">
+<span class="font-bold text-primary block mb-1 font-label-md text-label-md">تمهيد إلزامي يعتبر جزءاً لا يتجزأ من العقد:</span>
+                لما كان الطرف الأول يمتلك الكفاءة والترخيص والخبرة الفنية في أعمال صب وتوريد الخرسانات المسلحة والبنية التحتية، ورغب الطرف الثاني في إسناد أعمال التوريد والمقاولة للمرحلة التنفيذية الثانية لمشروع «زهرة النيل 2» بمدينة الشيخ زايد؛ فقد تلاقت الإرادتان على الآتي:
+              </div>
+<!-- Key Operational Clauses -->
+<div class="flex flex-col gap-3 font-body-sm text-body-sm text-justify">
+<div>
+<h3 class="font-label-md text-label-md font-bold text-primary mb-1">البند الأول — موضوع العقد:</h3>
+<p class="leading-relaxed">يلتزم الطرف الأول بتوريد وتنفيذ كافة المهمات والمواد الإنشائية المحددة بجدول المواصفات القياسية المصرية (كود البناء رقم 203)، وذلك بموقع العمل المملوك للطرف الثاني، وبكمية إجمالية قدرها 14,500 متر مكعب.</p>
+</div>
+<div>
+<h3 class="font-label-md text-label-md font-bold text-primary mb-1">البند الثاني — القيمة المالية وطريقة الصرف:</h3>
+<p class="leading-relaxed">اتفق الطرفان على أن القيمة الإجمالية المقدرة للأعمال تبلغ <span class="font-bold text-primary">12,450,000 جنيه مصري</span> (فقط اثنا عشر مليوناً وأربعمائة وخمسون ألف جنيه لا غير)، تُسدد بنظام المستخلصات الجارية المعتمدة من الاستشاري الهندسي بنسبة لا تجاوز 85% من منجزات كل مرحلة شهرية.</p>
+</div>
+<div>
+<h3 class="font-label-md text-label-md font-bold text-primary mb-1">البند الثالث — الاختصاص القضائي:</h3>
+<p class="leading-relaxed">تختص محكمة جنوب الجيزة الابتدائية ودوائرها التجارية دون غيرها بنظر أي نزاع قد ينشأ مستقبلاً بشأن تفسير أو إخلال بأي شرط من بنود هذا الاتفاق.</p>
+</div>
+</div>
+<!-- Signatures, Endorsements & Legal Stamp Block -->
+<div class="pt-6 mt-4 border-t border-outline-variant flex items-end justify-between">
+<!-- Party 1 Stamp & Signature -->
+<div class="flex flex-col items-center text-center gap-1.5 w-1/2">
+<span class="font-label-md text-label-md font-bold text-on-surface">عن الطرف الأول (المقاول العام)</span>
+<span class="font-body-sm text-body-sm text-secondary">إبراهيم توفيق السيد</span>
+<!-- Handwritten Signature Simulation -->
+<div class="h-12 w-32 flex items-center justify-center my-1 select-none">
+<svg class="w-full h-full text-primary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 160 50">
+<path d="M10,35 C30,10 45,45 60,20 C75,5 90,38 120,15 C135,5 145,40 155,25 M40,25 C70,25 110,30 140,22"></path>
+</svg>
+</div>
+<!-- Verification Rubber Stamp Simulation -->
+<div class="w-24 h-24 rounded-full border-2 border-primary-container p-1 flex items-center justify-center rotate-[-12deg] opacity-85 select-none bg-surface-container-low/40">
+<div class="w-full h-full rounded-full border border-dashed border-primary-container flex flex-col items-center justify-center text-[9px] text-primary-container font-bold leading-tight">
+<span>شركة النيل</span>
+<span class="text-[7px]">س.ت 984321</span>
+<span class="font-bold">معتمد للعقود</span>
+<span class="text-[8px]">15-08-2024</span>
+</div>
+</div>
+</div>
+<!-- Party 2 Stamp & Signature -->
+<div class="flex flex-col items-center text-center gap-1.5 w-1/2">
+<span class="font-label-md text-label-md font-bold text-on-surface">عن الطرف الثاني (جهة الإسناد)</span>
+<span class="font-body-sm text-body-sm text-secondary">طارق مصطفى البنهاوي</span>
+<!-- Handwritten Signature Simulation 2 -->
+<div class="h-12 w-32 flex items-center justify-center my-1 select-none">
+<svg class="w-full h-full text-secondary" fill="none" stroke="currentColor" stroke-width="2" viewbox="0 0 160 50">
+<path d="M15,20 C35,40 50,15 75,30 C95,45 115,10 135,28 C145,35 150,15 158,35 M55,38 C80,32 110,35 145,28"></path>
+</svg>
+</div>
+<!-- Circular Company Stamp -->
+<div class="w-24 h-24 rounded-full border-2 border-outline p-1 flex items-center justify-center rotate-[8deg] opacity-80 select-none bg-surface-container-lowest">
+<div class="w-full h-full rounded-full border border-solid border-outline flex flex-col items-center justify-center text-[9px] text-on-surface-variant font-bold leading-tight">
+<span>شركة الأهرام</span>
+<span class="text-[7px]">إدارة التعاقدات</span>
+<span class="font-bold">موافق عليه</span>
+<span class="text-[8px]">القاهرة</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Page Number Ledger Footer Inside Paper -->
+<div class="pt-6 border-t border-outline-variant/60 flex items-center justify-between text-secondary font-label-sm text-label-sm relative z-10">
+<span>عقد مقاولة وتوريد — رقم التسجيل: LO-2026-DOC-001</span>
+<span>صفحة [ 1 ] من أصل [ 4 ] صفحات</span>
+</div>
+</div>
+</div>
+<!-- Document Viewer Bottom Technical Status Deck -->
+<div class="bg-surface-container-lowest px-space-md py-space-sm flex items-center justify-between flex-wrap text-secondary font-body-sm text-body-sm">
+<div class="flex items-center gap-3">
+<span class="flex items-center gap-1.5 text-tertiary font-medium">
+<span class="material-symbols-outlined text-[17px]">verified_user</span>
+<span>المسح الضوئي: 300 DPI ملون عالي النقاوة</span>
+</span>
+<span class="text-outline-variant">|</span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[17px]">layers</span>
+<span>النص قابل للتحديد المباشر (OCR نشط)</span>
+</span>
+</div>
+<div class="flex items-center gap-2 font-label-sm text-label-sm">
+<span>تاريخ الفحص الرقمي:</span>
+<span class="font-bold text-on-surface">15/01/2026</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Secondary Area: Metadata & Archive Ledger Cards (Cols: 5 on Desktop XL) -->
+<div class="xl:col-span-5 flex flex-col gap-space-md">
+<!-- Card 1: Document Metadata & Case Association -->
+<div class="bg-surface-container-lowest rounded-md shadow-sm p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-sm border-b border-outline-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">badge</span>
+<h2 class="font-headline-sm text-headline-sm text-primary font-bold">بيانات الفهرسة والربط القضائي</h2>
+</div>
+<span class="font-label-sm text-label-sm text-secondary bg-surface-container px-2 py-0.5 rounded">مستند رقم 01</span>
+</div>
+<div class="flex flex-col gap-3 font-body-sm text-body-sm">
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">اسم المستند الرسمي الكامل:</span>
+<span class="font-body-lg-medium text-body-lg-medium text-on-surface">أصل عقد المقاولة والتوريد الإنشائي المؤرخ 15/08/2024</span>
+</div>
+<div class="grid grid-cols-2 gap-3 pt-2">
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">ملف المكتب الداخلي:</span>
+<a class="text-primary font-bold hover:underline flex items-center gap-1" href="#">
+<span class="material-symbols-outlined text-[16px]">folder</span>
+<span>LO-2026-001</span>
+</a>
+<span class="text-[12px] text-secondary">مطالبة مالية بمستحقات توريد ومقاولات</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">الدعوى القضائية المرتبطة:</span>
+<span class="text-on-surface font-semibold">1234 لسنة 2026</span>
+<span class="text-[12px] text-secondary">كلي تجاري جنوب الجيزة</span>
+</div>
+</div>
+<div class="h-px bg-outline-variant my-1"></div>
+<div class="flex flex-col gap-1">
+<span class="text-secondary font-label-sm text-label-sm">الطرف المودع لمصلحته (الموكل):</span>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[18px]">corporate_fare</span>
+<span class="font-medium text-on-surface">شركة النيل للمقاولات العامة (ش.م.م)</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-3 pt-1">
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">تاريخ وساعة الإيداع:</span>
+<span class="text-on-surface font-medium">15 يناير 2026 — 11:30 ص</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">حجم وصيغة الملف:</span>
+<span class="text-on-surface font-medium">PDF (3.8 ميجابايت)</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Card 2: Physical Archive Safe Vault Location -->
+<div class="bg-surface-container-lowest rounded-md shadow-sm p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-sm border-b border-outline-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">inventory_2</span>
+<h2 class="font-headline-sm text-headline-sm text-primary font-bold">موضع الأصل الورقي بالخزينة</h2>
+</div>
+<!-- Confirmed Storage Chip -->
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-tertiary-fixed text-on-tertiary-fixed font-label-sm text-label-sm font-semibold">
+<span class="material-symbols-outlined text-[15px]" style="font-variation-settings: 'FILL' 1;">lock</span>
+<span>الأصل مودع بالخزينة</span>
+</span>
+</div>
+<div class="flex flex-col gap-3 font-body-sm text-body-sm">
+<div class="bg-surface-container-low p-3 rounded-md flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-10 h-10 rounded bg-primary-container text-on-primary flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[20px]">door_sliding</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-label-sm text-secondary">الخزانة والرف:</span>
+<span class="font-bold text-primary font-headline-sm text-headline-sm">الخزانة الرئيسية (أ) — رف 02</span>
+</div>
+</div>
+<span class="text-xs bg-surface-container-lowest px-2 py-1 rounded text-secondary font-medium">كود: SEC-A2</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">رقم الحافظة / الدوسيه الورقي:</span>
+<span class="font-bold text-on-surface">ARC-2026-089</span>
+<span class="text-xs text-secondary">حافظة مقواه مضادة للرطوبة</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<span class="text-secondary font-label-sm text-label-sm">أمين عهدة الحفظ المادي:</span>
+<span class="font-bold text-on-surface">أ. سامح عبد الفتاح</span>
+<span class="text-xs text-secondary">إدارة الأرشيف والتوثيق</span>
+</div>
+</div>
+<div class="flex flex-col gap-0.5 pt-1">
+<span class="text-secondary font-label-sm text-label-sm">سند استلام العهدة الورقية:</span>
+<div class="flex items-center gap-1.5 text-on-surface">
+<span class="material-symbols-outlined text-[17px] text-tertiary">receipt_long</span>
+<span>تم الاستلام بتاريخ 14 يناير 2026 بموجب إيصال إيداع أصول رقم <strong>(104)</strong></span>
+</div>
+</div>
+<!-- Direct Barcode Printing Action -->
+<div class="pt-2">
+<button class="w-full h-11 rounded-md bg-surface-container text-primary font-label-md text-label-md hover:bg-surface-container-high transition-colors flex items-center justify-center gap-2 active:bg-surface-container-highest">
+<span class="material-symbols-outlined text-[20px]">qr_code_2</span>
+<span>طباعة بطاقة باركود للأصل الورقي (Sticker)</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Card 3: Version History & Audit Trail -->
+<div class="bg-surface-container-lowest rounded-md shadow-sm p-space-lg flex flex-col gap-space-md">
+<div class="flex items-center justify-between pb-space-sm border-b border-outline-variant">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[22px]">history</span>
+<h2 class="font-headline-sm text-headline-sm text-primary font-bold">سجل الإصدارات وتاريخ التعديل</h2>
+</div>
+<span class="text-secondary font-label-sm text-label-sm">إجمالي الإصدارات: 2</span>
+</div>
+<div class="flex flex-col gap-3">
+<!-- Version 1.0 (Current) -->
+<div class="p-3 rounded-md bg-surface-container-low flex flex-col gap-1.5">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="px-2 py-0.5 rounded bg-primary text-on-primary font-bold text-xs">v1.0</span>
+<span class="font-label-md text-label-md text-primary font-bold">النسخة الأصلية المعتمدة (الحالية)</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">15 يناير 2026</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+              رفعه الأستاذ / <strong>أحمد ممدوح المحامي</strong> — النسخة النهائية الممسوحة ضوئياً بعد اكتمال توقيعات وبصمات الطرفين وأختام الشركات.
+            </p>
+<div class="flex items-center gap-3 pt-1 text-xs text-secondary">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">verified</span> هاش SHA-256 موثق</span>
+<span>•</span>
+<span>3.8 ميجابايت</span>
+</div>
+</div>
+<!-- Version 0.9 (Pre-Signature Draft) -->
+<div class="p-3 rounded-md bg-surface-container-lowest hover:bg-surface-container-low transition-colors flex flex-col gap-1.5 opacity-80">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container font-semibold text-xs">v0.9</span>
+<span class="font-label-md text-label-md text-on-surface font-semibold">مسودة العقد قبل التوقيع</span>
+</div>
+<span class="font-label-sm text-label-sm text-secondary">10 أغسطس 2024</span>
+</div>
+<p class="font-body-sm text-body-sm text-secondary">
+              أودعها أ. سامح عبد الفتاح — المسودة المعدة للمراجعة قبل جلسة التوقيع الرسمية بمقر الطرف الثاني.
+            </p>
+<div class="flex items-center justify-between pt-1 text-xs text-secondary">
+<span>مسودة قابلة للرجوع إليها للمقارنة النصية</span>
+<a class="text-primary font-bold hover:underline" href="#">معاينة المسودة</a>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+  (function() {
+    let currentZoom = 100;
+    let rotation = 0;
+    let currentPage = 1;
+    const totalPages = 4;
+
+    const sheet = document.getElementById('document-sheet');
+    const zoomLabel = document.getElementById('zoom-level-label');
+    const pageNumLabel = document.getElementById('current-page-num');
+    const zoomInBtn = document.getElementById('zoom-in-btn');
+    const zoomOutBtn = document.getElementById('zoom-out-btn');
+    const fitWidthBtn = document.getElementById('fit-width-btn');
+    const rotateBtn = document.getElementById('rotate-btn');
+    const prevPageBtn = document.getElementById('prev-page-btn');
+    const nextPageBtn = document.getElementById('next-page-btn');
+
+    function applyTransforms() {
+      if (sheet) {
+        sheet.style.transform = `scale(${currentZoom / 100}) rotate(${rotation}deg)`;
+      }
+      if (zoomLabel) {
+        zoomLabel.textContent = `${currentZoom}%`;
+      }
+    }
+
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener('click', function() {
+        if (currentZoom < 180) {
+          currentZoom += 10;
+          applyTransforms();
+        }
+      });
+    }
+
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener('click', function() {
+        if (currentZoom > 60) {
+          currentZoom -= 10;
+          applyTransforms();
+        }
+      });
+    }
+
+    if (fitWidthBtn) {
+      fitWidthBtn.addEventListener('click', function() {
+        currentZoom = 100;
+        rotation = 0;
+        applyTransforms();
+      });
+    }
+
+    if (rotateBtn) {
+      rotateBtn.addEventListener('click', function() {
+        rotation = (rotation + 90) % 360;
+        applyTransforms();
+      });
+    }
+
+    function updatePage() {
+      if (pageNumLabel) {
+        pageNumLabel.textContent = currentPage;
+      }
+      if (prevPageBtn) {
+        prevPageBtn.disabled = (currentPage === 1);
+      }
+      if (nextPageBtn) {
+        nextPageBtn.disabled = (currentPage === totalPages);
+      }
+    }
+
+    if (prevPageBtn) {
+      prevPageBtn.addEventListener('click', function() {
+        if (currentPage > 1) {
+          currentPage--;
+          updatePage();
+        }
+      });
+    }
+
+    if (nextPageBtn) {
+      nextPageBtn.addEventListener('click', function() {
+        if (currentPage < totalPages) {
+          currentPage++;
+          updatePage();
+        }
+      });
+    }
+
+    updatePage();
+  })();
+</script></main>
+</body></html>

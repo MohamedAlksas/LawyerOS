@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+
+<html class="h-full" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>تسجيل الدخول — نظام LawOffice OS</title>
+<!-- Noto Sans Arabic Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-tertiary-container": "#88d1af",
+            "error-container": "#ffdad6",
+            "outline-variant": "#c0c8cc",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "primary-fixed": "#baeaff",
+            "tertiary-container": "#075b41",
+            "surface-container": "#ddf1ff",
+            "tertiary-fixed": "#a8f2cf",
+            "secondary": "#4e616b",
+            "on-tertiary-fixed": "#002115",
+            "inverse-surface": "#20333e",
+            "error": "#ba1a1a",
+            "surface-dim": "#c9ddec",
+            "on-error-container": "#93000a",
+            "on-surface": "#0a1e28",
+            "inverse-primary": "#96cfe7",
+            "secondary-container": "#cee3ef",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-secondary": "#ffffff",
+            "surface-container-low": "#e9f5ff",
+            "on-primary": "#ffffff",
+            "inverse-on-surface": "#e3f3ff",
+            "secondary-fixed": "#d1e6f1",
+            "on-surface-variant": "#40484c",
+            "surface-container-high": "#d7ebfa",
+            "on-secondary-fixed-variant": "#374953",
+            "background": "#f5faff",
+            "surface-variant": "#d1e5f4",
+            "primary": "#003e4f",
+            "primary-fixed-dim": "#96cfe7",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-highest": "#d1e5f4",
+            "on-secondary-container": "#52656f",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#001f29",
+            "on-error": "#ffffff",
+            "on-primary-fixed-variant": "#024d62",
+            "on-background": "#0a1e28",
+            "tertiary": "#00422d",
+            "surface-bright": "#f5faff",
+            "on-secondary-fixed": "#0a1e26",
+            "on-primary-container": "#91cae2",
+            "surface-tint": "#29657b",
+            "surface-container-lowest": "#ffffff",
+            "outline": "#70787c",
+            "primary-container": "#14566b",
+            "surface": "#f5faff"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "margin-desktop": "2rem",
+            "space-sm": "0.5rem",
+            "gutter": "1rem",
+            "space-xs": "0.375rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem"
+          },
+          "fontFamily": {
+            "body-lg": ["Noto Sans"],
+            "label-md": ["Noto Sans"],
+            "headline-lg-mobile": ["Noto Sans"],
+            "display": ["Noto Sans"],
+            "headline-md": ["Noto Sans"],
+            "body-sm-medium": ["Noto Sans"],
+            "body-sm": ["Noto Sans"],
+            "body-lg-medium": ["Noto Sans"],
+            "label-sm": ["Noto Sans"],
+            "headline-lg": ["Noto Sans"],
+            "headline-sm": ["Noto Sans"]
+          },
+          "fontSize": {
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "headline-lg-mobile": ["20px", { "lineHeight": "32px", "fontWeight": "700" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body class="bg-[#F4F6F7] text-on-surface antialiased min-h-screen flex flex-col justify-between selection:bg-secondary-container selection:text-on-surface">
+<!-- شريط الإعلان العلوي — تأكيد البيئة التجريبية والتقييد الصارم -->
+<header class="w-full bg-surface-container-lowest border-b border-[#D5DFE3] px-space-md py-space-xs">
+<div class="max-w-7xl mx-auto flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-[4px] bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-[#7A4A00]"></span>
+          نسخة تجريبية مقيدة
+        </span>
+<span class="hidden sm:inline font-body-sm text-body-sm text-on-surface-variant">بيئة فحص النظم وإدارة الملفات الإجرائية الخاصة</span>
+</div>
+<div class="flex items-center gap-space-xs font-body-sm text-body-sm text-secondary">
+<span class="material-symbols-outlined text-outline" data-icon="lock">lock</span>
+<span>بروتوكول تشفير معتمد</span>
+</div>
+</div>
+</header>
+<!-- الحاوية الرئيسية للتسجيل -->
+<main class="flex-grow flex items-center justify-center px-gutter py-space-xl">
+<div class="w-full max-w-[460px]">
+<!-- بطاقة تسجيل الدخول المركزية المسطحة والمحددة بدقة -->
+<div class="bg-[#FFFFFF] border border-[#D5DFE3] rounded-lg p-6 sm:p-8">
+<!-- الترويسة وشعار النظام الرسمي -->
+<div class="text-center pb-space-lg border-b border-[#D5DFE3] mb-space-lg">
+<div class="inline-flex items-center justify-center w-12 h-12 rounded bg-surface-container-low border border-[#D5DFE3] text-primary mb-space-md">
+<span class="material-symbols-outlined text-2xl" data-icon="account_balance">account_balance</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-primary tracking-tight mb-1">
+            LawOffice OS
+          </h1>
+<p class="font-headline-sm text-headline-sm text-on-surface">
+            نظام إدارة المكتب الرقمي
+          </p>
+<p class="font-body-sm text-body-sm text-secondary mt-1">
+            مكتب الأستاذ أحمد ممدوح — المحامي بالنقض والاستئناف
+          </p>
+</div>
+<!-- تنبيه الأمان والخصوصية المهنية -->
+<div class="mb-space-lg p-3.5 bg-surface-container-low border border-[#D5DFE3] rounded flex items-start gap-3">
+<span class="material-symbols-outlined text-primary-container shrink-0 mt-0.5" data-icon="shield">shield</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+            هذا النظام مخصص للاستخدام المهني الخاص بالمكتب فقط، ولا يتيح إنشاء حسابات عامة. الوصول مقتصر على هيئة الدفاع المصرح لها.
+          </p>
+</div>
+<!-- استمارة إدخال البيانات -->
+<form class="space-y-space-md" onsubmit="event.preventDefault();">
+<!-- حقل البريد الإلكتروني المهني -->
+<div>
+<label class="block font-label-md text-label-md text-on-surface mb-1.5" for="email">
+              البريد الإلكتروني المهني
+            </label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 pl-10 text-right bg-white border border-[#D5DFE3] rounded text-on-surface font-body-sm text-body-sm focus:border-primary-container focus:ring-1 focus:ring-primary-container focus:outline-none transition-colors" dir="rtl" id="email" name="email" placeholder="advocate@lawoffice.eg" required="" type="email"/>
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-outline pointer-events-none" data-icon="mail">mail</span>
+</div>
+</div>
+<!-- حقل كلمة المرور -->
+<div>
+<div class="flex items-center justify-between mb-1.5">
+<label class="block font-label-md text-label-md text-on-surface" for="password">
+                كلمة المرور
+              </label>
+</div>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 pl-10 text-right bg-white border border-[#D5DFE3] rounded text-on-surface font-body-sm text-body-sm focus:border-primary-container focus:ring-1 focus:ring-primary-container focus:outline-none transition-colors" dir="rtl" id="password" name="password" placeholder="••••••••••••" required="" type="password"/>
+<button aria-label="إظهار أو إخفاء كلمة المرور" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-outline hover:text-on-surface transition-colors" id="togglePassword" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- خيارات الجلسة واسترداد الحساب -->
+<div class="flex items-center justify-between pt-1">
+<label class="flex items-center gap-2 cursor-pointer select-none">
+<input class="w-5 h-5 rounded border-[#4D606A] text-primary-container focus:ring-0 focus:ring-offset-0 cursor-pointer" type="checkbox"/>
+<span class="font-body-sm text-body-sm text-on-surface-variant">تأمين الجلسة على هذا الحاسوب</span>
+</label>
+<a class="font-label-md text-label-md text-primary-container hover:underline underline-offset-4" href="#recovery">
+              نسيت كلمة المرور / الاسترداد الآمن
+            </a>
+</div>
+<!-- زر تسجيل الدخول الأساسي -->
+<button class="w-full h-[44px] px-5 bg-primary-container text-white font-label-md text-label-md rounded flex items-center justify-center gap-2 hover:bg-[#0F3F4F] active:bg-[#0B2F3B] focus:outline-none focus:ring-2 focus:ring-primary-container focus:ring-offset-2 transition-colors cursor-pointer mt-space-lg" type="submit">
+<span>تسجيل الدخول للمنظومة</span>
+<span class="material-symbols-outlined text-[18px]" data-icon="arrow_back">arrow_back</span>
+</button>
+</form>
+<!-- بطاقة الإرشاد السريع لبيانات العرض التجريبي -->
+<div class="mt-space-lg pt-space-md border-t border-[#D5DFE3]">
+<div class="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded flex items-center justify-between text-right">
+<div>
+<span class="block font-label-sm text-label-sm text-secondary">حساب التجربة المعتمد:</span>
+<span class="font-body-sm-medium text-body-sm-medium text-on-surface" dir="ltr">ahmed.mamdouh@lawoffice.eg</span>
+</div>
+<button class="px-2.5 py-1 text-xs font-label-md text-primary-container bg-white border border-[#D5DFE3] rounded hover:bg-surface-container-low transition-colors" onclick="document.getElementById('email').value='ahmed.mamdouh@lawoffice.eg'; document.getElementById('password').value='Password@2024';" type="button">
+              تعبئة تلقائية
+            </button>
+</div>
+</div>
+</div>
+<!-- دعم فني مخصص للمكتب المنفرد -->
+<div class="mt-space-md text-center">
+<p class="font-body-sm text-body-sm text-secondary">
+          للمساعدة التقنية الطارئة أو طلب تجديد مفتاح الدخول:
+          <a class="text-primary font-body-sm-medium hover:underline mr-1" href="#support">قسم الدعم الفني الداخلي</a>
+</p>
+</div>
+</div>
+</main>
+<!-- التذييل الرسمي وحقوق المنظومة المهنية -->
+<footer class="w-full border-t border-[#D5DFE3] bg-surface-container-lowest py-space-sm px-gutter">
+<div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-right">
+<p class="font-body-sm text-body-sm text-secondary">
+        جميع الحقوق محفوظة © لمكتب الأستاذ أحمد ممدوح للمحاماة والاستشارات القانونية — جمهورية مصر العربية
+      </p>
+<div class="flex items-center gap-space-md font-body-sm text-body-sm text-on-surface-variant">
+<span>رقم القيد بنقابة المحامين: ٤١٢٩٨ / نقض</span>
+<span class="inline-block w-1 h-1 rounded-full bg-outline-variant"></span>
+<span>الإصدار 3.2.0</span>
+</div>
+</div>
+</footer>
+<script>
+    // تفاعل إظهار وإخفاء كلمة المرور
+    const toggleBtn = document.getElementById('togglePassword');
+    const passwordInput = document.getElementById('password');
+
+    toggleBtn.addEventListener('click', () => {
+      const isPassword = passwordInput.getAttribute('type') === 'password';
+      passwordInput.setAttribute('type', isPassword ? 'text' : 'password');
+      const icon = toggleBtn.querySelector('.material-symbols-outlined');
+      if (icon) {
+        icon.textContent = isPassword ? 'visibility_off' : 'visibility';
+      }
+    });
+  </script>
+</body></html>

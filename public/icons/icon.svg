@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="64" fill="#14566B"/>
+  <g fill="#FFFFFF">
+    <!-- Center Column & Ornament -->
+    <circle cx="256" cy="110" r="18"/>
+    <rect x="248" y="128" width="16" height="230" rx="4"/>
+    <!-- Balance Beam -->
+    <rect x="116" y="160" width="280" height="14" rx="4"/>
+    <!-- Center Pivot -->
+    <circle cx="256" cy="167" r="14"/>
+    <!-- Left Pan -->
+    <path d="M136 174 L96 260 L176 260 Z" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M80 260 Q136 300 192 260 Z"/>
+    <!-- Right Pan -->
+    <path d="M376 174 L336 260 L416 260 Z" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="round"/>
+    <path d="M320 260 Q376 300 432 260 Z"/>
+    <!-- Base Pedestal -->
+    <rect x="176" y="358" width="160" height="18" rx="4"/>
+    <rect x="156" y="376" width="200" height="22" rx="6"/>
+  </g>
+</svg>

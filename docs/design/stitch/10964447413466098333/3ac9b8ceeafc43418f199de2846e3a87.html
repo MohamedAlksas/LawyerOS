@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+
+<html class="h-full bg-[#F4F6F7]" dir="rtl" lang="ar-EG"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>S11e — تصحيح عملية مالية | نظام LawOffice OS</title>
+<!-- Google Fonts: Noto Sans Arabic -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-primary": "#ffffff",
+            "surface-bright": "#f5faff",
+            "tertiary-fixed-dim": "#8dd5b4",
+            "inverse-primary": "#96cfe7",
+            "background": "#F4F6F7",
+            "surface-tint": "#29657b",
+            "surface-dim": "#c9ddec",
+            "on-surface": "#0a1e28",
+            "outline-variant": "#D5DFE3",
+            "primary": "#003e4f",
+            "primary-container": "#14566b",
+            "on-secondary-fixed": "#0a1e26",
+            "on-tertiary-fixed-variant": "#005139",
+            "on-error-container": "#93000a",
+            "surface-container": "#ddf1ff",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-container": "#075b41",
+            "outline": "#70787c",
+            "on-secondary": "#ffffff",
+            "on-surface-variant": "#40484c",
+            "inverse-on-surface": "#e3f3ff",
+            "surface": "#F4F6F7",
+            "secondary-container": "#cee3ef",
+            "secondary-fixed": "#d1e6f1",
+            "on-tertiary-fixed": "#002115",
+            "error": "#ba1a1a",
+            "on-primary-fixed-variant": "#024d62",
+            "secondary-fixed-dim": "#b5cad5",
+            "surface-container-high": "#d7ebfa",
+            "tertiary": "#00422d",
+            "on-background": "#0a1e28",
+            "primary-fixed": "#baeaff",
+            "inverse-surface": "#20333e",
+            "on-tertiary-container": "#88d1af",
+            "secondary": "#4e616b",
+            "on-error": "#ffffff",
+            "error-container": "#ffdad6",
+            "on-secondary-fixed-variant": "#374953",
+            "tertiary-fixed": "#a8f2cf",
+            "surface-variant": "#d1e5f4",
+            "primary-fixed-dim": "#96cfe7",
+            "surface-container-low": "#e9f5ff",
+            "on-secondary-container": "#52656f",
+            "surface-container-highest": "#d1e5f4",
+            "on-primary-fixed": "#001f29",
+            "on-tertiary": "#ffffff",
+            "on-primary-container": "#91cae2"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.375rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter": "1rem",
+            "space-md": "1rem",
+            "space-xl": "2rem",
+            "space-lg": "1.5rem",
+            "space-sm": "0.5rem",
+            "margin-desktop": "2rem",
+            "margin": "1rem",
+            "gutter-desktop": "1.5rem",
+            "space-xs": "0.375rem"
+          },
+          "fontFamily": {
+            "body-lg-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-md": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "body-sm-medium": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "label-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-sm": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "display": ["Noto Sans Arabic", "Noto Sans", "sans-serif"],
+            "headline-lg": ["Noto Sans Arabic", "Noto Sans", "sans-serif"]
+          },
+          "fontSize": {
+            "body-lg-medium": ["16px", { "lineHeight": "26.4px", "fontWeight": "500" }],
+            "headline-md": ["20px", { "lineHeight": "32px", "fontWeight": "600" }],
+            "body-lg": ["16px", { "lineHeight": "26.4px", "fontWeight": "400" }],
+            "label-md": ["14px", { "lineHeight": "20px", "fontWeight": "600" }],
+            "body-sm": ["14px", { "lineHeight": "23px", "fontWeight": "400" }],
+            "body-sm-medium": ["14px", { "lineHeight": "23px", "fontWeight": "500" }],
+            "label-sm": ["14px", { "lineHeight": "18px", "fontWeight": "500" }],
+            "headline-sm": ["18px", { "lineHeight": "28px", "fontWeight": "600" }],
+            "display": ["30px", { "lineHeight": "44px", "fontWeight": "700" }],
+            "headline-lg": ["24px", { "lineHeight": "36px", "fontWeight": "700" }]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Noto Sans Arabic', sans-serif;
+      background-color: #F4F6F7;
+      color: #172A35;
+      -webkit-font-smoothing: antialiased;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    /* Tab Transitions */
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+  </style>
+</head>
+<body class="h-full min-h-screen flex flex-col antialiased selection:bg-[#cee3ef] selection:text-[#003e4f]">
+<!-- Top Global Simulation Banner -->
+<div class="w-full bg-[#14566b] text-on-primary py-1.5 px-6 flex items-center justify-between border-b border-[#0f3f4f] text-[13px] font-label-sm">
+<div class="flex items-center gap-2">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#FFF7E6] text-[#7A4A00] font-bold border border-[#E0B46A] text-[11px]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#7A4A00] animate-pulse"></span>
+        بيانات تجريبية
+      </span>
+<span class="text-surface-container-low font-body-sm">
+        نظام الدفاتر المحاسبية الإلكترونية للنيابة والضرائب — الإصدار 4.2 المستقر
+      </span>
+</div>
+<div class="flex items-center gap-4 text-surface-container-low font-label-sm">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">verified_user</span>
+        قيد محاسبي مسجل تحت رقابة الجرد الدوري
+      </span>
+<span class="text-white/40">|</span>
+<span>مكتب القاهرة: فرع وسط البلد</span>
+</div>
+</div>
+<!-- Shared Component: TopNavBar -->
+<header class="sticky top-0 w-full h-[64px] z-30 bg-surface-container-lowest border-b border-outline-variant flex items-center justify-between px-gutter-desktop pr-[248px]">
+<!-- Search / Context Breadcrumb -->
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 font-headline-sm text-headline-sm text-primary">
+<span class="material-symbols-outlined text-primary-container">account_balance_wallet</span>
+<span>نظام إدارة المكتب الرقمي</span>
+</div>
+<span class="text-outline-variant font-light">/</span>
+<div class="flex items-center gap-1.5 text-secondary font-label-md text-label-md">
+<span>السجلات والمالية</span>
+<span class="text-outline-variant">›</span>
+<span class="text-on-surface font-semibold">تصحيح عملية مالية مرحلة (REC-2026-088)</span>
+</div>
+</div>
+<!-- Actions & User Profile -->
+<div class="flex items-center gap-3">
+<div class="relative">
+<button class="w-9 h-9 flex items-center justify-center rounded text-on-surface-variant hover:bg-[#F4F6F7] transition-colors" title="إشعارات مالية" type="button">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<span class="absolute top-2 left-2 w-2 h-2 rounded-full bg-error border-2 border-white"></span>
+</div>
+<button class="w-9 h-9 flex items-center justify-center rounded text-on-surface-variant hover:bg-[#F4F6F7] transition-colors" title="بحث سريع" type="button">
+<span class="material-symbols-outlined text-[20px]">search</span>
+</button>
+<button class="w-9 h-9 flex items-center justify-center rounded text-on-surface-variant hover:bg-[#F4F6F7] transition-colors" title="المساعدة والدعم" type="button">
+<span class="material-symbols-outlined text-[20px]">help_outline</span>
+</button>
+<div class="h-6 w-px bg-outline-variant mx-1"></div>
+<!-- User Chip -->
+<div class="flex items-center gap-2.5 pl-2">
+<div class="w-8 h-8 rounded bg-[#14566B] text-white flex items-center justify-center font-bold text-sm">
+          أم
+        </div>
+<div class="text-right">
+<div class="font-label-md text-label-md text-on-surface leading-tight">أ. أحمد ممدوح</div>
+<div class="text-[11px] text-secondary font-body-sm">المحامي بالنقض</div>
+</div>
+</div>
+</div>
+</header>
+<!-- Main App Shell -->
+<div class="flex flex-1 w-full relative">
+<!-- Shared Component: SideNavBar (Fixed Right 232px) -->
+<aside class="fixed top-0 right-0 h-screen w-[232px] z-40 bg-surface-container-lowest border-l border-outline-variant flex flex-col justify-between py-space-lg px-space-md">
+<!-- Top Section: Brand & Lawyer Info -->
+<div class="flex flex-col gap-5">
+<!-- Brand Header -->
+<div class="pb-4 border-b border-outline-variant">
+<div class="flex items-center gap-2.5 mb-1">
+<div class="w-9 h-9 rounded bg-[#14566b] text-white flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">gavel</span>
+</div>
+<div>
+<div class="font-headline-sm text-headline-sm text-primary leading-tight">مكتب الأستاذ أحمد ممدوح</div>
+<div class="text-[11px] text-secondary font-body-sm">المحامي بالنقض والاستئناف</div>
+</div>
+</div>
+</div>
+<!-- Quick Action Trigger -->
+<button class="w-full h-[40px] px-3 bg-[#14566b] hover:bg-[#0f3f4f] active:bg-[#0b2f3b] text-white rounded text-label-md font-label-md flex items-center justify-center gap-2 transition-colors" type="button">
+<span class="material-symbols-outlined text-[18px]">add_circle</span>
+<span>إضافة قضية جديدة</span>
+</button>
+<!-- Navigation Links -->
+<nav class="flex flex-col gap-1 mt-1">
+<!-- Item 1: جدول الجلسات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-[#F4F6F7] hover:text-on-surface rounded transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px]">calendar_month</span>
+<span>جدول الجلسات</span>
+</a>
+<!-- Item 2: ملفات القضايا -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-[#F4F6F7] hover:text-on-surface rounded transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px]">folder_open</span>
+<span>ملفات القضايا</span>
+</a>
+<!-- Item 3: دليل الموكلين -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-[#F4F6F7] hover:text-on-surface rounded transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px]">groups</span>
+<span>دليل الموكلين</span>
+</a>
+<!-- Item 4: المهام الإجرائية -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-[#F4F6F7] hover:text-on-surface rounded transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px]">assignment_late</span>
+<span>المهام الإجرائية</span>
+</a>
+<!-- Item 5: السجلات والمالية (ACTIVE NAV ITEM) -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-primary bg-[#e9f5ff] border-r-4 border-primary font-label-md text-label-md rounded-l" href="#">
+<span class="material-symbols-outlined text-[20px] text-primary" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+<span class="font-bold">السجلات والمالية</span>
+</a>
+<!-- Item 6: الإعدادات -->
+<a class="flex items-center gap-space-sm px-space-md py-space-sm text-on-surface-variant hover:bg-[#F4F6F7] hover:text-on-surface rounded transition-colors duration-150 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+<span>الإعدادات</span>
+</a>
+</nav>
+</div>
+<!-- Footer Actions in Sidebar -->
+<div class="pt-4 border-t border-outline-variant flex flex-col gap-1">
+<a class="flex items-center gap-space-sm px-space-md py-2 text-on-surface-variant hover:bg-[#F4F6F7] rounded font-label-md text-label-md transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">help</span>
+<span>الدعم والمساعدة</span>
+</a>
+<a class="flex items-center gap-space-sm px-space-md py-2 text-error hover:bg-[#FDF1F1] rounded font-label-md text-label-md transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">logout</span>
+<span>تسجيل الخروج</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Workspace Canvas (Offset by 232px from right) -->
+<main class="flex-1 mr-[232px] p-6 lg:p-8 max-w-[1400px]">
+<!-- Top Header & Regulatory Statement -->
+<div class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-outline-variant">
+<div>
+<div class="flex items-center gap-2 mb-1">
+<span class="px-2.5 py-0.5 rounded text-[12px] font-bold bg-[#FDF1F1] border border-[#F1A5A9] text-[#A4262C]">
+              إجراء رقابي وتصحيحي
+            </span>
+<span class="text-secondary text-sm">رمز الشاشة: S11e</span>
+</div>
+<h1 class="text-headline-lg font-headline-lg text-[#003e4f]">تصحيح عملية مالية مرحّلة</h1>
+<p class="text-body-sm font-body-sm text-secondary mt-1">
+            تطبيق المعايير الدفترية الرسمية: السجلات المقيدة لا تقبل الحذف أو التعديل المباشر، وتخضع لحصر القيد العكسي أو سندات الرد الفعلي الموثقة.
+          </p>
+</div>
+<!-- Back to Ledger Button -->
+<div class="flex items-center gap-3">
+<a class="h-[44px] px-4 rounded border border-outline-variant bg-white text-secondary hover:bg-[#F4F6F7] flex items-center gap-2 font-label-md text-label-md transition-colors" href="#">
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+<span>الرجوع إلى دفتر اليومية</span>
+</a>
+</div>
+</div>
+<!-- Grid Layout: Immutable Record (Right Column / 4 cols) vs. Action Workspace (Left Column / 8 cols) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+<!-- RIGHT PANE (lg:col-span-5): Immutable Docket Card (Read-Only) -->
+<div class="lg:col-span-5 flex flex-col gap-4">
+<!-- Notice on Immutable Records -->
+<div class="bg-[#FFF7E6] border border-[#E0B46A] rounded p-3.5 flex items-start gap-3">
+<span class="material-symbols-outlined text-[#7A4A00] text-[22px] mt-0.5">lock</span>
+<div class="text-[13px] text-[#7A4A00] leading-relaxed">
+<strong class="font-bold block mb-0.5">مبدأ عدم المساس بالقيود المرحلة</strong>
+              هذا السند مسجل دفترياً ومرحل بالقيد المزدوج. أرقام السند الأصلية محمية بموجب معايير الإثبات المحاسبي ولا تقبل التعديل المكتبي المباشر.
+            </div>
+</div>
+<!-- Document Record Card -->
+<div class="bg-white border border-outline-variant rounded p-5 relative overflow-hidden">
+<!-- Stamp Badge -->
+<div class="absolute -left-6 -bottom-6 w-32 h-32 rounded-full border-4 border-dashed border-[#82C5A5]/30 pointer-events-none flex items-center justify-center rotate-12">
+<span class="text-[#176449]/40 font-bold text-xs uppercase tracking-widest">مرحل بالسجل</span>
+</div>
+<!-- Card Header -->
+<div class="flex items-center justify-between pb-3 border-b border-outline-variant mb-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#14566B] text-[20px]">receipt_long</span>
+<span class="font-headline-sm text-headline-sm text-primary">السند المالي الأصلي</span>
+</div>
+<span class="h-[28px] px-2.5 rounded bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] font-body-sm-medium text-body-sm-medium flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-[#176449]"></span>
+                مرحل بالسجل
+              </span>
+</div>
+<!-- Ledger Meta Grid -->
+<div class="space-y-3.5">
+<!-- Item 1: Voucher ID & Date -->
+<div class="grid grid-cols-2 gap-3 pb-3 border-b border-outline-variant/60">
+<div>
+<span class="block text-[12px] text-secondary font-label-sm">رقم السند المالي</span>
+<span class="font-bold text-on-surface text-[15px] font-mono tracking-wide">REC-2026-088</span>
+</div>
+<div>
+<span class="block text-[12px] text-secondary font-label-sm">تاريخ الترحيل</span>
+<span class="font-semibold text-on-surface text-[14px]">15 يناير 2026</span>
+</div>
+</div>
+<!-- Item 2: Case & Client -->
+<div class="pb-3 border-b border-outline-variant/60">
+<span class="block text-[12px] text-secondary font-label-sm">ملف المكتب والقضية</span>
+<div class="flex items-center justify-between mt-0.5">
+<span class="font-bold text-primary text-[15px]">LO-2026-001</span>
+<span class="text-xs bg-[#e9f5ff] text-[#003e4f] px-2 py-0.5 rounded font-medium">تجاري كلي الجيزة</span>
+</div>
+<div class="text-[13px] text-on-surface font-semibold mt-1">شركة النيل للمقاولات والاستثمار العقاري</div>
+<div class="text-[12px] text-secondary">الممثل القانوني: م. طارق علام</div>
+</div>
+<!-- Item 3: Nature & Original Amount -->
+<div class="grid grid-cols-2 gap-3 pb-3 border-b border-outline-variant/60">
+<div>
+<span class="block text-[12px] text-secondary font-label-sm">نوع العملية الأصلية</span>
+<div class="flex items-center gap-1.5 mt-0.5 text-on-surface font-semibold text-[13px]">
+<span class="material-symbols-outlined text-[16px] text-primary">savings</span>
+<span>قبض أمانة موكل</span>
+</div>
+</div>
+<div>
+<span class="block text-[12px] text-secondary font-label-sm">وسيلة التحصيل</span>
+<span class="text-on-surface font-medium text-[13px] block mt-0.5">نقدي (خزينة المكتب)</span>
+</div>
+</div>
+<!-- Item 4: Financial Value Box -->
+<div class="bg-[#F8FAFB] border border-outline-variant rounded p-3 flex items-center justify-between">
+<div>
+<span class="block text-[11px] text-secondary font-medium">القيمة الدفترية المحصلة</span>
+<span class="text-primary font-extrabold text-[22px] tracking-tight">5,000.00</span>
+<span class="text-xs font-semibold text-secondary mr-1">جنيه مصري</span>
+</div>
+<div class="text-left border-r border-outline-variant pr-3">
+<span class="block text-[11px] text-secondary font-medium">الرصيد المتبقي المتاح</span>
+<span class="text-[#075b41] font-bold text-[18px]">3,800.00</span>
+<span class="text-[11px] text-secondary mr-1">ج.م</span>
+<span class="block text-[10px] text-secondary">(تم استهلاك 1,200 مأمورية)</span>
+</div>
+</div>
+<!-- Item 5: Notes & Book Reference -->
+<div class="pt-1 text-[12px] text-secondary leading-relaxed">
+<span class="font-semibold text-on-surface">البيان المسجل بالأصل:</span>
+                «دفعة أمانة خبير هندسي وقضية فسخ عقد التوريد رقم 4421 لسنة 2025 تجاري.»
+              </div>
+</div>
+</div>
+<!-- Audit Log Trail (Ledger Status) -->
+<div class="bg-white border border-outline-variant rounded p-4">
+<div class="text-[12px] font-bold text-secondary uppercase tracking-wider mb-2 flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">history</span>
+              سجل التتبع الرقابي للسند
+            </div>
+<ul class="text-[12px] text-secondary space-y-2">
+<li class="flex items-start gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-[#14566b] mt-1.5"></span>
+<span>تم الإنشاء والترحيل بواسطة: <strong>أ. سارة إبراهيم (إدارة الحسابات)</strong> في 15/01/2026 - 11:30 ص</span>
+</li>
+<li class="flex items-start gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-outline-variant mt-1.5"></span>
+<span>الحالة الحالية: قيد سارٍ في دفتر الأمانات اليومي — لم يتم إجراء أي تسويات سابقة.</span>
+</li>
+</ul>
+</div>
+</div>
+<!-- LEFT PANE (lg:col-span-7): Action Correction Form (Two Strict Legal Paths) -->
+<div class="lg:col-span-7 flex flex-col gap-5">
+<!-- Selection Tabs: Two Disjoint Legal Workflows -->
+<div class="bg-white border border-outline-variant rounded p-1.5 flex gap-2">
+<!-- Tab Button 1: Full Reversal -->
+<button class="flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-primary bg-[#e9f5ff] text-primary" id="tab-btn-reversal" onclick="switchCorrectionPath('reversal')" type="button">
+<div>
+<div class="flex items-center gap-1.5 font-headline-sm text-headline-sm">
+<span class="material-symbols-outlined text-[20px]">swap_horiz</span>
+<span>المسار الأول: عكس العملية بالكامل</span>
+</div>
+<div class="text-[12px] text-secondary mt-0.5">قيد تسوية قياسي لإلغاء أثر السند دفترياً</div>
+</div>
+<span class="w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[12px]">
+<span class="material-symbols-outlined text-[14px]">check</span>
+</span>
+</button>
+<!-- Tab Button 2: Cash Refund -->
+<button class="flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-transparent bg-transparent text-secondary hover:bg-[#F8FAFB]" id="tab-btn-refund" onclick="switchCorrectionPath('refund')" type="button">
+<div>
+<div class="flex items-center gap-1.5 font-headline-sm text-headline-sm">
+<span class="material-symbols-outlined text-[20px]">currency_exchange</span>
+<span>المسار الثاني: رد مبلغ فعلي</span>
+</div>
+<div class="text-[12px] text-secondary mt-0.5">سند صرف رد أموال وخروج نقدية للموكل</div>
+</div>
+<span class="w-5 h-5 rounded-full border border-outline-variant flex items-center justify-center" id="tab-refund-radio"></span>
+</button>
+</div>
+<!-- WORKFLOW 1: FULL REVERSAL (DEFAULT ACTIVE) -->
+<div class="tab-content active bg-white border border-outline-variant rounded p-6" id="section-reversal">
+<div class="flex items-center justify-between pb-4 border-b border-outline-variant mb-5">
+<div>
+<h2 class="text-headline-md font-headline-md text-primary">عكس العملية بالكامل (قيد تسوية قياسي)</h2>
+<p class="text-body-sm font-body-sm text-secondary mt-0.5">
+                  إجراء محاسبي لإبطال أثر القيد المحاسبي الخاطئ واستعادة حالة الدفاتر دون تحريك تدفقات نقدية فعلية.
+                </p>
+</div>
+<span class="px-2.5 py-1 rounded bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] font-label-sm text-label-sm font-semibold">
+                عكس شامل غير مجتزأ
+              </span>
+</div>
+<form class="space-y-5">
+<!-- Non-editable Amount Guarantee -->
+<div class="bg-[#F8FAFB] border border-outline-variant rounded p-4 flex items-center justify-between">
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1">المبلغ المراد عكسه (ثابت بقوة القانون المحاسبي)</label>
+<p class="text-[12px] text-secondary">لا يمكن تجزئة القيد العكسي؛ يتم تصفير قيمة السند كاملة.</p>
+</div>
+<div class="text-left">
+<div class="text-2xl font-bold font-mono text-primary">5,000.00 ج.م</div>
+<span class="text-[11px] text-secondary font-medium block">يطابق 100% من السند REC-2026-088</span>
+</div>
+</div>
+<!-- Date & Compulsory Reason -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="reversal-date">
+                    تاريخ قيد العكس المحاسبي <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="reversal-date" type="date" value="2026-01-18"/>
+</div>
+<span class="text-[11px] text-secondary mt-1 block">يُدرج بالقيد اليومي لتاريخ اليوم تلقائياً.</span>
+</div>
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="reversal-reason">
+                    سبب العكس الإلزامي بالدفاتر <span class="text-error">*</span>
+</label>
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="reversal-reason">
+<option selected="" value="1">خطأ في قيد ملف القضية (إدراج القضية بطريق السهو)</option>
+<option value="2">تكرار تسجيل السند المحاسبي مرتين</option>
+<option value="3">خطأ في اسم الموكل أو صفة المودع</option>
+<option value="4">إلغاء الوكالة قبل تفعيل إجراءات الدعوى</option>
+<option value="5">أمر قضائي بإلغاء الرسوم</option>
+</select>
+</div>
+</div>
+<!-- Detailed Justification Memo -->
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="reversal-memo">
+                  بيان القيد العكسي (الملاحظة الرقابية للتفتيش) <span class="text-error">*</span>
+</label>
+<textarea class="w-full p-3 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none resize-none leading-relaxed" id="reversal-memo" placeholder="اكتب إيضاحاً موجزاً ومحدداً للمراجع المالي والمحاسبي القانوني..." rows="2">تم قيد السند سهواً على ملف شركة النيل بدلاً من ملف شركة الدلتا للتجارة، ويتم العكس لإعادة القيد على الملف الصحيح بموجب طلب الشريك المسؤول.</textarea>
+</div>
+<!-- Accounting Double-Entry Effect Preview (Ledger Ledger) -->
+<div class="border border-outline-variant rounded overflow-hidden">
+<div class="bg-[#F4F6F7] px-4 py-2 border-b border-outline-variant flex items-center justify-between">
+<span class="text-[12px] font-bold text-secondary flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px]">account_tree</span>
+                    استعراض الأثر المحاسبي التلقائي (قيد اليومية العكسي)
+                  </span>
+<span class="text-[11px] text-[#075b41] font-bold">متزن دفترية (5,000 = 5,000)</span>
+</div>
+<div class="p-3 text-[13px] divide-y divide-outline-variant/50">
+<div class="py-2 flex items-center justify-between">
+<div>
+<span class="font-bold text-primary">من حـ / أمانات الموكلين (شركة النيل للمقاولات)</span>
+<span class="block text-[11px] text-secondary">مدين: تخفيض التزام المكتب وإلغاء الأمانة المقيدة</span>
+</div>
+<span class="font-bold font-mono text-on-surface">5,000.00 ج.م</span>
+</div>
+<div class="py-2 flex items-center justify-between">
+<div>
+<span class="font-bold text-[#A4262C]">إلى حـ / تسوية الخزينة الرئيسية (قيد عكسي)</span>
+<span class="block text-[11px] text-secondary">دائن: إبطال أثر التحصيل النقدي الدفتري السابق</span>
+</div>
+<span class="font-bold font-mono text-on-surface">5,000.00 ج.م</span>
+</div>
+</div>
+</div>
+<!-- Direct Explicit Accounting Disclaimer (MANDATORY REQUIREMENT) -->
+<div class="bg-[#e9f5ff] border border-primary/30 rounded p-4 flex items-start gap-3">
+<span class="material-symbols-outlined text-primary-container text-[24px] mt-0.5 shrink-0">info</span>
+<div class="text-[13px] text-primary leading-relaxed">
+<strong class="font-bold block mb-1">إيضاح مالي ورقابي صريح:</strong>
+                  «إجراء القيد العكسي يسوي الدفاتر المحاسبية دفترياً فقط، ولا يترتب عليه صرف نقدي للموكل آلياً. في حال تسليم أموال فعلية للموكل، يجب استخدام مسار "رد مبلغ فعلي" المقابل لإصدار إذن صرف خزينة رسمي.»
+                </div>
+</div>
+<!-- Single Reversal Lock Warning -->
+<div class="flex items-center gap-2 text-[12px] text-secondary">
+<span class="material-symbols-outlined text-[16px] text-[#A4262C]">security</span>
+<span>الحظر النظامي: بمجرد ترحيل هذا القيد، سيتم إقفال السند REC-2026-088 نهائياً ويُمنع عكسه مرة أخرى.</span>
+</div>
+</form>
+</div>
+<!-- WORKFLOW 2: ACTUAL CASH REFUND (HIDDEN BY DEFAULT) -->
+<div class="tab-content bg-white border border-outline-variant rounded p-6" id="section-refund">
+<div class="flex items-center justify-between pb-4 border-b border-outline-variant mb-5">
+<div>
+<h2 class="text-headline-md font-headline-md text-primary">رد مبلغ فعلي (سند صرف رد أموال)</h2>
+<p class="text-body-sm font-body-sm text-secondary mt-0.5">
+                  إصدار سند صرف خزينة رسمي معتمد لإرجاع نقدية أو تحويل بنكي للموكل مع خصمها من رصيد الأمانات.
+                </p>
+</div>
+<span class="px-2.5 py-1 rounded bg-[#EDF7F2] border border-[#82C5A5] text-[#176449] font-label-sm text-label-sm font-semibold">
+                حركة نقدية فعلية
+              </span>
+</div>
+<form class="space-y-5">
+<!-- Beneficiary & Identity Details -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-recipient">
+                    المستفيد من الرد (المستلم القانوني) <span class="text-error">*</span>
+</label>
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-recipient" type="text" value="م. طارق علام (رئيس مجلس الإدارة)"/>
+</div>
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-capacity">
+                    صفة المستلم ومستند التفويض <span class="text-error">*</span>
+</label>
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-capacity">
+<option selected="" value="principal">الموكل شخصياً (بموجب التوكيل الرسمي رقم 1142 ب)</option>
+<option value="proxy">مفوض عنه بموجب توكيل خاص رسمي بالصرف</option>
+<option value="corporate">محاسب الشركة المفوض ببطاقة الرقم القومي</option>
+</select>
+</div>
+</div>
+<!-- Refund Value & Capped Available Balance -->
+<div class="bg-[#F8FAFB] border border-outline-variant rounded p-4">
+<div class="flex items-center justify-between mb-3 pb-2 border-b border-outline-variant">
+<div class="text-[13px] text-secondary">
+<span>الرصيد القائم المتاح للصرف:</span>
+<strong class="text-primary font-bold mr-1">3,800.00 ج.م فقط</strong>
+<span class="text-[11px] text-secondary">(من أصل السند 5,000 ج.م بعد خصم المصروفات الإجرائية)</span>
+</div>
+<span class="text-[11px] font-bold text-[#A4262C] bg-[#FDF1F1] px-2 py-0.5 rounded border border-[#F1A5A9]">
+                    سقف الصرف مقيد
+                  </span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-amount">
+                      المبلغ المردود المطلوب صرفه (ج.م) <span class="text-error">*</span>
+</label>
+<div class="relative">
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm font-bold font-mono focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-amount" max="3800" min="1" type="number" value="3800"/>
+<span class="absolute left-3 top-2.5 text-secondary text-xs">ج.م</span>
+</div>
+</div>
+<div class="text-[12px] text-secondary leading-relaxed pt-2 md:pt-5">
+<span class="text-error font-bold block mb-0.5">تنبيه رقابي:</span>
+                    النظام يمنع صرف أي مبلغ يتجاوز الرصيد القائم (3,800 ج.م) تحت طائلة رفض الترحيل المحاسبي.
+                  </div>
+</div>
+</div>
+<!-- Method & Refund Reason -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-method">
+                    وسيلة الرد الفعلي <span class="text-error">*</span>
+</label>
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-method">
+<option selected="" value="cash">نقداً من خزينة المكتب الرئيسية</option>
+<option value="bank">تحويل بنكي عكسي (حساب الموكل بالبنك الأهلي المصري)</option>
+<option value="cheque">شيك مصرفي مسحوب على بنك مصر</option>
+</select>
+</div>
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-date">
+                    تاريخ صرف الرد <span class="text-error">*</span>
+</label>
+<input class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-date" type="date" value="2026-01-18"/>
+</div>
+</div>
+<!-- Mandatory Business Reason -->
+<div>
+<label class="block text-label-md font-label-md text-on-surface mb-1.5" for="refund-reason">
+                  سبب الاسترداد وصرف المبلغ <span class="text-error">*</span>
+</label>
+<select class="w-full h-[44px] px-3.5 bg-white border border-outline-variant rounded text-on-surface text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" id="refund-reason">
+<option selected="" value="surplus">انتهاء المأمورية ووجود فائض أمانة مستحق للموكل</option>
+<option value="settlement">صلح قضائي وانتهاء النزاع قبل سداد أمانة الخبير</option>
+<option value="client_request">طلب الموكل استرداد المتبقي بعد حفظ الدعوى</option>
+<option value="withdrawal">تنحي المكتب عن المباشرة واسترداد كامل الفائض</option>
+</select>
+</div>
+<!-- Financial Balance Impact Preview -->
+<div class="border border-outline-variant rounded p-3.5 bg-[#F8FAFB]">
+<span class="text-[12px] font-bold text-secondary block mb-2">أثر العملية على مركز الموكل المالي:</span>
+<div class="grid grid-cols-3 gap-3 text-center">
+<div class="bg-white p-2 rounded border border-outline-variant">
+<span class="block text-[11px] text-secondary">رصيد الأمانة قبل الرد</span>
+<span class="font-bold text-on-surface text-[14px]">3,800.00 ج.م</span>
+</div>
+<div class="bg-white p-2 rounded border border-outline-variant">
+<span class="block text-[11px] text-error font-medium">المبلغ المنصرف للموكل</span>
+<span class="font-bold text-error text-[14px]">- 3,800.00 ج.م</span>
+</div>
+<div class="bg-white p-2 rounded border border-outline-variant">
+<span class="block text-[11px] text-[#075b41] font-medium">الرصيد النهائي المتبقي</span>
+<span class="font-bold text-[#075b41] text-[14px]">0.00 ج.م (تصفية تامة)</span>
+</div>
+</div>
+</div>
+</form>
+</div>
+<!-- Final Confirmation & Commit Actions Bar -->
+<div class="bg-white border border-outline-variant rounded p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+<div class="flex items-center gap-2 text-[13px] text-secondary">
+<span class="material-symbols-outlined text-[18px] text-primary">verified</span>
+<span>العملية سيتم توثيقها في سجل الأستاذ العام وتوليد سند رسمي برقم تسلسلي جديد.</span>
+</div>
+<div class="flex items-center gap-3 w-full sm:w-auto">
+<!-- Cancel Button -->
+<button class="h-[44px] px-5 rounded border border-outline-variant bg-white text-secondary hover:bg-[#F4F6F7] font-label-md text-label-md transition-colors w-full sm:w-auto text-center" type="button">
+                إلغاء والعودة
+              </button>
+<!-- Primary Submit Button (44px Petrol Warning Color) -->
+<button class="h-[44px] px-6 rounded bg-[#14566B] hover:bg-[#0F3F4F] active:bg-[#0B2F3B] text-white font-label-md text-label-md flex items-center justify-center gap-2 transition-colors w-full sm:w-auto shadow-sm" id="confirm-submit-btn" onclick="triggerExecutionNotice()" type="button">
+<span class="material-symbols-outlined text-[18px]">rule</span>
+<span id="submit-btn-label">تأكيد وترحيل القيد العكسي</span>
+</button>
+</div>
+</div>
+<!-- Bottom Audit Guarantee -->
+<div class="text-center text-[12px] text-secondary flex items-center justify-center gap-1.5 py-1">
+<span class="material-symbols-outlined text-[15px] text-[#70787c]">lock</span>
+<span>نظام الحسابات متوافق مع أحكام قانون المحاماة المصري رقم 17 لسنة 1983 ولائحة إدارة أمانات الموكلين.</span>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Interactive Path Switcher Script -->
+<script>
+    function switchCorrectionPath(path) {
+      const reversalSection = document.getElementById('section-reversal');
+      const refundSection = document.getElementById('section-refund');
+      const tabBtnReversal = document.getElementById('tab-btn-reversal');
+      const tabBtnRefund = document.getElementById('tab-btn-refund');
+      const refundRadio = document.getElementById('tab-refund-radio');
+      const submitBtnLabel = document.getElementById('submit-btn-label');
+
+      if (path === 'reversal') {
+        // Show Reversal
+        reversalSection.classList.add('active');
+        refundSection.classList.remove('active');
+
+        // Style Reversal Tab Active
+        tabBtnReversal.className = "flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-primary bg-[#e9f5ff] text-primary";
+        tabBtnRefund.className = "flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-transparent bg-transparent text-secondary hover:bg-[#F8FAFB]";
+        
+        tabBtnReversal.querySelector('span:last-child').className = "w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[12px]";
+        tabBtnReversal.querySelector('span:last-child').innerHTML = '<span class="material-symbols-outlined text-[14px]">check</span>';
+        
+        refundRadio.className = "w-5 h-5 rounded-full border border-outline-variant flex items-center justify-center";
+        refundRadio.innerHTML = '';
+
+        submitBtnLabel.textContent = 'تأكيد وترحيل القيد العكسي';
+      } else {
+        // Show Refund
+        refundSection.classList.add('active');
+        reversalSection.classList.remove('active');
+
+        // Style Refund Tab Active
+        tabBtnRefund.className = "flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-primary bg-[#e9f5ff] text-primary";
+        tabBtnReversal.className = "flex-1 py-3 px-4 rounded text-right transition-all flex items-center justify-between border-2 border-transparent bg-transparent text-secondary hover:bg-[#F8FAFB]";
+        
+        tabBtnRefund.querySelector('#tab-refund-radio').className = "w-5 h-5 rounded-full bg-primary text-white flex items-center justify-center text-[12px]";
+        tabBtnRefund.querySelector('#tab-refund-radio').innerHTML = '<span class="material-symbols-outlined text-[14px]">check</span>';
+
+        tabBtnReversal.querySelector('span:last-child').className = "w-5 h-5 rounded-full border border-outline-variant flex items-center justify-center";
+        tabBtnReversal.querySelector('span:last-child').innerHTML = '';
+
+        submitBtnLabel.textContent = 'تأكيد وترحيل سند الرد الفعلي';
+      }
+    }
+
+    function triggerExecutionNotice() {
+      const activePath = document.getElementById('section-reversal').classList.contains('active') ? 'قيد عكسي' : 'سند رد فعلي';
+      alert('تم إرسال أمر الترحيل المالي: (' + activePath + ') للسند REC-2026-088. سيتم تسجيل العملية في دفتر اليومية برقم تسوية مستقل وإشعار المحامي المسؤول.');
+    }
+  </script>
+</body></html>

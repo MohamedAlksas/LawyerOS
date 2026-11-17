@@ -15,25 +15,34 @@ export default async function SecuritySettingsPage() {
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify');
+        redirect('/verify?returnTo=' + encodeURIComponent('/settings/security'));
       }
-      redirect('/login');
+      if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
+        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
+      }
+      const { headers } = await import('next/headers');
+      const reqHeaders = await headers();
+      const cookie = reqHeaders.get('cookie') || '';
+      if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
+        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
+      }
+      redirect('/login?returnTo=' + encodeURIComponent('/settings/security'));
     }
     if (error instanceof AuthorizationError) {
       return (
-        <main className="min-h-screen bg-[#F4F6F7] p-6" dir="rtl" lang="ar-EG">
+        <div className="min-h-screen bg-[#F4F6F7] p-6" dir="rtl" lang="ar-EG">
           <div className="max-w-4xl mx-auto bg-white p-6 rounded border border-red-200 text-[#A4262C]">
             <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
             <p>لا تمتلك الصلاحيات الكافية لإدارة إعدادات الأمان والجلسات.</p>
           </div>
-        </main>
+        </div>
       );
     }
     throw error;
   }
 
   return (
-    <main className="min-h-screen bg-[#F4F6F7] p-4 sm:p-8 overflow-x-hidden" dir="rtl" lang="ar-EG">
+    <div className="min-h-screen bg-[#F4F6F7] p-4 sm:p-8 overflow-x-hidden" dir="rtl" lang="ar-EG">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
           <nav className="text-xs text-[#4D606A] mb-1">الإعدادات &gt; الأمان</nav>
@@ -48,6 +57,6 @@ export default async function SecuritySettingsPage() {
           actor={overview.actor}
         />
       </div>
-    </main>
+    </div>
   );
 }
