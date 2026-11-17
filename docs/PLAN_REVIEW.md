@@ -24,7 +24,7 @@ Review date: November 10, 2026. Scope: document consistency and conversion into 
 - Distinguish overall matter kind from practice area, known from missing data, and never invent a hearing time.
 - Assign PWA and settings implementation to specific tasks rather than leaving them unowned descriptions.
 - Apply ACs within task scope/dependencies rather than requiring an early task to test features that do not exist yet.
-- Choose an actual local file scanner and include its cost in proposed server resources.
+- Superseded for the initial release by owner decision on 2026-11-17: [ADR 0003](adr/0003-initial-malware-scan-deferral.md) defers ClamAV and its resource allocation; preserve content validation/privacy and truthful unscanned status. Reassess scanner sizing when later activation is assigned.
 - Add recovery of old encryption keys/MFA and a restore mode preventing sending and cleanup.
 - Add expiry policies for staging, exports, and incomplete uploads; approved office documents are excluded from generic cleanup.
 - Prevent archiving from hiding a future hearing or open confirmed legal deadline.

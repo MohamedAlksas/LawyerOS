@@ -72,7 +72,7 @@ Apply each AC to the task owning its behavior, not to every task in its mileston
 | AC-07 | Date-only values do not shift across timezone/DST, and unknown hearing time remains unknown | Vitest edge cases + Cairo browser timezone | M3 |
 | AC-08 | Legal deadlines are not calculated or confirmed automatically | Draft/confirm E2E + audit | M3 |
 | AC-09 | Worker restart/lease/date changes neither duplicate reminders nor retain old ones | Real PostgreSQL integration + fake clock | T10 |
-| AC-10 | Oversized/fake-MIME/path-traversal uploads and ClamAV failure/timeout/stale definitions remain unavailable | Storage integration + HTTP + safe scanner tests | M4 |
+| AC-10 | Oversized/fake-MIME/path-traversal uploads remain unavailable; initial ADR 0003 permits validated unscanned files with truthful NOT_SCANNED_POLICY evidence. If scanning is later enabled, failure/timeout/stale definitions block publication | Storage integration + HTTP; scanner-specific tests deferred until activation | M4 |
 | AC-11 | Failed DB finalization does not produce a ready document; prior versions remain | Documents Interface + file manifest | M4 |
 | AC-12 | 15,000 fees, 5,000 collection, and 1,200 expense yield 10,000 fees due and 1,200 expenses due | Finance Interface with literal expected values | M5 |
 | AC-13 | Advance receipt/spending/partial return, allocation, excess, reversal, and concurrent operations | Real PostgreSQL transactions + statement output | M5 |

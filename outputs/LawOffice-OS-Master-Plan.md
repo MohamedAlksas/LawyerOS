@@ -187,6 +187,8 @@ The previous conversation, "اقتراحات نظام محاماة" (law office 
 
 ## Open Decisions
 
+Owner decision, 17 November 2026: malware scanning/ClamAV is deferred for the initial release. Private uploads still require type/size/signature validation, authorization and atomic finalization, and must be recorded as unscanned rather than CLEAN. See [ADR 0003](../docs/adr/0003-initial-malware-scan-deferral.md). Future activation is a separate owner-approved assignment.
+
 The hosting and offsite backup provider and location, archive size, external notification channel and its budget, and actual printers and devices remain open. These decisions do not prevent implementing a trial version with synthetic data.
 
 ---
@@ -321,6 +323,8 @@ Outside V1: calculating appeal periods from general rules, automatic submissions
 
 ## 6. Boundaries and evidence
 
+Initial-release owner exception: ClamAV is deferred under [ADR 0003](../docs/adr/0003-initial-malware-scan-deferral.md). File validation/privacy/finalization remain required; malware-scan status is explicitly NOT_SCANNED_POLICY, never a fabricated clean result. Scanner-specific evidence is deferred until an approved activation task.
+
 The dashboard displays actual database data; any demo data is clearly labeled and never mixed with live records. API success or a successful build is insufficient evidence of usability. The project owner's father must try the daily journeys, and the project owner must review the accounts and recovery.
 
 Before selecting an external storage location or sending a document to an AI service, the father reviews confidentiality, applicable legal and contractual obligations, and the processing location. The plan does not assume any provider automatically satisfies those obligations.
@@ -351,7 +355,7 @@ Version: implementation plan 1, 10 November 2026. Visual reference: [DESIGN.md](
 | Start of the day | Login → "النهارده" (today) → today's hearings → open matter → document checklist → print agenda | Hearings without a specified time are visible, and confirmed legal deadlines are separate from tasks |
 | New client and matter | Search for an existing person → add/select client → matter → court proceeding if available → specify paper location | Stable internal code, multiple clients supported, and a matter may begin as a consultation before any court case number exists |
 | After court | Hearing → "تسجيل النتيجة" (record result) → decision → optional next hearing → optional tasks → review and save | The result, new hearing, and tasks all appear together, or none are saved |
-| Mobile upload | Matter → "رفع مستند" (upload document) → photograph/select → preview image legibility → brief metadata → send | Scan status is clear, and the file is unavailable before upload and scanning finish |
+| Mobile upload | Matter → "رفع مستند" (upload document) → photograph/select → preview image legibility → brief metadata → send | Validation status is clear; file unavailable until validation/finalization finish. Initial ADR 0003 displays truthful unscanned status |
 | Collection | Matter → "تسجيل دفعة" (record payment) → select payer and classification → amount and allocation → review → post and issue receipt | Fees, expenses, and client money remain separate accounts |
 | Appeal | Matter → "إضافة رقم قضائي مرتبط" (add linked court case number) → select previous proceeding and instance → court details | Each court case number has its own hearings and documents, with earlier history preserved |
 | Month end | Accounts → period → collections/expenses/client balances → detailed statement → export | Total cash is not presented as office profit |
@@ -438,7 +442,7 @@ Party tabs: details, matters, powers of attorney, general documents, communicati
 
 Digital file **required**; title **required**, suggested from the filename; type **required**; link to a matter or party **required**, with proceeding/hearing **optional** and consistent with the matter; document date **optional**; paper-original location **optional**; is the original in the office? **optional**, with yes/no/unknown choices; description **optional**; sensitivity **required**, default confidential.
 
-Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Literal states: "بيترفع، جاري الفحص، جاهز، مرفوض، الرفع غير مكتمل" (uploading, scanning, ready, rejected, incomplete upload). A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
+Upload accepts the formats and size defined by security, showing limits before selection. Start with PDF, JPEG, and PNG and a proposed 25 MB limit per version. V1 permits selecting or capturing an image when supported by the browser, previewing legibility before sending, and previewing PDF pages after upload. Cropping, rotating, reordering images, and combining them into a multipage document are **optional enhancements outside the V1 delivery condition**; a mobile scanner can produce a ready PDF. Preserve the uploaded original. Initial ADR 0003 states: "بيترفع، جاري التحقق من الملف، جاهز، مرفوض، الرفع غير مكتمل" (uploading, validating, ready, rejected, incomplete). File details show "لم يُفحص ضد الفيروسات"; do not claim a clean malware scan. If scanning is activated later, show its actual pending/result state. A rejected file shows a safe reason and retry action; a new version never silently replaces the original. Preview and download require authorization every time. A matching file hash produces a duplication warning. No `OCR` or approved extracted text in the MVP.
 
 ## S11 — Accounts
 
@@ -618,7 +622,7 @@ A person or organization is recorded once in `Party`. Being a client or opponent
 | Entity | Fields | Rules |
 |---|---|---|
 | `Document` | `matterId` or `partyId`, `proceedingId?`, `hearingId?`, title, type, document date, description, tags, original location, `originalPresent: YES/NO/UNKNOWN`, `sensitivity: CONFIDENTIAL/RESTRICTED`, `currentVersionId`, `archivedAt` | One clear owner: a matter or a party's general document; optional hearing and proceeding belong to the same matter; if both are present their proceeding must match; default sensitivity CONFIDENTIAL; no public URL |
-| `DocumentVersion` | `documentId`, `versionNumber`, `objectKey`, original filename, detected MIME, size, `sha256`, `uploadStatus`, `scanStatus`, `createdById` | Unique document/version number and unique `objectKey`; version contents immutable; `UPLOADING/QUARANTINED/READY/REJECTED/FAILED` |
+| `DocumentVersion` | `documentId`, `versionNumber`, `objectKey`, original filename, detected MIME, size, `sha256`, `uploadStatus`, `scanStatus`, scan-policy/version evidence, `createdById` | Unique document/version number and unique `objectKey`; version contents immutable; `UPLOADING/QUARANTINED/READY/REJECTED/FAILED`. Initial ADR 0003 records scanStatus NOT_SCANNED_POLICY, never CLEAN; READY does not imply antivirus scanning |
 | `UploadAttempt` | `uploadId`, `documentId?`, `idempotencyRecordId`, expected size, status, expiry | A retry resumes an identified attempt or explicitly starts another; an incomplete upload never appears as a ready document |
 
 `currentVersionId` advances only after upload completion, scanning, and metadata approval. Earlier versions remain available subject to authorization. File compatibility is checked from contents, not the extension alone. The proposed starting limit is 25 MB per version with a clear message. Start with PDF, JPEG, and PNG; DOCX follows later after a safe download/scanning path. Future OCR is derived data with review and confidence, not a replacement for the original.
@@ -761,8 +765,8 @@ The reminder worker initially polls the outbox every minute, using a temporary `
 
 1. Open the matter → UI action “إضافة مستند” (add document); select an image/PDF, title, type, and optional proceeding. Show filename, size, and case before sending.
 2. The server issues an upload attempt with limited duration and permission into quarantine, using a random storage name. The UI displays upload progress.
-3. After transmission, the server verifies size, MIME, and hash, then runs scanning. The document displays “جاري الفحص” (scanning) and cannot be downloaded as an approved document.
-4. A successful scan activates the version as `READY` and updates `currentVersionId`. Failure shows a general reason and reupload option; the rejected original is not included in the approved archive.
+3. After transmission, the server verifies size, content signature, MIME and hash in quarantine. The document displays “جاري التحقق من الملف” (validating file) and cannot yet be downloaded as approved. Under initial ADR 0003 no antivirus service runs.
+4. Successful policy validation and atomic finalization activate the version as `READY` and update `currentVersionId`; record `scanStatus = NOT_SCANNED_POLICY` and policy/version, with file detail “لم يُفحص ضد الفيروسات”. Never fabricate a CLEAN result. Failure leaves the document unavailable with a safe reason and reupload option. If scanning is enabled later, its successful result is additionally required and failures remain fail-closed.
 5. Download requires a current server-side authorization check, or a short-lived private link issued after that check. Copying the link does not grant permanent access. Preview uses a safe sandbox, or download uses `Content-Disposition` according to file type.
 
 An interrupted upload must not produce an empty document page labeled successful. Cleanup removes expired, unlinked upload attempts after a grace period. Uploading a new version does not replace old bytes. The original filename is for display only. A duplicate hash produces a warning while allowing an intentional copy. The paper original's location is recorded separately from the image's existence.
@@ -843,10 +847,10 @@ One `Modular Monolith`, one repository, and one PostgreSQL database. Desktop and
 | Data | PostgreSQL + Prisma 7 with a compatible driver adapter | Relations, constraints, and transactions without mixing ORM version interfaces |
 | Auth | Better Auth + Prisma adapter + TOTP and recovery codes | Established session management; no custom password/MFA protocol |
 | Files | Private filesystem volume outside `public/`, accessed through the Documents module | Simple for a small initial deployment; move to private S3-compatible storage later if needed |
-| File scanning | Local ClamAV through a private service with updated definitions | No document uploads to external scanning sites; failed scans or stale definitions prevent READY |
+| File validation / deferred malware scanning | Initial release omits ClamAV under ADR 0003; private staging, signature/MIME/size/checksum checks remain | READY may carry NOT_SCANNED_POLICY; no fabricated CLEAN result or external scanning. If later enabled, failed/stale scans prevent READY |
 | Jobs | Worker process from the same project; PostgreSQL jobs/outbox + leases | Reminders and file scanning without adding Redis merely because a worker exists |
 | Printing | HTML print layouts + server-side Playwright PDF generation | Consistent Arabic CSS and a local font; queueing and resource limits for large reports |
-| Deployment | Docker Compose for app/worker/PostgreSQL/ClamAV + HTTPS through Tailscale Serve; Caddy if public access is selected | Document the access choice before production; database, documents, and scanner remain unexposed |
+| Deployment | Docker Compose for app/worker/PostgreSQL + HTTPS through Tailscale Serve; ClamAV deferred initially under ADR 0003; Caddy if public access is selected | Document the access choice before production; database/documents and any later scanner remain private |
 | Tests | Vitest + integration tests with real PostgreSQL + Playwright E2E | Verify financial rules, persistence, and transactions, then actual user journeys |
 | Backup | PostgreSQL dump + immutable file snapshot + restic | Consistent off-device recovery rather than copying a live volume alone |
 
@@ -979,11 +983,11 @@ If a public interface on a domain is chosen later, place `Caddy` in front of the
 
 ## 2. Runtime layout and resources
 
-`Docker Compose` runs `app`, a `worker` using the same code and release, `postgres`, a local `ClamAV` scanning service, and a separate backup job. `Caddy` is optional for public access; for private access, `Tailscale Serve` provides the HTTPS endpoint. PostgreSQL and the scanner stay on an internal network without internet-published ports. Files live in a private volume that is never served as a static folder.
+`Docker Compose` initially runs `app`, a `worker` using the same code and release, `postgres`, and a separate backup job. The owner deferred ClamAV under [ADR 0003](../docs/adr/0003-initial-malware-scan-deferral.md); do not install or reserve a scanner service for the initial release. `Caddy` is optional for public access; for private access, `Tailscale Serve` provides the HTTPS endpoint. PostgreSQL and any later scanner stay on an internal network without internet-published ports. Files live in a private volume that is never served as a static folder.
 
 Kubernetes and Redis are unnecessary initially. Jobs are stored in PostgreSQL with `lease_until`, `attempt_count`, `next_attempt_at`, and a key preventing duplication of the same job. A crashed worker's job can be reclaimed after its lease expires, and every handler must tolerate retries. Write the `outbox` within the business transaction, then let the worker perform side effects afterward; this is not a promise of exactly-once delivery.
 
-Proposed starting resources, subject to measurement: `2 vCPU`, `8 GB RAM`, and an `80–120 GB` SSD for a single-user machine/server running local scanning and PDF generation in jobs with limited concurrency, plus external backup capacity. ClamAV's own documentation specifies `3 GiB` minimum and `4 GiB` preferred for scanning, with additional consumption during virus-signature updates. Therefore, `4 GB` for the entire server is not an automatically acceptable production baseline. [ClamAV Docker resource requirements](https://docs.clamav.net/manual/Installing/Docker.html). These proposed resources are not a performance guarantee. Measure peak consumption during scanning, signature updates, PDF generation, and backups, then increase resources or reduce job concurrency as indicated.
+Resource sizing must follow the active release policy and measured workloads. The initial ADR 0003 release does not install a scanner or reserve ClamAV RAM; measure app/database/worker/PDF/backup peaks and existing host workloads. The earlier scanning-enabled proposal was `2 vCPU`, `8 GB RAM` and an `80–120 GB` SSD plus external backups. If scanning is later enabled, account separately for ClamAV's documented `3 GiB` minimum / `4 GiB` preferred and update peaks. [ClamAV resource requirements](https://docs.clamav.net/manual/Installing/Docker.html). Deferral is not a guarantee that any smaller host meets production requirements.
 
 Document volume is the main disk-sizing factor. Illustrative estimate: `20,000` pages averaging `0.5 MB` per page produce approximately `10 GB` of images, before original attachments and versions. Reserve capacity for data, the database, staging, and logs, plus at least 30% free headroom; calculate external backups separately. If the average page size differs, recalculate using an actual sample.
 
@@ -1017,9 +1021,9 @@ Key rotation is not simply replacing an environment variable: install the new ke
 
 ## 4. Document and data protection
 
-Uploads pass through `quarantine → validation/scan → available`. Failures leave the file unavailable with a clear message and a retry option. Validate size, the actual content-type signature, and a safely generated storage name. Initially allow PDF, JPEG, and PNG; executables, HTML, SVG, and archives are outside V1. The proposed initial limit is `25 MB` per file, with multiple-image uploads. Changes to this limit must be checked against proxy limits and storage capacity.
+Uploads initially pass through `quarantine → content validation → atomic finalization → available`. Validation/finalization failures leave the file unavailable with a clear message and a retry option. Validate size, actual content-type signature, MIME, checksum and a safely generated storage name. Initially allow PDF, JPEG, and PNG; executables, HTML, SVG, and archives are outside V1. The proposed initial limit is `25 MB` per file, with multiple-image uploads. Record `scanStatus = NOT_SCANNED_POLICY` and the approved deployment policy/version per document version; never mark unscanned content CLEAN. File details truthfully show `لم يُفحص ضد الفيروسات`. This owner-approved exception permits READY without antivirus scanning, not without the remaining controls. Changes to file limits must be checked against proxy limits and storage capacity.
 
-The proposed scanner is local `ClamAV`, with `freshclam` for signature updates and `clamd` in an isolated service. The worker sends quarantine content over a private socket without sending documents to an external scanning provider. The `clamd` TCP protocol does not add authentication, so it must not be exposed to the internet or an untrusted network. [ClamAV scanning documentation](https://docs.clamav.net/manual/Usage/Scanning.html). Pin the image version during implementation and monitor signature age. The proposed initial stale-signature threshold is 72 hours, subject to operational review. A timeout, unavailable scanner, inconclusive result, or signatures older than the threshold prevents transition to `READY`; provide a clear retry instead of bypassing scanning. A successful scan does not guarantee that a document is free of every threat; isolation and preview restrictions remain necessary. Test detection with a safe standard test sample, and test scanner outages, timeouts, and signature updates.
+ClamAV, freshclam and clamd are deferred initially by explicit owner decision, not bypassed after a scanner failure. The initial release does not detect malware, and structural file validation does not prove a file is safe. Do not send documents to an external scanning provider. If local scanning is enabled later through a reviewed assignment, use a private isolated service, pin its image and monitor signatures (proposed stale threshold: 72 hours). Timeout, unavailable service, inconclusive result or stale signatures must then prevent READY, without silent fallback to NOT_SCANNED_POLICY. Add actual detection/outage/timeout/staleness and reprocessing tests at activation. [ClamAV documentation](https://docs.clamav.net/manual/Usage/Scanning.html).
 
 Approved originals and versions are immutable, each with a `checksum`. Downloads undergo server-side permission checks. Previews use an explicitly configured content type and an isolated environment; types unsafe for preview are downloaded as attachments. There are no permanent public links and no caching of financial data, files, or case pages in a Service Worker or public CDN. Sensitive responses use a policy preventing caching; the PWA caches only public assets and the offline screen. Removing the mobile application or signing out does not automatically delete files that the user deliberately downloaded to the device; explain this at download time.
 
@@ -1072,7 +1076,7 @@ Run a recovery drill before introducing the first real data, then monthly in an 
 - [ ] Choose the hosting location and review its suitability for office files; document the maintainer and contact route.
 - [ ] Test login, TOTP, recovery, session/device revocation, and closure of public registration and database ports.
 - [ ] Test a document link without login and using the maintenance account: rejection is consistent, with no cache exposing content.
-- [ ] Test a forbidden file type, an oversized file, and scanner failure; no document is available before approval completes.
+- [ ] Test forbidden/disguised/oversized files and failed finalization; no document is available before policy validation completes. Under initial ADR 0003, record NOT_SCANNED_POLICY truthfully. Scanner failure tests become required when scanning is enabled later.
 - [ ] Have a consistent off-server backup, a disconnected copy, and a timed full recovery, with the separate key bundle accessible. Synthetic identity decryption and MFA login succeed after recovery; dispatch and jobs remain blocked until review.
 - [ ] Test backup failure, a full disk, internet loss, and a stopped worker; confirm actual external-alert delivery.
 - [ ] Use pinned system/package releases, retain the previous release image, and take a backup before any production migration; reverting the image does not automatically revert data.
@@ -1094,7 +1098,7 @@ This policy is a technical proposal for V1, not a determination of the legal ret
 | Original import CSV and raw staging rows | Retain for up to 7 days after the batch is closed or permanently fails | Delete private staging after producing the results report; retain source IDs, hashes, redacted errors, and mapping references without a complete PII copy |
 | Abandoned, unapproved import | Expire 7 days after the last modification | Show a warning before expiration and allow re-upload; never accept data automatically |
 | Incomplete/expired upload | Clean up 24 hours after the attempt expires | Never delete `READY` files or an object listed in a backup pin; cleanup checks state and identifiers |
-| File rejected by scanning | Protected quarantine until 24 hours after the result | No download or external transmission; after cleanup, retain only the hash and redacted reason unless there is an explicit incident hold |
+| File rejected by validation, or by malware scanning if enabled later | Protected quarantine until 24 hours after the result | No download or external transmission; retain hash/redacted reason after cleanup unless an incident hold applies. Initial ADR 0003 does not fabricate malware results |
 | Orphan file without metadata | A 7-day grace period with reconciliation | Produce a report before deletion; exclude backup-pinned versions and files undergoing finalization; never delete based on filename alone |
 | Idempotency for financial operations or hearings | Retain the event reference and key with the record | Never reuse the key; a temporary payload may be removed after 30 days while retaining its hash and result ID to prevent duplicate execution |
 | Technical logs | An initial proposal of 30 days | No PII or tokens; rotation, a size limit, and redaction before forwarding |
@@ -1226,7 +1230,7 @@ An initial organizational estimate is 6–10 weeks of part-time work, including 
 
 | Task | Scope | Submission requirement |
 |---|---|---|
-| T11 Upload and preview | Quarantine, allowed formats, checksum, private storage, private ClamAV, download authorization | Reject disguised/oversized files; scanner timeout/failure/stale definitions prevent publication; prevent path traversal; reject unauthorized direct links |
+| T11 Upload and preview | Quarantine, allowed formats, checksum, private storage, download authorization; ClamAV deferred initially by ADR 0003 | Reject disguised/oversized/traversal files; atomic finalization and private authorization; truthful NOT_SCANNED_POLICY. Scanner failure/timeout/staleness tests required only upon later activation |
 | T12 Versions and paper originals | Immutable versions, paper original/location, Proceeding/Hearing links | Old versions remain; failed finalization/database writes create no broken reference; orphan cleanup respects backup pins |
 
 **Demo:** a mobile photo and a 20-page PDF, re-upload, and download without a session. Before M4 is complete, the application is experimental rather than a trusted archive.
@@ -1352,7 +1356,7 @@ Apply each AC to the task owning its behavior, not to every task in its mileston
 | AC-07 | Date-only values do not shift across timezone/DST, and unknown hearing time remains unknown | Vitest edge cases + Cairo browser timezone | M3 |
 | AC-08 | Legal deadlines are not calculated or confirmed automatically | Draft/confirm E2E + audit | M3 |
 | AC-09 | Worker restart/lease/date changes neither duplicate reminders nor retain old ones | Real PostgreSQL integration + fake clock | T10 |
-| AC-10 | Oversized/fake-MIME/path-traversal uploads and ClamAV failure/timeout/stale definitions remain unavailable | Storage integration + HTTP + safe scanner tests | M4 |
+| AC-10 | Oversized/fake-MIME/path-traversal uploads remain unavailable; initial ADR 0003 permits validated unscanned files with truthful NOT_SCANNED_POLICY evidence. If scanning is later enabled, failure/timeout/stale definitions block publication | Storage integration + HTTP; scanner-specific tests deferred until activation | M4 |
 | AC-11 | Failed DB finalization does not produce a ready document; prior versions remain | Documents Interface + file manifest | M4 |
 | AC-12 | 15,000 fees, 5,000 collection, and 1,200 expense yield 10,000 fees due and 1,200 expenses due | Finance Interface with literal expected values | M5 |
 | AC-13 | Advance receipt/spending/partial return, allocation, excess, reversal, and concurrent operations | Real PostgreSQL transactions + statement output | M5 |
@@ -1565,6 +1569,32 @@ A single income/expense screen can confuse fee collection, expense reimbursement
 
 ---
 
+Source: `docs/adr/0003-initial-malware-scan-deferral.md`
+
+# ADR 0003 — Defer malware scanning during the initial release
+
+Date: 2026-11-17. Status: accepted product decision by the project owner; implementation pending T11/T18.
+
+## Decision and scope
+
+The owner explicitly requested postponing ClamAV for the initial period. The initial release will not install or require ClamAV, freshclam, signature updates or scanner jobs. T11 uploads may become available after all non-malware validation and atomic finalization requirements succeed, with malware scanning explicitly disabled by this approved deployment policy. Reassess activation in a separate owner-approved assignment; it is not an implicit initial go-live prerequisite.
+
+This changes the former mandatory quarantine → validation + antivirus scan → READY rule. READY now means accepted by the configured validation policy, not certified virus-free. Store per-version `scanStatus = NOT_SCANNED_POLICY` and the applicable policy/version; show the truthful Arabic detail `لم يُفحص ضد الفيروسات`. Never mark an unscanned document CLEAN or record a fabricated scanner result. Audit policy/version and finalization without document contents. Define these fields/enums in T11's reviewed schema; do not add document tables in T05.
+
+## Preserved controls and impact
+
+Keep private quarantine/staging, PDF/JPEG/PNG content-signature and MIME checks, the proposed 25 MB limit, random safe storage names, checksums, path-traversal protection, server-side authorization, safe isolated preview/download behavior, immutable versions, atomic database/file finalization, cleanup/backup pins, private storage and restorable backups. Validation or finalization failure still prevents publication.
+
+Impact: antivirus detection is absent, so a structurally valid allowed file may contain malicious content. File-type validation is not malware scanning. No external scanning substitute or document transfer is authorized. Removing this service lowers the initial resource requirements but does not establish a measured server-capacity guarantee.
+
+If scanning is explicitly enabled later, scanner outage, timeout, inconclusive result or stale definitions must fail closed; never silently fall back to the disabled policy. Existing versions retain their original scan-policy evidence until explicitly reprocessed. Re-enablement requires a reviewed migration/reprocessing plan and genuine failure/timeout/staleness tests.
+
+## Acceptance and precedence
+
+Initial AC-10 checks non-malware rejection, authorization, truthful unscanned status, policy attribution and atomic publication. Scanner execution/detection tests are deferred, not passed. T12 reuses the configured T11 validation path; T18 omits the scanner service for this policy. Earlier reviews/submissions remain historical evidence. This owner-approved ADR and updated canonical documents override earlier scanner-mandatory wording in generic/local skills; preserve installed agent/skill assets.
+
+---
+
 Source: `docs/PLAN_REVIEW.md`
 
 # Planning package review
@@ -1593,7 +1623,7 @@ Review date: November 10, 2026. Scope: document consistency and conversion into 
 - Distinguish overall matter kind from practice area, known from missing data, and never invent a hearing time.
 - Assign PWA and settings implementation to specific tasks rather than leaving them unowned descriptions.
 - Apply ACs within task scope/dependencies rather than requiring an early task to test features that do not exist yet.
-- Choose an actual local file scanner and include its cost in proposed server resources.
+- Superseded for the initial release by owner decision on 2026-11-17: [ADR 0003](../docs/adr/0003-initial-malware-scan-deferral.md) defers ClamAV and its resource allocation; preserve content validation/privacy and truthful unscanned status. Reassess scanner sizing when later activation is assigned.
 - Add recovery of old encryption keys/MFA and a restore mode preventing sending and cleanup.
 - Add expiry policies for staging, exports, and incomplete uploads; approved office documents are excluded from generic cleanup.
 - Prevent archiving from hiding a future hearing or open confirmed legal deadline.
@@ -2849,7 +2879,7 @@ Agency Agent assignment (required):
 - Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read .agents/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
 - Native execution is required: use invoke_subagent to launch the lead and each assigned support as distinct real sessions using .agents/agents/<profile-name>.md. Read docs/AGENCY_AGENTS.md for the preflight, ownership, snapshot, and evidence contract. Reading profiles or performing same-session role passes does not satisfy this assignment.
 - Run the canonical-name or registered-native-alias preflight in docs/AGENCY_AGENTS.md before dependent implementation. If a canonical TypeName is rejected but define_subagent is available, register its canonical instructions under the documented lawoffice-native- alias and actually invoke that alias; record the profile/definition/type/ID mapping. This is native registration, not a persona fallback. If the bounded native preflight fails, report BLOCKED_NATIVE_AGENTS and stop dependent implementation. Do not continue directly, install/upgrade tools, change the model, or invent an agent ID.
-- Task focus: Private upload/finalization/scanning and authorized preview; inspect fail-closed validation and real negative cases.
+- Task focus: Private upload/finalization and authorized preview; inspect fail-closed content validation and real negative cases. Owner-approved ADR 0003 defers malware scanning initially.
 - Resolve profile and definition paths from the current workspace root. A skill name is its frontmatter name, not its folder name. Read the project-local files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not delete extra installed profiles, install replacements, or silently substitute one.
 - The parent coordinates the task; the delegated lead implements owned paths. Give each child the task ID, role, required references/skills, owned paths, snapshot SHA, allowed actions, and checks. Freeze a committed checkpoint before support review; supports inspect that snapshot in separate contexts and use separate worktrees when commands could conflict. Reconcile findings through the lead and rerun affected checks. Parallelize independent work only; do not write the same files concurrently or spawn nested agents. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership.
 - Before submission, record actual native invocation/conversation IDs for all assigned roles, definition paths, profile metadata/path/SHA-256, ownership, inspected SHA, concrete findings/actions, lead reconciliation, and test results. Mark missing runtime evidence NOT RUN; a portable validator or a profile-load list does not prove execution. Do not self-approve or merge main.
@@ -2869,15 +2899,15 @@ Read these skills: .agents/skills/lawoffice-delivery/SKILL.md, .agents/skills/la
 
 Require docs/reviews/T10-review.md with ACCEPTED and inspect its actual delivered state. A missing predecessor stops dependent implementation; do not create its acceptance.
 
-Allowed edits: src/modules/documents/, scoped S10 routes/forms and shared UI where necessary, document/upload metadata schema and reviewed migrations, private file-storage configuration, local scanner Compose configuration and worker scan handler, affected authorization/tests, and docs/reviews/T11-submission.md. No OCR, AI, public storage, image-editing suite, version-history feature beyond schema needed for the first immutable version, or production deployment.
+Read docs/adr/0003-initial-malware-scan-deferral.md. Its explicit owner decision overrides older scanner-mandatory wording in project skills. Allowed edits: src/modules/documents/, scoped S10 routes/forms and shared UI where necessary, document/upload metadata schema and reviewed migrations, private file-storage configuration, content-validation/finalization worker, affected authorization/tests, and docs/reviews/T11-submission.md. Do not install ClamAV or add scanner dependencies/jobs for the initial release. No OCR, AI, public storage, image-editing suite, version-history feature beyond schema needed for the first immutable version, or production deployment.
 
 1. Implement beginUpload/finalizeUpload/authorizeDownload behind authenticated server Module Interfaces. Generate object keys server-side; keep bytes outside public. Link metadata to an existing matter or party and reject cross-matter proceeding/hearing references.
-2. Accept only PDF/JPEG/PNG with the proposed 25 MB per-file limit. Validate content signatures, discovered MIME, size, names/paths, and checksum. Quarantine uploads; run local private ClamAV with updated definitions. Timeout, failure, inconclusive scan, or definitions older than the proposed 72-hour limit must never produce READY. Allow explicit retry without pretending publication succeeded.
-3. Finalize only after bytes and scan evidence exist. A failed database transaction leaves no ready document reference. Preserve safe cleanup/reconciliation data for unfinished attempts; obey DATA_LIFECYCLE and never delete pinned versions.
+2. Accept only PDF/JPEG/PNG with the proposed 25 MB per-file limit. Validate content signatures, discovered MIME, size, names/paths and checksum in private quarantine. Under initial ADR 0003 no malware scan is required or executed: record scanStatus NOT_SCANNED_POLICY with the policy/version, never CLEAN. Show truthful unscanned file details. Invalid/incomplete files remain unavailable. If scanning is explicitly enabled later, timeout/failure/inconclusive/stale results must fail closed without silent policy fallback.
+3. Finalize only after actual bytes and configured-policy validation evidence exist. Initial policy records NOT_SCANNED_POLICY explicitly. A failed database transaction leaves no ready document reference. Preserve safe cleanup/reconciliation data for unfinished attempts; obey DATA_LIFECYCLE and never delete pinned versions.
 4. Build the Arabic S10 basic upload/preview states: uploading, scanning, ready, rejected, incomplete, disconnected. Multiple images are separate documents in V1; no implied PDF merging. Authorize every preview/download, use safe content headers/isolation, and prevent confidential caching.
-5. Exercise AC-10 and the first-version portion of AC-11: valid PDF/photo, oversized file, disguised MIME, traversal attempt, interrupted upload, scanner failure/timeout/staleness, database-finalize failure, duplicate retry, unauthenticated URL, and MAINTAINER download rejection. Use synthetic files and a standard safe scanner test; no real client uploads or external scanning sites.
+5. Exercise initial-policy AC-10 and first-version AC-11: valid PDF/photo, oversized/disguised/traversal file, interrupted upload, failed database finalization, duplicate retry, unauthorized URL and MAINTAINER rejection. Prove truthful NOT_SCANNED_POLICY and audit evidence; no scanner execution or fabricated CLEAN status. Scanner failure/timeout/staleness/detection tests are deferred until a separate activation assignment. Use synthetic files; no real client uploads or external scanning sites.
 
-Record actual commands/exit statuses and rendered 390/768/1440 evidence; unavailable checks are NOT RUN. Submit docs/reviews/T11-submission.md with loaded skills, storage/scanner behavior and remaining limits. Stop; T12 owns version history and later document-link integration.
+Record actual commands/exit statuses and rendered 390/768/1440 evidence; unavailable checks are NOT RUN. Submit docs/reviews/T11-submission.md with loaded skills, configured validation policy, storage behavior, truthful scanner deferral and remaining limits. Stop; T12 owns version history and later document-link integration.
 ```
 
 ---
@@ -2916,11 +2946,11 @@ Prerequisite: docs/reviews/T11-review.md is ACCEPTED and its private upload/scan
 
 Allowed edits: Documents addVersion/history/metadata behavior, scoped existing hearing/deadline/party/POA forms and commands for document links, S12 global-search integration for document titles/metadata, the corresponding schema constraints/migrations, cleanup reconciliation and backup-pin support, relevant tests, and docs/reviews/T12-submission.md. No financial module, OCR, PDF-body search, AI, object-storage migration, advanced image editor, or production backup orchestration.
 
-1. Implement addVersion using T11's validated scan path. Each version has a unique object key, version number, checksum, and immutable bytes. Switch currentVersionId only after READY; rejected or failed versions cannot replace the previous current version.
+1. Implement addVersion using T11's configured-policy validation/finalization path (ADR 0003 initially defers malware scanning). Preserve per-version NOT_SCANNED_POLICY and policy/version evidence; never fabricate CLEAN. Each version has a unique object key, version number, checksum and immutable bytes. Switch currentVersionId only after READY; rejected or failed versions cannot replace the previous current version.
 2. Display authorized history and retrieve older versions through the same permission checks. Persist the original's paper location and YES/NO/UNKNOWN presence independently of the digital file. Do not equate a scan with possession of an original.
 3. Complete previously deferred optional document references for powers of attorney, hearing decisions/results, and legal deadline sources using the existing modules. Enforce ownership/same-matter constraints; general party-owned POA documents must match the principal. Attaching a source does not automatically confirm a legal deadline or validate a power of attorney. Add authorized title/type/date metadata results to the existing S12 global search; do not search PDF image contents, expose storage keys, or return documents the actor cannot download.
 4. Implement only the pin records/checks needed to protect document versions during later backups. Cleanup respects current/old approved versions, active uploads, referenced records, and backup pins. T19 still owns coordinated backup execution; do not claim restore success here.
-5. Verify AC-11: new version success/failure, old-version retrieval, currentVersion unchanged on scan/DB failure, conflicting version writes, wrong-party/wrong-matter link rejection, missing-original state, and cleanup refusing a pinned version while expiring eligible temporary files.
+5. Verify AC-11: new version success/failure, old-version retrieval, currentVersion unchanged on validation/DB failure (or enabled-scan failure later), preserved per-version scan-policy evidence, conflicting writes, wrong-party/wrong-matter link rejection, missing-original state, and cleanup refusing a pinned version while expiring eligible temporary files.
 
 Use real PostgreSQL and private synthetic files. Record commands/exit statuses, migrations/upgrades, and actual UI observations where controls changed; mark unavailable checks NOT RUN. Submit docs/reviews/T12-submission.md with loaded skills and explicit T19 integration limits. Stop for review; no T13 finance work.
 ```
@@ -3314,10 +3344,10 @@ Require docs/reviews/T17-review.md with ACCEPTED and inspect the actual app/sche
 
 Allowed edits: ops/ production Compose and runbooks, app/worker image/build configuration, environment examples, sanitized operational health/monitoring code, S14 operational status display, targeted checks, and docs/reviews/T18-submission.md. No product feature additions or replacement of the approved stack.
 
-1. Prepare pinned versions for app/worker, PostgreSQL, and private ClamAV. Use least-privilege runtime users, persistent private data volumes, restart/health behavior, and bounded resource/job concurrency. Distinguish deployment credentials from synthetic examples; never commit secrets.
+1. Prepare pinned versions for app/worker and PostgreSQL. Under owner-approved ADR 0003, omit ClamAV/freshclam and scanner jobs/resources from the initial release; document the disabled policy and truthful per-version scan status. Use least-privilege runtime users, persistent private data volumes, restart/health behavior and bounded concurrency. Distinguish deployment credentials from synthetic examples; never commit secrets.
 2. Document and configure the proposed Tailscale Serve HTTPS private-access path. Do not enable Funnel, expose database/scanner ports, or enable public registration. Treat Caddy/public access as an alternative requiring a documented selected target, not a simultaneous default.
 3. Configure sanitized external health/worker-heartbeat/backup-status monitoring contracts and disk threshold handling (75% warning, 85% urgent). Include UTC storage/Cairo scheduling, NTP, update procedure, and safe migration/rollback steps. A prior image does not revert a changed schema.
-4. Exercise an isolated synthetic deployment: startup, readiness, lost database, stopped worker, scanner failure, restart, private volume persistence, and direct unauthorized routes. Verify installation/caching behavior on actual HTTPS when an approved test endpoint exists; confidential content must not enter PWA/public caches.
+4. Exercise an isolated synthetic deployment: startup, readiness, lost database, stopped worker, restart, private volume persistence, direct unauthorized routes and configured scan deferral. Prove no scanner service is required and files are not falsely marked CLEAN. Scanner-failure tests apply when a separate activation is approved. Verify installation/caching behavior on actual HTTPS when an approved test endpoint exists; confidential content must not enter PWA/public caches.
 5. Report the selected real deployment target and its explicit authorization if one exists. If none exists, finish all local configuration/checks and mark external HTTPS/mobile-outside-network, provider monitoring, and real-host tests NOT RUN with the exact missing prerequisites. Do not claim production readiness or manufacture a successful deployment.
 
 Submit docs/reviews/T18-submission.md with loaded skills, commands/exit codes, effective port/access configuration, operational observations, and each untested production gate. Stop for Codex review; T19 owns backup/restore, and real-data operation remains gated.

@@ -12,10 +12,10 @@ One `Modular Monolith`, one repository, and one PostgreSQL database. Desktop and
 | Data | PostgreSQL + Prisma 7 with a compatible driver adapter | Relations, constraints, and transactions without mixing ORM version interfaces |
 | Auth | Better Auth + Prisma adapter + TOTP and recovery codes | Established session management; no custom password/MFA protocol |
 | Files | Private filesystem volume outside `public/`, accessed through the Documents module | Simple for a small initial deployment; move to private S3-compatible storage later if needed |
-| File scanning | Local ClamAV through a private service with updated definitions | No document uploads to external scanning sites; failed scans or stale definitions prevent READY |
+| File validation / deferred malware scanning | Initial release omits ClamAV under ADR 0003; private staging, signature/MIME/size/checksum checks remain | READY may carry NOT_SCANNED_POLICY; no fabricated CLEAN result or external scanning. If later enabled, failed/stale scans prevent READY |
 | Jobs | Worker process from the same project; PostgreSQL jobs/outbox + leases | Reminders and file scanning without adding Redis merely because a worker exists |
 | Printing | HTML print layouts + server-side Playwright PDF generation | Consistent Arabic CSS and a local font; queueing and resource limits for large reports |
-| Deployment | Docker Compose for app/worker/PostgreSQL/ClamAV + HTTPS through Tailscale Serve; Caddy if public access is selected | Document the access choice before production; database, documents, and scanner remain unexposed |
+| Deployment | Docker Compose for app/worker/PostgreSQL + HTTPS through Tailscale Serve; ClamAV deferred initially under ADR 0003; Caddy if public access is selected | Document the access choice before production; database/documents and any later scanner remain private |
 | Tests | Vitest + integration tests with real PostgreSQL + Playwright E2E | Verify financial rules, persistence, and transactions, then actual user journeys |
 | Backup | PostgreSQL dump + immutable file snapshot + restic | Consistent off-device recovery rather than copying a live volume alone |
 

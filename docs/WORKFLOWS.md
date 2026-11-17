@@ -60,8 +60,8 @@ The reminder worker initially polls the outbox every minute, using a temporary `
 
 1. Open the matter → UI action “إضافة مستند” (add document); select an image/PDF, title, type, and optional proceeding. Show filename, size, and case before sending.
 2. The server issues an upload attempt with limited duration and permission into quarantine, using a random storage name. The UI displays upload progress.
-3. After transmission, the server verifies size, MIME, and hash, then runs scanning. The document displays “جاري الفحص” (scanning) and cannot be downloaded as an approved document.
-4. A successful scan activates the version as `READY` and updates `currentVersionId`. Failure shows a general reason and reupload option; the rejected original is not included in the approved archive.
+3. After transmission, the server verifies size, content signature, MIME and hash in quarantine. The document displays “جاري التحقق من الملف” (validating file) and cannot yet be downloaded as approved. Under initial ADR 0003 no antivirus service runs.
+4. Successful policy validation and atomic finalization activate the version as `READY` and update `currentVersionId`; record `scanStatus = NOT_SCANNED_POLICY` and policy/version, with file detail “لم يُفحص ضد الفيروسات”. Never fabricate a CLEAN result. Failure leaves the document unavailable with a safe reason and reupload option. If scanning is enabled later, its successful result is additionally required and failures remain fail-closed.
 5. Download requires a current server-side authorization check, or a short-lived private link issued after that check. Copying the link does not grant permanent access. Preview uses a safe sandbox, or download uses `Content-Disposition` according to file type.
 
 An interrupted upload must not produce an empty document page labeled successful. Cleanup removes expired, unlinked upload attempts after a grace period. Uploading a new version does not replace old bytes. The original filename is for display only. A duplicate hash produces a warning while allowing an intentional copy. The paper original's location is recorded separately from the image's existence.
