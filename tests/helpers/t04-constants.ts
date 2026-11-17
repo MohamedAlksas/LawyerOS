@@ -112,20 +112,33 @@ export const T04_MANIFEST = {
 } as const;
 
 /**
- * Service-worker allowlist from contract section 7.2. `/` is on the contract's
- * list even though section 2.1 calls `/` authenticated; the privacy test checks
- * any cached `/` body for identity/private markers rather than assuming safety.
+ * Service-worker allowlist strictly matching public/sw.js STATIC_ALLOWLIST (R04-07).
+ * Strictly limited to the 8 enumerated public static assets.
  */
+export const T04_SW_EXACT_ALLOWED_PATHS: readonly string[] = [
+  '/offline.html',
+  '/manifest.webmanifest',
+  '/icons/icon.svg',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable.png',
+  '/fonts/noto-sans-arabic-400.woff2',
+  '/fonts/noto-sans-arabic-latin.woff2',
+];
+
 export const T04_SW_ALLOWED_PATHS: readonly RegExp[] = [
-  /^\/$/,
-  /^\/offline(?:\.html)?$/,
+  /^\/offline\.html$/,
   /^\/manifest\.webmanifest$/,
-  /^\/icons\//,
-  /^\/fonts\//,
-  /^\/_next\/static\//,
+  /^\/icons\/icon\.svg$/,
+  /^\/icons\/icon-192\.png$/,
+  /^\/icons\/icon-512\.png$/,
+  /^\/icons\/icon-maskable\.png$/,
+  /^\/fonts\/noto-sans-arabic-400\.woff2$/,
+  /^\/fonts\/noto-sans-arabic-latin\.woff2$/,
 ];
 
 export const T04_SW_FORBIDDEN_PATHS: readonly RegExp[] = [
+  /^\/$/,
   /^\/api\//,
   /^\/login(?:\/|$)/,
   /^\/verify(?:\/|$)/,

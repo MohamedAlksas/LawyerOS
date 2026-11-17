@@ -1,5 +1,10 @@
 import { test, expect } from '../helpers/t04-fixtures';
-import { T04_ROUTES, T04_SW_ALLOWED_PATHS, T04_SW_FORBIDDEN_PATHS } from '../helpers/t04-constants';
+import {
+  T04_ROUTES,
+  T04_SW_ALLOWED_PATHS,
+  T04_SW_EXACT_ALLOWED_PATHS,
+  T04_SW_FORBIDDEN_PATHS,
+} from '../helpers/t04-constants';
 import {
   cachePathOf,
   expectCacheAllowlist,
@@ -114,4 +119,102 @@ test('CacheStorage contains only allowlisted public assets @once', async ({
     ...sensitiveNeedles(t04WorkerSession.owner, rawSessionCookies),
     { label: 'owner display name', value: t04WorkerSession.owner.name },
   ]);
+});
+
+test('service worker upgrade purges legacy caches and preserves allowlist only (T04-R2-03) @once', async ({
+  page,
+}) => {
+  // 1. Visit /offline.html to establish origin context before seeding caches
+  await page.goto(T04_ROUTES.offlineHtml);
+
+  // Seed synthetic legacy cache `lawoffice-public-v1` with `/icons/legacy-unlisted.txt`
+  // and seed `lawoffice-public-v2` with `/icons/legacy-unlisted.txt`
+  await page.evaluate(async () => {
+    const v1 = await caches.open('lawoffice-public-v1');
+    await v1.put(
+      '/icons/legacy-unlisted.txt',
+      new Response('synthetic old v1 public cache entry', {
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    );
+
+    const v2 = await caches.open('lawoffice-public-v2');
+    await v2.put(
+      '/icons/legacy-unlisted.txt',
+      new Response('synthetic stale v2 cache entry to purge', {
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    );
+  });
+
+  // Verify seeds exist
+  const seededKeys = await page.evaluate(async () => await caches.keys());
+  expect(seededKeys).toContain('lawoffice-public-v1');
+  expect(seededKeys).toContain('lawoffice-public-v2');
+
+  // 2. Navigate to /login to trigger AppShell service worker registration
+  await page.goto(T04_ROUTES.login);
+
+  // Await service worker readiness and activation
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+
+  // Reload page to ensure the active service worker controls the page
+  await page.reload();
+  await expect
+    .poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), {
+      message: 'Active service worker must control client page',
+      timeout: 10_000,
+    })
+    .toBe(true);
+
+  // 3. Assert lawoffice-public-v1 is deleted
+  const currentCacheKeys = await page.evaluate(async () => await caches.keys());
+  expect(
+    currentCacheKeys,
+    'Legacy cache lawoffice-public-v1 must be deleted on activation'
+  ).not.toContain('lawoffice-public-v1');
+  expect(
+    currentCacheKeys,
+    'Active cache lawoffice-public-v2 must exist'
+  ).toContain('lawoffice-public-v2');
+
+  // 4. Assert lawoffice-public-v2 exists with /icons/legacy-unlisted.txt purged
+  const legacyInV2 = await page.evaluate(async () => {
+    const v2 = await caches.open('lawoffice-public-v2');
+    const matched = await v2.match('/icons/legacy-unlisted.txt');
+    return Boolean(matched);
+  });
+  expect(
+    legacyInV2,
+    '/icons/legacy-unlisted.txt must be purged from lawoffice-public-v2 during activation'
+  ).toBe(false);
+
+  // 5. Assert only allowlisted static assets remain in lawoffice-public-v2
+  const v2CachedPaths = await page.evaluate(async () => {
+    const v2 = await caches.open('lawoffice-public-v2');
+    const requests = await v2.keys();
+    return requests.map((req) => new URL(req.url).pathname);
+  });
+
+  expect(v2CachedPaths.length, 'lawoffice-public-v2 must contain cached static assets').toBeGreaterThan(0);
+  for (const cachedPath of v2CachedPaths) {
+    expect(
+      T04_SW_EXACT_ALLOWED_PATHS,
+      `Cached path "${cachedPath}" must be in the exact static allowlist`
+    ).toContain(cachedPath);
+  }
+
+  // 6. Assert '/' is NOT cached
+  expect(v2CachedPaths, 'Root "/" must not be in service worker cache').not.toContain('/');
+
+  // 7. Assert permitted static assets return 200
+  for (const assetPath of T04_SW_EXACT_ALLOWED_PATHS) {
+    const status = await page.evaluate(async (path) => {
+      const response = await fetch(path);
+      return response.status;
+    }, assetPath);
+    expect(status, `Permitted asset "${assetPath}" must return HTTP 200`).toBe(200);
+  }
 });

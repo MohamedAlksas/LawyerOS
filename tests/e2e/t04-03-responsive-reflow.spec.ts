@@ -106,3 +106,65 @@ test('200% text scaling keeps content inside the viewport at every width @matrix
     await expectNoElementOverflow(action);
   }
 });
+
+test('tablet drawer open at 768px closes on resize to 1440px and removes inert from shell content (T04-R2-02) @matrix', async ({
+  t04Page: page,
+}) => {
+  // 1. Start at tablet viewport (768×1024)
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto(T04_ROUTES.home);
+  await expectShellReady(page);
+
+  const toggle = page.getByTestId(T04_TEST_IDS.drawerToggle);
+  const drawer = page.getByTestId(T04_TEST_IDS.tabletDrawer);
+  const shellContent = page.locator('#app-shell-content');
+
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+
+  // Assert drawer is visible and #app-shell-content has inert
+  await expect(drawer).toBeVisible();
+  expect(await shellContent.evaluate((el) => el.hasAttribute('inert'))).toBe(true);
+  expect(await shellContent.evaluate((el) => el.getAttribute('aria-hidden'))).toBe('true');
+
+  // 2. Resize viewport to desktop (1440×900)
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Assert drawer is closed, #app-shell-content is NOT inert and NOT aria-hidden
+  await expect(drawer).toBeHidden();
+  await expect.poll(async () => shellContent.evaluate((el) => el.hasAttribute('inert'))).toBe(false);
+  await expect.poll(async () => shellContent.evaluate((el) => el.hasAttribute('aria-hidden'))).toBe(false);
+
+  // Assert desktop navigation and content can be focused and clicked normally
+  const desktopSidebar = page.getByTestId(T04_TEST_IDS.desktopSidebar);
+  await expect(desktopSidebar).toBeVisible();
+
+  const desktopNavHome = desktopSidebar.getByTestId(T04_TEST_IDS.navHome);
+  await expect(desktopNavHome).toBeVisible();
+  await desktopNavHome.focus();
+  expect(await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe(T04_TEST_IDS.navHome);
+
+  const desktopNavSecurity = desktopSidebar.getByTestId(T04_TEST_IDS.navSecurity);
+  await expect(desktopNavSecurity).toBeVisible();
+  await desktopNavSecurity.click();
+  await expect(page).toHaveURL((url) => url.pathname === T04_ROUTES.security);
+
+  // Go back to home
+  await page.goto(T04_ROUTES.home);
+  await expectShellReady(page);
+
+  // 3. Resize back to 768×1024 and verify drawer can be reopened and closed via Escape
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await expect(page.getByTestId(T04_TEST_IDS.desktopSidebar)).toBeHidden();
+
+  const toggleAfterResize = page.getByTestId(T04_TEST_IDS.drawerToggle);
+  await expect(toggleAfterResize).toBeVisible();
+  await toggleAfterResize.click();
+
+  await expect(drawer).toBeVisible();
+  expect(await shellContent.evaluate((el) => el.hasAttribute('inert'))).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  expect(await shellContent.evaluate((el) => el.hasAttribute('inert'))).toBe(false);
+});

@@ -134,6 +134,80 @@ test('login with malicious returnTo sanitizes safely to root without open redire
   }
 });
 
+test('navigating to verify with dot-segment open-redirect returnTo settles safely on root (T04-R2-01) @once', async ({
+  page,
+  t04Owner,
+}) => {
+  await page.route('**://redirect.invalid/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Controlled redirect observer</title>' })
+  );
+  await page.goto('/login');
+  await page.locator('#email').fill(t04Owner.email);
+  await page.locator('#password').fill(t04Owner.password);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/verify/);
+
+  // Navigate to /verify with crafted dot-segment returnTo vector
+  await page.goto('/verify?returnTo=' + encodeURIComponent('/x/..//redirect.invalid/phish'));
+  await page.locator('#totpCode').fill(await currentTotp(t04Owner.totpSecret));
+  await page.locator('button[type="submit"]').click();
+
+  // Assert browser settles safely on local root '/' and NOT external redirect.invalid
+  await page.waitForURL((url) => url.origin === 'http://127.0.0.1:3204' && url.pathname === '/');
+  expect(page.url()).toBe('http://127.0.0.1:3204/');
+  expect(page.url()).not.toContain('redirect.invalid');
+});
+
+test('expired session return journey redirects through login and verify back to security @once', async ({
+  t04OwnerPage: page,
+  t04Owner,
+}) => {
+  await page.goto(T04_ROUTES.home);
+  await expectShellReady(page);
+  expect(await countSessionsForUser(t04Owner.id)).toBeGreaterThan(0);
+
+  // Revoke session so the browser holds an expired session cookie
+  const revoked = await revokeAllSessionsForUser(t04Owner.id);
+  expect(revoked, 'The synthetic owner had no session to revoke').toBeGreaterThan(0);
+
+  // 1. Visit /settings/security with expired session -> redirects to /login?error=session_expired&returnTo=%2Fsettings%2Fsecurity
+  await page.goto(T04_ROUTES.security);
+  await expect(page).toHaveURL((url) => {
+    return (
+      url.pathname === '/login' &&
+      url.searchParams.get('error') === 'session_expired' &&
+      url.searchParams.get('returnTo') === '/settings/security'
+    );
+  });
+
+  const alert = page.getByTestId(T04_TEST_IDS.sessionExpiredAlert);
+  await expect(alert).toBeVisible();
+
+  // 2. Submit owner credentials -> redirects to /verify?returnTo=%2Fsettings%2Fsecurity
+  await page.locator('#email').fill(t04Owner.email);
+  await page.locator('#password').fill(t04Owner.password);
+  await page.locator('button[type="submit"]').click();
+
+  await expect(page).toHaveURL((url) => {
+    return (
+      url.pathname === '/verify' &&
+      url.searchParams.get('returnTo') === '/settings/security'
+    );
+  });
+
+  // 3. Submit valid TOTP code -> browser settles back at http://127.0.0.1:3204/settings/security
+  const code = await currentTotp(t04Owner.totpSecret);
+  await page.locator('#totpCode').fill(code);
+  await page.locator('button[type="submit"]').click();
+
+  await page.waitForURL((url) => url.origin === 'http://127.0.0.1:3204' && url.pathname === '/settings/security');
+  expect(page.url()).toBe('http://127.0.0.1:3204/settings/security');
+
+  // 4. Assert displaying "الأمان وإدارة الجلسات"
+  const heading = page.getByRole('heading', { level: 1 });
+  await expect(heading).toContainText('الأمان وإدارة الجلسات');
+});
+
 test('returnTo sanitization neutralizes open redirect vectors and preserves safe relative paths @once', async () => {
   const maliciousVectors = [
     '//evil.com',
@@ -147,6 +221,9 @@ test('returnTo sanitization neutralizes open redirect vectors and preserves safe
     'http://evil.com',
     'data:text/html,<script>alert(1)</script>',
     '/evil\0test',
+    '/x/..//redirect.invalid/phish',
+    '/..//evil.com',
+    '/x/../\\evil.com',
   ];
 
   for (const vector of maliciousVectors) {
