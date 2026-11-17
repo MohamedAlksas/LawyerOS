@@ -114,3 +114,100 @@ export function formatCairoDateOnly(dateInput: string | Date | null | undefined)
     return 'تاريخ غير صالح';
   }
 }
+
+/**
+ * Returns the current wall-clock date and time in Cairo formatted as YYYY-MM-DDTHH:mm
+ * for use in HTML datetime-local inputs regardless of the client browser's local timezone.
+ */
+export function getCairoCurrentWallTime(): string {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const parts = dtf.formatToParts(new Date());
+  const obj: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') obj[p.type] = p.value;
+  }
+  if (obj.hour === '24') obj.hour = '00';
+  return `${obj.year}-${obj.month}-${obj.day}T${obj.hour}:${obj.minute}`;
+}
+
+/**
+ * Parses an HTML datetime-local input string (YYYY-MM-DDTHH:mm) as Cairo wall-clock time
+ * and converts it to an exact UTC ISO-8601 instant string (YYYY-MM-DDTHH:mm:ss.sssZ).
+ * Ensures consistency regardless of whether the client browser is in Cairo, UTC, or another zone.
+ */
+export function cairoWallTimeToUtcIso(dateStr: string): string {
+  const [datePart, timePart] = dateStr.split('T');
+  if (!datePart || !timePart) {
+    throw new Error('صيغة التاريخ والوقت غير صالحة');
+  }
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute] = timePart.split(':').map(Number);
+
+  if (
+    isNaN(year) ||
+    isNaN(month) ||
+    isNaN(day) ||
+    isNaN(hour) ||
+    isNaN(minute) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    throw new Error('قيمة التاريخ أو الوقت غير صالحة');
+  }
+
+  let candidate = Date.UTC(year, month - 1, day, hour, minute, 0);
+
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+  });
+
+  const getCairoParts = (ms: number) => {
+    const parts = dtf.formatToParts(new Date(ms));
+    const obj: Record<string, number> = {};
+    for (const p of parts) {
+      if (p.type !== 'literal') obj[p.type] = Number(p.value);
+    }
+    if (obj.hour === 24) obj.hour = 0;
+    return obj;
+  };
+
+  // Iteratively adjust for Cairo offset (including standard vs daylight saving transitions)
+  for (let i = 0; i < 3; i++) {
+    const cairo = getCairoParts(candidate);
+    const cairoAsUtc = Date.UTC(
+      cairo.year,
+      cairo.month - 1,
+      cairo.day,
+      cairo.hour,
+      cairo.minute,
+      cairo.second
+    );
+    const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+    const diff = targetAsUtc - cairoAsUtc;
+    if (diff === 0) break;
+    candidate += diff;
+  }
+
+  return new Date(candidate).toISOString();
+}

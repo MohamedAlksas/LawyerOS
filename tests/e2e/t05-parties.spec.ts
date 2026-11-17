@@ -151,22 +151,46 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await page.getByTestId('filter-person').click();
     await expect(partyEntry).toBeVisible();
 
-    // 11. Advisory Duplicate Warning Journey (R05-02 / T05-11)
+    // 11. Advisory Duplicate Warning Journey (R05-02 / T05-11 / PARENT-03)
+    // 11a. Pre-save duplicate check: clicking "open existing" leaves party count unchanged (zero new records)
+    const countBeforeDupAttempt = await prisma.party.count({ where: { archivedAt: null } });
+
     await page.goto('/parties/new');
     await page.getByTestId('kind-person').click();
-    // Use similar name and exact same phone
     await page.getByTestId('party-name-input').fill('محمود عبد العزيز');
     await page.getByTestId('party-phone-input').fill(testPhone);
 
     await page.getByTestId('submit-party-button').click();
 
-    // Duplicate advisory warning banner must appear
+    // Duplicate advisory warning banner must appear BEFORE any record is created in the database
     const advisoryBanner = page.getByTestId('duplicate-advisory-banner');
     await expect(advisoryBanner).toBeVisible();
     await expect(advisoryBanner).toContainText('تنبيه استرشادي');
     await expect(page.getByTestId('duplicate-warning-item').first()).toBeVisible();
 
-    // Confirm creation of distinct party despite warning
+    // Assert zero new parties were inserted in the database
+    const countAfterAdvisory = await prisma.party.count({ where: { archivedAt: null } });
+    expect(countAfterAdvisory).toBe(countBeforeDupAttempt);
+
+    // Option 1: "فتح الملف الموجود" navigates to the existing profile without inserting anything
+    const viewExistingLink = page.getByTestId(`view-existing-duplicate-${partyId}`);
+    await expect(viewExistingLink).toBeVisible();
+    await viewExistingLink.click();
+
+    await expect(page).toHaveURL(new RegExp(`/parties/${partyId}$`));
+    const countAfterOpenExisting = await prisma.party.count({ where: { archivedAt: null } });
+    expect(countAfterOpenExisting).toBe(countBeforeDupAttempt);
+
+    // 11b. Deliberate distinct creation: clicking "حفظ كطرف مستقل" inserts exactly one record
+    await page.goto('/parties/new');
+    await page.getByTestId('kind-person').click();
+    await page.getByTestId('party-name-input').fill('محمود عبد العزيز');
+    await page.getByTestId('party-phone-input').fill(testPhone);
+
+    await page.getByTestId('submit-party-button').click();
+    await expect(advisoryBanner).toBeVisible();
+
+    // Click "حفظ كطرف مستقل" to confirm distinct creation
     const confirmDupBtn = page.getByTestId('confirm-duplicate-button');
     await expect(confirmDupBtn).toBeVisible();
     await confirmDupBtn.click();
@@ -176,6 +200,10 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     const secondPartyId = page.url().split('/').pop()!;
     expect(secondPartyId).not.toBe(partyId);
     createdPartyIds.push(secondPartyId);
+
+    // Assert exactly one new record was inserted
+    const countAfterDistinctSave = await prisma.party.count({ where: { archivedAt: null } });
+    expect(countAfterDistinctSave).toBe(countBeforeDupAttempt + 1);
 
     // 12. Optimistic Concurrency Conflict (R05-03)
     // Open edit page for second party
@@ -203,5 +231,93 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
 
     // Form inputs must remain preserved in memory
     await expect(page.getByTestId('party-notes-input')).toHaveValue('محاولة حفظ من جلسة متأخرة');
+  });
+
+  test('search handles rapid queries and transport failures with accessible retry @parties', async ({ page }) => {
+    await signInWithTotp(page, owner);
+    await page.goto('/parties');
+
+    const searchInput = page.getByTestId('party-search-input');
+    await expect(searchInput).toBeVisible();
+
+    // Fast sequential searches: latest query result must remain in view
+    await searchInput.fill('محمود');
+    await page.getByTestId('party-search-submit').click();
+    await expect(page.getByTestId('party-total-count')).toBeVisible();
+
+    // Simulate transport failure
+    await page.route('**/parties**', async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+
+    await searchInput.fill('بحث_معطل');
+    await page.getByTestId('party-search-submit').click();
+
+    // Error banner appears with retry button
+    const errorContainer = page.getByTestId('error-container');
+    await expect(errorContainer).toBeVisible();
+    const retryBtn = page.getByTestId('error-retry-button');
+    await expect(retryBtn).toBeVisible();
+
+    // Unroute and retry: recovers gracefully
+    await page.unroute('**/parties**');
+    await retryBtn.click();
+    await expect(errorContainer).toBeHidden();
+  });
+
+  test('communication notes parse Cairo wall-time correctly from non-Cairo client timezone @parties', async ({ browser }) => {
+    // Non-Cairo browser timezone (America/New_York)
+    const context = await browser.newContext({
+      timezoneId: 'America/New_York',
+      locale: 'ar-EG',
+    });
+    const page = await context.newPage();
+    await signInWithTotp(page, owner);
+
+    // Create a temporary party for this test
+    const timeParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: 'طرف فحص توقيت القاهرة الخارجي',
+        nameNormalized: 'طرف فحص توقيت القاهرة الخارجي',
+        primaryPhone: '01055556666',
+        primaryPhoneNormalized: '01055556666',
+        createdById: owner.id,
+        updatedById: owner.id,
+        version: 1,
+      },
+    });
+    createdPartyIds.push(timeParty.id);
+
+    await page.goto(`/parties/${timeParty.id}`);
+    await page.getByTestId('add-note-button').click();
+
+    // Specific Cairo wall-clock time: 2026-11-25T14:30
+    // In November 2026, Cairo is UTC+2 (Standard Time).
+    // So 14:30 Cairo wall-clock time must correspond strictly to 12:30:00.000Z in UTC
+    const targetWallTime = '2026-11-25T14:30';
+    await page.getByTestId('note-date-input').fill(targetWallTime);
+    await page.getByTestId('note-channel-select').selectOption('PHONE');
+    await page.getByTestId('note-summary-input').fill('محادثة مسجلة بتوقيت القاهرة من عميل في نيويورك');
+    await page.getByTestId('save-note-button').click();
+
+    // Verify note is rendered in timeline
+    const noteItem = page.getByTestId('communication-note-item').first();
+    await expect(noteItem).toBeVisible();
+    await expect(noteItem.getByTestId('note-cairo-timestamp')).toBeVisible();
+
+    // Check exact UTC instant stored in the database
+    const savedNote = await prisma.communicationNote.findFirst({
+      where: { partyId: timeParty.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(savedNote).not.toBeNull();
+    expect(savedNote!.communicationAt.toISOString()).toBe('2026-11-25T12:30:00.000Z');
+
+    await context.close();
   });
 });

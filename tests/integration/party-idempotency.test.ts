@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
-import { saveParty } from '@/modules/parties/service';
+import {
+  saveParty,
+  addCommunicationNote,
+  savePowerOfAttorney,
+} from '@/modules/parties/service';
 import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import {
   createSyntheticActor,
@@ -29,6 +33,8 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
       kind: 'PERSON' as const,
       name: 'هشام طلعت مصطفى',
       primaryPhone: '01011112222',
+      address: 'شارع مصدق، الدقي، الجيزة',
+      notes: 'ملاحظات سرية للغاية عن العميل لا يجب تخزينها في سجلات التكرار',
       idempotencyKey: key,
     };
 
@@ -53,6 +59,122 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
       where: { entityId: first.party.id, action: 'CREATE_PARTY' },
     });
     expect(auditCount).toBe(1);
+
+    // STD-01 / T05-05: Verify IdempotencyRecord.resultPayload contains ZERO confidential notes or address
+    const idempRecord = await prisma.idempotencyRecord.findUniqueOrThrow({
+      where: {
+        actorId_commandType_key: {
+          actorId: actor1.id,
+          commandType: 'saveParty',
+          key,
+        },
+      },
+    });
+
+    const storedPayload = idempRecord.resultPayload as Record<string, unknown>;
+    expect(storedPayload.command).toBe('saveParty');
+    expect(storedPayload.partyId).toBe(first.party.id);
+    expect(storedPayload.notes).toBeUndefined();
+    expect(storedPayload.address).toBeUndefined();
+    expect(storedPayload.party).toBeUndefined(); // No nested full party DTO
+    expect(JSON.stringify(storedPayload)).not.toContain('ملاحظات سرية للغاية');
+  });
+
+  it('guarantees zero confidential snapshots in idempotency storage across addCommunicationNote and savePowerOfAttorney', async () => {
+    // 1. Setup base party
+    const party = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'عميل اختبار التكرار المحمي',
+      idempotencyKey: `setup-party-${crypto.randomUUID()}`,
+    });
+    partyIds.push(party.party.id);
+
+    // 2. Add Communication Note with sensitive details
+    const commKey = `comm-idem-${crypto.randomUUID()}`;
+    const commInstant = new Date().toISOString();
+    const sensitiveSummary = 'جلسة استشارية سرية جداً بخصوص تفاوض تسوية مالية';
+    const note1 = await addCommunicationNote(actor1, {
+      partyId: party.party.id,
+      communicationAt: commInstant,
+      channel: 'IN_PERSON',
+      summary: sensitiveSummary,
+      followUpRequired: true,
+      followUpDate: '2026-11-25',
+      idempotencyKey: commKey,
+    });
+
+    // Verify raw idempotency storage contains zero sensitive summary
+    const commIdemp = await prisma.idempotencyRecord.findUniqueOrThrow({
+      where: {
+        actorId_commandType_key: {
+          actorId: actor1.id,
+          commandType: 'addCommunicationNote',
+          key: commKey,
+        },
+      },
+    });
+    const commPayload = commIdemp.resultPayload as Record<string, unknown>;
+    expect(commPayload.command).toBe('addCommunicationNote');
+    expect(commPayload.noteId).toBe(note1.id);
+    expect(commPayload.summary).toBeUndefined();
+    expect(JSON.stringify(commPayload)).not.toContain(sensitiveSummary);
+
+    // Replay communication note and verify reconstructed result matches authorized note
+    const noteReplay = await addCommunicationNote(actor1, {
+      partyId: party.party.id,
+      communicationAt: commInstant,
+      channel: 'IN_PERSON',
+      summary: sensitiveSummary,
+      followUpRequired: true,
+      followUpDate: '2026-11-25',
+      idempotencyKey: commKey,
+    });
+    expect(noteReplay.id).toBe(note1.id);
+    expect(noteReplay.summary).toBe(sensitiveSummary);
+
+    // 3. Save Power of Attorney with confidential lawyer notes
+    const poaKey = `poa-idem-${crypto.randomUUID()}`;
+    const sensitivePoaNotes = 'التوكيل خاص بإجراءات التنازل فقط ولا يشمل قبض المبالغ';
+    const poa1 = await savePowerOfAttorney(actor1, {
+      partyId: party.party.id,
+      poaNumberText: '9988/أ',
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب توثيق شمال القاهرة',
+      poaType: 'SPECIAL',
+      issueDate: '2026-10-15',
+      notes: sensitivePoaNotes,
+      idempotencyKey: poaKey,
+    });
+
+    // Verify raw idempotency storage contains zero confidential POA notes
+    const poaIdemp = await prisma.idempotencyRecord.findUniqueOrThrow({
+      where: {
+        actorId_commandType_key: {
+          actorId: actor1.id,
+          commandType: 'savePowerOfAttorney',
+          key: poaKey,
+        },
+      },
+    });
+    const poaPayload = poaIdemp.resultPayload as Record<string, unknown>;
+    expect(poaPayload.command).toBe('savePowerOfAttorney');
+    expect(poaPayload.poaId).toBe(poa1.id);
+    expect(poaPayload.notes).toBeUndefined();
+    expect(JSON.stringify(poaPayload)).not.toContain(sensitivePoaNotes);
+
+    // Replay POA and verify reconstructed response
+    const poaReplay = await savePowerOfAttorney(actor1, {
+      partyId: party.party.id,
+      poaNumberText: '9988/أ',
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب توثيق شمال القاهرة',
+      poaType: 'SPECIAL',
+      issueDate: '2026-10-15',
+      notes: sensitivePoaNotes,
+      idempotencyKey: poaKey,
+    });
+    expect(poaReplay.id).toBe(poa1.id);
+    expect(poaReplay.notes).toBe(sensitivePoaNotes);
   });
 
   it('rejects reusing the same idempotency key with a differing payload', async () => {

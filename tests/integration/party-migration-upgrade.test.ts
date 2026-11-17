@@ -68,6 +68,25 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         expect(fkNames).toContain('party_identity_partyId_fkey');
         expect(fkNames).toContain('communication_note_partyId_fkey');
         expect(fkNames).toContain('power_of_attorney_partyId_fkey');
+
+        // Verify native temporal types (STD-04)
+        const columnsRes = await client.query(`
+          SELECT table_name, column_name, data_type
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND (
+              (table_name = 'communication_note' AND column_name IN ('communicationAt', 'followUpDate'))
+              OR
+              (table_name = 'power_of_attorney' AND column_name IN ('issueDate', 'humanReviewedAt'))
+            )
+        `);
+        const colTypes = Object.fromEntries(
+          columnsRes.rows.map((r) => [`${r.table_name}.${r.column_name}`, r.data_type])
+        );
+        expect(colTypes['communication_note.communicationAt']).toBe('timestamp with time zone');
+        expect(colTypes['communication_note.followUpDate']).toBe('date');
+        expect(colTypes['power_of_attorney.issueDate']).toBe('date');
+        expect(colTypes['power_of_attorney.humanReviewedAt']).toBe('timestamp with time zone');
       } finally {
         client.release();
       }
@@ -161,6 +180,25 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         `);
         expect(partyRes.rows).toHaveLength(1);
         expect(partyRes.rows[0].name).toBe('عميل جديد بعد الترقية');
+
+        // 5. Verify upgraded database has correct native temporal types
+        const colRes = await clientAfter.query(`
+          SELECT table_name, column_name, data_type
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND (
+              (table_name = 'communication_note' AND column_name IN ('communicationAt', 'followUpDate'))
+              OR
+              (table_name = 'power_of_attorney' AND column_name IN ('issueDate', 'humanReviewedAt'))
+            )
+        `);
+        const colTypes = Object.fromEntries(
+          colRes.rows.map((r) => [`${r.table_name}.${r.column_name}`, r.data_type])
+        );
+        expect(colTypes['communication_note.communicationAt']).toBe('timestamp with time zone');
+        expect(colTypes['communication_note.followUpDate']).toBe('date');
+        expect(colTypes['power_of_attorney.issueDate']).toBe('date');
+        expect(colTypes['power_of_attorney.humanReviewedAt']).toBe('timestamp with time zone');
       } finally {
         clientAfter.release();
       }

@@ -55,6 +55,60 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
       expect(valid.identity?.number).toBe('29001011234567');
     });
 
+    it('accepts Arabic-Indic digits (٠١٠١٢٣٤٥٦٧٨) and preserves original characters', () => {
+      const arabicPhone = '٠١٠١٢٣٤٥٦٧٨';
+      const valid = validateInput(savePartySchema, {
+        kind: 'PERSON',
+        name: 'أحمد شوقي',
+        primaryPhone: arabicPhone,
+        additionalPhones: ['٠١١٩٨٧٦٥٤٣٢'],
+        idempotencyKey: 'idemp-arabic-phone',
+      });
+      expect(valid.primaryPhone).toBe(arabicPhone);
+      expect(valid.additionalPhones?.[0]).toBe('٠١١٩٨٧٦٥٤٣٢');
+    });
+
+    it('accepts Persian digits (۰۱۰۱۲۳۴۵۶۷۸)', () => {
+      const valid = validateInput(savePartySchema, {
+        kind: 'PERSON',
+        name: 'فريد الأطرش',
+        primaryPhone: '۰۱۰۱۲۳۴۵۶۷۸',
+        idempotencyKey: 'idemp-persian-phone',
+      });
+      expect(valid.primaryPhone).toBe('۰۱۰۱۲۳۴۵۶۷۸');
+    });
+
+    it('rejects unsupported relationship fields (matterId, documentId, proceedingId)', () => {
+      expect(() =>
+        validateInput(savePartySchema, {
+          kind: 'PERSON',
+          name: 'عميل مع قضية غير مدعومة',
+          matterId: '33333333-3333-4333-8333-333333333333',
+          idempotencyKey: 'idemp-matter-fail',
+        })
+      ).toThrowError(ValidationError);
+
+      expect(() =>
+        validateInput(savePartySchema, {
+          kind: 'PERSON',
+          name: 'عميل مع مستند غير مدعوم',
+          documentId: '44444444-4444-4444-8444-444444444444',
+          idempotencyKey: 'idemp-doc-fail',
+        })
+      ).toThrowError(ValidationError);
+    });
+
+    it('rejects unrecognized extra fields due to strict schema', () => {
+      expect(() =>
+        validateInput(savePartySchema, {
+          kind: 'PERSON',
+          name: 'عميل بحقل غير معترف به',
+          unknownCustomField: 'value',
+          idempotencyKey: 'idemp-unknown-fail',
+        })
+      ).toThrowError(ValidationError);
+    });
+
     it('rejects blank or whitespace-only names', () => {
       expect(() =>
         validateInput(savePartySchema, {
@@ -194,6 +248,80 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
         })
       ).toThrowError(ValidationError);
     });
+
+    it('rejects impossible calendar dates for followUpDate (e.g. 2026-02-31, 2026-04-31)', () => {
+      // 31st of February does not exist
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-11-17T10:30:00.000Z',
+          channel: 'PHONE',
+          summary: 'ملخص الاتصال',
+          followUpDate: '2026-02-31',
+          idempotencyKey: 'idemp-comm-4',
+        })
+      ).toThrowError(ValidationError);
+
+      // 31st of April does not exist (April has 30 days)
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-11-17T10:30:00.000Z',
+          channel: 'PHONE',
+          summary: 'ملخص الاتصال',
+          followUpDate: '2026-04-31',
+          idempotencyKey: 'idemp-comm-5',
+        })
+      ).toThrowError(ValidationError);
+
+      // 29th of February in non-leap year 2026
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-11-17T10:30:00.000Z',
+          channel: 'PHONE',
+          summary: 'ملخص الاتصال',
+          followUpDate: '2026-02-29',
+          idempotencyKey: 'idemp-comm-6',
+        })
+      ).toThrowError(ValidationError);
+    });
+
+    it('accepts leap year 29th of February (2024-02-29)', () => {
+      const valid = validateInput(addCommunicationNoteSchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        communicationAt: '2026-11-17T10:30:00.000Z',
+        channel: 'PHONE',
+        summary: 'ملخص الاتصال في سنة كبيسة',
+        followUpDate: '2024-02-29',
+        idempotencyKey: 'idemp-comm-7',
+      });
+      expect(valid.followUpDate).toBe('2024-02-29');
+    });
+
+    it('rejects unsupported relationship fields (matterId, documentId)', () => {
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          matterId: '22222222-2222-4222-8222-222222222222',
+          communicationAt: '2026-11-17T10:30:00.000Z',
+          channel: 'PHONE',
+          summary: 'ملخص اتصال مع معرف قضية غير مدعوم',
+          idempotencyKey: 'idemp-comm-8',
+        })
+      ).toThrowError(ValidationError);
+
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          documentId: '33333333-3333-4333-8333-333333333333',
+          communicationAt: '2026-11-17T10:30:00.000Z',
+          channel: 'PHONE',
+          summary: 'ملخص اتصال مع مستند غير مدعوم',
+          idempotencyKey: 'idemp-comm-9',
+        })
+      ).toThrowError(ValidationError);
+    });
   });
 
   describe('savePowerOfAttorneySchema', () => {
@@ -209,6 +337,47 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
       expect(valid.poaNumberText).toBe('0045/ب');
       expect(valid.poaYearLabel).toBe('2026');
       expect(valid.humanReviewStatus).toBe('UNREVIEWED');
+    });
+
+    it('rejects impossible calendar dates for issueDate', () => {
+      expect(() =>
+        validateInput(savePowerOfAttorneySchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          poaNumberText: '123/أ',
+          poaYearLabel: '2026',
+          notarizationOffice: 'مكتب توثيق قصر النيل',
+          poaType: 'GENERAL',
+          issueDate: '2026-02-31', // impossible date
+          idempotencyKey: 'idemp-poa-date-fail',
+        })
+      ).toThrowError(ValidationError);
+    });
+
+    it('accepts leap year issueDate (2024-02-29)', () => {
+      const valid = validateInput(savePowerOfAttorneySchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        poaNumberText: '123/أ',
+        poaYearLabel: '2024',
+        notarizationOffice: 'مكتب توثيق قصر النيل',
+        poaType: 'GENERAL',
+        issueDate: '2024-02-29',
+        idempotencyKey: 'idemp-poa-leap',
+      });
+      expect(valid.issueDate).toBe('2024-02-29');
+    });
+
+    it('rejects unsupported relationship fields (documentId, matterId)', () => {
+      expect(() =>
+        validateInput(savePowerOfAttorneySchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          documentId: '55555555-5555-4555-8555-555555555555',
+          poaNumberText: '123/أ',
+          poaYearLabel: '2026',
+          notarizationOffice: 'مكتب توثيق قصر النيل',
+          poaType: 'GENERAL',
+          idempotencyKey: 'idemp-poa-doc-fail',
+        })
+      ).toThrowError(ValidationError);
     });
 
     it('requires expectedVersion on update', () => {

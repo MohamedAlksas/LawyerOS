@@ -1,6 +1,10 @@
 'use server';
 
 import { requireActor } from '@/modules/identity/require-actor';
+import { assertAuthorized } from '@/modules/identity/authorize';
+import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { CryptoDecryptionError } from '@/lib/crypto/party-identity';
+import { getPrismaClient } from '@/lib/auth';
 import {
   saveParty,
   searchParties,
@@ -8,6 +12,7 @@ import {
   addCommunicationNote,
   savePowerOfAttorney,
   revealPartyIdentity,
+  findDuplicateWarnings,
   ConcurrencyConflictError,
   NotFoundError,
 } from './service';
@@ -26,6 +31,7 @@ import {
   CommunicationNoteSummaryDTO,
   SavePowerOfAttorneyInput,
   PoASummaryDTO,
+  DuplicateWarningDTO,
 } from './types';
 
 export type ActionResult<T> =
@@ -47,6 +53,22 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
+  if (error instanceof AuthenticationError) {
+    return {
+      success: false,
+      error: error.message,
+      code: error.code,
+    };
+  }
+
+  if (error instanceof AuthorizationError) {
+    return {
+      success: false,
+      error: 'غير مصرح للقيام بهذه العملية.',
+      code: 'FORBIDDEN',
+    };
+  }
+
   if (error instanceof ConcurrencyConflictError) {
     return {
       success: false,
@@ -60,6 +82,14 @@ function handleActionError(error: unknown): ActionResult<never> {
       success: false,
       error: error.message,
       code: 'NOT_FOUND',
+    };
+  }
+
+  if (error instanceof CryptoDecryptionError) {
+    return {
+      success: false,
+      error: 'تعذر فك تشفير بيانات الهوية أو أن مفتاح التشفير غير صالح.',
+      code: 'CRYPTO_ERROR',
     };
   }
 
@@ -79,19 +109,21 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
-  const message = error instanceof Error ? error.message : 'حدث خطأ غير متوقع في الخادم.';
+  // PARENT-01: Explicitly map any unexpected internal/Prisma errors to a safe generic Arabic message.
+  // Guarantees zero query, table, schema, credentials, or server-path leakage to the client.
   return {
     success: false,
-    error: message,
+    error: 'حدث خطأ غير متوقع أثناء معالجة الطلب. يرجى المحاولة مرة أخرى.',
     code: 'INTERNAL_ERROR',
   };
 }
 
 export async function savePartyAction(
-  input: SavePartyInput
+  input: SavePartyInput,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<SavePartyResult>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await saveParty(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -100,10 +132,11 @@ export async function savePartyAction(
 }
 
 export async function searchPartiesAction(
-  params: SearchPartiesParams
+  params: SearchPartiesParams,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<SearchPartiesResult>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await searchParties(actor, params);
     return { success: true, data: result };
   } catch (error) {
@@ -112,10 +145,11 @@ export async function searchPartiesAction(
 }
 
 export async function getClientProfileAction(
-  partyId: string
+  partyId: string,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<ClientProfileDTO>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await getClientProfile(actor, partyId);
     return { success: true, data: result };
   } catch (error) {
@@ -124,10 +158,11 @@ export async function getClientProfileAction(
 }
 
 export async function addCommunicationNoteAction(
-  input: AddCommunicationNoteInput
+  input: AddCommunicationNoteInput,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<CommunicationNoteSummaryDTO>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await addCommunicationNote(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -136,10 +171,11 @@ export async function addCommunicationNoteAction(
 }
 
 export async function savePowerOfAttorneyAction(
-  input: SavePowerOfAttorneyInput
+  input: SavePowerOfAttorneyInput,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<PoASummaryDTO>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await savePowerOfAttorney(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -149,12 +185,30 @@ export async function savePowerOfAttorneyAction(
 
 export async function revealPartyIdentityAction(
   partyId: string,
-  reason?: string
+  reason?: string,
+  options?: { headers?: Headers | null }
 ): Promise<ActionResult<{ identificationType: string; number: string }>> {
   try {
-    const actor = await requireActor();
+    const actor = await requireActor(options);
     const result = await revealPartyIdentity(actor, partyId, reason);
     return { success: true, data: result };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function checkPartyDuplicatesAction(
+  name: string,
+  primaryPhone?: string | null,
+  excludePartyId?: string,
+  options?: { headers?: Headers | null }
+): Promise<ActionResult<DuplicateWarningDTO[]>> {
+  try {
+    const actor = await requireActor(options);
+    assertAuthorized(actor, 'READ_CLIENT_DATA');
+    const prisma = getPrismaClient();
+    const warnings = await findDuplicateWarnings(prisma, name, primaryPhone, excludePartyId);
+    return { success: true, data: warnings };
   } catch (error) {
     return handleActionError(error);
   }

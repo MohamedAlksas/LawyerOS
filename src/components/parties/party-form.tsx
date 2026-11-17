@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { savePartyAction } from '@/modules/parties/actions';
+import { savePartyAction, checkPartyDuplicatesAction } from '@/modules/parties/actions';
 import {
   PartyKind,
   IdentificationType,
@@ -51,7 +51,7 @@ export function PartyForm({ party }: PartyFormProps) {
 
   // Duplicate warning advisory state
   const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarningDTO[]>([]);
-  const [savedPartyId, setSavedPartyId] = useState<string | null>(null);
+  const [acknowledgedDuplicates, setAcknowledgedDuplicates] = useState(false);
 
   // Idempotency key preserved across retries for the same form state
   const idempotencyKeyRef = useRef<string | null>(null);
@@ -106,20 +106,10 @@ export function PartyForm({ party }: PartyFormProps) {
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const doSaveParty = async () => {
+    setIsSubmitting(true);
     setGeneralError(null);
     setHasConcurrencyConflict(false);
-
-    if (!validateClientSide()) {
-      // Focus first error field for accessibility
-      const firstErrorKey = Object.keys(fieldErrors)[0] || 'name';
-      const el = document.getElementById(firstErrorKey);
-      el?.focus();
-      return;
-    }
-
-    setIsSubmitting(true);
 
     const parsedAdditionalPhones = additionalPhones
       .split(',')
@@ -166,16 +156,6 @@ export function PartyForm({ party }: PartyFormProps) {
       }
 
       const savedParty = result.data.party;
-
-      // Handle duplicate warnings in create mode
-      if (!isEdit && result.data.duplicateWarnings && result.data.duplicateWarnings.length > 0) {
-        setDuplicateWarnings(result.data.duplicateWarnings);
-        setSavedPartyId(savedParty.id);
-        setIsSubmitting(false);
-        return;
-      }
-
-      // If no duplicate warnings or in edit mode, proceed directly to profile
       router.push(`/parties/${savedParty.id}`);
       router.refresh();
     } catch {
@@ -184,11 +164,44 @@ export function PartyForm({ party }: PartyFormProps) {
     }
   };
 
-  const handleConfirmDuplicate = () => {
-    if (savedPartyId) {
-      router.push(`/parties/${savedPartyId}`);
-      router.refresh();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGeneralError(null);
+    setHasConcurrencyConflict(false);
+
+    if (!validateClientSide()) {
+      // Focus first error field for accessibility
+      const firstErrorKey = Object.keys(fieldErrors)[0] || 'name';
+      const el = document.getElementById(firstErrorKey);
+      el?.focus();
+      return;
     }
+
+    // In create mode: if duplicates haven't been acknowledged, perform pre-save duplicate check
+    if (!isEdit && !acknowledgedDuplicates) {
+      setIsSubmitting(true);
+      try {
+        const dupRes = await checkPartyDuplicatesAction(
+          name.trim(),
+          primaryPhone.trim() || null
+        );
+        if (dupRes.success && dupRes.data.length > 0) {
+          setDuplicateWarnings(dupRes.data);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch {
+        // Continue to save if duplicate check fails
+      }
+    }
+
+    await doSaveParty();
+  };
+
+  const handleConfirmDuplicate = async () => {
+    setAcknowledgedDuplicates(true);
+    setDuplicateWarnings([]);
+    await doSaveParty();
   };
 
   const handleReloadLatest = () => {
@@ -254,8 +267,7 @@ export function PartyForm({ party }: PartyFormProps) {
                 تنبيه استرشادي: يوجد أطراف مسجلة مسبقاً ببيانات مشابهة
               </h3>
               <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                تم حفظ الطرف الجديد بنجاح في قاعدة البيانات، ولكن نلفت انتباهك لوجود طرف أو أكثر يتشابه
-                في الاسم أو رقم الهاتف:
+                يوجد طرف أو أكثر مسجل مسبقاً يتشابه في الاسم أو رقم الهاتف المدخل. لم يتم إنشاء أي طرف جديد حتى الآن. يمكنك استعراض الملف المسجل مسبقاً دون إنشاء تكرار، أو تأكيد الحفظ كطرف مستقل:
               </p>
 
               <ul className="mt-2 space-y-1.5 text-xs text-amber-900 bg-white/70 p-2.5 rounded border border-amber-200">
@@ -275,11 +287,11 @@ export function PartyForm({ party }: PartyFormProps) {
                     </div>
                     <Link
                       href={`/parties/${dup.id}`}
-                      target="_blank"
                       data-testid={`view-existing-duplicate-${dup.id}`}
-                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs"
+                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs inline-flex items-center gap-1"
                     >
-                      فتح الملف المسجل مسبقاً ↗
+                      <span>فتح الملف الموجود</span>
+                      <span aria-hidden="true">↗</span>
                     </Link>
                   </li>
                 ))}
@@ -292,15 +304,16 @@ export function PartyForm({ party }: PartyFormProps) {
               type="button"
               data-testid="confirm-duplicate-button"
               onClick={handleConfirmDuplicate}
+              disabled={isSubmitting}
               className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
             >
-              متابعة إلى ملف الطرف الجديد المنفصل
+              {isSubmitting ? 'جارٍ الحفظ...' : 'حفظ كطرف مستقل'}
             </button>
             <Link
               href="/parties"
               className="px-4 py-2 bg-white text-amber-900 border border-amber-300 hover:bg-amber-100 text-xs font-semibold rounded-[6px] transition-colors flex items-center justify-center min-h-[44px]"
             >
-              العودة لدليل الأطراف
+              إلغاء والعودة لدليل الأطراف
             </Link>
           </div>
         </div>
@@ -390,6 +403,8 @@ export function PartyForm({ party }: PartyFormProps) {
             value={name}
             onChange={(e) => {
               setName(e.target.value);
+              setAcknowledgedDuplicates(false);
+              setDuplicateWarnings([]);
               if (fieldErrors.name) {
                 setFieldErrors((prev) => {
                   const n = { ...prev };
@@ -429,6 +444,8 @@ export function PartyForm({ party }: PartyFormProps) {
               value={primaryPhone}
               onChange={(e) => {
                 setPrimaryPhone(e.target.value);
+                setAcknowledgedDuplicates(false);
+                setDuplicateWarnings([]);
                 if (fieldErrors.primaryPhone) {
                   setFieldErrors((prev) => {
                     const n = { ...prev };

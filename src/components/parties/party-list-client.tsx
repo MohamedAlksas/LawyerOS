@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { searchPartiesAction } from '@/modules/parties/actions';
 import { PartyKind, SearchPartiesResult } from '@/modules/parties/types';
@@ -40,27 +40,46 @@ export function PartyListClient({
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestGenRef = useRef(0);
 
   const fetchParties = useCallback(
     async (searchQuery: string, kind?: PartyKind, pageNum: number = 1) => {
+      const currentGen = ++requestGenRef.current;
       setIsLoading(true);
       setError(null);
 
-      const res = await searchPartiesAction({
-        query: searchQuery.trim() || undefined,
-        kind,
-        page: pageNum,
-        limit: 20,
-      });
+      try {
+        const res = await searchPartiesAction({
+          query: searchQuery.trim() || undefined,
+          kind,
+          page: pageNum,
+          limit: 20,
+        });
 
-      if (!res.success) {
-        setError(res.error || 'تعذر تحميل بيانات الأطراف.');
+        if (currentGen !== requestGenRef.current) {
+          // Discard response if a newer search request has already been issued
+          return;
+        }
+
+        if (!res.success) {
+          setError(res.error || 'تعذر تحميل بيانات الأطراف.');
+          setIsLoading(false);
+          return;
+        }
+
+        setPartiesResult(res.data);
         setIsLoading(false);
-        return;
+      } catch (err: unknown) {
+        if (currentGen !== requestGenRef.current) {
+          return;
+        }
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'حدث خطأ في الاتصال أثناء تحميل بيانات الأطراف.'
+        );
+        setIsLoading(false);
       }
-
-      setPartiesResult(res.data);
-      setIsLoading(false);
     },
     []
   );

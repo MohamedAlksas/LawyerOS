@@ -116,6 +116,52 @@ describe('T05-02: Party Search & Duplicate Warnings (Integration)', () => {
     expect(paged.totalCount).toBeGreaterThanOrEqual(3);
     expect(paged.totalPages).toBe(Math.ceil(paged.totalCount / 2));
   });
+
+  it('preserves original Arabic-Indic phone digits and matches bidirectional cross-digit queries (SPEC-03)', async () => {
+    const arabicPhone = '٠١٠٩٨٧٦٥٤٣٢';
+    const arabicAdditional = '٠١١٢٣٤٥٦٧٨٩';
+
+    // 1. Save party with Arabic digits
+    const partyRes = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'عبد الحليم حافظ',
+      primaryPhone: arabicPhone,
+      additionalPhones: [arabicAdditional],
+      idempotencyKey: `arabic-phone-test-${crypto.randomUUID()}`,
+    });
+    expect(partyRes.success).toBe(true);
+    partyIds.push(partyRes.party.id);
+
+    // 2. Verify database reloads original characters
+    const loaded = await prisma.party.findUniqueOrThrow({
+      where: { id: partyRes.party.id },
+    });
+    expect(loaded.primaryPhone).toBe(arabicPhone);
+    expect(loaded.additionalPhones).toContain(arabicAdditional);
+    expect(loaded.primaryPhoneNormalized).toBe('01098765432');
+
+    // 3. Search with Western ASCII digits matches
+    const searchWestern = await searchParties(actor, { query: '01098765432' });
+    expect(searchWestern.parties.some((p) => p.id === partyRes.party.id)).toBe(true);
+
+    // 4. Search with Eastern Arabic digits matches
+    const searchArabic = await searchParties(actor, { query: '٠١٠٩٨٧٦٥٤٣٢' });
+    expect(searchArabic.parties.some((p) => p.id === partyRes.party.id)).toBe(true);
+
+    // 5. Duplicate detection triggers when another party is entered with ASCII digits
+    const dupCheck = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'شخص آخر بنفس الهاتف',
+      primaryPhone: '01098765432', // ASCII digits
+      idempotencyKey: `dup-ascii-check-${crypto.randomUUID()}`,
+    });
+    expect(dupCheck.success).toBe(true);
+    partyIds.push(dupCheck.party.id);
+
+    const phoneWarning = dupCheck.duplicateWarnings.find((w) => w.id === partyRes.party.id);
+    expect(phoneWarning).toBeDefined();
+    expect(phoneWarning?.matchType).toBe('PHONE');
+  });
 });
 
 

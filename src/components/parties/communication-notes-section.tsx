@@ -11,6 +11,8 @@ import {
   COMMUNICATION_CHANNEL_LABELS,
   formatCairoDateTime,
   formatCairoDateOnly,
+  getCairoCurrentWallTime,
+  cairoWallTimeToUtcIso,
 } from './party-types';
 
 interface CommunicationNotesSectionProps {
@@ -25,14 +27,9 @@ export function CommunicationNotesSection({
   const [notes, setNotes] = useState<CommunicationNoteSummaryDTO[]>(initialNotes);
   const [isFormOpen, setIsFormOpen] = useState(false);
 
-  // Form inputs
+  // Form inputs — initialized to current Cairo office wall-clock time
   const [communicationAt, setCommunicationAt] = useState<string>(() => {
-    // Default to current local time in YYYY-MM-DDTHH:mm format for datetime-local input
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(
-      now.getHours()
-    )}:${pad(now.getMinutes())}`;
+    return getCairoCurrentWallTime();
   });
   const [channel, setChannel] = useState<CommunicationChannel>('PHONE');
   const [summary, setSummary] = useState('');
@@ -70,8 +67,15 @@ export function CommunicationNotesSection({
 
     setIsSubmitting(true);
 
-    // Convert datetime-local to ISO instant string
-    const isoInstant = new Date(communicationAt).toISOString();
+    let isoInstant: string;
+    try {
+      // Explicitly convert Cairo wall-clock time to UTC ISO instant
+      isoInstant = cairoWallTimeToUtcIso(communicationAt);
+    } catch {
+      setError('صيغة تاريخ أو وقت التواصل غير صالحة.');
+      setIsSubmitting(false);
+      return;
+    }
 
     const payload: AddCommunicationNoteInput = {
       partyId,
@@ -96,6 +100,7 @@ export function CommunicationNotesSection({
       setNotes((prev) => [result.data, ...prev]);
 
       // Reset form and clear idempotency key for next note
+      setCommunicationAt(getCairoCurrentWallTime());
       setSummary('');
       setFollowUpRequired(false);
       setFollowUpDate('');
@@ -127,7 +132,14 @@ export function CommunicationNotesSection({
         <button
           type="button"
           data-testid="add-note-button"
-          onClick={() => setIsFormOpen((prev) => !prev)}
+          onClick={() => {
+            setIsFormOpen((prev) => {
+              if (!prev) {
+                setCommunicationAt(getCairoCurrentWallTime());
+              }
+              return !prev;
+            });
+          }}
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
         >
           <span>{isFormOpen ? 'إلغاء الإضافة' : '＋ إضافة ملاحظة تواصل'}</span>

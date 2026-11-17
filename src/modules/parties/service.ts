@@ -166,14 +166,20 @@ export async function saveParty(
     });
 
     if (claim.isReplay) {
-      const cached = claim.resultPayload as {
-        party: PartySummaryDTO;
-        duplicateWarnings: DuplicateWarningDTO[];
-      };
+      if (!claim.resultId) {
+        throw new NotFoundError('الطرف المطلوب غير موجود.');
+      }
+      const party = await tx.party.findFirst({
+        where: { id: claim.resultId, archivedAt: null },
+        include: { identities: true },
+      });
+      if (!party) {
+        throw new NotFoundError('الطرف المطلوب غير موجود.');
+      }
       return {
         success: true,
-        party: cached.party,
-        duplicateWarnings: cached.duplicateWarnings,
+        party: mapPartySummary(party),
+        duplicateWarnings: [],
         isReplay: true,
       };
     }
@@ -378,7 +384,7 @@ export async function saveParty(
 
     const partySummary = mapPartySummary(resultingParty);
 
-    // Complete idempotency
+    // Complete idempotency with minimal identifiers and safe metadata (STD-01)
     await completeIdempotencyKey(tx, {
       actorId: actor.id,
       commandType: 'saveParty',
@@ -386,8 +392,9 @@ export async function saveParty(
       resultType: 'Party',
       resultId: targetPartyId,
       resultPayload: {
-        party: partySummary,
-        duplicateWarnings,
+        command: 'saveParty',
+        partyId: targetPartyId,
+        version: resultingParty.version,
       },
     });
 
@@ -561,7 +568,27 @@ export async function addCommunicationNote(
     });
 
     if (claim.isReplay) {
-      return claim.resultPayload as CommunicationNoteSummaryDTO;
+      if (!claim.resultId) {
+        throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
+      }
+      const note = await tx.communicationNote.findUnique({
+        where: { id: claim.resultId },
+      });
+      if (!note) {
+        throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
+      }
+      return {
+        id: note.id,
+        partyId: note.partyId,
+        matterId: note.matterId,
+        communicationAt: note.communicationAt.toISOString(),
+        channel: note.channel,
+        summary: note.summary,
+        followUpRequired: note.followUpRequired,
+        followUpDate: note.followUpDate ? (note.followUpDate instanceof Date ? note.followUpDate.toISOString().slice(0, 10) : String(note.followUpDate).slice(0, 10)) : null,
+        createdAt: note.createdAt.toISOString(),
+        createdById: note.createdById,
+      };
     }
 
     const party = await tx.party.findUnique({
@@ -619,7 +646,11 @@ export async function addCommunicationNote(
       key: input.idempotencyKey,
       resultType: 'CommunicationNote',
       resultId: note.id,
-      resultPayload: result,
+      resultPayload: {
+        command: 'addCommunicationNote',
+        noteId: note.id,
+        partyId: input.partyId,
+      },
     });
 
     return result;
@@ -648,7 +679,31 @@ export async function savePowerOfAttorney(
     });
 
     if (claim.isReplay) {
-      return claim.resultPayload as PoASummaryDTO;
+      if (!claim.resultId) {
+        throw new NotFoundError('التوكيل المطلوب غير موجود.');
+      }
+      const poa = await tx.powerOfAttorney.findUnique({
+        where: { id: claim.resultId },
+      });
+      if (!poa) {
+        throw new NotFoundError('التوكيل المطلوب غير موجود.');
+      }
+      return {
+        id: poa.id,
+        partyId: poa.partyId,
+        poaNumberText: poa.poaNumberText,
+        poaYearLabel: poa.poaYearLabel,
+        notarizationOffice: poa.notarizationOffice,
+        poaType: poa.poaType,
+        issueDate: poa.issueDate ? (poa.issueDate instanceof Date ? poa.issueDate.toISOString().slice(0, 10) : String(poa.issueDate).slice(0, 10)) : null,
+        humanReviewStatus: poa.humanReviewStatus,
+        humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
+        humanReviewedById: poa.humanReviewedById,
+        notes: poa.notes,
+        version: poa.version,
+        createdAt: poa.createdAt.toISOString(),
+        updatedAt: poa.updatedAt.toISOString(),
+      };
     }
 
     const party = await tx.party.findUnique({
@@ -790,7 +845,12 @@ export async function savePowerOfAttorney(
       key: input.idempotencyKey,
       resultType: 'PowerOfAttorney',
       resultId: poaRecord.id,
-      resultPayload: result,
+      resultPayload: {
+        command: 'savePowerOfAttorney',
+        poaId: poaRecord.id,
+        partyId: input.partyId,
+        version: poaRecord.version,
+      },
     });
 
     return result;

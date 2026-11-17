@@ -193,11 +193,11 @@ model CommunicationNote {
   id                 String               @id @default(uuid())
   partyId            String
   matterId           String?              // Optional reference reserved for T06; unlinked in T05
-  communicationAt    DateTime             // Absolute instant (timestamptz)
+  communicationAt    DateTime             @db.Timestamptz(3) // Absolute instant (timestamptz)
   channel            CommunicationChannel
   summary            String
   followUpRequired   Boolean              @default(false)
-  followUpDate       DateTime?            // Date-only representation for follow up
+  followUpDate       DateTime?            @db.Date // Date-only representation for follow up
   createdAt          DateTime             @default(now())
   createdById        String
 
@@ -214,9 +214,9 @@ model PowerOfAttorney {
   poaYearLabel       String          // e.g. "2026"
   notarizationOffice String          // Issuing Real Estate Registration / Notarization office
   poaType            PoAType
-  issueDate          DateTime?       // Date-only stored as midnight UTC
+  issueDate          DateTime?       @db.Date // Date-only stored as calendar day
   humanReviewStatus  PoAReviewStatus @default(UNREVIEWED)
-  humanReviewedAt    DateTime?
+  humanReviewedAt    DateTime?       @db.Timestamptz(3)
   humanReviewedById  String?
   notes              String?
   version            Int             @default(1)
