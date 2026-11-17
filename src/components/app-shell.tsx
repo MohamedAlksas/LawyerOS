@@ -28,6 +28,27 @@ export function AppShell({ children }: AppShellProps) {
     }
   }, []);
 
+  // Reset drawer state when crossing into desktop breakpoint (>= 1024px)
+  // to prevent hidden drawer leaving #app-shell-content permanently inert/aria-hidden (T04-R2-02)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const handleBreakpointChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      if (e.matches) {
+        setIsDrawerOpen(false);
+      }
+    };
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', handleBreakpointChange);
+      return () => mediaQuery.removeEventListener('change', handleBreakpointChange);
+    } else {
+      mediaQuery.addListener(handleBreakpointChange);
+      return () => mediaQuery.removeListener(handleBreakpointChange);
+    }
+  }, []);
+
   // For public auth and offline pages, omit the operational navigation shell
   const isPublicAuthPage =
     pathname.startsWith('/login') ||
@@ -79,8 +100,9 @@ export function AppShell({ children }: AppShellProps) {
             id="main-content"
             role="main"
             dir="rtl"
+            tabIndex={-1}
             data-testid="main-content"
-            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden lg:mr-[232px]"
+            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
           >
             {children}
           </main>

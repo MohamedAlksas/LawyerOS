@@ -1,5 +1,5 @@
 ﻿// LawOffice OS Service Worker — Strict Public Assets Only Allowlist (T04)
-const CACHE_NAME = "lawoffice-public-v1";
+const CACHE_NAME = "lawoffice-public-v2";
 
 const STATIC_ALLOWLIST = [
   "/offline.html",
@@ -23,9 +23,29 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+      // 1. Delete old application caches (lawoffice-public-*)
+      const deleteOldCaches = Promise.all(
+        keys
+          .filter((key) => key.startsWith("lawoffice-public-") && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
       );
+
+      // 2. Inspect retained/current cache and purge any entry whose URL pathname is not in STATIC_ALLOWLIST
+      const purgeStaleEntries = caches.open(CACHE_NAME).then((cache) => {
+        return cache.keys().then((requests) => {
+          return Promise.all(
+            requests.map((request) => {
+              const url = new URL(request.url);
+              if (!STATIC_ALLOWLIST.includes(url.pathname)) {
+                return cache.delete(request);
+              }
+              return Promise.resolve(false);
+            })
+          );
+        });
+      });
+
+      return Promise.all([deleteOldCaches, purgeStaleEntries]);
     }).then(() => self.clients.claim())
   );
 });

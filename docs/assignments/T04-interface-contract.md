@@ -159,8 +159,7 @@ When an authenticated lawyer lands on `/`:
   - Component: `<LoadingIndicator />`
   - Attributes: `role="status"`, `aria-busy="true"`, `aria-label="جارٍ التحميل..."`, `data-testid="loading-indicator"`.
 - **Reproducible Triggers on Current Surfaces:**
-  1. **Route Transition Boundary:** `src/app/loading.tsx` renders `<LoadingIndicator />` during Next.js server component resolution.
-  2. **Dashboard Status Widget on `/`:** The dashboard agenda status widget (`src/components/dashboard-status.tsx`) executes an initial asynchronous readiness/session verification. While the request is in-flight, it renders `<LoadingIndicator />`. Once settled, the indicator disappears and the settled empty state is revealed.
+  1. **Dashboard Status Widget on `/`:** The pending/loading state is handled on `/` by `DashboardStatus` (`src/components/dashboard-status.tsx`) and `<LoadingIndicator />` during initial asynchronous readiness/session verification. While the request is in-flight, it renders `<LoadingIndicator />`. Once settled, the indicator disappears and the authentic empty state is revealed.
 
 ### 6.3 Recoverable Error and Retry State (R04-04)
 - **Presentation Primitive (`src/components/presentation-state.tsx`):**

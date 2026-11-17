@@ -37,11 +37,34 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
       closeButtonRef.current?.focus();
     });
 
+    const restoreFocus = () => {
+      // Attempt restoring focus to trigger or previous active element if visible and focusable
+      const target = triggerRef?.current || previouslyFocused;
+      if (target && typeof target.focus === 'function') {
+        const isVisible =
+          target.offsetWidth > 0 ||
+          target.offsetHeight > 0 ||
+          target.getClientRects().length > 0;
+        if (isVisible) {
+          target.focus();
+          if (document.activeElement === target) {
+            return;
+          }
+        }
+      }
+
+      // Safe fallback to main content if trigger button is hidden or unfocused on desktop
+      const mainContent = document.getElementById('main-content');
+      if (mainContent && typeof mainContent.focus === 'function') {
+        mainContent.focus();
+      }
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         handleClose();
-        previouslyFocused?.focus();
+        restoreFocus();
         return;
       }
 
@@ -73,7 +96,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     return () => {
       cancelAnimationFrame(frameId);
       document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
+      restoreFocus();
     };
   }, [isOpen, handleClose, triggerRef]);
 
