@@ -68,6 +68,7 @@ export default defineConfig({
     },
   ],
   webServer: {
+    cwd: __dirname,
     command: `npx next start -H ${HOST} -p ${PORT}`,
     url: `${BASE_URL}/login`,
     reuseExistingServer: false,

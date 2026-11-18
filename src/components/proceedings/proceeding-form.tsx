@@ -11,6 +11,7 @@ import {
 import {
   MatterDTO,
   ProceedingSummaryDTO,
+  ProceedingPartySummaryDTO,
   ProceedingInstance,
   ProceedingStatus,
   ProceedingLegalCapacity,
@@ -22,6 +23,11 @@ import {
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   generateClientRequestId,
 } from '../matters/matter-ui-types';
+
+interface PartyCapacityState {
+  legalCapacity: ProceedingLegalCapacity;
+  capacityText: string;
+}
 
 interface CourtOption {
   id: string;
@@ -58,27 +64,53 @@ export function ProceedingForm({
   const [circuit, setCircuit] = useState(initialProceeding?.circuit || '');
   const [filingDate, setFilingDate] = useState(initialProceeding?.filingDate || '');
   const [claimAmount, setClaimAmount] = useState(initialProceeding?.claimAmount || '');
-  const [status] = useState<ProceedingStatus>(
+  const [status, setStatus] = useState<ProceedingStatus>(
     initialProceeding?.status || 'ACTIVE'
   );
 
-  // Legal Capacities per matter party
-  const [partyCapacities, setPartyCapacities] = useState<Record<string, ProceedingLegalCapacity>>(() => {
-    const initial: Record<string, ProceedingLegalCapacity> = {};
+  // Legal Capacities per matter party (storing both legalCapacity and capacityText)
+  const [partyCapacities, setPartyCapacities] = useState<Record<string, PartyCapacityState>>(() => {
+    const initial: Record<string, PartyCapacityState> = {};
+    const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
     if (initialProceeding?.parties) {
       for (const p of initialProceeding.parties) {
-        initial[p.matterPartyId] = p.legalCapacity;
+        existingPartiesMap.set(p.matterPartyId, p);
       }
-    } else {
-      // Default: clients are PLAINTIFF, opponents are DEFENDANT
-      for (const mp of matter.parties || []) {
-        if (mp.role === 'CLIENT') {
-          initial[mp.id] = instance === 'APPEAL' ? 'APPELLEE' : 'PLAINTIFF';
-        } else if (mp.role === 'OPPONENT') {
-          initial[mp.id] = instance === 'APPEAL' ? 'APPELLANT' : 'DEFENDANT';
-        } else {
-          initial[mp.id] = 'OTHER';
-        }
+    }
+
+    for (const mp of matter.parties || []) {
+      const existing = existingPartiesMap.get(mp.id);
+      if (existing) {
+        initial[mp.id] = {
+          legalCapacity: existing.legalCapacity ?? 'OTHER',
+          capacityText: existing.capacityText ?? '',
+        };
+      } else {
+        // Sensible defaults with notice to verify
+        const defaultLegalCapacity: ProceedingLegalCapacity =
+          mp.role === 'CLIENT'
+            ? instance === 'APPEAL'
+              ? 'APPELLEE'
+              : 'PLAINTIFF'
+            : mp.role === 'OPPONENT'
+              ? instance === 'APPEAL'
+                ? 'APPELLANT'
+                : 'DEFENDANT'
+              : 'OTHER';
+        const defaultCapacityText =
+          defaultLegalCapacity === 'PLAINTIFF'
+            ? 'مدعي'
+            : defaultLegalCapacity === 'DEFENDANT'
+              ? 'مدعى عليه'
+              : defaultLegalCapacity === 'APPELLEE'
+                ? 'مستأنف ضده'
+                : defaultLegalCapacity === 'APPELLANT'
+                  ? 'مستأنف'
+                  : 'طرف آخر';
+        initial[mp.id] = {
+          legalCapacity: defaultLegalCapacity,
+          capacityText: defaultCapacityText,
+        };
       }
     }
     return initial;
@@ -158,6 +190,22 @@ export function ProceedingForm({
           return;
         }
 
+        // Link / update capacities for all parties
+        for (const [matterPartyId, capState] of Object.entries(partyCapacities)) {
+          const capRes = await linkProceedingPartyAction({
+            proceedingId: initialProceeding.id,
+            matterPartyId,
+            legalCapacity: capState.legalCapacity,
+            capacityText: capState.capacityText.trim() || undefined,
+            idempotencyKey: `${idempotencyKey}_cap_${matterPartyId}`,
+          });
+          if (!capRes.success) {
+            setGeneralError(capRes.error || 'تعذر حفظ الصفات القضائية للأطراف.');
+            setIsSaving(false);
+            return;
+          }
+        }
+
         router.push(`/matters/${matter.id}`);
       } else {
         const payload: AddProceedingInput = {
@@ -183,18 +231,20 @@ export function ProceedingForm({
           return;
         }
 
-        // Link capacities if any
+        // Link capacities for all parties
         const newProceedingId = res.data.id;
-        for (const [matterPartyId, cap] of Object.entries(partyCapacities)) {
-          try {
-            await linkProceedingPartyAction({
-              proceedingId: newProceedingId,
-              matterPartyId,
-              legalCapacity: cap,
-              idempotencyKey: `${idempotencyKey}_cap_${matterPartyId}`,
-            });
-          } catch {
-            // capacity failure does not roll back proceeding
+        for (const [matterPartyId, capState] of Object.entries(partyCapacities)) {
+          const capRes = await linkProceedingPartyAction({
+            proceedingId: newProceedingId,
+            matterPartyId,
+            legalCapacity: capState.legalCapacity,
+            capacityText: capState.capacityText.trim() || undefined,
+            idempotencyKey: `${idempotencyKey}_cap_${matterPartyId}`,
+          });
+          if (!capRes.success) {
+            setGeneralError(capRes.error || 'تعذر حفظ الصفات القضائية للأطراف.');
+            setIsSaving(false);
+            return;
           }
         }
 
@@ -367,17 +417,33 @@ export function ProceedingForm({
 
         {/* Section 2: Docket Registration Details */}
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-[#E8EEF1]">
             <h2 className="text-base font-bold text-[#172A35]">
               بيانات القيد ورقم الدعوى
             </h2>
-            {isDocketIncomplete && (
+            {isDocketIncomplete ? (
               <span
                 data-testid="incomplete-docket-badge"
-                className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-300"
+                className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-300 self-start sm:self-auto"
               >
                 الرقم غير مستكمل (مسودة قيد)
               </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <label htmlFor={`${formId}-status`} className="text-xs font-bold text-[#172A35]">
+                  حالة القيد:
+                </label>
+                <select
+                  id={`${formId}-status`}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as ProceedingStatus)}
+                  data-testid="proceeding-status-select"
+                  className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[36px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                >
+                  <option value="ACTIVE">قيد نشط بالمحكمة</option>
+                  <option value="DRAFT">مسودة قيد</option>
+                </select>
+              </div>
             )}
           </div>
 
@@ -488,8 +554,8 @@ export function ProceedingForm({
             <h2 className="text-base font-bold text-[#172A35]">
               الصفات القانونية للأطراف في هذا القيد
             </h2>
-            <p className="text-xs text-[#4D606A]">
-              تحدد صفة كل طرف في هذه الدرجة القضائية (مثلاً: الموكل مدعي أو مستأنف ضده).
+            <p className="text-xs text-[#4D606A] mt-1 leading-relaxed">
+              تحدد صفة كل طرف في هذه الدرجة القضائية (مثلاً: الموكل مدعي أو مستأنف ضده). يجب مراجعة وتأكيد الصفة والمسمى الإجرائي لكل طرف في هذا القيد القضائي قبل الحفظ (لا يتم الاعتماد التلقائي دون مراجعة).
             </p>
           </div>
 
@@ -499,45 +565,81 @@ export function ProceedingForm({
             </p>
           ) : (
             <div className="space-y-3">
-              {(matter.parties || []).map((mp) => (
-                <div
-                  key={mp.id}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 bg-[#F9FBFC] rounded-[6px] border border-[#E8EEF1] text-xs"
-                >
-                  <div className="space-y-0.5">
-                    <span className="font-bold text-sm text-[#172A35] block">
-                      {mp.partyName}
-                    </span>
-                    <span className="text-[#4D606A]">
-                      صفته بالملف: {mp.role === 'CLIENT' ? 'موكل' : mp.role === 'OPPONENT' ? 'خصم' : 'طرف آخر'}
-                    </span>
-                  </div>
+              {(matter.parties || []).map((mp) => {
+                const currentCap = partyCapacities[mp.id] || {
+                  legalCapacity: 'OTHER' as ProceedingLegalCapacity,
+                  capacityText: '',
+                };
 
-                  <div className="flex items-center gap-2">
-                    <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35]">
-                      الصفة بالقيد:
-                    </label>
-                    <select
-                      id={`capacity-${mp.id}`}
-                      value={partyCapacities[mp.id] || 'PLAINTIFF'}
-                      onChange={(e) =>
-                        setPartyCapacities((prev) => ({
-                          ...prev,
-                          [mp.id]: e.target.value as ProceedingLegalCapacity,
-                        }))
-                      }
-                      data-testid={`capacity-select-${mp.id}`}
-                      className="px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[36px]"
-                    >
-                      {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
-                        <option key={cap} value={cap}>
-                          {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
-                        </option>
-                      ))}
-                    </select>
+                return (
+                  <div
+                    key={mp.id}
+                    className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3.5 bg-[#F9FBFC] rounded-[6px] border border-[#E8EEF1] text-xs"
+                  >
+                    <div className="space-y-0.5 min-w-[140px]">
+                      <span className="font-bold text-sm text-[#172A35] block">
+                        {mp.partyName}
+                      </span>
+                      <span className="text-[#4D606A]">
+                        صفته بالملف: {mp.role === 'CLIENT' ? 'موكل' : mp.role === 'OPPONENT' ? 'خصم' : 'طرف آخر'}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-lg">
+                      <div className="flex items-center gap-1.5 sm:w-1/2">
+                        <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
+                          الصفة القانونية:
+                        </label>
+                        <select
+                          id={`capacity-${mp.id}`}
+                          value={currentCap.legalCapacity}
+                          onChange={(e) =>
+                            setPartyCapacities((prev) => ({
+                              ...prev,
+                              [mp.id]: {
+                                ...prev[mp.id],
+                                legalCapacity: e.target.value as ProceedingLegalCapacity,
+                              },
+                            }))
+                          }
+                          data-testid={`capacity-select-${mp.id}`}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                        >
+                          {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
+                            <option key={cap} value={cap}>
+                              {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 sm:w-1/2">
+                        <label htmlFor={`capacity-text-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
+                          المسمى الإجرائي:
+                        </label>
+                        <input
+                          id={`capacity-text-${mp.id}`}
+                          type="text"
+                          maxLength={100}
+                          value={currentCap.capacityText}
+                          onChange={(e) =>
+                            setPartyCapacities((prev) => ({
+                              ...prev,
+                              [mp.id]: {
+                                ...prev[mp.id],
+                                capacityText: e.target.value,
+                              },
+                            }))
+                          }
+                          placeholder="مثال: مدعي، بصفته..."
+                          data-testid={`capacity-text-${mp.id}`}
+                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

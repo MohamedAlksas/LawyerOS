@@ -103,14 +103,14 @@ describe('T06-02: Atomic FileCode Generation & Cairo Year Boundary', () => {
       expectedVersion: 1,
       title: 'عنوان جديد تماماً',
       kind: 'LITIGATION',
-      status: 'SUSPENDED',
+      status: 'ON_HOLD',
       idempotencyKey: `edit-immutability-${crypto.randomUUID()}`,
     });
 
     expect(updated.matter.fileCode).toBe(initialCode);
     expect(updated.matter.title).toBe('عنوان جديد تماماً');
     expect(updated.matter.kind).toBe('LITIGATION');
-    expect(updated.matter.status).toBe('SUSPENDED');
+    expect(updated.matter.status).toBe('ON_HOLD');
   });
 });
 

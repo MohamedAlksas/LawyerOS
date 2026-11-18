@@ -278,8 +278,9 @@ enum MatterKind {
 enum MatterStatus {
   DRAFT
   ACTIVE
-  SUSPENDED
+  ON_HOLD
   CLOSED
+  ARCHIVED
 }
 
 enum MatterPartyRole {
@@ -298,8 +299,8 @@ enum ProceedingInstance {
 enum ProceedingStatus {
   DRAFT
   ACTIVE
-  JUDGMENT_ISSUED
-  SUSPENDED
+  AWAITING_JUDGMENT
+  DECIDED
   CLOSED
 }
 
@@ -406,16 +407,17 @@ model Proceeding {
 }
 
 model ProceedingParty {
-  id            String                  @id @default(uuid())
+  id            String                   @id @default(uuid())
   proceedingId  String
   matterPartyId String
-  legalCapacity ProceedingLegalCapacity
+  capacityText  String                   @db.VarChar(100)
+  legalCapacity ProceedingLegalCapacity?
   notes         String?
-  createdAt     DateTime                @default(now()) @db.Timestamptz(3)
+  createdAt     DateTime                 @default(now()) @db.Timestamptz(3)
   createdById   String
 
-  proceeding    Proceeding              @relation(fields: [proceedingId], references: [id], onDelete: Cascade)
-  matterParty   MatterParty             @relation(fields: [matterPartyId], references: [id], onDelete: Cascade)
+  proceeding    Proceeding               @relation(fields: [proceedingId], references: [id], onDelete: Cascade)
+  matterParty   MatterParty              @relation(fields: [matterPartyId], references: [id], onDelete: Cascade)
 
   @@unique([proceedingId, matterPartyId])
   @@index([matterPartyId])

@@ -89,13 +89,24 @@ describe('T06-04 & T06-05: Court Proceedings, Instances & Cycle Invariants', () 
     });
     createdMatterIds.push(matter.matter.id);
 
-    // Incomplete data (missing number and year) requested as ACTIVE remains DRAFT ("الرقم غير مستكمل")
+    // Incomplete data (missing number and year) requested as ACTIVE is rejected (T06-R1-08)
+    await expect(
+      addProceeding(actor, {
+        matterId: matter.matter.id,
+        courtId: testCourt1Id,
+        instance: 'FIRST_INSTANCE',
+        status: 'ACTIVE',
+        idempotencyKey: `proc-incomplete-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(MatterValidationError);
+
+    // Initial creation without complete data defaults to DRAFT ("الرقم غير مستكمل")
     const proc1 = await addProceeding(actor, {
       matterId: matter.matter.id,
       courtId: testCourt1Id,
       instance: 'FIRST_INSTANCE',
-      status: 'ACTIVE',
-      idempotencyKey: `proc-incomplete-${crypto.randomUUID()}`,
+      status: 'DRAFT',
+      idempotencyKey: `proc-incomplete-draft-${crypto.randomUUID()}`,
     });
     expect(proc1.status).toBe('DRAFT');
     expect(proc1.numberText).toBeNull();
@@ -136,7 +147,7 @@ describe('T06-04 & T06-05: Court Proceedings, Instances & Cycle Invariants', () 
       numberText: '1001/تجاري',
       yearLabel: '2025',
       registerType: 'تجاري كلي',
-      status: 'JUDGMENT_ISSUED',
+      status: 'DECIDED',
       idempotencyKey: `proc-first-inst-${crypto.randomUUID()}`,
     });
 

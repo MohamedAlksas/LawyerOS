@@ -321,8 +321,9 @@ export function MatterForm({
                 >
                   <option value="ACTIVE">{MATTER_STATUS_LABELS.ACTIVE}</option>
                   <option value="DRAFT">{MATTER_STATUS_LABELS.DRAFT}</option>
-                  <option value="SUSPENDED">{MATTER_STATUS_LABELS.SUSPENDED}</option>
+                  <option value="ON_HOLD">{MATTER_STATUS_LABELS.ON_HOLD}</option>
                   <option value="CLOSED">{MATTER_STATUS_LABELS.CLOSED}</option>
+                  <option value="ARCHIVED">{MATTER_STATUS_LABELS.ARCHIVED}</option>
                 </select>
               </div>
             )}

@@ -1,5 +1,7 @@
+import { z } from 'zod';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
-import { Actor } from '@/modules/identity/types';
+import { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import {
@@ -16,34 +18,50 @@ import {
   CreateReferenceItemInput,
   UpdateReferenceItemInput,
   ReferenceValidationError,
+  UnauthorizedError,
+  ConcurrencyConflictError,
+  NotFoundError,
+  updateOfficeSettingsSchema,
+  createReferenceItemSchema,
+  updateReferenceItemSchema,
+  listReferenceItemsSchema,
+  formatZodError,
 } from './reference-types';
-import { ConcurrencyConflictError, NotFoundError } from '../matters/matter-types';
 
 const SINGLETON_ID = 'singleton';
 
-export async function getOfficeSettings(actor?: Actor): Promise<OfficeSettingsDTO> {
-  if (actor) {
-    assertAuthorized(actor, 'READ_CLIENT_DATA');
-  }
-  const prisma = getPrismaClient();
-  let settings = await prisma.officeSettings.findUnique({
-    where: { id: SINGLETON_ID },
-  });
+interface MinimalReferenceIdempotencyPayload {
+  operation?: string;
+  resourceId?: string;
+  version?: number;
+  acknowledgedAt?: string;
+}
 
-  if (!settings) {
-    // Lazy initialize singleton if not yet created
-    settings = await prisma.officeSettings.create({
-      data: {
-        id: SINGLETON_ID,
-        officeName: 'مكتب المحاماة',
-        currency: 'EGP',
-        timeZone: 'Africa/Cairo',
-        version: 1,
-        updatedById: 'system',
-      },
-    });
-  }
+function extractResourceId(claim: { resultId?: string | null; resultPayload?: unknown }): string {
+  const resourceId = claim.resultId || (claim.resultPayload as MinimalReferenceIdempotencyPayload | null)?.resourceId;
+  return resourceId ?? '';
+}
 
+function assertActorAuthorized(actor: Actor | undefined | null, permission: Permission): void {
+  if (!actor || !actor.id || !actor.role) {
+    throw new UnauthorizedError('غير مصرح. يرجى تسجيل الدخول أولاً.');
+  }
+  assertAuthorized(actor, permission);
+}
+
+function mapOfficeSettingsToDTO(settings: {
+  id: string;
+  officeName: string;
+  lawyerName: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  taxNumber: string | null;
+  currency: string;
+  timeZone: string;
+  version: number;
+  updatedAt: Date;
+}): OfficeSettingsDTO {
   return {
     id: settings.id,
     officeName: settings.officeName,
@@ -59,19 +77,50 @@ export async function getOfficeSettings(actor?: Actor): Promise<OfficeSettingsDT
   };
 }
 
+async function getOfficeSettingsInternal(
+  prismaOrTx: PrismaClient | Prisma.TransactionClient
+): Promise<OfficeSettingsDTO> {
+  let settings = await prismaOrTx.officeSettings.findUnique({
+    where: { id: SINGLETON_ID },
+  });
+
+  if (!settings) {
+    settings = await prismaOrTx.officeSettings.create({
+      data: {
+        id: SINGLETON_ID,
+        officeName: 'مكتب المحاماة',
+        currency: 'EGP',
+        timeZone: 'Africa/Cairo',
+        version: 1,
+        updatedById: 'system',
+      },
+    });
+  }
+
+  return mapOfficeSettingsToDTO(settings);
+}
+
+export async function getOfficeSettings(actor?: Actor): Promise<OfficeSettingsDTO> {
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const prisma = getPrismaClient();
+  return await getOfficeSettingsInternal(prisma);
+}
+
 export async function updateOfficeSettings(
   actor: Actor,
-  input: UpdateOfficeSettingsInput
+  rawInput: UpdateOfficeSettingsInput
 ): Promise<OfficeSettingsDTO> {
-  assertAuthorized(actor, 'WRITE_CLIENT_DATA');
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
-  if (!input.officeName || input.officeName.trim().length === 0) {
-    throw new ReferenceValidationError('اسم المكتب مطلوب.', { officeName: 'اسم المكتب مطلوب.' });
-  }
-  if (input.officeName.length > 255) {
-    throw new ReferenceValidationError('اسم المكتب لا يجب أن يتجاوز 255 حرفاً.', {
-      officeName: 'الاسم طويل جداً.',
-    });
+  let input: UpdateOfficeSettingsInput;
+  try {
+    input = updateOfficeSettingsSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new ReferenceValidationError(message, fieldErrors);
+    }
+    throw err;
   }
 
   const prisma = getPrismaClient();
@@ -87,15 +136,25 @@ export async function updateOfficeSettings(
       });
 
       if (claim.isReplay) {
-        return claim.resultPayload as OfficeSettingsDTO;
+        return await getOfficeSettingsInternal(tx);
       }
 
       // 2. Lock and retrieve current settings
-      const current = await tx.officeSettings.findUnique({
-        where: { id: SINGLETON_ID },
-      });
+      const [current] = await tx.$queryRaw<Array<{
+        id: string;
+        version: number;
+      }>>`
+        SELECT "id", "version"
+        FROM "office_settings"
+        WHERE "id" = ${SINGLETON_ID}
+        FOR UPDATE;
+      `;
 
-      if (current && input.expectedVersion !== undefined && current.version !== input.expectedVersion) {
+      if (current && current.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError();
+      }
+
+      if (!current && input.expectedVersion !== 1) {
         throw new ConcurrencyConflictError();
       }
 
@@ -142,28 +201,21 @@ export async function updateOfficeSettings(
         },
       });
 
-      const resultDTO: OfficeSettingsDTO = {
-        id: updated.id,
-        officeName: updated.officeName,
-        lawyerName: updated.lawyerName,
-        phone: updated.phone,
-        email: updated.email,
-        address: updated.address,
-        taxNumber: updated.taxNumber,
-        currency: updated.currency,
-        timeZone: updated.timeZone,
-        version: updated.version,
-        updatedAt: updated.updatedAt.toISOString(),
-      };
+      const resultDTO = mapOfficeSettingsToDTO(updated);
 
-      // 4. Complete idempotency
+      // 4. Complete idempotency with minimal safe metadata
       await completeIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateOfficeSettings',
         key: input.idempotencyKey,
         resultType: 'OfficeSettingsDTO',
         resultId: SINGLETON_ID,
-        resultPayload: resultDTO,
+        resultPayload: {
+          operation: 'UPDATE_OFFICE_SETTINGS',
+          resourceId: SINGLETON_ID,
+          version: nextVersion,
+          acknowledgedAt: new Date().toISOString(),
+        },
       });
 
       return resultDTO;
@@ -177,9 +229,9 @@ export async function updateOfficeSettings(
         payload: input,
       });
       if (resolved) {
-        return resolved.resultPayload as OfficeSettingsDTO;
+        return await getOfficeSettingsInternal(prisma);
       }
-      return updateOfficeSettings(actor, input);
+      return updateOfficeSettings(actor, rawInput);
     }
     throw err;
   }
@@ -190,9 +242,18 @@ export async function listReferenceItems(
   includeInactive = false,
   actor?: Actor
 ): Promise<ReferenceItemDTO[]> {
-  if (actor) {
-    assertAuthorized(actor, 'READ_CLIENT_DATA');
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  try {
+    listReferenceItemsSchema.parse({ type, includeInactive });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new ReferenceValidationError(message, fieldErrors);
+    }
+    throw err;
   }
+
   const prisma = getPrismaClient();
   const results: ReferenceItemDTO[] = [];
 
@@ -260,14 +321,73 @@ export async function listReferenceItems(
   return results;
 }
 
+async function getReferenceItemDTO(
+  tx: PrismaClient | Prisma.TransactionClient,
+  type: ReferenceItemType,
+  id: string
+): Promise<ReferenceItemDTO> {
+  if (type === 'COURT') {
+    const item = await tx.court.findUnique({ where: { id } });
+    if (!item) throw new NotFoundError('المحكمة غير موجودة.');
+    return {
+      id: item.id,
+      type: 'COURT',
+      name: item.name,
+      code: item.code,
+      circuitTypes: item.circuitTypes,
+      notes: item.notes,
+      isActive: item.isActive,
+      version: item.version,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+    };
+  } else if (type === 'PRACTICE_AREA') {
+    const item = await tx.practiceArea.findUnique({ where: { id } });
+    if (!item) throw new NotFoundError('تصنيف العمل غير موجود.');
+    return {
+      id: item.id,
+      type: 'PRACTICE_AREA',
+      name: item.name,
+      code: item.code,
+      notes: item.notes,
+      isActive: item.isActive,
+      version: item.version,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+    };
+  } else if (type === 'STORAGE_LOCATION') {
+    const item = await tx.storageLocation.findUnique({ where: { id } });
+    if (!item) throw new NotFoundError('مكان الحفظ غير موجود.');
+    return {
+      id: item.id,
+      type: 'STORAGE_LOCATION',
+      name: item.name,
+      code: item.code,
+      notes: item.notes,
+      isActive: item.isActive,
+      version: item.version,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+    };
+  }
+  throw new ReferenceValidationError('نوع العنصر المرجعي غير صالح.');
+}
+
 export async function createReferenceItem(
   actor: Actor,
-  input: CreateReferenceItemInput
+  rawInput: CreateReferenceItemInput
 ): Promise<ReferenceItemDTO> {
-  assertAuthorized(actor, 'WRITE_CLIENT_DATA');
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
-  if (!input.name || input.name.trim().length === 0) {
-    throw new ReferenceValidationError('الاسم مطلوب.', { name: 'الاسم مطلوب.' });
+  let input: CreateReferenceItemInput;
+  try {
+    input = createReferenceItemSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new ReferenceValidationError(message, fieldErrors);
+    }
+    throw err;
   }
 
   const prisma = getPrismaClient();
@@ -282,7 +402,8 @@ export async function createReferenceItem(
       });
 
       if (claim.isReplay) {
-        return claim.resultPayload as ReferenceItemDTO;
+        const resourceId = extractResourceId(claim);
+        return await getReferenceItemDTO(tx, input.type, resourceId);
       }
 
       let createdDTO: ReferenceItemDTO;
@@ -376,7 +497,12 @@ export async function createReferenceItem(
         key: input.idempotencyKey,
         resultType: 'ReferenceItemDTO',
         resultId: createdDTO.id,
-        resultPayload: createdDTO,
+        resultPayload: {
+          operation: `CREATE_${input.type}`,
+          resourceId: createdDTO.id,
+          version: 1,
+          acknowledgedAt: new Date().toISOString(),
+        },
       });
 
       return createdDTO;
@@ -390,9 +516,10 @@ export async function createReferenceItem(
         payload: input,
       });
       if (resolved) {
-        return resolved.resultPayload as ReferenceItemDTO;
+        const resourceId = extractResourceId(resolved);
+        return await getReferenceItemDTO(prisma, input.type, resourceId);
       }
-      return createReferenceItem(actor, input);
+      return createReferenceItem(actor, rawInput);
     }
     throw err;
   }
@@ -400,12 +527,19 @@ export async function createReferenceItem(
 
 export async function updateReferenceItem(
   actor: Actor,
-  input: UpdateReferenceItemInput
+  rawInput: UpdateReferenceItemInput
 ): Promise<ReferenceItemDTO> {
-  assertAuthorized(actor, 'WRITE_CLIENT_DATA');
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
-  if (!input.name || input.name.trim().length === 0) {
-    throw new ReferenceValidationError('الاسم مطلوب.', { name: 'الاسم مطلوب.' });
+  let input: UpdateReferenceItemInput;
+  try {
+    input = updateReferenceItemSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new ReferenceValidationError(message, fieldErrors);
+    }
+    throw err;
   }
 
   const prisma = getPrismaClient();
@@ -420,14 +554,17 @@ export async function updateReferenceItem(
       });
 
       if (claim.isReplay) {
-        return claim.resultPayload as ReferenceItemDTO;
+        const resourceId = extractResourceId(claim);
+        return await getReferenceItemDTO(tx, input.type, resourceId);
       }
 
       let updatedDTO: ReferenceItemDTO;
 
       if (input.type === 'COURT') {
-        const existing = await tx.court.findUnique({ where: { id: input.id } });
-        if (!existing) throw new NotFoundError();
+        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+          SELECT "id", "version" FROM "court" WHERE "id" = ${input.id} FOR UPDATE;
+        `;
+        if (!existing) throw new NotFoundError('المحكمة غير موجودة.');
         if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
 
         const item = await tx.court.update({
@@ -435,7 +572,7 @@ export async function updateReferenceItem(
           data: {
             name: input.name.trim(),
             code: input.code?.trim() ?? null,
-            circuitTypes: input.circuitTypes ?? existing.circuitTypes,
+            circuitTypes: input.circuitTypes ?? undefined,
             notes: input.notes?.trim() ?? null,
             isActive: input.isActive,
             version: existing.version + 1,
@@ -455,8 +592,10 @@ export async function updateReferenceItem(
           updatedAt: item.updatedAt.toISOString(),
         };
       } else if (input.type === 'PRACTICE_AREA') {
-        const existing = await tx.practiceArea.findUnique({ where: { id: input.id } });
-        if (!existing) throw new NotFoundError();
+        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+          SELECT "id", "version" FROM "practice_area" WHERE "id" = ${input.id} FOR UPDATE;
+        `;
+        if (!existing) throw new NotFoundError('تصنيف العمل غير موجود.');
         if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
 
         const item = await tx.practiceArea.update({
@@ -482,8 +621,10 @@ export async function updateReferenceItem(
           updatedAt: item.updatedAt.toISOString(),
         };
       } else if (input.type === 'STORAGE_LOCATION') {
-        const existing = await tx.storageLocation.findUnique({ where: { id: input.id } });
-        if (!existing) throw new NotFoundError();
+        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+          SELECT "id", "version" FROM "storage_location" WHERE "id" = ${input.id} FOR UPDATE;
+        `;
+        if (!existing) throw new NotFoundError('مكان الحفظ غير موجود.');
         if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
 
         const item = await tx.storageLocation.update({
@@ -526,7 +667,12 @@ export async function updateReferenceItem(
         key: input.idempotencyKey,
         resultType: 'ReferenceItemDTO',
         resultId: updatedDTO.id,
-        resultPayload: updatedDTO,
+        resultPayload: {
+          operation: `UPDATE_${input.type}`,
+          resourceId: updatedDTO.id,
+          version: updatedDTO.version,
+          acknowledgedAt: new Date().toISOString(),
+        },
       });
 
       return updatedDTO;
@@ -540,9 +686,10 @@ export async function updateReferenceItem(
         payload: input,
       });
       if (resolved) {
-        return resolved.resultPayload as ReferenceItemDTO;
+        const resourceId = extractResourceId(resolved);
+        return await getReferenceItemDTO(prisma, input.type, resourceId);
       }
-      return updateReferenceItem(actor, input);
+      return updateReferenceItem(actor, rawInput);
     }
     throw err;
   }

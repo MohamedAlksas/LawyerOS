@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { seedT04Owner, deleteT04Owner, signInWithTotp, T04Owner } from '../helpers/t04-auth';
 import { cleanupPartyFixtures, setupTestEncryptionKeys } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import { normalizeArabicText } from '@/lib/normalization';
 
 test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => {
   let owner: T04Owner;
@@ -11,10 +12,24 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
   const createdMatterIds: string[] = [];
   let testCourtId = '';
   let testStorageLocationId = '';
+  let testOpponentPartyId = '';
 
   test.beforeAll(async () => {
     setupTestEncryptionKeys();
     owner = await seedT04Owner({ label: 'matters-e2e', name: 'أحمد المحامي' });
+
+    // Seed test opponent party (required for ACTIVE litigation matters)
+    const oppParty = await prisma.party.create({
+      data: {
+        kind: 'ORGANIZATION',
+        name: 'شركة النيل للتجارة والمقاولات',
+        nameNormalized: normalizeArabicText('شركة النيل للتجارة والمقاولات'),
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    testOpponentPartyId = oppParty.id;
+    createdPartyIds.push(oppParty.id);
 
     // Seed test court and storage location so dropdowns are guaranteed populated
     const court = await prisma.court.create({
@@ -68,8 +83,10 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await page.goto('/parties/new');
     await expect(page.locator('h1')).toContainText('إضافة طرف أو موكل جديد');
 
-    const testClientName = 'حسام عبد الرؤوف المنشاوي';
-    const testClientPhone = '01077778888';
+    const runId = Math.random().toString(36).substring(2, 7);
+    const testClientName = `حسام عبد الرؤوف المنشاوي ${runId}`;
+    const testClientPhone = `010${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const testPoaNumber = `${Math.floor(1000 + Math.random() * 9000)}/أ`;
     await page.getByTestId('party-name-input').fill(testClientName);
     await page.getByTestId('party-phone-input').fill(testClientPhone);
     await page.getByTestId('submit-party-button').click();
@@ -82,7 +99,7 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
 
     // Add a Power of Attorney (POA) for this client
     await page.getByTestId('add-poa-button').click();
-    await page.getByTestId('poa-number-input').fill('1234/أ');
+    await page.getByTestId('poa-number-input').fill(testPoaNumber);
     await page.getByTestId('poa-year-input').fill('2026');
     await page.getByTestId('poa-office-input').fill('مكتب توثيق الأهرام النموذجي');
     await page.getByTestId('poa-type-select').selectOption('LITIGATION');
@@ -100,7 +117,7 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await expect(page.locator('h1')).toContainText('فتح ملف قضية جديد');
 
     // 5. Fill matter form as a DRAFT (no client selected)
-    const matterTitle = 'دعوى تعويض عن أضرار مادية وتجارية';
+    const matterTitle = `دعوى تعويض عن أضرار تجارية ${runId}`;
     await page.getByTestId('matter-title-input').fill(matterTitle);
     await page.getByTestId('matter-kind-select').selectOption('LITIGATION');
     await page.getByTestId('matter-summary-textarea').fill('ملخص نزاع تجاري متعلق بعقد توريد بضائع ومعدات');
@@ -133,6 +150,21 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await expect(page.getByTestId('detail-action-message')).toContainText('تم ربط الطرف بالملف بنجاح');
     await expect(page.getByText(testClientName)).toBeVisible();
     await expect(page.getByText('جهة الاتصال الأساسية')).toBeVisible();
+
+    // 7b. Link an opponent party to this matter (required for ACTIVE litigation matters)
+    await page.getByTestId('open-add-party-modal').click();
+    await expect(page.getByTestId('add-party-panel')).toBeVisible();
+
+    await page.getByTestId('party-search-input').fill('شركة النيل');
+    const selectOpponentBtn = page.getByTestId(`select-party-${testOpponentPartyId}`);
+    await expect(selectOpponentBtn).toBeVisible();
+    await selectOpponentBtn.click();
+
+    await page.getByTestId('party-role-select').selectOption('OPPONENT');
+    await page.getByTestId('submit-link-party').click();
+
+    await expect(page.getByTestId('detail-action-message')).toContainText('تم ربط الطرف بالملف بنجاح');
+    await expect(page.getByText('شركة النيل للتجارة والمقاولات')).toBeVisible();
 
     // 8. Link the client's POA to this matter
     await page.getByTestId('tab-authorizations').click();
@@ -186,20 +218,32 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await expect(page.getByTestId('proceeding-draft-badge')).toBeVisible();
     await expect(page.getByText('الرقم غير مستكمل (مسودة قيد)')).toBeVisible();
 
-    // 12. Complete the court proceeding registration
+    // 12. Complete the court proceeding registration and activate it
     await page.locator('[data-testid^="edit-proceeding-"]').first().click();
     await page.getByTestId('proceeding-number-input').fill('5678');
     await page.getByTestId('proceeding-year-input').fill('2026');
     await page.getByTestId('proceeding-register-type-input').fill('مدني كلي');
     await page.getByTestId('proceeding-circuit-input').fill('الدائرة 4 تعويضات');
+    await expect(page.getByTestId('proceeding-status-select')).toBeVisible();
+    await page.getByTestId('proceeding-status-select').selectOption('ACTIVE');
+    await page.locator('[data-testid^="capacity-text-"]').first().fill('المدعي الأصلي');
     await page.getByTestId('proceeding-submit-button').click();
 
-    // Proceeding is now complete
+    // Proceeding is now complete and active
     await expect(page).toHaveURL(new RegExp(`/matters/${matterId}$`));
     await page.getByTestId('tab-proceedings').click();
     await expect(page.getByText('5678 لسنة 2026')).toBeVisible();
     await expect(page.getByText('مدني كلي')).toBeVisible();
     await expect(page.getByText('الدائرة 4 تعويضات')).toBeVisible();
+    await expect(page.getByText('متداول بالجلسات')).toBeVisible();
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').first()).toContainText('المدعي الأصلي');
+
+    // Reload to verify persisted active status and capacityText
+    await page.reload();
+    await page.getByTestId('tab-proceedings').click();
+    await expect(page.getByText('5678 لسنة 2026')).toBeVisible();
+    await expect(page.getByText('متداول بالجلسات')).toBeVisible();
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').first()).toContainText('المدعي الأصلي');
 
     // 13. Add Linked Appeal Proceeding
     await page.getByTestId('add-proceeding-tab-button').click();

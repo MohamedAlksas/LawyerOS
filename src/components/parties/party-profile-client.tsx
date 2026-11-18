@@ -327,7 +327,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
                     </Link>
                   </div>
                   <span className="text-[#4D606A] block">
-                    الحالة: {m.status === 'ACTIVE' ? 'نشط' : m.status === 'DRAFT' ? 'مسودة' : m.status === 'SUSPENDED' ? 'موقوف' : 'مغلق'}
+                    الحالة: {m.status === 'ACTIVE' ? 'نشط' : m.status === 'DRAFT' ? 'مسودة' : m.status === 'ON_HOLD' ? 'معلق' : m.status === 'ARCHIVED' ? 'مؤرشف' : 'مغلق'}
                   </span>
                 </div>
 

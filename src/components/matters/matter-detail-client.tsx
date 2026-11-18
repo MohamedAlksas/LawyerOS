@@ -72,6 +72,12 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   const hasMissingPaperLocation = !matter.paperLocationId && matter.status === 'ACTIVE';
 
+  const handleOpenPartyModal = () => {
+    setActionMessage(null);
+    setPartyActionError(null);
+    setShowAddPartyModal(true);
+  };
+
   // Search Parties for Linking
   const handleSearchParties = async (q: string) => {
     setPartySearchQuery(q);
@@ -207,6 +213,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   // Load POAs for linking
   const handleOpenPoaModal = async () => {
+    setActionMessage(null);
     setShowAddPoaModal(true);
     setIsLoadingPoas(true);
     setPoaActionError(null);
@@ -525,10 +532,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <button
               type="button"
               data-testid="open-add-party-modal"
-              onClick={() => {
-                setShowAddPartyModal(true);
-                setPartyActionError(null);
-              }}
+              onClick={handleOpenPartyModal}
               className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
             >
               <span>+</span>
@@ -944,7 +948,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                             >
                               <span className="font-bold text-[#172A35]">{pp.partyName}:</span>
                               <span className="font-semibold text-[#14566B]">
-                                {PROCEEDING_LEGAL_CAPACITY_LABELS[pp.legalCapacity]}
+                                {pp.capacityText || (pp.legalCapacity ? PROCEEDING_LEGAL_CAPACITY_LABELS[pp.legalCapacity] : '')}
                               </span>
                             </span>
                           ))}
