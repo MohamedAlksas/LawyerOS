@@ -34,8 +34,10 @@ export function DesktopSidebar() {
   };
 
   const isHomeActive = pathname === '/';
+  const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
+  const isReferenceActive = pathname === '/settings/reference';
 
   return (
     <aside
@@ -59,6 +61,21 @@ export function DesktopSidebar() {
           >
             <span aria-hidden="true" className="text-base">📅</span>
             <span>الرئيسية / اليوم</span>
+          </Link>
+
+          {/* Matters Directory */}
+          <Link
+            href="/matters"
+            data-testid="nav-link-matters"
+            aria-current={isMattersActive ? 'page' : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+              isMattersActive
+                ? 'bg-[#14566B] text-white shadow-xs'
+                : 'text-[#172A35] hover:bg-[#E8EEF1]'
+            }`}
+          >
+            <span aria-hidden="true" className="text-base">📁</span>
+            <span>ملفات القضايا</span>
           </Link>
 
           {/* Parties Directory */}
@@ -91,23 +108,27 @@ export function DesktopSidebar() {
             <span>إعدادات الأمان</span>
           </Link>
 
+          {/* Reference Settings */}
+          <Link
+            href="/settings/reference"
+            data-testid="nav-link-reference"
+            aria-current={isReferenceActive ? 'page' : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+              isReferenceActive
+                ? 'bg-[#14566B] text-white shadow-xs'
+                : 'text-[#172A35] hover:bg-[#E8EEF1]'
+            }`}
+          >
+            <span aria-hidden="true" className="text-base">⚙️</span>
+            <span>إعدادات المراجع</span>
+          </Link>
+
           {/* Future Modules Indicator Section (Contract 2.2: strictly non-interactive, no fake metrics) */}
           <div className="pt-4 mt-2 border-t border-[#D5DFE3]">
             <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-2">
               الوحدات القادمة
             </span>
             <div className="space-y-1">
-              <div
-                aria-disabled="true"
-                className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"
-              >
-                <div className="flex items-center gap-2">
-                  <span aria-hidden="true">📁</span>
-                  <span>ملفات القضايا</span>
-                </div>
-                <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
-              </div>
-
               <div
                 aria-disabled="true"
                 className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"

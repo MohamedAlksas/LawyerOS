@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
+import { searchMattersAction } from '@/modules/matters/matter-actions';
+import { MatterDTO } from '@/modules/matters/matter-types';
 import { ClientProfileDTO } from '@/modules/parties/types';
 import {
   PARTY_KIND_LABELS,
@@ -20,6 +22,29 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
+
+  const [linkedMatters, setLinkedMatters] = useState<MatterDTO[]>([]);
+  const [isLoadingMatters, setIsLoadingMatters] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadMatters() {
+      try {
+        const res = await searchMattersAction({ clientId: party.id });
+        if (res.success && isMounted) {
+          setLinkedMatters(res.data.matters);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (isMounted) setIsLoadingMatters(false);
+      }
+    }
+    loadMatters();
+    return () => {
+      isMounted = false;
+    };
+  }, [party.id]);
 
   const handleRevealIdentity = async () => {
     setIsRevealing(true);
@@ -263,13 +288,68 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
       {/* 4. Powers of Attorney Section */}
       <PoaSection partyId={party.id} initialPoas={party.powersOfAttorney} />
 
-      {/* 5. Future Modules Indicator (Contract S09: strictly non-interactive, no fake data) */}
+      {/* 5. Linked Matters Section */}
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
+        <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+          <h2 className="text-base font-bold text-[#172A35]">
+            📁 ملفات القضايا والنزاعات المرتبطة ({linkedMatters.length})
+          </h2>
+          <Link
+            href="/matters/new"
+            className="text-xs font-semibold text-[#14566B] hover:underline"
+          >
+            + فتح ملف جديد
+          </Link>
+        </div>
+
+        {isLoadingMatters ? (
+          <p className="text-xs text-[#4D606A] italic">جارٍ تحميل ملفات القضايا المرتبطة...</p>
+        ) : linkedMatters.length === 0 ? (
+          <p className="text-xs text-[#4D606A] italic">لا توجد ملفات قضايا مسجلة لهذا الطرف بعد.</p>
+        ) : (
+          <div className="divide-y divide-[#E8EEF1]">
+            {linkedMatters.map((m) => (
+              <div
+                key={m.id}
+                data-testid={`linked-matter-${m.id}`}
+                className="py-3 flex items-center justify-between gap-3 text-xs"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <bdi dir="ltr" className="font-mono font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                      {m.fileCode}
+                    </bdi>
+                    <Link
+                      href={`/matters/${m.id}`}
+                      className="font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
+                    >
+                      {m.title}
+                    </Link>
+                  </div>
+                  <span className="text-[#4D606A] block">
+                    الحالة: {m.status === 'ACTIVE' ? 'نشط' : m.status === 'DRAFT' ? 'مسودة' : m.status === 'SUSPENDED' ? 'موقوف' : 'مغلق'}
+                  </span>
+                </div>
+
+                <Link
+                  href={`/matters/${m.id}`}
+                  className="px-3 py-1.5 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] rounded border border-[#D5DFE3] min-h-[36px] flex items-center"
+                >
+                  عرض الملف
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 6. Future Financial & Documents Modules Indicator */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          📁 ملفات القضايا والحسابات المالية المرتبطة
+          💰 الحسابات المالية والمستندات الرقمية
         </span>
         <p>
-          وحدات القضايا والنزاعات (T06) والمستندات الرقمية (T10) وحسابات الأتعاب والمصروفات (T11/T12)
+          وحدات المستندات الرقمية (T10) وحسابات الأتعاب والمصروفات (T11/T12)
           غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
         </p>
       </div>

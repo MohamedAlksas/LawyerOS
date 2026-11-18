@@ -163,6 +163,7 @@ model Party {
   identities              PartyIdentity[]
   communicationNotes      CommunicationNote[]
   powersOfAttorney        PowerOfAttorney[]
+  matterParties           MatterParty[]
 
   @@index([nameNormalized])
   @@index([primaryPhoneNormalized])
@@ -226,6 +227,7 @@ model PowerOfAttorney {
   updatedById        String
 
   party              Party           @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  matterAuthorizations MatterAuthorization[]
 
   @@index([partyId])
   @@index([poaNumberText, poaYearLabel])
@@ -264,4 +266,253 @@ model IdempotencyRecord {
   @@unique([actorId, commandType, key])
   @@index([createdAt])
   @@map("idempotency_record")
+}
+
+enum MatterKind {
+  LITIGATION
+  CONSULTATION
+  CONTRACT
+  OTHER
+}
+
+enum MatterStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum MatterPartyRole {
+  CLIENT
+  OPPONENT
+  OTHER
+}
+
+enum ProceedingInstance {
+  FIRST_INSTANCE
+  APPEAL
+  CASSATION
+  OTHER
+}
+
+enum ProceedingStatus {
+  DRAFT
+  ACTIVE
+  JUDGMENT_ISSUED
+  SUSPENDED
+  CLOSED
+}
+
+enum ProceedingLegalCapacity {
+  PLAINTIFF
+  DEFENDANT
+  APPELLANT
+  APPELLEE
+  INTERVENOR
+  OTHER
+}
+
+enum ReferenceItemType {
+  COURT
+  PRACTICE_AREA
+  STORAGE_LOCATION
+}
+
+model Matter {
+  id              String            @id @default(uuid())
+  fileCode        String            @unique
+  title           String
+  kind            MatterKind
+  status          MatterStatus      @default(DRAFT)
+  practiceAreaId  String?
+  openingDate     DateTime?         @db.Date
+  closingDate     DateTime?         @db.Date
+  summary         String?
+  notes           String?
+  paperLocationId String?
+  version         Int               @default(1)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+  createdById     String
+  updatedById     String
+
+  practiceArea    PracticeArea?     @relation(fields: [practiceAreaId], references: [id])
+  paperLocation   StorageLocation?  @relation(fields: [paperLocationId], references: [id])
+  parties         MatterParty[]
+  proceedings     Proceeding[]
+  authorizations  MatterAuthorization[]
+
+  @@index([status])
+  @@index([kind])
+  @@index([practiceAreaId])
+  @@index([paperLocationId])
+  @@map("matter")
+}
+
+model MatterParty {
+  id                String            @id @default(uuid())
+  matterId          String
+  partyId           String
+  role              MatterPartyRole
+  isPrimaryContact  Boolean           @default(false)
+  billingEnabled    Boolean           @default(false)
+  notes             String?
+  version           Int               @default(1)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+  createdById       String
+  updatedById       String
+
+  matter            Matter            @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  party             Party             @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  proceedingParties ProceedingParty[]
+
+  @@unique([matterId, partyId, role])
+  @@index([partyId])
+  @@index([matterId])
+  @@map("matter_party")
+}
+
+model Proceeding {
+  id                 String             @id @default(uuid())
+  matterId           String
+  courtId            String
+  instance           ProceedingInstance
+  parentProceedingId String?
+  registerType       String?
+  circuit            String?
+  numberText         String?
+  yearLabel          String?
+  filingDate         DateTime?          @db.Date
+  claimAmount        String?
+  status             ProceedingStatus   @default(DRAFT)
+  version            Int                @default(1)
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+  createdById        String
+  updatedById        String
+
+  matter             Matter             @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  court              Court              @relation(fields: [courtId], references: [id])
+  parentProceeding   Proceeding?        @relation("ProceedingHierarchy", fields: [parentProceedingId], references: [id])
+  childProceedings   Proceeding[]       @relation("ProceedingHierarchy")
+  parties            ProceedingParty[]
+
+  @@index([matterId])
+  @@index([courtId])
+  @@index([parentProceedingId])
+  @@index([numberText, yearLabel])
+  @@map("proceeding")
+}
+
+model ProceedingParty {
+  id            String                  @id @default(uuid())
+  proceedingId  String
+  matterPartyId String
+  legalCapacity ProceedingLegalCapacity
+  notes         String?
+  createdAt     DateTime                @default(now()) @db.Timestamptz(3)
+  createdById   String
+
+  proceeding    Proceeding              @relation(fields: [proceedingId], references: [id], onDelete: Cascade)
+  matterParty   MatterParty             @relation(fields: [matterPartyId], references: [id], onDelete: Cascade)
+
+  @@unique([proceedingId, matterPartyId])
+  @@index([matterPartyId])
+  @@map("proceeding_party")
+}
+
+model MatterAuthorization {
+  id                String          @id @default(uuid())
+  matterId          String
+  powerOfAttorneyId String
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+  createdById       String
+
+  matter            Matter          @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  powerOfAttorney   PowerOfAttorney @relation(fields: [powerOfAttorneyId], references: [id], onDelete: Cascade)
+
+  @@unique([matterId, powerOfAttorneyId])
+  @@index([powerOfAttorneyId])
+  @@map("matter_authorization")
+}
+
+model OfficeSettings {
+  id          String   @id @default("singleton")
+  officeName  String
+  lawyerName  String?
+  phone       String?
+  email       String?
+  address     String?
+  taxNumber   String?
+  currency    String   @default("EGP")
+  timeZone    String   @default("Africa/Cairo")
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  updatedById String
+
+  @@map("office_settings")
+}
+
+model Court {
+  id           String       @id @default(uuid())
+  name         String
+  code         String?
+  circuitTypes String[]     @default([])
+  notes        String?
+  isActive     Boolean      @default(true)
+  version      Int          @default(1)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+  createdById  String
+  updatedById  String
+
+  proceedings  Proceeding[]
+
+  @@index([isActive, name])
+  @@map("court")
+}
+
+model PracticeArea {
+  id          String   @id @default(uuid())
+  name        String
+  code        String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  createdById String
+  updatedById String
+
+  matters     Matter[]
+
+  @@index([isActive, name])
+  @@map("practice_area")
+}
+
+model StorageLocation {
+  id          String   @id @default(uuid())
+  name        String
+  code        String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  createdById String
+  updatedById String
+
+  matters     Matter[]
+
+  @@index([isActive, name])
+  @@map("storage_location")
+}
+
+model FileCodeSequence {
+  year      Int      @id
+  nextVal   Int      @default(1)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("file_code_sequence")
 }
