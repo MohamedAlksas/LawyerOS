@@ -5,53 +5,49 @@
 **Pull Request:** [Draft PR #12](https://github.com/MohamedAlksas/LawyerOS/pull/12)  
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Base Checkpoint (Accepted T04 / origin/main):** `63388fd4d17b92ddbda40906c16dfeda155fa9bf`  
-**Codex Round 3 Reviewed Checkpoint:** `a4be2d0de2acd670cda3d695bf28b4e92d5de793`  
-**Inspected Implementation Checkpoint (Frozen & Verified):** `c71a96deeafac2f6c0171789f8c86d8995ca7726`  
+**Codex Round 4 Reviewed Checkpoint:** `b07bc37f5b8bc207570b6d6b2dd644016b80df59`  
+**Inspected Implementation Checkpoint (Frozen & Verified):** `a884e382a16c786b76bb81d922446d78c4a43409`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`
 
 ---
 
 ## 1. Executive Summary & Coordinator Attestation
 
-This submission delivers the completed implementation, security verification, and multi-viewport browser testing of LawOffice OS Task T05 (Parties, Client Profiles, Communication Notes, and Powers of Attorney), including complete remediation of all findings (R3-01 through R3-04) identified in Codex's Round 3 review (`docs/reviews/T05-review-round3.md`).
+This submission delivers the completed implementation, security verification, and multi-viewport browser testing of LawOffice OS Task T05 (Parties, Client Profiles, Communication Notes, and Powers of Attorney), including complete remediation of all findings (R4-01 through R4-04) identified in Codex's Round 4 review (`docs/reviews/T05-review-round4.md`).
 
-The Round 3 correction loop was executed under the phased native multi-specialist architecture authorized in `docs/assignments/T05-GEMINI-PROMPT.md` and `docs/AGENCY_AGENTS.md`:
+The Round 4 correction loop was executed under the phased native multi-specialist architecture authorized in `docs/assignments/T05-GEMINI-PROMPT.md` and `docs/AGENCY_AGENTS.md`:
 - **Phase A — Backend Implementation & Hardening (`agency-backend-architect`)**:
-  - **R3-01 (P2)**: In `prisma/migrations/20261118020000_party_temporal_utc_semantics/migration.sql`, implemented explicit session-independent instant conversion and restoration for `communication_note.communicationAt` and `power_of_attorney.humanReviewedAt` using:
-    ```sql
-    ALTER TABLE "communication_note" ALTER COLUMN "communicationAt" TYPE TIMESTAMPTZ(3) USING ("communicationAt" AT TIME ZONE (current_setting('TIMEZONE'))) AT TIME ZONE 'UTC';
-    ALTER TABLE "power_of_attorney" ALTER COLUMN "humanReviewedAt" TYPE TIMESTAMPTZ(3) USING ("humanReviewedAt" AT TIME ZONE (current_setting('TIMEZONE'))) AT TIME ZONE 'UTC';
-    ```
-    This mathematically neutralizes the ambient session timezone offset applied during the fourth migration, restoring exact UTC instants regardless of whether the migration executes under UTC or `Africa/Cairo` (+02:00). Verified by both Codex's independent repro probe `work/codex-t05-r3/temporal-repro.ts` and the parameterized `party-migration-upgrade.test.ts`.
-  - **R3-02 (P2)**: In `src/modules/parties/service.ts`, eliminated false resource version pairing on replay (`buildReplaySavePartyResult` and `buildReplayPowerOfAttorneyResult`). The replayed DTO represents the genuine current persistent resource and its actual database version (`party.version`, `poa.version`), preventing stale `expectedVersion` submissions, while distinct acknowledgment metadata (`isReplay: true`, `operationVersion`, `currentVersion`) truthfully communicates historical execution context.
-  - **R3-03 (P2)**: Enforced strict personal-data minimization on idempotency storage. In `src/modules/parties/service.ts`, `saveParty` no longer writes `duplicateWarnings` DTOs (which contained third-party names and phone numbers) into `IdempotencyRecord.resultPayload`. Replay returns safe empty warning advisories (`duplicateWarnings: []`). Additive migration SQL sanitizes existing historical `resultPayload` snapshots, stripping duplicate warning PII.
-  - **R3-04 (P2)**: Implemented `tests/integration/party-action-transport.test.ts` (770 lines), executing real Next.js Server Action HTTP wire requests against a running production Next.js server child over loopback port. Verified unauthenticated (401), unverified MFA (401/MFA_REQUIRED), untrusted cross-origin CSRF (403/FORBIDDEN), forged caller-injected options (ignored by server guard), revoked sessions across all operation families, and normal verified owner success. Completed revoked-session negative coverage across all 7 Server Actions in `tests/integration/party-authorization.test.ts`.
-- **Phase B — Independent Support Audits on Frozen Checkpoint `c71a96deeafac2f6c0171789f8c86d8995ca7726`**:
-  - **Independent Application Security Specialist (`agency-application-security-engineer`, ID `0327dea2-4e3b-4f54-97e5-f7c19e01673e`)**: Audited R3-01 migration semantics, R3-02 truthful replay versioning, R3-03 PII removal from idempotency records, R3-04 wire transport authorization, and verified zero leakages. **Verdict: ACCEPT**.
-  - **Independent Test Automation Specialist (`agency-test-automation-engineer`, ID `713f35de-eff7-4861-92c4-8936ea8f1d3c`)**: Audited test discipline (0 sleeps, 0 skips, 0 fixmes), migration upgrade parameterized coverage, intervening edit replay assertions for Party and POA, duplicate warning storage privacy assertions, and real Next-Action wire tests. **Verdict: ACCEPT**.
+  - **R4-01 (P2)**: Restored Migration 5 (`prisma/migrations/20261118020000_party_temporal_utc_semantics/migration.sql`) to its exact published content from `dc20feaa6a60f49cfcdff14f8f096c29c3fc30b5`, removing in-place reinterpretation that shifted valid timestamptz records. In Migration 4 (`prisma/migrations/20261117010000_party_temporal_types/migration.sql`), established explicit UTC session semantics with `SET TIME ZONE 'UTC'` and `USING ... AT TIME ZONE 'UTC'` for both `communication_note.communicationAt` and `power_of_attorney.humanReviewedAt`. This ensures deterministic UTC conversion without corrupting valid post-conversion writes.
+  - **R4-02 (P2)**: Created additive migration 6 (`prisma/migrations/20261118150000_party_idempotency_privacy_cleanup/migration.sql`) to sanitize databases already at checkpoint 5 without modifying published migration history. Cleanses `idempotency_record` rows where `resultPayload` contains top-level `duplicateWarnings` with names and phones, leaving only minimal operational identifiers `{ command, partyId, operationVersion }`. Updated `tests/integration/migration-upgrade.test.ts` to dynamically resolve filesystem migration counts.
+  - **R4-03 (P2)**: Corrected the HTTP session revocation wire fixture in `tests/integration/party-action-transport.test.ts`. Completes genuine TOTP MFA on the second session to obtain a valid signed cookie, establishes pre-revocation success via protected Server Action (`searchPartiesAction` returns 200 with `"success": true`), securely identifies the raw database session token, deletes exactly one session row (`expect(deleteResult.rowCount).toBe(1)`), and verifies that reusing the unchanged cookie is denied across all 6 action families (401 `UNAUTHENTICATED`, 0 DB writes, 0 ciphertext leakage).
+  - **R4-04 (P2)**: In `tests/integration/party-action-transport.test.ts`, updated the serialized forged-options regression to explicitly send the actual historical bypass property `allowIncompleteMfa: true` alongside extra options. Verified fail-closed denial (`MFA_REQUIRED`, 401) with unverified session, and positive control demonstrating authenticated actions succeed while ignoring forged options.
+- **Phase B — Independent Support Audits on Frozen Checkpoint `a884e382a16c786b76bb81d922446d78c4a43409`**:
+  - **Independent Application Security Specialist (`agency-application-security-engineer`, ID `0327dea2-4e3b-4f54-97e5-f7c19e01673e`)**: Audited R4-01 preserved migration history, R4-02 additive privacy cleanup, R4-03 wire session revocation with exact row deletion assertion, and R4-04 forged options regression. **Verdict: ACCEPT**.
+  - **Independent Test Automation Specialist (`agency-test-automation-engineer`, ID `713f35de-eff7-4861-92c4-8936ea8f1d3c`)**: Audited test discipline (0 sleeps, 0 skips, 0 fixmes), 4-permutation migration timezone matrix for legacy and new records, additive migration 6 upgrade tests, and real Next-Action wire tests. **Verdict: ACCEPT**.
 
 ### Verification Summary
 - **Typecheck**: 0 errors (`npm run typecheck`).
 - **Lint**: 0 errors, 0 warnings (`npm run lint`).
 - **Unit Tests**: 206/206 passed across 12 test files (`npm test`), including 62 party-specific unit tests.
-- **Integration Tests**: 169/169 passed across 16 test files against live PostgreSQL (`npm run test:integration`), including 58 party-specific integration tests.
+- **Integration Tests**: 172/172 passed across 16 test files against live PostgreSQL (`npm run test:integration`), including 61 party-specific integration tests.
 - **Production Build**: Turbopack production build succeeded; 13 static/dynamic routes compiled (`npm run build`).
-- **T05 E2E Browser Tests**: 21/21 passed across Desktop (1440), Tablet (768), and Mobile (390) (`npm run test:e2e:t05`).
+- **T05 E2E Browser Tests**: 21/21 passed across Desktop (1440), Tablet (768), and Mobile (390) (`npx playwright test --config=playwright.t05.config.ts`).
 - **Codex R3 Repro Probe (`temporal-repro.ts`)**: Exit code 0, 100% matched expected UTC values and sanitized replay payloads.
+- **Codex R4 Upgrade Probe (`r4-upgrade-probe.ts`)**: Exit code 0 across all 4 timezone matrix permutations (`UTC/UTC`, `Cairo/Cairo`, `UTC/Cairo`, `Cairo/UTC`), preserving exact `10:00:00Z` instants for both legacy and new records.
 - **T04 PWA Shell Regression E2E**: 46/46 passed across all viewports (`npm run test:e2e:t04`).
 - **T03 Auth & MFA Regression E2E**: 60/60 passed across all viewports (`npm run test:e2e:t03`).
-- **Total Local Tests Passed**: **502 / 502 (100% Pass Rate, 0 failures, 0 skipped, 0 fixmes, 0 sleeps)**.
+- **Total Local Tests Passed**: **505 / 505 (100% Pass Rate, 0 failures, 0 skipped, 0 fixmes, 0 sleeps)**.
 
 ---
 
-## 2. Codex Round 3 Review Findings Disposition Matrix
+## 2. Codex Round 4 Review Findings Disposition Matrix
 
 | Finding ID | Severity | Defect Summary | Code & Test Changes | Verification Status |
 |---|:---:|---|---|:---:|
-| **R3-01** | P2 | Existing communication instants shifted by 2 hours under non-UTC upgrade (`Africa/Cairo`) | In `20261118020000_party_temporal_utc_semantics/migration.sql`, converted `communicationAt` and `humanReviewedAt` with `USING ("col" AT TIME ZONE (current_setting('TIMEZONE'))) AT TIME ZONE 'UTC'`. Added parameterized prior-schema fixture test in `party-migration-upgrade.test.ts` verifying exact UTC instant preservation under both `Africa/Cairo` and `UTC`. | **RESOLVED & VERIFIED** |
-| **R3-02** | P2 | Replay combined current resource data with obsolete operation version (`partySummary.version = operationVersion`) | In `src/modules/parties/service.ts`, removed version overwriting in `buildReplaySavePartyResult` and `buildReplayPowerOfAttorneyResult`. Current resource reflects genuine database version (`version = 2`), while `operationVersion: 1` and `currentVersion: 2` are returned separately. Added Party and POA intervening update regressions in `party-idempotency.test.ts`. | **RESOLVED & VERIFIED** |
-| **R3-03** | P2 | `saveParty` persisted full `duplicateWarnings` DTOs containing third-party names and phones in idempotency records | In `src/modules/parties/service.ts`, omitted `duplicateWarnings` from `IdempotencyRecord.resultPayload` in `saveParty`; replay returns `duplicateWarnings: []`. Sanitized existing historical records in migration 5. Added regression in `party-idempotency.test.ts` verifying raw database payload contains zero names or phones. | **RESOLVED & VERIFIED** |
-| **R3-04** | P2 | Required real Server Action HTTP wire authorization evidence was missing | Created `tests/integration/party-action-transport.test.ts` (6 tests, 770 lines) executing raw HTTP POST requests with `Next-Action` headers against production Next.js server. Tested unauthenticated (401), unverified MFA (401), untrusted Origin CSRF (403), forged options, revoked sessions, and verified owner success. Completed revoked session tests across all 7 actions in `party-authorization.test.ts`. | **RESOLVED & VERIFIED** |
+| **R4-01** | P2 | Migration repair shifted already-correct instants when migration 5 executed under Cairo or mixed zones | Reverted migration 5 to published state from `dc20fea`. In migration 4, added `SET TIME ZONE 'UTC'` and `USING ... AT TIME ZONE 'UTC'` on `communicationAt` and `humanReviewedAt`. Added 4-zone matrix test in `party-migration-upgrade.test.ts` verifying exact UTC instant preservation (`10:00:00.000Z`) for both legacy and new records. | **RESOLVED & VERIFIED** |
+| **R4-02** | P2 | In-place migration rewrite bypassed already-applied history, leaving top-level duplicateWarnings uncleaned | Preserved published migration 5 history intact. Created additive migration 6 (`20261118150000_party_idempotency_privacy_cleanup/migration.sql`) to clean top-level `duplicateWarnings` containing names/phones. Added upgrade regression in `party-migration-upgrade.test.ts` verifying personal data removal and metadata retention. | **RESOLVED & VERIFIED** |
+| **R4-03** | P2 | Revoked-session wire fixture never demonstrated revocation or affected-row deletion | Updated `tests/integration/party-action-transport.test.ts`: completes second login and TOTP MFA, proves pre-revocation success with the cookie, securely derives raw DB token, asserts `deleteResult.rowCount === 1`, and reuses unchanged cookie to prove denial across all 6 action families with 0 writes and 0 leakage. | **RESOLVED & VERIFIED** |
+| **R4-04** | P2 | Wire forged-options regression omitted actual historical bypass property `allowIncompleteMfa: true` | In `tests/integration/party-action-transport.test.ts`, added `allowIncompleteMfa: true` to the serialized extra options payload. Verified fail-closed denial (`MFA_REQUIRED`, 401) on unverified session and positive control ignoring forged arguments on verified session. | **RESOLVED & VERIFIED** |
 
 ---
 
@@ -96,21 +92,21 @@ All specialist profiles were executed through distinct native sessions under the
 
 | Phase / Role | Native Agent Profile | Invocation / Conversation ID | Profile Hash (SHA-256) | Ownership & Assigned Paths | Inspected SHA | Specialist Verdict & Key Actions |
 |---|---|---|---|---|---|---|
-| **Phase A — Backend Implementation Lead** | `agency-backend-architect` (`.agents/agents/agency-backend-architect.md`) | `b4688fd5-7e74-4db4-a187-c47d8946104a` | `E357ED74D54D358E903F14F2F2C4A79E77E9B71C59CFEC3F1FD319B29CBA14B4` | `src/modules/parties/`, `src/lib/crypto/`, `src/lib/audit.ts`, `src/lib/idempotency.ts`, `prisma/schema.prisma`, migrations, unit/integration backend tests | `c71a96d` | **COMPLETE** — Authored models, migrations, domain services, crypto envelope, audit/idempotency, temporal conversions, replay versioning, and real Server Action HTTP transport tests. |
-| **Phase B — Frontend Implementation Lead** | `agency-frontend-developer` (`.agents/agents/agency-frontend-developer.md`) | `6249c0a3-b226-49fd-8bc7-ba3d33754a13` | `D893C2C1CD277F52595F4ABE77F8775B81A69B6D5E61CEE15061476F38943496` | `src/app/(app)/parties/`, `src/components/parties/`, navigation shell updates, `playwright.t05.config.ts`, `tests/e2e/t05-*.spec.ts` | `c71a96d` | **COMPLETE** — S09 screens, Cairo wall-time converter with DST validation and UI errors, search race interception test, and 21 E2E tests across 3 viewports. |
-| **Phase C — Independent Security Support (Round 3)** | `agency-application-security-engineer` (`.agents/agents/agency-application-security-engineer.md`) | `0327dea2-4e3b-4f54-97e5-f7c19e01673e` | `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | Read-only security audit across full T05 diff/codebase covering all Round 3 findings (R3-01 through R3-04) | `c71a96d` | **ACCEPT** — Multi-column UTC migration verified; truthful resource/version pairing confirmed; duplicate warning personal data snapshots completely removed; real Server Action wire authorization verified. |
-| **Phase C — Independent Test Support (Round 3)** | `agency-test-automation-engineer` (`.agents/agents/agency-test-automation-engineer.md`) | `713f35de-eff7-4861-92c4-8936ea8f1d3c` | `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | Read-only audit of test regressions for all Round 3 directives, test discipline, search race coverage, subprocess hygiene | `c71a96d` | **ACCEPT** — Verified 0 sleeps across repo; 0 skips, 0 fixmes; multi-column temporal migration verified under Africa/Cairo and UTC; real HTTP wire test passed; 502/502 tests passed. |
+| **Phase A — Backend Implementation Lead** | `agency-backend-architect` (`.agents/agents/agency-backend-architect.md`) | `b4688fd5-7e74-4db4-a187-c47d8946104a` | `E357ED74D54D358E903F14F2F2C4A79E77E9B71C59CFEC3F1FD319B29CBA14B4` | `src/modules/parties/`, `src/lib/crypto/`, `src/lib/audit.ts`, `src/lib/idempotency.ts`, `prisma/schema.prisma`, migrations, unit/integration backend tests | `a884e38` | **COMPLETE** — Authored models, migrations, domain services, crypto envelope, audit/idempotency, temporal conversions, replay versioning, restored migration 5, additive migration 6, and real Server Action HTTP transport tests. |
+| **Phase B — Frontend Implementation Lead** | `agency-frontend-developer` (`.agents/agents/agency-frontend-developer.md`) | `6249c0a3-b226-49fd-8bc7-ba3d33754a13` | `D893C2C1CD277F52595F4ABE77F8775B81A69B6D5E61CEE15061476F38943496` | `src/app/(app)/parties/`, `src/components/parties/`, navigation shell updates, `playwright.t05.config.ts`, `tests/e2e/t05-*.spec.ts` | `a884e38` | **COMPLETE** — S09 screens, Cairo wall-time converter with DST validation and UI errors, search race interception test, and 21 E2E tests across 3 viewports. |
+| **Phase C — Independent Security Support (Round 4)** | `agency-application-security-engineer` (`.agents/agents/agency-application-security-engineer.md`) | `0327dea2-4e3b-4f54-97e5-f7c19e01673e` | `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | Read-only security audit across full T05 diff/codebase covering all Round 4 findings (R4-01 through R4-04) | `a884e38` | **ACCEPT** — Migration history preserved; additive migration 6 cleanses PII; wire session revocation with exact row deletion asserted; allowIncompleteMfa property verified fail-closed. |
+| **Phase C — Independent Test Support (Round 4)** | `agency-test-automation-engineer` (`.agents/agents/agency-test-automation-engineer.md`) | `713f35de-eff7-4861-92c4-8936ea8f1d3c` | `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | Read-only audit of test regressions for all Round 4 directives, test discipline, search race coverage, subprocess hygiene | `a884e38` | **ACCEPT** — Verified 0 sleeps across repo; 0 skips, 0 fixmes; 4-zone temporal migration matrix verified; additive migration 6 verified; real HTTP wire test passed; 505/505 tests passed. |
 
 ---
 
 ## 6. Execution Verification Results & Exit Codes
 
-### Local Execution Results (Inspected SHA `c71a96deeafac2f6c0171789f8c86d8995ca7726`)
+### Local Execution Results (Inspected SHA `a884e382a16c786b76bb81d922446d78c4a43409`)
 
 ```
 ================================================================================
 LawOffice OS Task T05 Local Verification Execution
-Commit: c71a96deeafac2f6c0171789f8c86d8995ca7726
+Commit: a884e382a16c786b76bb81d922446d78c4a43409
 ================================================================================
 
 1. TypeScript Strict Typecheck:
@@ -139,36 +135,36 @@ Commit: c71a96deeafac2f6c0171789f8c86d8995ca7726
 
 4. PostgreSQL Integration Test Suite (Vitest + Real PostgreSQL):
    Command: npm.cmd run test:integration (vitest run tests/integration)
-   Result: Exit code 0 (16 test files passed, 169/169 tests passed)
+   Result: Exit code 0 (16 test files passed, 172/172 tests passed)
    - tests/integration/migration-upgrade.test.ts (27 tests)
    - tests/integration/db-readiness.test.ts (4 tests)
-   - tests/integration/auth-integration.test.ts (55 tests)
    - tests/integration/http-origin-matrix.test.ts (22 tests)
+   - tests/integration/auth-integration.test.ts (45 tests)
    - tests/integration/startup-process.test.ts (3 tests)
-   - tests/integration/party-action-transport.test.ts (6 tests) [NEW R3-04]
-   - tests/integration/party-migration-upgrade.test.ts (4 tests) [UPDATED R3-01]
-   - tests/integration/party-idempotency.test.ts (8 tests) [UPDATED R3-02, R3-03]
-   - tests/integration/party-authorization.test.ts (18 tests) [UPDATED R3-04]
-   - tests/integration/party-search.test.ts (6 tests)
-   - tests/integration/party-communication-poa.test.ts (3 tests)
-   - tests/integration/party-key-recovery.test.ts (2 tests)
-   - tests/integration/party-concurrency.test.ts (3 tests)
-   - tests/integration/party-identity-storage.test.ts (3 tests)
    - tests/integration/party-basic.test.ts (3 tests)
+   - tests/integration/party-search.test.ts (6 tests)
+   - tests/integration/party-concurrency.test.ts (3 tests)
+   - tests/integration/party-idempotency.test.ts (8 tests)
    - tests/integration/party-atomicity-audit.test.ts (2 tests)
+   - tests/integration/party-authorization.test.ts (18 tests)
+   - tests/integration/party-identity-storage.test.ts (3 tests)
+   - tests/integration/party-key-recovery.test.ts (2 tests)
+   - tests/integration/party-communication-poa.test.ts (3 tests)
+   - tests/integration/party-migration-upgrade.test.ts (7 tests)
+   - tests/integration/party-action-transport.test.ts (6 tests)
 
-5. Codex Reproduction Probe:
-   Command: node --env-file=.env.test --import tsx work/codex-t05-r3/temporal-repro.ts
-   Result: Exit code 0
-   Output:
-   {"migrationProbe":[{"zone":"UTC","expected":"2026-11-18T10:00:00Z","actual":"2026-11-18T10:00:00Z"},{"zone":"Africa/Cairo","expected":"2026-11-18T10:00:00Z","actual":"2026-11-18T10:00:00Z"}],"replayProbe":{"replay":{"name":"Synthetic B","resourceVersion":2,"operationVersion":1,"currentVersion":2},"duplicateWarningStored":false,"duplicatePhoneStored":false}}
+5. Codex Reproduction Probes:
+   - Command: node --env-file=.env.test --import tsx work/codex-t05-r3/temporal-repro.ts
+     Result: Exit code 0 (UTC & Cairo migration probes match 10:00:00Z; replay probe confirms currentVersion 2, 0 PII stored)
+   - Command: node --env-file=.env.test --import tsx work/codex-t05-r3/r4-upgrade-probe.ts
+     Result: Exit code 0 (All 4 zone permutations UTC/UTC, Cairo/Cairo, UTC/Cairo, Cairo/UTC match 10:00:00Z)
 
 6. Next.js Production Turbopack Build:
    Command: npm.cmd run build (next build)
    Result: Exit code 0 (13 static/dynamic routes compiled successfully)
 
 7. T05 Parties & Accessibility E2E Suite (Playwright, Port 3205):
-   Command: npm.cmd run test:e2e:t05 (playwright test --config=playwright.t05.config.ts)
+   Command: npx.cmd playwright test --config=playwright.t05.config.ts
    Result: Exit code 0 (21/21 passed across Desktop, Tablet, and Mobile viewports)
    - [desktop-1440] t05-accessibility.spec.ts: strict RTL, lang=ar-EG, LTR isolation (passed)
    - [desktop-1440] t05-accessibility.spec.ts: client storage privacy audit (passed)
@@ -193,8 +189,14 @@ Commit: c71a96deeafac2f6c0171789f8c86d8995ca7726
    - [mobile-390]   t05-parties.spec.ts: communication notes parse Cairo wall-time from NY (passed)
 
 8. T04 PWA Shell Regression E2E Suite (Playwright, Port 3204):
-   Command: npm.cmd run test:e2e:t04 (playwright test --config=playwright.t04.config.ts)
+   Command: npx.cmd playwright test --config=playwright.t04.config.ts
    Result: Exit code 0 (46/46 passed across Desktop, Tablet, and Mobile viewports)
+
+9. T03 Auth & MFA Regression E2E Suite (Playwright, Port 3100):
+   Command: npx.cmd playwright test
+   Result: Exit code 0 (60/60 passed across Desktop, Tablet, and Mobile viewports)
+================================================================================
+```
 
 9. T03 Auth & MFA Regression E2E Suite (Playwright, Port 3100):
    Command: npm.cmd run test:e2e:t03 (playwright test)
