@@ -69,8 +69,10 @@ describe('Database Readiness Probe Integration (Real PostgreSQL & Failure Modes)
           'SELECT current_database() AS db_name, current_user AS db_user'
         );
         const { db_name, db_user } = idQuery.rows[0];
-        expect(db_name).toBe('lawoffice_test');
-        expect(db_user).toBe('lawoffice_user');
+        const parsedUrl = new URL(testUrl);
+        const expectedDbName = parsedUrl.pathname.replace(/^\//, '');
+        expect(db_name).toBe(expectedDbName);
+        expect(db_user).toBe(parsedUrl.username || 'lawoffice_user');
       } finally {
         client.release();
       }

@@ -26,6 +26,7 @@ export const T04_TEST_IDS = {
   errorRetryButton: 'error-retry-button',
   sessionExpiredAlert: 'session-expired-alert',
   navHome: 'nav-link-home',
+  navParties: 'nav-link-parties',
   navSecurity: 'nav-link-security',
   navLogout: 'nav-button-logout',
 } as const;
@@ -36,24 +37,30 @@ export const T04_ROUTES = {
   home: '/',
   login: '/login',
   verify: '/verify',
+  parties: '/parties',
   security: '/settings/security',
   offline: '/offline',
   offlineHtml: '/offline.html',
   manifest: '/manifest.webmanifest',
 } as const;
 
-/** Routes that exist and are reachable in T04 (section 2.1). */
+/** Routes that exist and are reachable in T04/T05 (section 2.1). */
 export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.home,
   T04_ROUTES.login,
   T04_ROUTES.verify,
+  T04_ROUTES.parties,
   T04_ROUTES.security,
   T04_ROUTES.offline,
   T04_ROUTES.offlineHtml,
 ];
 
 /** The only destinations the navigation shell may expose (section 4.2). */
-export const T04_ALLOWED_NAV_HREFS: readonly string[] = [T04_ROUTES.home, T04_ROUTES.security];
+export const T04_ALLOWED_NAV_HREFS: readonly string[] = [
+  T04_ROUTES.home,
+  T04_ROUTES.parties,
+  T04_ROUTES.security,
+];
 
 /**
  * Business modules that are strictly unbuilt in T04 (section 2.2). The shell

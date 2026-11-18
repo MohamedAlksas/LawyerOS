@@ -10,9 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts",
+    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts && playwright test --config=playwright.t05.config.ts",
     "test:e2e:t03": "playwright test",
     "test:e2e:t04": "playwright test --config=playwright.t04.config.ts",
+    "test:e2e:t05": "playwright test --config=playwright.t05.config.ts",
     "postinstall": "prisma generate",
     "auth:provision-owner": "tsx src/cli/provision-owner.ts"
   },
