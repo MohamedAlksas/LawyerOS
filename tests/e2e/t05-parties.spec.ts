@@ -11,6 +11,11 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
   test.beforeAll(async () => {
     setupTestEncryptionKeys();
     owner = await seedT04Owner({ label: 'parties-e2e', name: 'أحمد المحامي الشريك' });
+    await prisma.party.deleteMany({
+      where: {
+        primaryPhone: { in: ['01012345678', '01022223333', '01033334444', '01055556666'] },
+      },
+    });
   });
 
   test.afterAll(async () => {
@@ -20,7 +25,6 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     if (owner?.id) {
       await deleteT04Owner(owner.id);
     }
-    await prisma.$disconnect();
   });
 
   test('full operational party lifecycle journey @parties', async ({ page }) => {
@@ -271,6 +275,7 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await expect(searchInput).toBeVisible();
 
     let postCount = 0;
+    let query1Fulfilled = false;
     await page.route('**/parties**', async (route) => {
       if (route.request().method() === 'POST') {
         postCount++;
@@ -279,6 +284,7 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
           await new Promise((r) => setTimeout(r, 400));
           const response = await route.fetch();
           await route.fulfill({ response });
+          query1Fulfilled = true;
         } else {
           const response = await route.fetch();
           await route.fulfill({ response });
@@ -291,7 +297,6 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     // 1. Dispatch Query 1 ("بطيء")
     await searchInput.fill('بطيء');
     await page.getByTestId('party-search-submit').click();
-    await page.waitForTimeout(50);
 
     // 2. Dispatch Query 2 ("سريع")
     await searchInput.fill('سريع');
@@ -303,8 +308,8 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
       .filter({ visible: true });
     await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
 
-    // Wait a brief moment to ensure late Query 1 response does not overwrite fastParty
-    await page.waitForTimeout(500);
+    // Await completion of late Query 1 deterministically via route fulfillment flag
+    await expect.poll(() => query1Fulfilled, { timeout: 10_000 }).toBe(true);
 
     // 4. Assert UI still displays Party 2 (Fast) and has NOT been overwritten by Party 1 (Slow)
     await expect(fastPartyEntry).toBeVisible();
