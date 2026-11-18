@@ -159,18 +159,13 @@ async function buildReplaySavePartyResult(
       : typeof payload.version === 'number'
       ? payload.version
       : party.version;
-  const storedWarnings = Array.isArray(payload.duplicateWarnings)
-    ? (payload.duplicateWarnings as DuplicateWarningDTO[])
-    : [];
 
   const partySummary = mapPartySummary(party);
-  // Guarantee callers cannot misrepresent later edits as the outcome of the original save (R2-04)
-  partySummary.version = operationVersion;
 
   return {
     success: true,
     party: partySummary,
-    duplicateWarnings: storedWarnings,
+    duplicateWarnings: [],
     isReplay: true,
     operationVersion,
     currentVersion: party.version,
@@ -250,7 +245,7 @@ async function buildReplayPowerOfAttorneyResult(
     humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
     humanReviewedById: poa.humanReviewedById,
     notes: poa.notes,
-    version: operationVersion,
+    version: poa.version,
     createdAt: poa.createdAt.toISOString(),
     updatedAt: poa.updatedAt.toISOString(),
     isReplay: true,
@@ -509,7 +504,6 @@ export async function saveParty(
         command: 'saveParty',
         partyId: targetPartyId,
         operationVersion: resultingParty.version,
-        duplicateWarnings,
       },
     });
 

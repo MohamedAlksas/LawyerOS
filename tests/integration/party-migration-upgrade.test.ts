@@ -224,7 +224,10 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
     }
   }, 60000);
 
-  it('preserves exact UTC instants when applying additive migration under non-UTC session (Africa/Cairo) and sanitizes historical idempotency snapshots (R2-06, Residual STD-01)', async () => {
+  it.each([
+    { zone: 'Africa/Cairo', description: 'non-UTC timezone (Africa/Cairo)' },
+    { zone: 'UTC', description: 'UTC timezone' },
+  ])('preserves exact UTC temporal instants across communication, review, and party columns under $description (R3-01)', async ({ zone }) => {
     const dedicated = await createDedicatedTestDatabase();
 
     try {
@@ -233,20 +236,28 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         const fs = await import('fs');
         const path = await import('path');
 
-        // Apply migrations 1 through 4
+        // Apply migrations 1 through 3 to create prior T05 schema
         const mig1 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261111000000_init_auth/migration.sql'), 'utf8');
         await client.query(mig1);
         const mig2 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261114000000_credential_version/migration.sql'), 'utf8');
         await client.query(mig2);
         const mig3 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261117000000_parties_communication_poa/migration.sql'), 'utf8');
         await client.query(mig3);
-        const mig4 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261117010000_party_temporal_types/migration.sql'), 'utf8');
-        await client.query(mig4);
 
-        // Populate test party with known instant
+        // Populate test party, communication note, and power of attorney with known instants
         await client.query(`
           INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
           VALUES ('party-tz-test-1', 'PERSON', 'عميل اختبار التوقيت', 'عميل اختبار التوقيت', 1, 'system', 'system', '2026-11-18 10:00:00'::timestamp, '2026-11-18 10:00:00'::timestamp);
+        `);
+
+        await client.query(`
+          INSERT INTO "communication_note" ("id", "partyId", "communicationAt", "channel", "summary", "createdById")
+          VALUES ('note-tz-test-1', 'party-tz-test-1', '2026-11-18 10:00:00'::timestamp, 'PHONE', 'ملاحظة اختبار التوقيت', 'system');
+        `);
+
+        await client.query(`
+          INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "humanReviewedAt", "humanReviewedById", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ('poa-tz-test-1', 'party-tz-test-1', '101/أ', '2026', 'مكتب توثيق الأهرام', 'GENERAL', 'VALID', '2026-11-18 10:00:00'::timestamp, 'system', 'system', 'system', '2026-11-18 10:00:00'::timestamp, '2026-11-18 10:00:00'::timestamp);
         `);
 
         // Populate historical idempotency record containing sensitive DTO snapshot
@@ -261,31 +272,45 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
             'COMPLETED',
             'Party',
             'party-tz-test-1',
-            '{"party": {"id": "party-tz-test-1", "name": "عميل اختبار التوقيت", "address": "عنوان سكني سري للغاية", "notes": "ملاحظات قضائية سرية جداً", "version": 3}, "duplicateWarnings": []}'::jsonb,
+            '{"party": {"id": "party-tz-test-1", "name": "عميل اختبار التوقيت", "address": "عنوان سكني سري للغاية", "notes": "ملاحظات قضائية سرية جداً", "version": 3}, "duplicateWarnings": [{"name": "طرف مكرر", "primaryPhone": "01012345678"}]}'::jsonb,
             '2026-11-18 10:00:00'::timestamp
           );
         `);
 
-        // Set non-UTC session TimeZone: Africa/Cairo (+02:00 in winter)
-        await client.query("SET TIME ZONE 'Africa/Cairo'");
+        // Set session TimeZone BEFORE executing the affected migrations
+        await client.query(`SET TIME ZONE '${zone}'`);
 
-        // Execute the additive migration SQL under this non-UTC connection
+        // Execute migration 4 and 5 in sequence under this session timezone
+        const mig4 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261117010000_party_temporal_types/migration.sql'), 'utf8');
+        await client.query(mig4);
+
         const mig5 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261118020000_party_temporal_utc_semantics/migration.sql'), 'utf8');
         await client.query(mig5);
 
-        // 1. Verify exact UTC instant preservation: must remain 10:00:00 UTC (not shifted by Cairo +02:00)
-        const partyTzRes = await client.query(`
-          SELECT "createdAt" AS utc_created,
-                 to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS utc_formatted
+        // 1. Verify exact UTC instant preservation across party, communication note, and POA:
+        // All must remain 10:00:00 UTC (not shifted by Cairo +02:00)
+        const partyRes = await client.query(`
+          SELECT to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
           FROM "party"
           WHERE id = 'party-tz-test-1'
         `);
-        expect(partyTzRes.rows).toHaveLength(1);
-        const isoCreated = new Date(partyTzRes.rows[0].utc_created).toISOString();
-        expect(isoCreated).toBe('2026-11-18T10:00:00.000Z');
-        expect(partyTzRes.rows[0].utc_formatted).toBe('2026-11-18T10:00:00.000Z');
+        expect(partyRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
 
-        // 2. Verify historical idempotency snapshot sanitization (Residual STD-01)
+        const commRes = await client.query(`
+          SELECT to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
+          FROM "communication_note"
+          WHERE id = 'note-tz-test-1'
+        `);
+        expect(commRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
+
+        const poaRes = await client.query(`
+          SELECT to_char("humanReviewedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
+          FROM "power_of_attorney"
+          WHERE id = 'poa-tz-test-1'
+        `);
+        expect(poaRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
+
+        // 2. Verify historical idempotency snapshot sanitization (Residual STD-01, R3-03)
         const idempRes = await client.query(`
           SELECT "resultPayload"
           FROM "idempotency_record"
@@ -299,8 +324,11 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         expect(stored.party).toBeUndefined();
         expect(stored.address).toBeUndefined();
         expect(stored.notes).toBeUndefined();
+        expect(stored.duplicateWarnings).toBeUndefined();
         expect(JSON.stringify(stored)).not.toContain('عنوان سكني سري للغاية');
         expect(JSON.stringify(stored)).not.toContain('ملاحظات قضائية سرية جداً');
+        expect(JSON.stringify(stored)).not.toContain('طرف مكرر');
+        expect(JSON.stringify(stored)).not.toContain('01012345678');
       } finally {
         client.release();
       }

@@ -220,7 +220,7 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
     expect(p2.party.name).toBe('عميل المالك الثاني');
   });
 
-  it('replay after intervening edit returns operationVersion: 1 and currentVersion: 2 without misrepresenting state (R2-04)', async () => {
+  it('replay after intervening edit keeps truthful resource/version pairing alongside operation acknowledgment (R3-02)', async () => {
     const key1 = `idem-edit-orig-${crypto.randomUUID()}`;
     const key2 = `idem-edit-second-${crypto.randomUUID()}`;
 
@@ -232,6 +232,7 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
     });
     partyIds.push(original.party.id);
     expect(original.party.version).toBe(1);
+    expect(original.party.name).toBe('طرف لاختبار التعديل المتداخل');
 
     // 2. Perform intervening update under key2 (advances to version 2)
     const updated = await saveParty(actor1, {
@@ -242,6 +243,7 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
       idempotencyKey: key2,
     });
     expect(updated.party.version).toBe(2);
+    expect(updated.party.name).toBe('طرف بعد التعديل المتداخل');
 
     // 3. Replay original key1
     const replayed = await saveParty(actor1, {
@@ -252,9 +254,106 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
     expect(replayed.isReplay).toBe(true);
     expect(replayed.operationVersion).toBe(1);
     expect(replayed.currentVersion).toBe(2);
-    // Callers cannot misrepresent later edits as the outcome of the original save
-    expect(replayed.party.version).toBe(1);
+    // Resource version and current content stay truthful together (R3-02)
     expect(replayed.party.id).toBe(original.party.id);
+    expect(replayed.party.name).toBe('طرف بعد التعديل المتداخل');
+    expect(replayed.party.version).toBe(2);
+
+    // 4. Also verify POA intervening edit replay keeps truthful version and separate acknowledgment
+    const poaKey1 = `idem-poa-orig-${crypto.randomUUID()}`;
+    const poaKey2 = `idem-poa-second-${crypto.randomUUID()}`;
+
+    const originalPoa = await savePowerOfAttorney(actor1, {
+      partyId: original.party.id,
+      poaNumberText: '500/أ',
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب مصر الجديدة',
+      poaType: 'GENERAL',
+      notes: 'ملاحظات أولية',
+      idempotencyKey: poaKey1,
+    });
+    expect(originalPoa.version).toBe(1);
+
+    const updatedPoa = await savePowerOfAttorney(actor1, {
+      id: originalPoa.id,
+      partyId: original.party.id,
+      poaNumberText: '500/أ',
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب مصر الجديدة',
+      poaType: 'GENERAL',
+      notes: 'ملاحظات معدلة بعد مراجعة الأستاذ',
+      expectedVersion: 1,
+      idempotencyKey: poaKey2,
+    });
+    expect(updatedPoa.version).toBe(2);
+    expect(updatedPoa.notes).toBe('ملاحظات معدلة بعد مراجعة الأستاذ');
+
+    const replayedPoa = await savePowerOfAttorney(actor1, {
+      partyId: original.party.id,
+      poaNumberText: '500/أ',
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب مصر الجديدة',
+      poaType: 'GENERAL',
+      notes: 'ملاحظات أولية',
+      idempotencyKey: poaKey1,
+    });
+    expect(replayedPoa.isReplay).toBe(true);
+    expect(replayedPoa.operationVersion).toBe(1);
+    expect(replayedPoa.currentVersion).toBe(2);
+    expect(replayedPoa.version).toBe(2);
+    expect(replayedPoa.notes).toBe('ملاحظات معدلة بعد مراجعة الأستاذ');
+  });
+
+  it('guarantees zero duplicate-warning personal data snapshots stored in idempotency records (R3-03)', async () => {
+    const p1Key = `dup-p1-${crypto.randomUUID()}`;
+    const p1 = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'أحمد محمود السيد',
+      primaryPhone: '01099887766',
+      idempotencyKey: p1Key,
+    });
+    partyIds.push(p1.party.id);
+
+    // Save second party with same phone — triggers duplicate advisory warning
+    const p2Key = `dup-p2-${crypto.randomUUID()}`;
+    const p2 = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'طرف جديد بنفس الهاتف',
+      primaryPhone: '01099887766',
+      idempotencyKey: p2Key,
+    });
+    partyIds.push(p2.party.id);
+
+    // Verify initial save returned advisory warnings
+    expect(p2.duplicateWarnings.length).toBeGreaterThan(0);
+    expect(p2.duplicateWarnings.some((w) => w.name === 'أحمد محمود السيد')).toBe(true);
+    expect(p2.duplicateWarnings.some((w) => w.primaryPhone === '01099887766')).toBe(true);
+
+    // Verify idempotency record storage for p2 contains ZERO personal data from duplicate warnings
+    const storedRecord = await prisma.idempotencyRecord.findUniqueOrThrow({
+      where: {
+        actorId_commandType_key: {
+          actorId: actor1.id,
+          commandType: 'saveParty',
+          key: p2Key,
+        },
+      },
+    });
+
+    const payloadStr = JSON.stringify(storedRecord.resultPayload);
+    expect(payloadStr).not.toContain('أحمد محمود السيد');
+    expect(payloadStr).not.toContain('01099887766');
+    expect((storedRecord.resultPayload as Record<string, unknown>).duplicateWarnings).toBeUndefined();
+
+    // Replay p2Key — returns clean replay without persisting or resurrecting sensitive third-party snapshots
+    const replayed = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'طرف جديد بنفس الهاتف',
+      primaryPhone: '01099887766',
+      idempotencyKey: p2Key,
+    });
+    expect(replayed.isReplay).toBe(true);
+    expect(replayed.party.id).toBe(p2.party.id);
   });
 
   it('handles simultaneous identical-key requests via Promise.allSettled: both succeed, 1 initial and 1 replay (R2-05)', async () => {

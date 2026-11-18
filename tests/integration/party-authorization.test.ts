@@ -370,7 +370,7 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
       expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r7).code);
     });
 
-    it('rejects revoked sessions across all server action entry points', async () => {
+    it('rejects revoked sessions across all server action entry points (R3-04)', async () => {
       const nonExistentToken = crypto.randomBytes(32).toString('hex');
       setTestRequest(nonExistentToken);
 
@@ -382,6 +382,35 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
 
       const r3 = await checkPartyDuplicatesAction('عميل');
       expect(expectFailure(r3).code).toBe('UNAUTHENTICATED');
+
+      const r4 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل بجلسة ملغاة',
+        idempotencyKey: `revoked-save-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r4).code).toBe('UNAUTHENTICATED');
+
+      const r5 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'محاولة تدوين بجلسة ملغاة',
+        idempotencyKey: `revoked-note-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r5).code).toBe('UNAUTHENTICATED');
+
+      const r6 = await savePowerOfAttorneyAction({
+        partyId: existingPartyId,
+        poaNumberText: '99/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        idempotencyKey: `revoked-poa-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r6).code).toBe('UNAUTHENTICATED');
+
+      const r7 = await revealPartyIdentityAction(existingPartyId, 'محاولة فك تشفير بجلسة ملغاة');
+      expect(expectFailure(r7).code).toBe('UNAUTHENTICATED');
     });
 
     it('rejects unverified MFA session for OWNER role across all operation families (R2-01, R2-03)', async () => {
