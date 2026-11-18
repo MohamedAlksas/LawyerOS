@@ -14,6 +14,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
   const isHomeActive = pathname === '/';
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
+  const isSecurityActive = pathname === '/settings/security';
 
   return (
     <nav
@@ -33,7 +34,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">📅</span>
-        <span className="text-sm leading-tight mt-0.5">الرئيسية</span>
+        <span className="text-xs leading-tight mt-0.5">الرئيسية</span>
       </Link>
 
       {/* Matters Link */}
@@ -47,7 +48,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">📁</span>
-        <span className="text-sm leading-tight mt-0.5">الملفات</span>
+        <span className="text-xs leading-tight mt-0.5">الملفات</span>
       </Link>
 
       {/* Parties Link */}
@@ -61,7 +62,21 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">👥</span>
-        <span className="text-sm leading-tight mt-0.5">الأطراف</span>
+        <span className="text-xs leading-tight mt-0.5">الأطراف</span>
+      </Link>
+
+      {/* Security Link */}
+      <Link
+        href="/settings/security"
+        data-testid="nav-link-security"
+        aria-label="إعدادات الأمان"
+        aria-current={isSecurityActive ? 'page' : undefined}
+        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+          isSecurityActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
+        }`}
+      >
+        <span aria-hidden="true" className="text-lg">🛡️</span>
+        <span className="text-xs leading-tight mt-0.5">الأمان</span>
       </Link>
 
       {/* Menu / Drawer Toggle */}
@@ -73,7 +88,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         className="flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
       >
         <span aria-hidden="true" className="text-lg">☰</span>
-        <span className="text-sm leading-tight mt-0.5">المزيد</span>
+        <span className="text-xs leading-tight mt-0.5">المزيد</span>
       </button>
     </nav>
   );
