@@ -6,7 +6,8 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Base Checkpoint (Accepted T05 / origin/main):** `8e7c773c39a97ff5a0e634be9b6eb0b145b4985d`  
 **Codex Round 1 Reviewed Checkpoint:** `0ac4e253eeb1168db286ef56f2f9aa7e35b0d014`  
-**Inspected Implementation Checkpoint (Frozen & Verified):** `aa6d5645790ac4602d0fc755e4f29d53690828cb`  
+**Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `aa6d5645790ac4602d0fc755e4f29d53690828cb`  
+**Deterministic Ordering & CI Parity Checkpoint:** `f29808caa77c8997ec77cedecf4b33f4d3d80d5c`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`  
 
 ---
@@ -15,7 +16,7 @@
 
 Task T06 delivers the complete core operational casework backbone for LawOffice OS in strict Egyptian Arabic RTL (`lang="ar-EG"`, `dir="rtl"`). All casework records are built on top of the accepted predecessor T05 party directory, enforcing relational integrity, transactional invariants, optimistic concurrency, and zero client leakage.
 
-Following Codex's Round 1 review (`docs/reviews/T06-review.md`), all 13 reported findings (`T06-R1-01` through `T06-R1-13`) and the domain-status vocabulary mismatch have been comprehensively resolved, accompanied by failing regression test suites, full multi-viewport Playwright verification, and independent specialist sign-offs on frozen checkpoint `aa6d5645790ac4602d0fc755e4f29d53690828cb`.
+Following Codex's Round 1 review (`docs/reviews/T06-review.md`), all 13 reported findings (`T06-R1-01` through `T06-R1-13`) and the domain-status vocabulary mismatch have been comprehensively resolved, accompanied by failing regression test suites, full multi-viewport Playwright verification, and independent specialist sign-offs on frozen checkpoint `aa6d5645790ac4602d0fc755e4f29d53690828cb`. In addition, refinement commit `f29808caa77c8997ec77cedecf4b33f4d3d80d5c` was applied to enforce deterministic proceeding party ordering (`orderBy: { createdAt: 'asc' }`) in `matter-service.ts` queries and resilient party-specific capacity assertions in `tests/e2e/t06-matters.spec.ts` for Linux PostgreSQL hosted CI parity.
 
 ### Core Deliverables Built & Verified:
 1. **Additive Database Migrations 7 & 8**:
