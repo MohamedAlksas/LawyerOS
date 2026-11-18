@@ -8,6 +8,7 @@
 **Codex Round 1 Reviewed Checkpoint:** `0ac4e253eeb1168db286ef56f2f9aa7e35b0d014`  
 **Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `aa6d5645790ac4602d0fc755e4f29d53690828cb`  
 **Deterministic Ordering & CI Parity Checkpoint:** `f29808caa77c8997ec77cedecf4b33f4d3d80d5c`  
+**Verified Hosted CI Checkpoint:** `c01225c15414731253fce550e0430c191d0cc4eb`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`  
 
 ---
@@ -157,8 +158,35 @@ In compliance with `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native chil
     - `tablet-768` (6 passed): Full 6 tests passed identically under 768px tablet adaptation.
     - `mobile-390` (6 passed): Full 6 tests passed identically under 390px mobile bottom-nav layout.
 
-### Hosted GitHub Actions Workflow Results:
-*(Will be verified and recorded on final pushed SHA.)*
+### Hosted GitHub Actions Workflow Results (Verified on Checkpoint `c01225c15414731253fce550e0430c191d0cc4eb`):
+- **Planning Package Validation (`pull_request`)**:
+  - Run ID: `44414208320`
+  - URL: https://github.com/MohamedAlksas/LawyerOS/actions/runs/44414208320
+  - Status: **completed** | Conclusion: **success**
+- **CI (`pull_request`)**:
+  - Run ID: `44414208493`
+  - URL: https://github.com/MohamedAlksas/LawyerOS/actions/runs/44414208493
+  - Status: **completed** | Conclusion: **success**
+  - Verification Breakdown:
+    - Set up job & Initialize containers: completed success
+    - Checkout code & Setup Node.js 26 LTS: completed success
+    - Clean installation from lockfile: completed success
+    - Install Playwright Chromium browser: completed success
+    - Generate Prisma Client & Deploy migrations: completed success
+    - Lint check: completed success (0 errors, 0 warnings)
+    - TypeScript strict typecheck: completed success (0 errors)
+    - Run unit tests: completed success
+    - Production build: completed success (Exit 0)
+    - Run integration tests: completed success (All integration suites green)
+    - Run Playwright E2E tests: completed success (All 145 multi-milestone tests green across mobile, tablet, desktop)
+- **Planning Package Validation (`push`)**:
+  - Run ID: `44414198813`
+  - URL: https://github.com/MohamedAlksas/LawyerOS/actions/runs/44414198813
+  - Status: **completed** | Conclusion: **success**
+- **CI (`push`)**:
+  - Run ID: `44414198725`
+  - URL: https://github.com/MohamedAlksas/LawyerOS/actions/runs/44414198725
+  - Status: **completed** | Conclusion: **success**
 
 ---
 
