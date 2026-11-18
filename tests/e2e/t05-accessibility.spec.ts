@@ -11,6 +11,11 @@ test.describe('T05 Arabic RTL UI & Accessibility Verification', () => {
   test.beforeAll(async () => {
     setupTestEncryptionKeys();
     owner = await seedT04Owner({ label: 'a11y-e2e', name: 'أحمد المحامي' });
+    await prisma.party.deleteMany({
+      where: {
+        name: { startsWith: 'خالد عبد الله محمود' },
+      },
+    });
   });
 
   test.afterAll(async () => {
@@ -20,7 +25,6 @@ test.describe('T05 Arabic RTL UI & Accessibility Verification', () => {
     if (owner?.id) {
       await deleteT04Owner(owner.id);
     }
-    await prisma.$disconnect();
   });
 
   test('strict RTL, lang=ar-EG, and LTR isolation @a11y', async ({ page }) => {
