@@ -236,14 +236,16 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await expect(page.getByText('مدني كلي')).toBeVisible();
     await expect(page.getByText('الدائرة 4 تعويضات')).toBeVisible();
     await expect(page.getByText('متداول بالجلسات')).toBeVisible();
-    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').first()).toContainText('المدعي الأصلي');
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').filter({ hasText: testClientName })).toContainText('المدعي الأصلي');
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').filter({ hasText: 'شركة النيل' })).toContainText('مدعى عليه');
 
     // Reload to verify persisted active status and capacityText
     await page.reload();
     await page.getByTestId('tab-proceedings').click();
     await expect(page.getByText('5678 لسنة 2026')).toBeVisible();
     await expect(page.getByText('متداول بالجلسات')).toBeVisible();
-    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').first()).toContainText('المدعي الأصلي');
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').filter({ hasText: testClientName })).toContainText('المدعي الأصلي');
+    await expect(page.locator('[data-testid^="proceeding-party-capacity-"]').filter({ hasText: 'شركة النيل' })).toContainText('مدعى عليه');
 
     // 13. Add Linked Appeal Proceeding
     await page.getByTestId('add-proceeding-tab-button').click();

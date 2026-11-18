@@ -371,7 +371,7 @@ async function getMatterInternal(
         include: {
           court: true,
           parentProceeding: { include: { court: true } },
-          parties: { include: { matterParty: { include: { party: true } } } },
+          parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
         },
         orderBy: { createdAt: 'asc' },
       },
@@ -437,7 +437,7 @@ async function getProceedingDTO(
     include: {
       court: true,
       parentProceeding: { include: { court: true } },
-      parties: { include: { matterParty: { include: { party: true } } } },
+      parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
     },
   });
   if (!proceeding) throw new NotFoundError('القيد القضائي غير موجود.');
@@ -1457,7 +1457,7 @@ export async function addProceeding(
         include: {
           court: true,
           parentProceeding: { include: { court: true } },
-          parties: { include: { matterParty: { include: { party: true } } } },
+          parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
         },
       });
 
@@ -1649,7 +1649,7 @@ export async function updateProceeding(
         include: {
           court: true,
           parentProceeding: { include: { court: true } },
-          parties: { include: { matterParty: { include: { party: true } } } },
+          parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
         },
       });
 
@@ -2219,7 +2219,7 @@ export async function getMatter(matterId: string, actor?: Actor): Promise<Matter
         include: {
           court: true,
           parentProceeding: { include: { court: true } },
-          parties: { include: { matterParty: { include: { party: true } } } },
+          parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
         },
         orderBy: { createdAt: 'asc' },
       },
@@ -2304,7 +2304,7 @@ export async function searchMatters(
           include: {
             court: true,
             parentProceeding: { include: { court: true } },
-            parties: { include: { matterParty: { include: { party: true } } } },
+            parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
           },
         },
         authorizations: {
