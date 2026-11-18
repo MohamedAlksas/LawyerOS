@@ -7,6 +7,7 @@ import {
   savePowerOfAttorney,
 } from '@/modules/parties/service';
 import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
+import type { SavePartyResult } from '@/modules/parties/types';
 import {
   createSyntheticActor,
   cleanupPartyFixtures,
@@ -217,6 +218,102 @@ describe('T05-04: Scoped Idempotency & Replay Mechanics (Integration)', () => {
     expect(p1.party.id).not.toBe(p2.party.id);
     expect(p1.party.name).toBe('عميل المالك الأول');
     expect(p2.party.name).toBe('عميل المالك الثاني');
+  });
+
+  it('replay after intervening edit returns operationVersion: 1 and currentVersion: 2 without misrepresenting state (R2-04)', async () => {
+    const key1 = `idem-edit-orig-${crypto.randomUUID()}`;
+    const key2 = `idem-edit-second-${crypto.randomUUID()}`;
+
+    // 1. Create party at version 1 under key1
+    const original = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'طرف لاختبار التعديل المتداخل',
+      idempotencyKey: key1,
+    });
+    partyIds.push(original.party.id);
+    expect(original.party.version).toBe(1);
+
+    // 2. Perform intervening update under key2 (advances to version 2)
+    const updated = await saveParty(actor1, {
+      id: original.party.id,
+      kind: 'PERSON',
+      name: 'طرف بعد التعديل المتداخل',
+      expectedVersion: 1,
+      idempotencyKey: key2,
+    });
+    expect(updated.party.version).toBe(2);
+
+    // 3. Replay original key1
+    const replayed = await saveParty(actor1, {
+      kind: 'PERSON',
+      name: 'طرف لاختبار التعديل المتداخل',
+      idempotencyKey: key1,
+    });
+    expect(replayed.isReplay).toBe(true);
+    expect(replayed.operationVersion).toBe(1);
+    expect(replayed.currentVersion).toBe(2);
+    // Callers cannot misrepresent later edits as the outcome of the original save
+    expect(replayed.party.version).toBe(1);
+    expect(replayed.party.id).toBe(original.party.id);
+  });
+
+  it('handles simultaneous identical-key requests via Promise.allSettled: both succeed, 1 initial and 1 replay (R2-05)', async () => {
+    const sharedKey = `idem-concurrent-same-${crypto.randomUUID()}`;
+    const payload = {
+      kind: 'PERSON' as const,
+      name: 'طرف للتسابق المتزامن بنفس المفتاح',
+      primaryPhone: '01022334455',
+      idempotencyKey: sharedKey,
+    };
+
+    // Fire both requests concurrently
+    const [res1, res2] = await Promise.all([
+      saveParty(actor1, payload),
+      saveParty(actor1, payload),
+    ]);
+
+    expect(res1.success).toBe(true);
+    expect(res2.success).toBe(true);
+    expect(res1.party.id).toBe(res2.party.id);
+
+    const replayCount = (res1.isReplay ? 1 : 0) + (res2.isReplay ? 1 : 0);
+    expect(replayCount).toBe(1); // Exactly one is the initial creator, and one is the concurrent replay!
+    partyIds.push(res1.party.id);
+  });
+
+  it('handles simultaneous differing-payload requests on same key: rejects with IdempotencyPayloadMismatchError (R2-05)', async () => {
+    const sharedKey = `idem-concurrent-diff-${crypto.randomUUID()}`;
+
+    const payloadA = {
+      kind: 'PERSON' as const,
+      name: 'طرف أول متسابق',
+      idempotencyKey: sharedKey,
+    };
+
+    const payloadB = {
+      kind: 'PERSON' as const,
+      name: 'طرف ثاني مختلف في نفس اللحظة',
+      idempotencyKey: sharedKey,
+    };
+
+    const results = await Promise.allSettled([
+      saveParty(actor1, payloadA),
+      saveParty(actor1, payloadB),
+    ]);
+
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<SavePartyResult> => r.status === 'fulfilled');
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+
+    const rejError = rejected[0]?.reason as Error | undefined;
+    expect(rejError instanceof IdempotencyPayloadMismatchError || rejError?.name === 'IdempotencyPayloadMismatchError').toBe(true);
+
+    const winningResult = fulfilled[0];
+    if (winningResult) {
+      partyIds.push(winningResult.value.party.id);
+    }
   });
 });
 

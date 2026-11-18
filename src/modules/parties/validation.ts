@@ -69,6 +69,58 @@ export function isValidCalendarDate(dateStr: string): boolean {
   return day >= 1 && day <= maxDays;
 }
 
+/**
+ * Strict calendar-valid ISO 8601 instant validator (R2-02).
+ * Requirements:
+ * 1. Must be full ISO 8601 instant with time and explicit UTC ('Z') or offset ('[+-]HH:MM' or '[+-]HHMM').
+ * 2. Rejects date-only strings ('2026-11-18') and offset-free timestamps ('2026-11-18T10:00:00').
+ * 3. Enforces calendar date bounds, month limits, and leap-year rules via isValidCalendarDate.
+ * 4. Enforces 24-hour time ranges (HH: 00-23, MM: 00-59, SS: 00-59).
+ * 5. Rejects impossible calendar instants ('2026-02-30T10:00:00Z', '2026-02-29T10:00:00Z' non-leap).
+ */
+export function isValidIsoInstant(val: string): boolean {
+  if (typeof val !== 'string' || !val) {
+    return false;
+  }
+
+  const match = val.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:?\d{2})$/
+  );
+  if (!match) {
+    return false;
+  }
+
+  const [, yearStr, monthStr, dayStr, hourStr, minStr, secStr, offsetStr] = match;
+
+  // 1. Calendar date check (year 1900-2100, month 1-12, leap-year days for Feb)
+  if (!isValidCalendarDate(`${yearStr}-${monthStr}-${dayStr}`)) {
+    return false;
+  }
+
+  // 2. Time components check
+  const hour = parseInt(hourStr, 10);
+  const min = parseInt(minStr, 10);
+  const sec = parseInt(secStr, 10);
+
+  if (hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
+    return false;
+  }
+
+  // 3. Offset check (if not Z)
+  if (offsetStr !== 'Z') {
+    const cleanOffset = offsetStr.replace(':', '');
+    const offsetHours = parseInt(cleanOffset.slice(1, 3), 10);
+    const offsetMins = parseInt(cleanOffset.slice(3, 5), 10);
+    if (offsetHours > 14 || offsetMins > 59) {
+      return false;
+    }
+  }
+
+  // 4. Safe Date.parse verify
+  const parsed = Date.parse(val);
+  return !isNaN(parsed);
+}
+
 const UNSUPPORTED_RELATIONSHIP_FIELDS = [
   'matterId',
   'documentId',
@@ -216,8 +268,8 @@ export const addCommunicationNoteSchema = z
     communicationAt: z
       .string()
       .trim()
-      .refine((val) => !isNaN(Date.parse(val)), {
-        message: 'تاريخ ووقت التواصل غير صالح.',
+      .refine(isValidIsoInstant, {
+        message: 'تاريخ ووقت التواصل غير صالح (يجب أن يكون بصيغة ISO صالحة مع منطقة زمنية محددة مثل UTC أو فارق توقيت).',
       }),
     channel: communicationChannelSchema,
     summary: z

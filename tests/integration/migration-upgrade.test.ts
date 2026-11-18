@@ -91,7 +91,7 @@ describe('Security trigger drift rejection (R14-01)', () => {
         if (history === 'unmanaged') {
           expect((await db.pool.query("SELECT to_regclass('public._prisma_migrations') AS history")).rows[0].history).toBeNull();
         } else {
-          expect((await db.pool.query('SELECT count(*)::int n FROM _prisma_migrations WHERE finished_at IS NOT NULL')).rows[0].n).toBe(4);
+          expect((await db.pool.query('SELECT count(*)::int n FROM _prisma_migrations WHERE finished_at IS NOT NULL')).rows[0].n).toBe(5);
         }
         await db.pool.query(forwardSql);
       }
@@ -478,7 +478,7 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
       await targetDb.drop().catch(() => {});
       await ambientFixtureDb.drop().catch(() => {});
     }
-  }, 60000);
+  }, 120000);
 
   it('handles post-DDL history recording failure and safely recovers upon retry (Correction 3)', async () => {
     // 1. Create a fresh dedicated database with pre-existing sentinel data

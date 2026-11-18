@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { cairoWallTimeToUtcIso } from '@/components/parties/party-types';
 import {
   savePartySchema,
   addCommunicationNoteSchema,
   savePowerOfAttorneySchema,
   validateInput,
   ValidationError,
+  isValidIsoInstant,
 } from '@/modules/parties/validation';
 
 describe('T05-01: Party Validation Schemas (Unit)', () => {
@@ -322,6 +324,90 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
         })
       ).toThrowError(ValidationError);
     });
+
+    it('rejects date-only, offset-free, and impossible calendar instants for communicationAt (R2-02)', () => {
+      // 1. Rejects date-only strings without time and timezone
+      expect(isValidIsoInstant('2026-11-18')).toBe(false);
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-11-18',
+          channel: 'PHONE',
+          summary: 'تاريخ فقط بدون وقت أو منطقة زمنية',
+          idempotencyKey: 'idemp-comm-iso-1',
+        })
+      ).toThrowError(ValidationError);
+
+      // 2. Rejects offset-free timestamps without UTC Z or offset
+      expect(isValidIsoInstant('2026-11-18T10:00:00')).toBe(false);
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-11-18T10:00:00',
+          channel: 'PHONE',
+          summary: 'وقت وتاريخ بدون منطقة زمنية',
+          idempotencyKey: 'idemp-comm-iso-2',
+        })
+      ).toThrowError(ValidationError);
+
+      // 3. Rejects impossible calendar day: 30th of February
+      expect(isValidIsoInstant('2026-02-30T10:00:00Z')).toBe(false);
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-02-30T10:00:00Z',
+          channel: 'PHONE',
+          summary: 'يوم 30 فبراير مستحيل',
+          idempotencyKey: 'idemp-comm-iso-3',
+        })
+      ).toThrowError(ValidationError);
+
+      // 4. Rejects impossible calendar day: 29th of February in non-leap year (2026)
+      expect(isValidIsoInstant('2026-02-29T10:00:00Z')).toBe(false);
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-02-29T10:00:00Z',
+          channel: 'PHONE',
+          summary: 'يوم 29 فبراير في سنة بسيطة',
+          idempotencyKey: 'idemp-comm-iso-4',
+        })
+      ).toThrowError(ValidationError);
+
+      // 5. Rejects 31st day for 30-day months: 31st of April
+      expect(isValidIsoInstant('2026-04-31T12:00:00Z')).toBe(false);
+      expect(() =>
+        validateInput(addCommunicationNoteSchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          communicationAt: '2026-04-31T12:00:00Z',
+          channel: 'PHONE',
+          summary: 'يوم 31 أبريل غير موجود',
+          idempotencyKey: 'idemp-comm-iso-5',
+        })
+      ).toThrowError(ValidationError);
+
+      // 6. Accepts leap year: 29th of February 2024
+      expect(isValidIsoInstant('2024-02-29T10:00:00Z')).toBe(true);
+      const leapValid = validateInput(addCommunicationNoteSchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        communicationAt: '2024-02-29T10:00:00Z',
+        channel: 'PHONE',
+        summary: 'تاريخ سليم في سنة كبيسة',
+        idempotencyKey: 'idemp-comm-iso-6',
+      });
+      expect(leapValid.communicationAt).toBe('2024-02-29T10:00:00Z');
+
+      // 7. Accepts explicit offset: UTC+2 Cairo winter time
+      expect(isValidIsoInstant('2026-11-18T14:30:00+02:00')).toBe(true);
+      const offsetValid = validateInput(addCommunicationNoteSchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        communicationAt: '2026-11-18T14:30:00+02:00',
+        channel: 'PHONE',
+        summary: 'تاريخ بتوقيت محلي مع فارق توقيت صريح',
+        idempotencyKey: 'idemp-comm-iso-7',
+      });
+      expect(offsetValid.communicationAt).toBe('2026-11-18T14:30:00+02:00');
+    });
   });
 
   describe('savePowerOfAttorneySchema', () => {
@@ -392,6 +478,52 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
           idempotencyKey: 'idemp-poa-2',
         })
       ).toThrowError(ValidationError);
+    });
+  });
+
+  describe('cairoWallTimeToUtcIso - Cairo Wall-Clock Time Converter (R2-07)', () => {
+    it('converts normal winter standard time (EET UTC+2) to exact UTC instant', () => {
+      const result = cairoWallTimeToUtcIso('2026-11-25T14:30');
+      expect(result).toBe('2026-11-25T12:30:00.000Z');
+    });
+
+    it('converts normal summer daylight saving time (EEST UTC+3) to exact UTC instant', () => {
+      const result = cairoWallTimeToUtcIso('2026-07-15T14:30');
+      expect(result).toBe('2026-07-15T11:30:00.000Z');
+    });
+
+    it('rejects DST spring-forward gap with explicit Arabic error', () => {
+      expect(() => cairoWallTimeToUtcIso('2026-04-24T00:30')).toThrowError(
+        'الوقت المحدد غير موجود في التوقيت المحلي للقاهرة بسبب بدء التوقيت الصيفي (قفزة التوقيت).'
+      );
+    });
+
+    it('rejects impossible calendar day (2026-02-31) with calendar error', () => {
+      expect(() => cairoWallTimeToUtcIso('2026-02-31T14:30')).toThrowError(
+        'تاريخ غير صالح في التقويم (عدد أيام الشهر غير صحيح).'
+      );
+    });
+
+    it('rejects 31st day for 30-day months (2026-04-31)', () => {
+      expect(() => cairoWallTimeToUtcIso('2026-04-31T14:30')).toThrowError(
+        'تاريخ غير صالح في التقويم (عدد أيام الشهر غير صحيح).'
+      );
+    });
+
+    it('accepts leap year February 29th (2024-02-29)', () => {
+      const result = cairoWallTimeToUtcIso('2024-02-29T14:30');
+      expect(result).toBe('2024-02-29T12:30:00.000Z');
+    });
+
+    it('rejects non-leap year February 29th (2026-02-29)', () => {
+      expect(() => cairoWallTimeToUtcIso('2026-02-29T14:30')).toThrowError(
+        'تاريخ غير صالح في التقويم (عدد أيام الشهر غير صحيح).'
+      );
+    });
+
+    it('resolves DST fall-back overlap by selecting standard time UTC+2', () => {
+      const result = cairoWallTimeToUtcIso('2026-10-29T23:30');
+      expect(result).toBe('2026-10-29T21:30:00.000Z');
     });
   });
 });

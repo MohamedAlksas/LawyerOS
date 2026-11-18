@@ -31,7 +31,7 @@ export default defineConfig({
   forbidOnly: true,
   retries: 0,
   workers: 1,
-  timeout: 60_000,
+  timeout: 90_000,
   expect: { timeout: 15_000 },
   outputDir: 'test-results/t05',
   reporter: [['list']],

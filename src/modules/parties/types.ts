@@ -77,6 +77,8 @@ export interface SavePartyResult {
   party: PartySummaryDTO;
   duplicateWarnings: DuplicateWarningDTO[];
   isReplay?: boolean;
+  operationVersion?: number;
+  currentVersion?: number;
 }
 
 export interface SearchPartiesParams {
@@ -104,6 +106,7 @@ export interface CommunicationNoteSummaryDTO {
   followUpDate: string | null; // YYYY-MM-DD
   createdAt: string;
   createdById: string;
+  isReplay?: boolean;
 }
 
 export interface AddCommunicationNoteInput {
@@ -131,6 +134,9 @@ export interface PoASummaryDTO {
   version: number;
   createdAt: string;
   updatedAt: string;
+  isReplay?: boolean;
+  operationVersion?: number;
+  currentVersion?: number;
 }
 
 export interface SavePowerOfAttorneyInput {

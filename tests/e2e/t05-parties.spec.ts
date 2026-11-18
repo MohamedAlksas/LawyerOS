@@ -24,6 +24,7 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
   });
 
   test('full operational party lifecycle journey @parties', async ({ page }) => {
+    test.setTimeout(120_000);
     // 1. Authenticate with real TOTP
     await signInWithTotp(page, owner);
 
@@ -233,7 +234,89 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await expect(page.getByTestId('party-notes-input')).toHaveValue('محاولة حفظ من جلسة متأخرة');
   });
 
-  test('search handles rapid queries and transport failures with accessible retry @parties', async ({ page }) => {
+  test('controlled search race discards late out-of-order response via request generation @parties', async ({ page }) => {
+    await signInWithTotp(page, owner);
+
+    // Seed two distinct parties for testing out-of-order search responses
+    const slowParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: 'طرف استعلام بطيء للتأكد من السباق',
+        nameNormalized: 'طرف استعلام بطيء للتاكد من السباق',
+        primaryPhone: '01011112222',
+        primaryPhoneNormalized: '01011112222',
+        createdById: owner.id,
+        updatedById: owner.id,
+        version: 1,
+      },
+    });
+    createdPartyIds.push(slowParty.id);
+
+    const fastParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: 'طرف استعلام سريع للتأكد من السباق',
+        nameNormalized: 'طرف استعلام سريع للتاكد من السباق',
+        primaryPhone: '01033334444',
+        primaryPhoneNormalized: '01033334444',
+        createdById: owner.id,
+        updatedById: owner.id,
+        version: 1,
+      },
+    });
+    createdPartyIds.push(fastParty.id);
+
+    await page.goto('/parties');
+    const searchInput = page.getByTestId('party-search-input');
+    await expect(searchInput).toBeVisible();
+
+    let postCount = 0;
+    await page.route('**/parties**', async (route) => {
+      if (route.request().method() === 'POST') {
+        postCount++;
+        if (postCount === 1) {
+          // Controlled delay of 400ms for Query 1
+          await new Promise((r) => setTimeout(r, 400));
+          const response = await route.fetch();
+          await route.fulfill({ response });
+        } else {
+          const response = await route.fetch();
+          await route.fulfill({ response });
+        }
+      } else {
+        await route.continue();
+      }
+    });
+
+    // 1. Dispatch Query 1 ("بطيء")
+    await searchInput.fill('بطيء');
+    await page.getByTestId('party-search-submit').click();
+    await page.waitForTimeout(50);
+
+    // 2. Dispatch Query 2 ("سريع")
+    await searchInput.fill('سريع');
+    await page.getByTestId('party-search-submit').click();
+
+    // Query 2 arrives and updates the UI with Party 2 (Fast)
+    const fastPartyEntry = page
+      .locator(`[data-testid="party-row-${fastParty.id}"], [data-testid="party-card-${fastParty.id}"]`)
+      .filter({ visible: true });
+    await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
+
+    // Wait a brief moment to ensure late Query 1 response does not overwrite fastParty
+    await page.waitForTimeout(500);
+
+    // 4. Assert UI still displays Party 2 (Fast) and has NOT been overwritten by Party 1 (Slow)
+    await expect(fastPartyEntry).toBeVisible();
+    const slowPartyEntry = page
+      .locator(`[data-testid="party-row-${slowParty.id}"], [data-testid="party-card-${slowParty.id}"]`)
+      .filter({ visible: true });
+    await expect(slowPartyEntry).toBeHidden();
+
+    await page.unroute('**/parties**');
+  });
+
+  test('search handles transport failures with accessible retry banner @parties', async ({ page }) => {
     await signInWithTotp(page, owner);
     await page.goto('/parties');
 

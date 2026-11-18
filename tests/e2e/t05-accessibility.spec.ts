@@ -70,10 +70,11 @@ test.describe('T05 Arabic RTL UI & Accessibility Verification', () => {
     await page.goto('/parties/new');
 
     const syntheticSecretNationalId = '29911223344556';
+    const uniquePartyName = `خالد عبد الله محمود ${Math.random().toString(36).slice(2, 7)}`;
 
     // Fill and submit party with secret national ID
     await page.getByTestId('kind-person').click();
-    await page.getByTestId('party-name-input').fill('خالد عبد الله محمود');
+    await page.getByTestId('party-name-input').fill(uniquePartyName);
     await page.getByTestId('toggle-identity-fields').click();
     await page.getByTestId('identity-type-select').selectOption('NATIONAL_ID');
     await page.getByTestId('identity-number-input').fill(syntheticSecretNationalId);

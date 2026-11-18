@@ -153,10 +153,10 @@ model Party {
   email                   String?
   address                 String?
   notes                   String?
-  archivedAt              DateTime?
+  archivedAt              DateTime?           @db.Timestamptz(3)
   version                 Int                 @default(1)
-  createdAt               DateTime            @default(now())
-  updatedAt               DateTime            @updatedAt
+  createdAt               DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime            @updatedAt @db.Timestamptz(3)
   createdById             String
   updatedById             String
 
@@ -180,7 +180,7 @@ model PartyIdentity {
   keyId              String
   encryptionVersion  Int                @default(1)
   lastFour           String             // Trailing 4 digits for display masking
-  createdAt          DateTime           @default(now())
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
   createdById        String
 
   party              Party              @relation(fields: [partyId], references: [id], onDelete: Cascade)
@@ -198,7 +198,7 @@ model CommunicationNote {
   summary            String
   followUpRequired   Boolean              @default(false)
   followUpDate       DateTime?            @db.Date // Date-only representation for follow up
-  createdAt          DateTime             @default(now())
+  createdAt          DateTime             @default(now()) @db.Timestamptz(3)
   createdById        String
 
   party              Party                @relation(fields: [partyId], references: [id], onDelete: Cascade)
@@ -220,8 +220,8 @@ model PowerOfAttorney {
   humanReviewedById  String?
   notes              String?
   version            Int             @default(1)
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  createdAt          DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime        @updatedAt @db.Timestamptz(3)
   createdById        String
   updatedById        String
 
@@ -241,7 +241,7 @@ model AuditEvent {
   changedFields      Json?    // Redacted payload changes (never full identity, never keys)
   reason             String?
   requestId          String?
-  createdAt          DateTime @default(now())
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([entityType, entityId, createdAt])
   @@index([userId, createdAt])
@@ -258,8 +258,8 @@ model IdempotencyRecord {
   resultType         String?
   resultId           String?
   resultPayload      Json?             // Redacted result summary (never raw secrets)
-  createdAt          DateTime          @default(now())
-  completedAt        DateTime?
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  completedAt        DateTime?         @db.Timestamptz(3)
 
   @@unique([actorId, commandType, key])
   @@index([createdAt])

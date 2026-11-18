@@ -11,6 +11,8 @@ import { recordAuditEvent } from '@/lib/audit';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
+  isIdempotencyUniqueConflict,
+  resolveConcurrentIdempotency,
 } from '@/lib/idempotency';
 import {
   SavePartyInput,
@@ -134,6 +136,129 @@ export async function findDuplicateWarnings(
   });
 }
 
+async function buildReplaySavePartyResult(
+  txOrPrisma: PrismaClient | Prisma.TransactionClient,
+  claim: { resultId: string | null; resultPayload: unknown }
+): Promise<SavePartyResult> {
+  const payload = (claim.resultPayload as Record<string, unknown>) || {};
+  const partyId = claim.resultId || (payload.partyId as string);
+  if (!partyId) {
+    throw new NotFoundError('الطرف المطلوب غير موجود.');
+  }
+  const party = await txOrPrisma.party.findFirst({
+    where: { id: partyId, archivedAt: null },
+    include: { identities: true },
+  });
+  if (!party) {
+    throw new NotFoundError('الطرف المطلوب غير موجود.');
+  }
+
+  const operationVersion =
+    typeof payload.operationVersion === 'number'
+      ? payload.operationVersion
+      : typeof payload.version === 'number'
+      ? payload.version
+      : party.version;
+  const storedWarnings = Array.isArray(payload.duplicateWarnings)
+    ? (payload.duplicateWarnings as DuplicateWarningDTO[])
+    : [];
+
+  const partySummary = mapPartySummary(party);
+  // Guarantee callers cannot misrepresent later edits as the outcome of the original save (R2-04)
+  partySummary.version = operationVersion;
+
+  return {
+    success: true,
+    party: partySummary,
+    duplicateWarnings: storedWarnings,
+    isReplay: true,
+    operationVersion,
+    currentVersion: party.version,
+  };
+}
+
+async function buildReplayCommunicationNoteResult(
+  txOrPrisma: PrismaClient | Prisma.TransactionClient,
+  claim: { resultId: string | null; resultPayload: unknown }
+): Promise<CommunicationNoteSummaryDTO> {
+  const payload = (claim.resultPayload as Record<string, unknown>) || {};
+  const noteId = claim.resultId || (payload.noteId as string);
+  if (!noteId) {
+    throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
+  }
+  const note = await txOrPrisma.communicationNote.findUnique({
+    where: { id: noteId },
+  });
+  if (!note) {
+    throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
+  }
+  return {
+    id: note.id,
+    partyId: note.partyId,
+    matterId: note.matterId,
+    communicationAt: note.communicationAt.toISOString(),
+    channel: note.channel,
+    summary: note.summary,
+    followUpRequired: note.followUpRequired,
+    followUpDate: note.followUpDate
+      ? note.followUpDate instanceof Date
+        ? note.followUpDate.toISOString().slice(0, 10)
+        : String(note.followUpDate).slice(0, 10)
+      : null,
+    createdAt: note.createdAt.toISOString(),
+    createdById: note.createdById,
+    isReplay: true,
+  };
+}
+
+async function buildReplayPowerOfAttorneyResult(
+  txOrPrisma: PrismaClient | Prisma.TransactionClient,
+  claim: { resultId: string | null; resultPayload: unknown }
+): Promise<PoASummaryDTO> {
+  const payload = (claim.resultPayload as Record<string, unknown>) || {};
+  const poaId = claim.resultId || (payload.poaId as string);
+  if (!poaId) {
+    throw new NotFoundError('التوكيل المطلوب غير موجود.');
+  }
+  const poa = await txOrPrisma.powerOfAttorney.findUnique({
+    where: { id: poaId },
+  });
+  if (!poa) {
+    throw new NotFoundError('التوكيل المطلوب غير موجود.');
+  }
+
+  const operationVersion =
+    typeof payload.operationVersion === 'number'
+      ? payload.operationVersion
+      : typeof payload.version === 'number'
+      ? payload.version
+      : poa.version;
+
+  return {
+    id: poa.id,
+    partyId: poa.partyId,
+    poaNumberText: poa.poaNumberText,
+    poaYearLabel: poa.poaYearLabel,
+    notarizationOffice: poa.notarizationOffice,
+    poaType: poa.poaType,
+    issueDate: poa.issueDate
+      ? poa.issueDate instanceof Date
+        ? poa.issueDate.toISOString().slice(0, 10)
+        : String(poa.issueDate).slice(0, 10)
+      : null,
+    humanReviewStatus: poa.humanReviewStatus,
+    humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
+    humanReviewedById: poa.humanReviewedById,
+    notes: poa.notes,
+    version: operationVersion,
+    createdAt: poa.createdAt.toISOString(),
+    updatedAt: poa.updatedAt.toISOString(),
+    isReplay: true,
+    operationVersion,
+    currentVersion: poa.version,
+  };
+}
+
 /**
  * Saves a party record (Create or Update) within an atomic transaction.
  * Enforces server authorization, optimistic version checks, AES-256-GCM context-bound identity
@@ -156,35 +281,24 @@ export async function saveParty(
     input.id
   );
 
-  return await prisma.$transaction(async (tx) => {
-    // 1. Claim or verify idempotency token
-    const claim = await claimIdempotencyKey(tx, {
-      actorId: actor.id,
-      commandType: 'saveParty',
-      key: input.idempotencyKey,
-      payload: input,
-    });
+  let attempts = 0;
+  while (attempts < 3) {
+    attempts++;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        // 1. Claim or verify idempotency token
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'saveParty',
+          key: input.idempotencyKey,
+          payload: input,
+        });
 
-    if (claim.isReplay) {
-      if (!claim.resultId) {
-        throw new NotFoundError('الطرف المطلوب غير موجود.');
-      }
-      const party = await tx.party.findFirst({
-        where: { id: claim.resultId, archivedAt: null },
-        include: { identities: true },
-      });
-      if (!party) {
-        throw new NotFoundError('الطرف المطلوب غير موجود.');
-      }
-      return {
-        success: true,
-        party: mapPartySummary(party),
-        duplicateWarnings: [],
-        isReplay: true,
-      };
-    }
+        if (claim.isReplay) {
+          return await buildReplaySavePartyResult(tx, claim);
+        }
 
-    const nameNormalized = normalizeArabicText(input.name);
+        const nameNormalized = normalizeArabicText(input.name);
     const primaryPhoneNormalized = normalizePhone(input.primaryPhone);
 
     let targetPartyId: string;
@@ -384,7 +498,7 @@ export async function saveParty(
 
     const partySummary = mapPartySummary(resultingParty);
 
-    // Complete idempotency with minimal identifiers and safe metadata (STD-01)
+    // Complete idempotency with minimal identifiers and safe metadata (STD-01, R2-04)
     await completeIdempotencyKey(tx, {
       actorId: actor.id,
       commandType: 'saveParty',
@@ -394,7 +508,8 @@ export async function saveParty(
       resultPayload: {
         command: 'saveParty',
         partyId: targetPartyId,
-        version: resultingParty.version,
+        operationVersion: resultingParty.version,
+        duplicateWarnings,
       },
     });
 
@@ -404,6 +519,25 @@ export async function saveParty(
       duplicateWarnings,
     };
   });
+    } catch (error) {
+      if (isIdempotencyUniqueConflict(error)) {
+        const concurrent = await resolveConcurrentIdempotency(prisma, {
+          actorId: actor.id,
+          commandType: 'saveParty',
+          key: input.idempotencyKey,
+          payload: input,
+        });
+        if (!concurrent) {
+          // Winner transaction aborted/rolled back, retry cleanly
+          continue;
+        }
+        return await buildReplaySavePartyResult(prisma, concurrent);
+      }
+      throw error;
+    }
+  }
+
+  throw new ConcurrencyConflictError('فشلت محاولات حفظ الطرف بسبب تعارض متزامن.');
 }
 
 /**
@@ -559,102 +693,104 @@ export async function addCommunicationNote(
   const input = validateInput(addCommunicationNoteSchema, rawInput);
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  return await prisma.$transaction(async (tx) => {
-    const claim = await claimIdempotencyKey(tx, {
-      actorId: actor.id,
-      commandType: 'addCommunicationNote',
-      key: input.idempotencyKey,
-      payload: input,
-    });
+  let attempts = 0;
+  while (attempts < 3) {
+    attempts++;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'addCommunicationNote',
+          key: input.idempotencyKey,
+          payload: input,
+        });
 
-    if (claim.isReplay) {
-      if (!claim.resultId) {
-        throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
-      }
-      const note = await tx.communicationNote.findUnique({
-        where: { id: claim.resultId },
-      });
-      if (!note) {
-        throw new NotFoundError('الملاحظة المطلوبة غير موجودة.');
-      }
-      return {
-        id: note.id,
-        partyId: note.partyId,
-        matterId: note.matterId,
-        communicationAt: note.communicationAt.toISOString(),
-        channel: note.channel,
-        summary: note.summary,
-        followUpRequired: note.followUpRequired,
-        followUpDate: note.followUpDate ? (note.followUpDate instanceof Date ? note.followUpDate.toISOString().slice(0, 10) : String(note.followUpDate).slice(0, 10)) : null,
-        createdAt: note.createdAt.toISOString(),
-        createdById: note.createdById,
-      };
-    }
+        if (claim.isReplay) {
+          return await buildReplayCommunicationNoteResult(tx, claim);
+        }
 
-    const party = await tx.party.findUnique({
-      where: { id: input.partyId, archivedAt: null },
-    });
+        const party = await tx.party.findUnique({
+          where: { id: input.partyId, archivedAt: null },
+        });
 
-    if (!party) {
-      throw new NotFoundError('الطرف المحدد لتسجيل الملاحظة غير موجود.');
-    }
+        if (!party) {
+          throw new NotFoundError('الطرف المحدد لتسجيل الملاحظة غير موجود.');
+        }
 
-    const note = await tx.communicationNote.create({
-      data: {
-        partyId: input.partyId,
-        communicationAt: new Date(input.communicationAt),
-        channel: input.channel,
-        summary: input.summary,
-        followUpRequired: input.followUpRequired ?? false,
-        followUpDate: input.followUpDate ? new Date(input.followUpDate) : null,
-        createdById: actor.id,
-      },
-    });
+        const note = await tx.communicationNote.create({
+          data: {
+            partyId: input.partyId,
+            communicationAt: new Date(input.communicationAt),
+            channel: input.channel,
+            summary: input.summary,
+            followUpRequired: input.followUpRequired ?? false,
+            followUpDate: input.followUpDate ? new Date(input.followUpDate) : null,
+            createdById: actor.id,
+          },
+        });
 
-    const result: CommunicationNoteSummaryDTO = {
-      id: note.id,
-      partyId: note.partyId,
-      matterId: note.matterId,
-      communicationAt: note.communicationAt.toISOString(),
-      channel: note.channel,
-      summary: note.summary,
-      followUpRequired: note.followUpRequired,
-      followUpDate: note.followUpDate ? note.followUpDate.toISOString().slice(0, 10) : null,
-      createdAt: note.createdAt.toISOString(),
-      createdById: note.createdById,
-    };
-
-    await recordAuditEvent(
-      tx,
-      {
-        userId: actor.id,
-        action: 'RECORD_COMMUNICATION',
-        entityType: 'CommunicationNote',
-        entityId: note.id,
-        changedFields: {
+        const result: CommunicationNoteSummaryDTO = {
+          id: note.id,
           partyId: note.partyId,
-          channel: note.channel,
+          matterId: note.matterId,
           communicationAt: note.communicationAt.toISOString(),
-        },
-      },
-      { simulateFailure: options.simulateAuditFailure }
-    );
+          channel: note.channel,
+          summary: note.summary,
+          followUpRequired: note.followUpRequired,
+          followUpDate: note.followUpDate ? note.followUpDate.toISOString().slice(0, 10) : null,
+          createdAt: note.createdAt.toISOString(),
+          createdById: note.createdById,
+        };
 
-    await completeIdempotencyKey(tx, {
-      actorId: actor.id,
-      commandType: 'addCommunicationNote',
-      key: input.idempotencyKey,
-      resultType: 'CommunicationNote',
-      resultId: note.id,
-      resultPayload: {
-        command: 'addCommunicationNote',
-        noteId: note.id,
-        partyId: input.partyId,
-      },
-    });
+        await recordAuditEvent(
+          tx,
+          {
+            userId: actor.id,
+            action: 'RECORD_COMMUNICATION',
+            entityType: 'CommunicationNote',
+            entityId: note.id,
+            changedFields: {
+              partyId: note.partyId,
+              channel: note.channel,
+              communicationAt: note.communicationAt.toISOString(),
+            },
+          },
+          { simulateFailure: options.simulateAuditFailure }
+        );
 
-    return result;
-  });
+        await completeIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'addCommunicationNote',
+          key: input.idempotencyKey,
+          resultType: 'CommunicationNote',
+          resultId: note.id,
+          resultPayload: {
+            command: 'addCommunicationNote',
+            noteId: note.id,
+            partyId: input.partyId,
+          },
+        });
+
+        return result;
+      });
+    } catch (error) {
+      if (isIdempotencyUniqueConflict(error)) {
+        const concurrent = await resolveConcurrentIdempotency(prisma, {
+          actorId: actor.id,
+          commandType: 'addCommunicationNote',
+          key: input.idempotencyKey,
+          payload: input,
+        });
+        if (!concurrent) {
+          continue;
+        }
+        return await buildReplayCommunicationNoteResult(prisma, concurrent);
+      }
+      throw error;
+    }
+  }
+
+  throw new ConcurrencyConflictError('فشلت محاولات تسجيل ملاحظة التواصل بسبب تعارض متزامن.');
 }
 
 /**
@@ -670,191 +806,189 @@ export async function savePowerOfAttorney(
   const input = validateInput(savePowerOfAttorneySchema, rawInput);
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  return await prisma.$transaction(async (tx) => {
-    const claim = await claimIdempotencyKey(tx, {
-      actorId: actor.id,
-      commandType: 'savePowerOfAttorney',
-      key: input.idempotencyKey,
-      payload: input,
-    });
-
-    if (claim.isReplay) {
-      if (!claim.resultId) {
-        throw new NotFoundError('التوكيل المطلوب غير موجود.');
-      }
-      const poa = await tx.powerOfAttorney.findUnique({
-        where: { id: claim.resultId },
-      });
-      if (!poa) {
-        throw new NotFoundError('التوكيل المطلوب غير موجود.');
-      }
-      return {
-        id: poa.id,
-        partyId: poa.partyId,
-        poaNumberText: poa.poaNumberText,
-        poaYearLabel: poa.poaYearLabel,
-        notarizationOffice: poa.notarizationOffice,
-        poaType: poa.poaType,
-        issueDate: poa.issueDate ? (poa.issueDate instanceof Date ? poa.issueDate.toISOString().slice(0, 10) : String(poa.issueDate).slice(0, 10)) : null,
-        humanReviewStatus: poa.humanReviewStatus,
-        humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
-        humanReviewedById: poa.humanReviewedById,
-        notes: poa.notes,
-        version: poa.version,
-        createdAt: poa.createdAt.toISOString(),
-        updatedAt: poa.updatedAt.toISOString(),
-      };
-    }
-
-    const party = await tx.party.findUnique({
-      where: { id: input.partyId, archivedAt: null },
-    });
-
-    if (!party) {
-      throw new NotFoundError('الطرف المحدد لإصدار التوكيل غير موجود.');
-    }
-
-    let poaRecord;
-
-    if (input.id) {
-      const existing = await tx.powerOfAttorney.findUnique({
-        where: { id: input.id, partyId: input.partyId },
-      });
-
-      if (!existing) {
-        throw new NotFoundError('التوكيل المطلوب تعديله غير موجود.');
-      }
-
-      if (existing.version !== input.expectedVersion) {
-        throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
-      }
-
-      const isStatusChanged =
-        input.humanReviewStatus && input.humanReviewStatus !== existing.humanReviewStatus;
-
-      const updateResult = await tx.powerOfAttorney.updateMany({
-        where: {
-          id: input.id,
-          partyId: input.partyId,
-          version: input.expectedVersion,
-        },
-        data: {
-          poaNumberText: input.poaNumberText,
-          poaYearLabel: input.poaYearLabel,
-          notarizationOffice: input.notarizationOffice,
-          poaType: input.poaType,
-          issueDate: input.issueDate ? new Date(input.issueDate) : null,
-          humanReviewStatus: input.humanReviewStatus ?? existing.humanReviewStatus,
-          humanReviewedAt: isStatusChanged ? new Date() : existing.humanReviewedAt,
-          humanReviewedById: isStatusChanged ? actor.id : existing.humanReviewedById,
-          notes: input.notes,
-          version: { increment: 1 },
-          updatedById: actor.id,
-        },
-      });
-
-      if (updateResult.count === 0) {
-        const current = await tx.powerOfAttorney.findUnique({
-          where: { id: input.id, partyId: input.partyId },
+  let attempts = 0;
+  while (attempts < 3) {
+    attempts++;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'savePowerOfAttorney',
+          key: input.idempotencyKey,
+          payload: input,
         });
-        if (!current) {
-          throw new NotFoundError('التوكيل المطلوب تعديله غير موجود.');
+
+        if (claim.isReplay) {
+          return await buildReplayPowerOfAttorneyResult(tx, claim);
         }
-        throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
+
+        const party = await tx.party.findUnique({
+          where: { id: input.partyId, archivedAt: null },
+        });
+
+        if (!party) {
+          throw new NotFoundError('الطرف المحدد لإصدار التوكيل غير موجود.');
+        }
+
+        let poaRecord;
+
+        if (input.id) {
+          const existing = await tx.powerOfAttorney.findUnique({
+            where: { id: input.id, partyId: input.partyId },
+          });
+
+          if (!existing) {
+            throw new NotFoundError('التوكيل المطلوب تعديله غير موجود.');
+          }
+
+          if (existing.version !== input.expectedVersion) {
+            throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
+          }
+
+          const isStatusChanged =
+            input.humanReviewStatus && input.humanReviewStatus !== existing.humanReviewStatus;
+
+          const updateResult = await tx.powerOfAttorney.updateMany({
+            where: {
+              id: input.id,
+              partyId: input.partyId,
+              version: input.expectedVersion,
+            },
+            data: {
+              poaNumberText: input.poaNumberText,
+              poaYearLabel: input.poaYearLabel,
+              notarizationOffice: input.notarizationOffice,
+              poaType: input.poaType,
+              issueDate: input.issueDate ? new Date(input.issueDate) : null,
+              humanReviewStatus: input.humanReviewStatus ?? existing.humanReviewStatus,
+              humanReviewedAt: isStatusChanged ? new Date() : existing.humanReviewedAt,
+              humanReviewedById: isStatusChanged ? actor.id : existing.humanReviewedById,
+              notes: input.notes,
+              version: { increment: 1 },
+              updatedById: actor.id,
+            },
+          });
+
+          if (updateResult.count === 0) {
+            const current = await tx.powerOfAttorney.findUnique({
+              where: { id: input.id, partyId: input.partyId },
+            });
+            if (!current) {
+              throw new NotFoundError('التوكيل المطلوب تعديله غير موجود.');
+            }
+            throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
+          }
+
+          poaRecord = await tx.powerOfAttorney.findUniqueOrThrow({
+            where: { id: input.id },
+          });
+
+          await recordAuditEvent(
+            tx,
+            {
+              userId: actor.id,
+              action: 'UPDATE_POA',
+              entityType: 'PowerOfAttorney',
+              entityId: poaRecord.id,
+              changedFields: {
+                poaNumberText: poaRecord.poaNumberText,
+                poaYearLabel: poaRecord.poaYearLabel,
+                humanReviewStatus: poaRecord.humanReviewStatus,
+                version: poaRecord.version,
+              },
+            },
+            { simulateFailure: options.simulateAuditFailure }
+          );
+        } else {
+          const isReviewed = input.humanReviewStatus && input.humanReviewStatus !== 'UNREVIEWED';
+
+          poaRecord = await tx.powerOfAttorney.create({
+            data: {
+              partyId: input.partyId,
+              poaNumberText: input.poaNumberText,
+              poaYearLabel: input.poaYearLabel,
+              notarizationOffice: input.notarizationOffice,
+              poaType: input.poaType,
+              issueDate: input.issueDate ? new Date(input.issueDate) : null,
+              humanReviewStatus: input.humanReviewStatus ?? 'UNREVIEWED',
+              humanReviewedAt: isReviewed ? new Date() : null,
+              humanReviewedById: isReviewed ? actor.id : null,
+              notes: input.notes,
+              version: 1,
+              createdById: actor.id,
+              updatedById: actor.id,
+            },
+          });
+
+          await recordAuditEvent(
+            tx,
+            {
+              userId: actor.id,
+              action: 'RECORD_POA',
+              entityType: 'PowerOfAttorney',
+              entityId: poaRecord.id,
+              changedFields: {
+                poaNumberText: poaRecord.poaNumberText,
+                poaYearLabel: poaRecord.poaYearLabel,
+                humanReviewStatus: poaRecord.humanReviewStatus,
+                version: 1,
+              },
+            },
+            { simulateFailure: options.simulateAuditFailure }
+          );
+        }
+
+        const result: PoASummaryDTO = {
+          id: poaRecord.id,
+          partyId: poaRecord.partyId,
+          poaNumberText: poaRecord.poaNumberText,
+          poaYearLabel: poaRecord.poaYearLabel,
+          notarizationOffice: poaRecord.notarizationOffice,
+          poaType: poaRecord.poaType,
+          issueDate: poaRecord.issueDate ? poaRecord.issueDate.toISOString().slice(0, 10) : null,
+          humanReviewStatus: poaRecord.humanReviewStatus,
+          humanReviewedAt: poaRecord.humanReviewedAt ? poaRecord.humanReviewedAt.toISOString() : null,
+          humanReviewedById: poaRecord.humanReviewedById,
+          notes: poaRecord.notes,
+          version: poaRecord.version,
+          createdAt: poaRecord.createdAt.toISOString(),
+          updatedAt: poaRecord.updatedAt.toISOString(),
+        };
+
+        await completeIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'savePowerOfAttorney',
+          key: input.idempotencyKey,
+          resultType: 'PowerOfAttorney',
+          resultId: poaRecord.id,
+          resultPayload: {
+            command: 'savePowerOfAttorney',
+            poaId: poaRecord.id,
+            partyId: input.partyId,
+            operationVersion: poaRecord.version,
+          },
+        });
+
+        return result;
+      });
+    } catch (error) {
+      if (isIdempotencyUniqueConflict(error)) {
+        const concurrent = await resolveConcurrentIdempotency(prisma, {
+          actorId: actor.id,
+          commandType: 'savePowerOfAttorney',
+          key: input.idempotencyKey,
+          payload: input,
+        });
+        if (!concurrent) {
+          continue;
+        }
+        return await buildReplayPowerOfAttorneyResult(prisma, concurrent);
       }
-
-      poaRecord = await tx.powerOfAttorney.findUniqueOrThrow({
-        where: { id: input.id },
-      });
-
-      await recordAuditEvent(
-        tx,
-        {
-          userId: actor.id,
-          action: 'UPDATE_POA',
-          entityType: 'PowerOfAttorney',
-          entityId: poaRecord.id,
-          changedFields: {
-            poaNumberText: poaRecord.poaNumberText,
-            poaYearLabel: poaRecord.poaYearLabel,
-            humanReviewStatus: poaRecord.humanReviewStatus,
-            version: poaRecord.version,
-          },
-        },
-        { simulateFailure: options.simulateAuditFailure }
-      );
-    } else {
-      const isReviewed = input.humanReviewStatus && input.humanReviewStatus !== 'UNREVIEWED';
-
-      poaRecord = await tx.powerOfAttorney.create({
-        data: {
-          partyId: input.partyId,
-          poaNumberText: input.poaNumberText,
-          poaYearLabel: input.poaYearLabel,
-          notarizationOffice: input.notarizationOffice,
-          poaType: input.poaType,
-          issueDate: input.issueDate ? new Date(input.issueDate) : null,
-          humanReviewStatus: input.humanReviewStatus ?? 'UNREVIEWED',
-          humanReviewedAt: isReviewed ? new Date() : null,
-          humanReviewedById: isReviewed ? actor.id : null,
-          notes: input.notes,
-          version: 1,
-          createdById: actor.id,
-          updatedById: actor.id,
-        },
-      });
-
-      await recordAuditEvent(
-        tx,
-        {
-          userId: actor.id,
-          action: 'RECORD_POA',
-          entityType: 'PowerOfAttorney',
-          entityId: poaRecord.id,
-          changedFields: {
-            poaNumberText: poaRecord.poaNumberText,
-            poaYearLabel: poaRecord.poaYearLabel,
-            humanReviewStatus: poaRecord.humanReviewStatus,
-            version: 1,
-          },
-        },
-        { simulateFailure: options.simulateAuditFailure }
-      );
+      throw error;
     }
+  }
 
-    const result: PoASummaryDTO = {
-      id: poaRecord.id,
-      partyId: poaRecord.partyId,
-      poaNumberText: poaRecord.poaNumberText,
-      poaYearLabel: poaRecord.poaYearLabel,
-      notarizationOffice: poaRecord.notarizationOffice,
-      poaType: poaRecord.poaType,
-      issueDate: poaRecord.issueDate ? poaRecord.issueDate.toISOString().slice(0, 10) : null,
-      humanReviewStatus: poaRecord.humanReviewStatus,
-      humanReviewedAt: poaRecord.humanReviewedAt ? poaRecord.humanReviewedAt.toISOString() : null,
-      humanReviewedById: poaRecord.humanReviewedById,
-      notes: poaRecord.notes,
-      version: poaRecord.version,
-      createdAt: poaRecord.createdAt.toISOString(),
-      updatedAt: poaRecord.updatedAt.toISOString(),
-    };
-
-    await completeIdempotencyKey(tx, {
-      actorId: actor.id,
-      commandType: 'savePowerOfAttorney',
-      key: input.idempotencyKey,
-      resultType: 'PowerOfAttorney',
-      resultId: poaRecord.id,
-      resultPayload: {
-        command: 'savePowerOfAttorney',
-        poaId: poaRecord.id,
-        partyId: input.partyId,
-        version: poaRecord.version,
-      },
-    });
-
-    return result;
-  });
+  throw new ConcurrencyConflictError('فشلت محاولات حفظ التوكيل بسبب تعارض متزامن.');
 }
 
 /**

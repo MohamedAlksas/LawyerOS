@@ -139,17 +139,71 @@ export function getCairoCurrentWallTime(): string {
 }
 
 /**
+ * Helper to check whether a year is a leap year in the Gregorian calendar.
+ */
+export function isGregorianLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/**
+ * Returns the maximum number of days in a given Gregorian month (1-based).
+ */
+export function getDaysInMonth(year: number, month: number): number {
+  switch (month) {
+    case 1:
+    case 3:
+    case 5:
+    case 7:
+    case 8:
+    case 10:
+    case 12:
+      return 31;
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30;
+    case 2:
+      return isGregorianLeapYear(year) ? 29 : 28;
+    default:
+      return 0;
+  }
+}
+
+/**
  * Parses an HTML datetime-local input string (YYYY-MM-DDTHH:mm) as Cairo wall-clock time
  * and converts it to an exact UTC ISO-8601 instant string (YYYY-MM-DDTHH:mm:ss.sssZ).
- * Ensures consistency regardless of whether the client browser is in Cairo, UTC, or another zone.
+ * 
+ * Validates real calendar dates, rejects DST spring-forward gaps where wall time does not exist,
+ * and resolves DST fall-back overlaps by selecting standard time (UTC+2).
  */
 export function cairoWallTimeToUtcIso(dateStr: string): string {
+  if (!dateStr || typeof dateStr !== 'string') {
+    throw new Error('صيغة التاريخ والوقت غير صالحة');
+  }
+
   const [datePart, timePart] = dateStr.split('T');
   if (!datePart || !timePart) {
     throw new Error('صيغة التاريخ والوقت غير صالحة');
   }
-  const [year, month, day] = datePart.split('-').map(Number);
-  const [hour, minute] = timePart.split(':').map(Number);
+
+  const dateParts = datePart.split('-');
+  if (dateParts.length !== 3) {
+    throw new Error('صيغة التاريخ والوقت غير صالحة');
+  }
+
+  const [yearStr, monthStr, dayStr] = dateParts;
+  const timeParts = timePart.split(':');
+  if (timeParts.length < 2) {
+    throw new Error('صيغة التاريخ والوقت غير صالحة');
+  }
+
+  const [hourStr, minuteStr] = timeParts;
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
 
   if (
     isNaN(year) ||
@@ -157,21 +211,29 @@ export function cairoWallTimeToUtcIso(dateStr: string): string {
     isNaN(day) ||
     isNaN(hour) ||
     isNaN(minute) ||
+    year < 1000 ||
+    year > 9999 ||
     month < 1 ||
-    month > 12 ||
-    day < 1 ||
-    day > 31 ||
-    hour < 0 ||
-    hour > 23 ||
-    minute < 0 ||
-    minute > 59
+    month > 12
   ) {
     throw new Error('قيمة التاريخ أو الوقت غير صالحة');
   }
 
-  let candidate = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const maxDays = getDaysInMonth(year, month);
+  if (day < 1 || day > maxDays) {
+    throw new Error('تاريخ غير صالح في التقويم (عدد أيام الشهر غير صحيح).');
+  }
 
-  const dtf = new Intl.DateTimeFormat('en-US', {
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    throw new Error('قيمة الوقت غير صالحة (الساعة بين 0-23 والدقيقة بين 0-59).');
+  }
+
+  // Africa/Cairo alternates between standard time (UTC+2) and summer time (UTC+3).
+  // Evaluate the two possible candidate UTC timestamps:
+  const candidateUtc2 = Date.UTC(year, month - 1, day, hour - 2, minute, 0, 0);
+  const candidateUtc3 = Date.UTC(year, month - 1, day, hour - 3, minute, 0, 0);
+
+  const cairoDtf = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Africa/Cairo',
     year: 'numeric',
     month: 'numeric',
@@ -179,35 +241,48 @@ export function cairoWallTimeToUtcIso(dateStr: string): string {
     hour: 'numeric',
     minute: 'numeric',
     second: 'numeric',
-    hour12: false,
+    hourCycle: 'h23',
   });
 
-  const getCairoParts = (ms: number) => {
-    const parts = dtf.formatToParts(new Date(ms));
+  const getCairoWallParts = (ms: number) => {
+    const parts = cairoDtf.formatToParts(new Date(ms));
     const obj: Record<string, number> = {};
     for (const p of parts) {
       if (p.type !== 'literal') obj[p.type] = Number(p.value);
     }
-    if (obj.hour === 24) obj.hour = 0;
     return obj;
   };
 
-  // Iteratively adjust for Cairo offset (including standard vs daylight saving transitions)
-  for (let i = 0; i < 3; i++) {
-    const cairo = getCairoParts(candidate);
-    const cairoAsUtc = Date.UTC(
-      cairo.year,
-      cairo.month - 1,
-      cairo.day,
-      cairo.hour,
-      cairo.minute,
-      cairo.second
+  const matchesWall = (ms: number) => {
+    const p = getCairoWallParts(ms);
+    return (
+      p.year === year &&
+      p.month === month &&
+      p.day === day &&
+      p.hour === hour &&
+      p.minute === minute
     );
-    const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
-    const diff = targetAsUtc - cairoAsUtc;
-    if (diff === 0) break;
-    candidate += diff;
+  };
+
+  const matchUtc2 = matchesWall(candidateUtc2);
+  const matchUtc3 = matchesWall(candidateUtc3);
+
+  // Case 1: Neither candidate matches -> DST spring-forward gap (time does not exist)
+  if (!matchUtc2 && !matchUtc3) {
+    throw new Error(
+      'الوقت المحدد غير موجود في التوقيت المحلي للقاهرة بسبب بدء التوقيت الصيفي (قفزة التوقيت).'
+    );
   }
 
-  return new Date(candidate).toISOString();
+  // Case 2: Both candidates match -> DST fall-back overlap. Policy: select standard time (UTC+2).
+  if (matchUtc2 && matchUtc3) {
+    return new Date(candidateUtc2).toISOString();
+  }
+
+  // Case 3: Exactly one matches
+  if (matchUtc2) {
+    return new Date(candidateUtc2).toISOString();
+  }
+
+  return new Date(candidateUtc3).toISOString();
 }

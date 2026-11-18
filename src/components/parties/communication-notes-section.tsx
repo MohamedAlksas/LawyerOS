@@ -71,8 +71,12 @@ export function CommunicationNotesSection({
     try {
       // Explicitly convert Cairo wall-clock time to UTC ISO instant
       isoInstant = cairoWallTimeToUtcIso(communicationAt);
-    } catch {
-      setError('صيغة تاريخ أو وقت التواصل غير صالحة.');
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'صيغة تاريخ أو وقت التواصل غير صالحة.'
+      );
       setIsSubmitting(false);
       return;
     }

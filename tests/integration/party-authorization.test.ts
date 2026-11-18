@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
@@ -17,6 +17,7 @@ import {
   addCommunicationNoteAction,
   savePowerOfAttorneyAction,
   revealPartyIdentityAction,
+  checkPartyDuplicatesAction,
 } from '@/modules/parties/actions';
 import { AuthorizationError } from '@/modules/identity/types';
 import type { SavePartyInput } from '@/modules/parties/types';
@@ -27,20 +28,41 @@ import {
   setupTestEncryptionKeys,
 } from '../helpers/party-test-helper';
 
+let mockRequestHeaders: Headers = new Headers();
+
+vi.mock('next/headers', () => {
+  return {
+    headers: async () => mockRequestHeaders,
+  };
+});
+
 function signSessionTokenCookie(token: string, secret: string): string {
   const signature = crypto.createHmac('sha256', secret).update(token).digest('base64');
   return encodeURIComponent(`${token}.${signature}`);
 }
 
-function makeSessionHeaders(token: string): Headers {
+function setTestRequest(token?: string, origin?: string): void {
   const env = getEnv();
-  const signed = signSessionTokenCookie(token, env.BETTER_AUTH_SECRET);
-  return new Headers({
-    cookie: `better-auth.session_token=${signed}`,
-  });
+  const h = new Headers();
+  if (token) {
+    const signed = signSessionTokenCookie(token, env.BETTER_AUTH_SECRET);
+    h.set('cookie', `better-auth.session_token=${signed}`);
+  }
+  if (origin !== undefined) {
+    h.set('origin', origin);
+  } else {
+    h.set('origin', env.BETTER_AUTH_URL);
+  }
+  mockRequestHeaders = h;
 }
 
-function expectFailure(res: { success: boolean; error?: string; code?: string; fieldErrors?: Record<string, string>; data?: unknown }) {
+function expectFailure(res: {
+  success: boolean;
+  error?: string;
+  code?: string;
+  fieldErrors?: Record<string, string>;
+  data?: unknown;
+}) {
   expect(res.success).toBe(false);
   expect(res.data).toBeUndefined();
   return res as { success: false; error: string; code?: string; fieldErrors?: Record<string, string> };
@@ -114,13 +136,14 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
       },
     });
 
-    // 3. Setup Real DB Owner with Incomplete / Pending 2FA
+    // 3. Setup Real DB Owner with Incomplete / Pending 2FA (R2-01, R2-03)
     const incompleteMfaUser = await prisma.user.create({
       data: {
         id: `user-owner-nomfa-${crypto.randomUUID()}`,
         name: 'مالك غير مكتمل المصادقة الثنائية',
         email: `owner-nomfa-${crypto.randomUUID()}@lawoffice.test`,
         role: 'OWNER',
+        twoFactorEnabled: true,
         emailVerified: true,
         credentialVersion: 1,
       },
@@ -138,6 +161,16 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
     });
     sessionIds.push(incompleteMfaSession.id);
     unverifiedMfaOwnerSessionToken = incompleteMfaSession.token;
+
+    await prisma.twoFactor.create({
+      data: {
+        id: `tf-owner-nomfa-${crypto.randomUUID()}`,
+        userId: incompleteMfaUser.id,
+        secret: 'TESTSECRET2FAUNVERIFIED',
+        backupCodes: '[]',
+        verified: false, // Explicitly unverified MFA record (R2-01, R2-03)
+      },
+    });
 
     // 4. Setup Real DB Maintainer User and Session
     const maintainerUser = await prisma.user.create({
@@ -252,108 +285,243 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
     });
   });
 
-  describe('Server Action Entry Points: Negative Authorization Checks (SPEC-02)', () => {
-    it('rejects unauthenticated requests across all entry points returning zero protected data', async () => {
-      const emptyHeaders = new Headers();
+  describe('Server Action Entry Points: Negative Authorization Checks (SPEC-02, R2-01, R2-03)', () => {
+    it('rejects unauthenticated requests across all 7 entry points returning zero protected data', async () => {
+      setTestRequest(undefined);
 
-      const r1 = await savePartyAction(
-        {
-          kind: 'PERSON',
-          name: 'محاولة بدون مصادقة',
-          idempotencyKey: `unauth-${crypto.randomUUID()}`,
-        },
-        { headers: emptyHeaders }
-      );
+      const r1 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'محاولة بدون مصادقة',
+        idempotencyKey: `unauth-${crypto.randomUUID()}`,
+      });
       expect(expectFailure(r1).code).toBe('UNAUTHENTICATED');
 
-      const r2 = await searchPartiesAction({ query: 'عميل' }, { headers: emptyHeaders });
+      const r2 = await searchPartiesAction({ query: 'عميل' });
       expect(expectFailure(r2).code).toBe('UNAUTHENTICATED');
 
-      const r3 = await getClientProfileAction(existingPartyId, { headers: emptyHeaders });
+      const r3 = await getClientProfileAction(existingPartyId);
       expect(expectFailure(r3).code).toBe('UNAUTHENTICATED');
 
-      const r4 = await addCommunicationNoteAction(
-        {
-          partyId: existingPartyId,
-          communicationAt: new Date().toISOString(),
-          channel: 'PHONE',
-          summary: 'محاولة غير مصرح بها',
-          idempotencyKey: `unauth-comm-${crypto.randomUUID()}`,
-        },
-        { headers: emptyHeaders }
-      );
+      const r4 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'محاولة غير مصرح بها',
+        idempotencyKey: `unauth-comm-${crypto.randomUUID()}`,
+      });
       expect(expectFailure(r4).code).toBe('UNAUTHENTICATED');
 
-      const r5 = await savePowerOfAttorneyAction(
-        {
-          partyId: existingPartyId,
-          poaNumberText: '11/أ',
-          poaYearLabel: '2026',
-          notarizationOffice: 'مكتب التوثيق',
-          poaType: 'GENERAL',
-          idempotencyKey: `unauth-poa-${crypto.randomUUID()}`,
-        },
-        { headers: emptyHeaders }
-      );
+      const r5 = await savePowerOfAttorneyAction({
+        partyId: existingPartyId,
+        poaNumberText: '11/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        idempotencyKey: `unauth-poa-${crypto.randomUUID()}`,
+      });
       expect(expectFailure(r5).code).toBe('UNAUTHENTICATED');
 
-      const r6 = await revealPartyIdentityAction(existingPartyId, 'اختبار', {
-        headers: emptyHeaders,
-      });
+      const r6 = await revealPartyIdentityAction(existingPartyId, 'اختبار');
       expect(expectFailure(r6).code).toBe('UNAUTHENTICATED');
+
+      const r7 = await checkPartyDuplicatesAction('عميل');
+      expect(expectFailure(r7).code).toBe('UNAUTHENTICATED');
     });
 
-    it('rejects expired sessions across server action entry points', async () => {
-      const expiredHeaders = makeSessionHeaders(expiredSessionToken);
+    it('rejects expired sessions across all server action entry points', async () => {
+      setTestRequest(expiredSessionToken);
 
-      const res = await getClientProfileAction(existingPartyId, { headers: expiredHeaders });
-      const f = expectFailure(res);
-      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(f.code);
+      const r1 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'محاولة بجلسة منتهية',
+        idempotencyKey: `expired-${crypto.randomUUID()}`,
+      });
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r1).code);
+
+      const r2 = await searchPartiesAction({ query: 'عميل' });
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r2).code);
+
+      const r3 = await getClientProfileAction(existingPartyId);
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r3).code);
+
+      const r4 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'محاولة بجلسة منتهية',
+        idempotencyKey: `expired-comm-${crypto.randomUUID()}`,
+      });
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r4).code);
+
+      const r5 = await savePowerOfAttorneyAction({
+        partyId: existingPartyId,
+        poaNumberText: '12/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        idempotencyKey: `expired-poa-${crypto.randomUUID()}`,
+      });
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r5).code);
+
+      const r6 = await revealPartyIdentityAction(existingPartyId, 'اختبار');
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r6).code);
+
+      const r7 = await checkPartyDuplicatesAction('عميل');
+      expect(['SESSION_EXPIRED', 'UNAUTHENTICATED']).toContain(expectFailure(r7).code);
     });
 
-    it('rejects revoked sessions across server action entry points', async () => {
+    it('rejects revoked sessions across all server action entry points', async () => {
       const nonExistentToken = crypto.randomBytes(32).toString('hex');
-      const revokedHeaders = makeSessionHeaders(nonExistentToken);
+      setTestRequest(nonExistentToken);
 
-      const res = await searchPartiesAction({ query: 'عميل' }, { headers: revokedHeaders });
-      expect(expectFailure(res).code).toBe('UNAUTHENTICATED');
+      const r1 = await searchPartiesAction({ query: 'عميل' });
+      expect(expectFailure(r1).code).toBe('UNAUTHENTICATED');
+
+      const r2 = await getClientProfileAction(existingPartyId);
+      expect(expectFailure(r2).code).toBe('UNAUTHENTICATED');
+
+      const r3 = await checkPartyDuplicatesAction('عميل');
+      expect(expectFailure(r3).code).toBe('UNAUTHENTICATED');
     });
 
-    it('rejects pending 2FA / unfinished MFA session for OWNER role', async () => {
-      const incompleteHeaders = makeSessionHeaders(unverifiedMfaOwnerSessionToken);
+    it('rejects unverified MFA session for OWNER role across all operation families (R2-01, R2-03)', async () => {
+      setTestRequest(unverifiedMfaOwnerSessionToken);
 
-      const res = await savePartyAction(
-        {
-          kind: 'PERSON',
-          name: 'عميل بمصادقة ناقصة',
-          idempotencyKey: `nomfa-${crypto.randomUUID()}`,
-        },
-        { headers: incompleteHeaders }
-      );
-      expect(expectFailure(res).code).toBe('MFA_REQUIRED');
+      const r1 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل بمصادقة ناقصة',
+        idempotencyKey: `nomfa-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r1).code).toBe('MFA_REQUIRED');
+
+      const r2 = await searchPartiesAction({ query: 'عميل' });
+      expect(expectFailure(r2).code).toBe('MFA_REQUIRED');
+
+      const r3 = await getClientProfileAction(existingPartyId);
+      expect(expectFailure(r3).code).toBe('MFA_REQUIRED');
+
+      const r4 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'محاولة بدون إكمال MFA',
+        idempotencyKey: `nomfa-comm-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r4).code).toBe('MFA_REQUIRED');
+
+      const r5 = await savePowerOfAttorneyAction({
+        partyId: existingPartyId,
+        poaNumberText: '13/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        idempotencyKey: `nomfa-poa-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r5).code).toBe('MFA_REQUIRED');
+
+      const r6 = await revealPartyIdentityAction(existingPartyId, 'اختبار');
+      expect(expectFailure(r6).code).toBe('MFA_REQUIRED');
+
+      const r7 = await checkPartyDuplicatesAction('عميل');
+      expect(expectFailure(r7).code).toBe('MFA_REQUIRED');
     });
 
-    it('rejects MAINTAINER role from executing client data actions', async () => {
-      const maintainerHeaders = makeSessionHeaders(maintainerSessionToken);
+    it('rejects forged runtime options attempting to bypass MFA (R2-01)', async () => {
+      setTestRequest(unverifiedMfaOwnerSessionToken);
 
-      const r1 = await savePartyAction(
+      // Attempting to inject allowIncompleteMfa: true as an extra parameter
+      const savePartyWithExtraArg = savePartyAction as unknown as (
+        input: unknown,
+        options?: unknown
+      ) => ReturnType<typeof savePartyAction>;
+      const r1 = await savePartyWithExtraArg(
         {
           kind: 'PERSON',
-          name: 'محاولة صيانة عبر Server Action',
-          idempotencyKey: `maint-action-${crypto.randomUUID()}`,
+          name: 'عميل محاولة تجاوز',
+          idempotencyKey: `nomfa-forged-${crypto.randomUUID()}`,
         },
-        { headers: maintainerHeaders }
+        { allowIncompleteMfa: true }
       );
+      expect(expectFailure(r1).code).toBe('MFA_REQUIRED');
+
+      const revealPartyWithExtraArg = revealPartyIdentityAction as unknown as (
+        partyId: string,
+        reason?: string,
+        options?: unknown
+      ) => ReturnType<typeof revealPartyIdentityAction>;
+      const r2 = await revealPartyWithExtraArg(
+        existingPartyId,
+        'سبب التجاوز',
+        { allowIncompleteMfa: true }
+      );
+      expect(expectFailure(r2).code).toBe('MFA_REQUIRED');
+    });
+
+    it('rejects cross-origin requests from untrusted origins with FORBIDDEN (R2-01, R2-03)', async () => {
+      setTestRequest(verifiedOwnerSessionToken, 'http://untrusted-attacker.invalid');
+
+      const r1 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل هجوم عبر المصدر',
+        idempotencyKey: `cors-attack-${crypto.randomUUID()}`,
+      });
       expect(expectFailure(r1).code).toBe('FORBIDDEN');
 
-      const r2 = await getClientProfileAction(existingPartyId, { headers: maintainerHeaders });
+      const r2 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'ملاحظة عبر مصدر غير موثوق',
+        idempotencyKey: `cors-comm-${crypto.randomUUID()}`,
+      });
       expect(expectFailure(r2).code).toBe('FORBIDDEN');
     });
 
-    it('rejects forged client inputs injecting actorId, role, or userId into actions', async () => {
-      const verifiedHeaders = makeSessionHeaders(verifiedOwnerSessionToken);
+    it('rejects MAINTAINER role from executing client data actions across all entry points', async () => {
+      setTestRequest(maintainerSessionToken);
 
-      // Attempting to inject actorId or role into input
+      const r1 = await savePartyAction({
+        kind: 'PERSON',
+        name: 'محاولة صيانة عبر Server Action',
+        idempotencyKey: `maint-action-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r1).code).toBe('FORBIDDEN');
+
+      const r2 = await searchPartiesAction({ query: 'عميل' });
+      expect(expectFailure(r2).code).toBe('FORBIDDEN');
+
+      const r3 = await getClientProfileAction(existingPartyId);
+      expect(expectFailure(r3).code).toBe('FORBIDDEN');
+
+      const r4 = await addCommunicationNoteAction({
+        partyId: existingPartyId,
+        communicationAt: '2026-11-18T10:00:00.000Z',
+        channel: 'PHONE',
+        summary: 'محاولة صيانة لتسجيل ملاحظة',
+        idempotencyKey: `maint-comm-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r4).code).toBe('FORBIDDEN');
+
+      const r5 = await savePowerOfAttorneyAction({
+        partyId: existingPartyId,
+        poaNumberText: '14/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        idempotencyKey: `maint-poa-${crypto.randomUUID()}`,
+      });
+      expect(expectFailure(r5).code).toBe('FORBIDDEN');
+
+      const r6 = await revealPartyIdentityAction(existingPartyId, 'محاولة صيانة كشف هوية');
+      expect(expectFailure(r6).code).toBe('FORBIDDEN');
+
+      const r7 = await checkPartyDuplicatesAction('عميل');
+      expect(expectFailure(r7).code).toBe('FORBIDDEN');
+    });
+
+    it('rejects forged client inputs injecting actorId, role, or userId into actions', async () => {
+      setTestRequest(verifiedOwnerSessionToken);
+
       const forgedInput = {
         kind: 'PERSON' as const,
         name: 'عميل بحقول مزورة',
@@ -363,7 +531,7 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
         userId: 'forged-user-id',
       };
 
-      const res = await savePartyAction(forgedInput as unknown as SavePartyInput, { headers: verifiedHeaders });
+      const res = await savePartyAction(forgedInput as unknown as SavePartyInput);
       expect(expectFailure(res).code).toBe('VALIDATION_ERROR');
     });
 
@@ -379,18 +547,15 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
         },
       });
       sessionIds.push(tempSession.id);
-      const tempHeaders = makeSessionHeaders(tempSession.token);
+      setTestRequest(tempSession.token);
 
       // 2. Action succeeds with active session
       const validKey = `temp-replay-test-${crypto.randomUUID()}`;
-      const firstRes = await savePartyAction(
-        {
-          kind: 'PERSON',
-          name: 'عميل جلسة مؤقتة',
-          idempotencyKey: validKey,
-        },
-        { headers: tempHeaders }
-      );
+      const firstRes = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل جلسة مؤقتة',
+        idempotencyKey: validKey,
+      });
       expect(firstRes.success).toBe(true);
       if (firstRes.success) {
         partyIds.push(firstRes.data.party.id);
@@ -400,25 +565,19 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
       await prisma.session.delete({ where: { id: tempSession.id } });
 
       // 4. Replay attempt using the revoked session must fail
-      const replayRes = await savePartyAction(
-        {
-          kind: 'PERSON',
-          name: 'عميل جلسة مؤقتة',
-          idempotencyKey: validKey,
-        },
-        { headers: tempHeaders }
-      );
+      const replayRes = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل جلسة مؤقتة',
+        idempotencyKey: validKey,
+      });
       expect(expectFailure(replayRes).code).toBe('UNAUTHENTICATED');
     });
 
     it('sanitizes unexpected internal errors and leaks zero query, table, or schema details (PARENT-01)', async () => {
-      const verifiedHeaders = makeSessionHeaders(verifiedOwnerSessionToken);
+      setTestRequest(verifiedOwnerSessionToken);
 
-      // Pass an invalid/non-existent UUID to a query that triggers an internal or DB error,
-      // or invoke with a mock that throws an unexpected internal Error
-      const res = await getClientProfileAction('not-a-uuid', { headers: verifiedHeaders });
+      const res = await getClientProfileAction('not-a-uuid');
       const f = expectFailure(res);
-      // Must not leak SQL queries, schema, tables, or file paths
       expect(f.error).not.toMatch(/SELECT|INSERT|UPDATE|DELETE/i);
       expect(f.error).not.toMatch(/public\./i);
       expect(f.error).not.toMatch(/password|secret|key/i);
@@ -437,7 +596,7 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
 
       const note = await addCommunicationNote(ownerActor, {
         partyId: existingPartyId,
-        communicationAt: new Date().toISOString(),
+        communicationAt: '2026-11-18T10:00:00.000Z',
         channel: 'PHONE',
         summary: 'ملاحظة تواصل مصرح بها من المالك',
         idempotencyKey: `owner-comm-allowed-${crypto.randomUUID()}`,
@@ -446,22 +605,22 @@ describe('T05-06: Server-Side Authorization & Role Access Controls (Integration)
     });
 
     it('allows verified OWNER to execute real Server Actions successfully', async () => {
-      const verifiedHeaders = makeSessionHeaders(verifiedOwnerSessionToken);
+      setTestRequest(verifiedOwnerSessionToken);
 
-      const saveRes = await savePartyAction(
-        {
-          kind: 'PERSON',
-          name: 'عميل مالك ناجح عبر Server Action',
-          primaryPhone: '01055443322',
-          idempotencyKey: `owner-action-success-${crypto.randomUUID()}`,
-        },
-        { headers: verifiedHeaders }
-      );
+      const saveRes = await savePartyAction({
+        kind: 'PERSON',
+        name: 'عميل مالك ناجح عبر Server Action',
+        primaryPhone: '01055443322',
+        idempotencyKey: `owner-action-success-${crypto.randomUUID()}`,
+      });
       expect(saveRes.success).toBe(true);
       if (saveRes.success) {
         partyIds.push(saveRes.data.party.id);
         expect(saveRes.data.party.name).toBe('عميل مالك ناجح عبر Server Action');
       }
+
+      const dupRes = await checkPartyDuplicatesAction('عميل مالك ناجح عبر Server Action');
+      expect(dupRes.success).toBe(true);
     });
   });
 });

@@ -16,6 +16,26 @@ export class IdempotencyConcurrentConflictError extends Error {
 }
 
 /**
+ * Checks whether an error is a Prisma unique constraint violation (P2002) on IdempotencyRecord.
+ */
+export function isIdempotencyUniqueConflict(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    const meta = error.meta as { target?: string[] | string; modelName?: string } | undefined;
+    if (meta?.modelName === 'IdempotencyRecord') {
+      return true;
+    }
+    const targetStr = Array.isArray(meta?.target) ? meta.target.join(',') : String(meta?.target || '');
+    if (targetStr.includes('key') || targetStr.includes('actorId') || targetStr.includes('commandType')) {
+      return true;
+    }
+    if (error.message.includes('idempotency_record') || error.message.includes('actorId_commandType_key')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Deterministically canonicalizes a JavaScript value to JSON (keys sorted alphabetically).
  */
 export function canonicalizeJson(value: unknown): string {
@@ -158,4 +178,81 @@ export async function completeIdempotencyKey(
     },
   });
 }
+
+export interface ResolveConcurrentOptions {
+  maxRetries?: number;
+  retryDelayMs?: number;
+}
+
+/**
+ * Resolves concurrent same-key idempotency collisions outside the aborted transaction (R2-05).
+ * When racing transactions hit a P2002 conflict on IdempotencyRecord:
+ * 1. Checks the state of the winning record.
+ * 2. If record is absent (winner rolled back): returns null to trigger clean retry.
+ * 3. If payloadHash mismatches: throws IdempotencyPayloadMismatchError.
+ * 4. If status === 'COMPLETED': returns the completed replay payload.
+ * 5. If status === 'IN_PROGRESS': waits and re-polls; if still in progress, throws IdempotencyConcurrentConflictError.
+ */
+export type ClaimReplayResult = {
+  isReplay: true;
+  payloadHash: string;
+  resultType: string | null;
+  resultId: string | null;
+  resultPayload: unknown;
+};
+
+export async function resolveConcurrentIdempotency(
+  prisma: {
+    idempotencyRecord: {
+      findUnique: (args: Prisma.IdempotencyRecordFindUniqueArgs) => Promise<Prisma.IdempotencyRecordGetPayload<object> | null>;
+    };
+  },
+  params: ClaimIdempotencyParams,
+  options: ResolveConcurrentOptions = {}
+): Promise<ClaimReplayResult | null> {
+  const { actorId, commandType, key, payload } = params;
+  const payloadHash = computePayloadHash(payload);
+  const maxRetries = options.maxRetries ?? 8;
+  const retryDelayMs = options.retryDelayMs ?? 100;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const existing = await prisma.idempotencyRecord.findUnique({
+      where: {
+        actorId_commandType_key: {
+          actorId,
+          commandType,
+          key,
+        },
+      },
+    });
+
+    if (!existing) {
+      // Winner transaction rolled back and un-inserted the record. Caller can retry cleanly!
+      return null;
+    }
+
+    if (existing.payloadHash !== payloadHash) {
+      throw new IdempotencyPayloadMismatchError();
+    }
+
+    if (existing.status === 'COMPLETED') {
+      return {
+        isReplay: true,
+        payloadHash,
+        resultType: existing.resultType,
+        resultId: existing.resultId,
+        resultPayload: existing.resultPayload,
+      };
+    }
+
+    // Status is IN_PROGRESS — wait for winner to commit or abort
+    if (attempt < maxRetries - 1) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+
+  // Still in progress after max attempts
+  throw new IdempotencyConcurrentConflictError();
+}
+
 

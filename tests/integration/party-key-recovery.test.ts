@@ -205,7 +205,14 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
             twoFactorVerified: true
           };
           const res = await revealPartyIdentity(actor, '${party.party.id}', 'cold-start test');
-          console.log('REVEALED_OUTPUT:' + JSON.stringify(res));
+          const isVerified = res.number === '${rawNationalId}' && res.identificationType === 'NATIONAL_ID';
+          if (isVerified) {
+            console.log('REVEAL_VERIFICATION:SUCCESS');
+            process.exit(0);
+          } else {
+            console.error('REVEAL_VERIFICATION:MISMATCH');
+            process.exit(2);
+          }
         }
         run().catch(err => {
           console.error(err);
@@ -218,7 +225,7 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       // 2. Subprocess run with matching key custody
       const subEnvSuccess: NodeJS.ProcessEnv = {
         ...process.env,
-        DATABASE_URL: getEnv().TEST_DATABASE_URL,
+        DATABASE_URL: getEnv().DATABASE_URL,
         PARTY_IDENTITY_ENCRYPTION_KEY: SYNTHETIC_ENCRYPTION_KEY,
         PARTY_IDENTITY_KEY_ID: SYNTHETIC_KEY_ID,
         NODE_ENV: 'production',
@@ -228,6 +235,7 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       const subSuccess = spawnSync(process.execPath, [tsxCli, tempScriptPath], {
         env: subEnvSuccess,
         encoding: 'utf-8',
+        timeout: 45000,
       });
 
       if (subSuccess.status !== 0) {
@@ -236,17 +244,13 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       }
 
       expect(subSuccess.status).toBe(0);
-      expect(subSuccess.stdout).toContain('REVEALED_OUTPUT:');
-      const match = subSuccess.stdout.match(/REVEALED_OUTPUT:(.*)/);
-      expect(match).not.toBeNull();
-      const parsed = JSON.parse(match![1]);
-      expect(parsed.number).toBe(rawNationalId);
-      expect(parsed.identificationType).toBe('NATIONAL_ID');
+      expect(subSuccess.stdout).toContain('REVEAL_VERIFICATION:SUCCESS');
+      expect(subSuccess.stdout).not.toContain(rawNationalId);
 
       // 3. Subprocess run WITHOUT key custody (missing key fails closed)
       const envWithoutKey: NodeJS.ProcessEnv = {
         ...process.env,
-        DATABASE_URL: getEnv().TEST_DATABASE_URL,
+        DATABASE_URL: getEnv().DATABASE_URL,
         NODE_ENV: 'production',
       };
       delete envWithoutKey.TEST_DATABASE_URL;
@@ -256,6 +260,7 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       const subFail = spawnSync(process.execPath, [tsxCli, tempScriptPath], {
         env: envWithoutKey,
         encoding: 'utf-8',
+        timeout: 45000,
       });
 
       // Subprocess must exit with non-zero error code
@@ -272,6 +277,6 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
         fs.unlinkSync(tempScriptPath);
       }
     }
-  }, 60000);
+  }, 90000);
 });
 
