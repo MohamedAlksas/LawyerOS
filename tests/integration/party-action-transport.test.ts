@@ -400,7 +400,9 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
     expect(verifiedSessionToken).not.toBeNull();
     verifiedSessionCookie = `better-auth.session_token=${verifiedSessionToken}`;
 
-    // C. Revoked Session Cookie: create another session and delete it from DB
+    // C. Revoked Session Cookie: create another session with completed MFA,
+    // establish protected-action success using that exact cookie, identify raw DB session,
+    // revoke exactly one session row (assert rowCount === 1), then reuse unchanged cookie.
     const loginRevoked = await makeRequest(serverPort, {
       method: 'POST',
       path: '/api/auth/sign-in/email',
@@ -414,12 +416,42 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
         password: OWNER_INITIAL_PASSWORD,
       }),
     });
-    const revokedToken = extractCookieValue(loginRevoked.setCookies, 'better-auth.session_token');
-    expect(revokedToken).not.toBeNull();
-    revokedSessionCookie = `better-auth.session_token=${revokedToken}`;
+    expect(loginRevoked.status).toBe(200);
+    const tfToken2 = extractCookieValue(loginRevoked.setCookies, 'better-auth.two_factor');
+    expect(tfToken2).toBeTruthy();
 
-    // Revoke by deleting from database
-    await dedicatedPool.query('DELETE FROM "session" WHERE token = $1', [revokedToken]);
+    const totpCode2 = await generateTotpCode(ownerTotpSecret);
+    const mfaRes2 = await makeRequest(serverPort, {
+      method: 'POST',
+      path: '/api/auth/two-factor/verify-totp',
+      headers: {
+        'Host': `127.0.0.1:${serverPort}`,
+        'Origin': trustedOrigin,
+        'Content-Type': 'application/json',
+        'Cookie': `better-auth.two_factor=${tfToken2}`,
+      },
+      body: JSON.stringify({
+        code: totpCode2,
+      }),
+    });
+    expect(mfaRes2.status).toBe(200);
+
+    const revokedCookieToken = extractCookieValue(mfaRes2.setCookies, 'better-auth.session_token');
+    expect(revokedCookieToken).toBeTruthy();
+    expect(revokedCookieToken!.length).toBeGreaterThan(0);
+    revokedSessionCookie = `better-auth.session_token=${revokedCookieToken}`;
+
+    // Establish protected-action success using that exact cookie before revocation
+    const preRevocationCheck = await postServerAction('searchPartiesAction', [{ query: 'عميل' }], {
+      cookie: revokedSessionCookie,
+    });
+    expect(preRevocationCheck.status).toBe(200);
+    expect(preRevocationCheck.body).toContain('"success":true');
+
+    // Securely identify the corresponding raw DB session and delete exactly one row
+    const rawToken = decodeURIComponent(revokedCookieToken!).split('.')[0];
+    const deleteResult = await dedicatedPool.query('DELETE FROM "session" WHERE token = $1', [rawToken]);
+    expect(deleteResult.rowCount).toBe(1);
   }, 60000);
 
   afterAll(async () => {
@@ -624,6 +656,7 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
           idempotencyKey: `forged-${crypto.randomUUID()}`,
         },
         {
+          allowIncompleteMfa: true,
           bypassMfa: true,
           simulateAuditFailure: true,
           skipAuthorization: true,

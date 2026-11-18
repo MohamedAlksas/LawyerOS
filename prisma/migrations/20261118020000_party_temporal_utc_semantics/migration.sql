@@ -8,11 +8,9 @@ ALTER TABLE "party" ALTER COLUMN "archivedAt" TYPE TIMESTAMPTZ(3) USING "archive
 ALTER TABLE "party_identity" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
 
 ALTER TABLE "communication_note" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
-ALTER TABLE "communication_note" ALTER COLUMN "communicationAt" TYPE TIMESTAMPTZ(3) USING ("communicationAt" AT TIME ZONE (current_setting('TIMEZONE'))) AT TIME ZONE 'UTC';
 
 ALTER TABLE "power_of_attorney" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
 ALTER TABLE "power_of_attorney" ALTER COLUMN "updatedAt" TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
-ALTER TABLE "power_of_attorney" ALTER COLUMN "humanReviewedAt" TYPE TIMESTAMPTZ(3) USING ("humanReviewedAt" AT TIME ZONE (current_setting('TIMEZONE'))) AT TIME ZONE 'UTC';
 
 ALTER TABLE "audit_event" ALTER COLUMN "createdAt" TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
 
@@ -26,11 +24,12 @@ UPDATE "idempotency_record"
 SET "resultPayload" = jsonb_build_object(
   'command', 'saveParty',
   'partyId', COALESCE("resultPayload"->'party'->>'id', "resultPayload"->>'partyId', "resultId"),
-  'operationVersion', COALESCE(("resultPayload"->'party'->>'version')::int, ("resultPayload"->>'operationVersion')::int, ("resultPayload"->>'version')::int, 1)
+  'operationVersion', COALESCE(("resultPayload"->'party'->>'version')::int, ("resultPayload"->>'operationVersion')::int, ("resultPayload"->>'version')::int, 1),
+  'duplicateWarnings', '[]'::jsonb
 )
 WHERE "commandType" = 'saveParty'
   AND "resultPayload" IS NOT NULL
-  AND ("resultPayload" ? 'party' OR "resultPayload" ? 'address' OR "resultPayload" ? 'notes' OR "resultPayload" ? 'duplicateWarnings');
+  AND ("resultPayload" ? 'party' OR "resultPayload" ? 'address' OR "resultPayload" ? 'notes');
 
 UPDATE "idempotency_record"
 SET "resultPayload" = jsonb_build_object(

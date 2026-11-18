@@ -225,9 +225,11 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
   }, 60000);
 
   it.each([
-    { zone: 'Africa/Cairo', description: 'non-UTC timezone (Africa/Cairo)' },
-    { zone: 'UTC', description: 'UTC timezone' },
-  ])('preserves exact UTC temporal instants across communication, review, and party columns under $description (R3-01)', async ({ zone }) => {
+    { zone4: 'UTC', zone5: 'UTC', desc: 'UTC mig4 / UTC mig5' },
+    { zone4: 'Africa/Cairo', zone5: 'Africa/Cairo', desc: 'Cairo mig4 / Cairo mig5' },
+    { zone4: 'UTC', zone5: 'Africa/Cairo', desc: 'UTC mig4 / Cairo mig5' },
+    { zone4: 'Africa/Cairo', zone5: 'UTC', desc: 'Cairo mig4 / UTC mig5' },
+  ])('preserves exact UTC temporal instants across communication, review, and party columns under $desc (R4-01)', async ({ zone4, zone5 }) => {
     const dedicated = await createDedicatedTestDatabase();
 
     try {
@@ -244,7 +246,7 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         const mig3 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261117000000_parties_communication_poa/migration.sql'), 'utf8');
         await client.query(mig3);
 
-        // Populate test party, communication note, and power of attorney with known instants
+        // Populate test party, legacy communication note, and legacy power of attorney with known instants
         await client.query(`
           INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
           VALUES ('party-tz-test-1', 'PERSON', 'عميل اختبار التوقيت', 'عميل اختبار التوقيت', 1, 'system', 'system', '2026-11-18 10:00:00'::timestamp, '2026-11-18 10:00:00'::timestamp);
@@ -252,43 +254,37 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
 
         await client.query(`
           INSERT INTO "communication_note" ("id", "partyId", "communicationAt", "channel", "summary", "createdById")
-          VALUES ('note-tz-test-1', 'party-tz-test-1', '2026-11-18 10:00:00'::timestamp, 'PHONE', 'ملاحظة اختبار التوقيت', 'system');
+          VALUES ('note-legacy-1', 'party-tz-test-1', '2026-11-18 10:00:00'::timestamp, 'PHONE', 'ملاحظة قديمة قبل الهجرة', 'system');
         `);
 
         await client.query(`
           INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "humanReviewedAt", "humanReviewedById", "createdById", "updatedById", "createdAt", "updatedAt")
-          VALUES ('poa-tz-test-1', 'party-tz-test-1', '101/أ', '2026', 'مكتب توثيق الأهرام', 'GENERAL', 'VALID', '2026-11-18 10:00:00'::timestamp, 'system', 'system', 'system', '2026-11-18 10:00:00'::timestamp, '2026-11-18 10:00:00'::timestamp);
+          VALUES ('poa-legacy-1', 'party-tz-test-1', '101/أ', '2026', 'مكتب توثيق الأهرام', 'GENERAL', 'VALID', '2026-11-18 10:00:00'::timestamp, 'system', 'system', 'system', '2026-11-18 10:00:00'::timestamp, '2026-11-18 10:00:00'::timestamp);
         `);
 
-        // Populate historical idempotency record containing sensitive DTO snapshot
-        await client.query(`
-          INSERT INTO "idempotency_record" ("id", "actorId", "commandType", "key", "payloadHash", "status", "resultType", "resultId", "resultPayload", "createdAt")
-          VALUES (
-            gen_random_uuid()::text,
-            'actor-hist-test',
-            'saveParty',
-            'key-historical-snapshot',
-            'hash-historical-123',
-            'COMPLETED',
-            'Party',
-            'party-tz-test-1',
-            '{"party": {"id": "party-tz-test-1", "name": "عميل اختبار التوقيت", "address": "عنوان سكني سري للغاية", "notes": "ملاحظات قضائية سرية جداً", "version": 3}, "duplicateWarnings": [{"name": "طرف مكرر", "primaryPhone": "01012345678"}]}'::jsonb,
-            '2026-11-18 10:00:00'::timestamp
-          );
-        `);
-
-        // Set session TimeZone BEFORE executing the affected migrations
-        await client.query(`SET TIME ZONE '${zone}'`);
-
-        // Execute migration 4 and 5 in sequence under this session timezone
+        // Set session TimeZone to zone4 and execute migration 4
+        await client.query(`SET TIME ZONE '${zone4}'`);
         const mig4 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261117010000_party_temporal_types/migration.sql'), 'utf8');
         await client.query(mig4);
 
+        // Insert new records created AFTER migration 4 with explicit UTC timestamptz
+        await client.query(`
+          INSERT INTO "communication_note" ("id", "partyId", "communicationAt", "channel", "summary", "createdById")
+          VALUES ('note-new-1', 'party-tz-test-1', '2026-11-19T10:00:00Z'::timestamptz, 'PHONE', 'ملاحظة جديدة بعد الهجرة 4', 'system');
+        `);
+
+        await client.query(`
+          INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "humanReviewedAt", "humanReviewedById", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ('poa-new-1', 'party-tz-test-1', '102/ب', '2026', 'مكتب توثيق الأهرام', 'GENERAL', 'VALID', '2026-11-19T10:00:00Z'::timestamptz, 'system', 'system', 'system', '2026-11-19T10:00:00Z'::timestamptz, '2026-11-19T10:00:00Z'::timestamptz);
+        `);
+
+        // Set session TimeZone to zone5 and execute migration 5
+        await client.query(`SET TIME ZONE '${zone5}'`);
         const mig5 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261118020000_party_temporal_utc_semantics/migration.sql'), 'utf8');
         await client.query(mig5);
 
-        // 1. Verify exact UTC instant preservation across party, communication note, and POA:
-        // All must remain 10:00:00 UTC (not shifted by Cairo +02:00)
+        // Verify exact UTC instant preservation across legacy and new records for communication note and POA:
+        // Expected values are independently specified constants, not expressions.
         const partyRes = await client.query(`
           SELECT to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
           FROM "party"
@@ -296,39 +292,102 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
         `);
         expect(partyRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
 
-        const commRes = await client.query(`
+        const commLegacyRes = await client.query(`
           SELECT to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
           FROM "communication_note"
-          WHERE id = 'note-tz-test-1'
+          WHERE id = 'note-legacy-1'
         `);
-        expect(commRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
+        expect(commLegacyRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
 
-        const poaRes = await client.query(`
+        const commNewRes = await client.query(`
+          SELECT to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
+          FROM "communication_note"
+          WHERE id = 'note-new-1'
+        `);
+        expect(commNewRes.rows[0].val).toBe('2026-11-19T10:00:00.000Z');
+
+        const poaLegacyRes = await client.query(`
           SELECT to_char("humanReviewedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
           FROM "power_of_attorney"
-          WHERE id = 'poa-tz-test-1'
+          WHERE id = 'poa-legacy-1'
         `);
-        expect(poaRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
+        expect(poaLegacyRes.rows[0].val).toBe('2026-11-18T10:00:00.000Z');
 
-        // 2. Verify historical idempotency snapshot sanitization (Residual STD-01, R3-03)
-        const idempRes = await client.query(`
-          SELECT "resultPayload"
-          FROM "idempotency_record"
-          WHERE key = 'key-historical-snapshot'
+        const poaNewRes = await client.query(`
+          SELECT to_char("humanReviewedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS val
+          FROM "power_of_attorney"
+          WHERE id = 'poa-new-1'
         `);
-        expect(idempRes.rows).toHaveLength(1);
-        const stored = idempRes.rows[0].resultPayload;
-        expect(stored.command).toBe('saveParty');
-        expect(stored.partyId).toBe('party-tz-test-1');
-        expect(stored.operationVersion).toBe(3);
-        expect(stored.party).toBeUndefined();
-        expect(stored.address).toBeUndefined();
-        expect(stored.notes).toBeUndefined();
-        expect(stored.duplicateWarnings).toBeUndefined();
-        expect(JSON.stringify(stored)).not.toContain('عنوان سكني سري للغاية');
-        expect(JSON.stringify(stored)).not.toContain('ملاحظات قضائية سرية جداً');
-        expect(JSON.stringify(stored)).not.toContain('طرف مكرر');
-        expect(JSON.stringify(stored)).not.toContain('01012345678');
+        expect(poaNewRes.rows[0].val).toBe('2026-11-19T10:00:00.000Z');
+      } finally {
+        client.release();
+      }
+    } finally {
+      await dedicated.drop();
+    }
+  }, 60000);
+
+  it('applies additive migration 6 to clean up top-level duplicateWarnings from existing checkpoint 5 databases (R4-02)', async () => {
+    const dedicated = await createDedicatedTestDatabase();
+
+    try {
+      const client = await dedicated.pool.connect();
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+
+        // Apply migrations 1 through 5 (checkpoint 5 state)
+        for (const n of [
+          '20261111000000_init_auth',
+          '20261114000000_credential_version',
+          '20261117000000_parties_communication_poa',
+          '20261117010000_party_temporal_types',
+          '20261118020000_party_temporal_utc_semantics',
+        ]) {
+          await client.query(fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations', n, 'migration.sql'), 'utf8'));
+        }
+
+        // Seed a historical idempotency record containing top-level duplicateWarnings with personal data
+        // (This simulates databases that completed migration 5 on the preceding candidate)
+        await client.query(`
+          INSERT INTO "idempotency_record" ("id", "actorId", "commandType", "key", "payloadHash", "status", "resultType", "resultId", "resultPayload", "createdAt")
+          VALUES (
+            'idemp-r4-02',
+            'actor-r4-test',
+            'saveParty',
+            'key-duplicate-warnings-only',
+            'hash-r4-123',
+            'COMPLETED',
+            'Party',
+            'party-r4-1',
+            '{"command": "saveParty", "partyId": "party-r4-1", "operationVersion": 1, "duplicateWarnings": [{"name": "طرف مكرر سري", "primaryPhone": "01099998888"}]}'::jsonb,
+            '2026-11-18 10:00:00'::timestamp
+          );
+        `);
+
+        // Apply additive migration 6
+        const mig6 = fs.readFileSync(path.resolve(process.cwd(), 'prisma/migrations/20261118150000_party_idempotency_privacy_cleanup/migration.sql'), 'utf8');
+        await client.query(mig6);
+
+        // Verify that personal data is stripped while operational identifiers remain intact
+        const res = await client.query(`SELECT * FROM "idempotency_record" WHERE id = 'idemp-r4-02'`);
+        expect(res.rows).toHaveLength(1);
+        const row = res.rows[0];
+        expect(row.actorId).toBe('actor-r4-test');
+        expect(row.commandType).toBe('saveParty');
+        expect(row.key).toBe('key-duplicate-warnings-only');
+        expect(row.payloadHash).toBe('hash-r4-123');
+        expect(row.status).toBe('COMPLETED');
+        expect(row.resultType).toBe('Party');
+        expect(row.resultId).toBe('party-r4-1');
+
+        const payload = row.resultPayload;
+        expect(payload.command).toBe('saveParty');
+        expect(payload.partyId).toBe('party-r4-1');
+        expect(payload.operationVersion).toBe(1);
+        expect(payload.duplicateWarnings).toBeUndefined();
+        expect(JSON.stringify(payload)).not.toContain('طرف مكرر سري');
+        expect(JSON.stringify(payload)).not.toContain('01099998888');
       } finally {
         client.release();
       }

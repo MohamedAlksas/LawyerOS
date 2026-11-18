@@ -91,7 +91,10 @@ describe('Security trigger drift rejection (R14-01)', () => {
         if (history === 'unmanaged') {
           expect((await db.pool.query("SELECT to_regclass('public._prisma_migrations') AS history")).rows[0].history).toBeNull();
         } else {
-          expect((await db.pool.query('SELECT count(*)::int n FROM _prisma_migrations WHERE finished_at IS NOT NULL')).rows[0].n).toBe(5);
+          const expectedCount = fs
+            .readdirSync(path.resolve(process.cwd(), 'prisma/migrations'))
+            .filter((n) => fs.existsSync(path.resolve(process.cwd(), 'prisma/migrations', n, 'migration.sql'))).length;
+          expect((await db.pool.query('SELECT count(*)::int n FROM _prisma_migrations WHERE finished_at IS NOT NULL')).rows[0].n).toBe(expectedCount);
         }
         await db.pool.query(forwardSql);
       }
