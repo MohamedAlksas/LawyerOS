@@ -13,6 +13,7 @@ $documents = @(
     'docs/adr/0001-matter-and-proceeding.md',
     'docs/adr/0002-financial-subledger.md',
     'docs/adr/0003-initial-malware-scan-deferral.md',
+    'docs/adr/0004-exclude-office-operating-expenses.md',
     'docs/PLAN_REVIEW.md', 'docs/START_HERE.md', 'docs/ANTIGRAVITY.md',
     'docs/GIT_WORKFLOW.md', '.github/PULL_REQUEST_TEMPLATE.md', 'docs/AGENCY_AGENTS.md', 'docs/AGENCY_AGENT_CATALOG.md', 'docs/GRAPHIFY.md'
 )

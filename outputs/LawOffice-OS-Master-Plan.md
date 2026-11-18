@@ -166,7 +166,7 @@ The desktop is used to enter files, review accounts, and print. The mobile is us
 - One matter may involve multiple clients and opponents, as well as multiple court instances and court case numbers.
 - Legal deadlines are entered or reviewed by the lawyer; the application does not determine them independently.
 - Paper remains in use during the transition, and its location is part of the matter's data.
-- Fees, judicial expenses, office expenses, and client money received for future spending are separate accounts.
+- Fees, matter expenses, and client money received for future spending remain separate. Office operating expenses (rent, internet, utilities and supplies) are outside V1 by owner decision; see docs/adr/0004-exclude-office-operating-expenses.md.
 - The current request assigns planning and review to Codex and implementation to Gemini 3.8 Flash, using the model name specified by the project owner. Model availability, operation, and file access have not been tested.
 
 ## Stack
@@ -282,6 +282,8 @@ The project owner's father opens the system in the morning to see his hearings a
 | P2 later | Arabic OCR, proposed AI summaries with source pages, assistants and matter-level permissions, integrations | Requires accuracy and privacy evaluation and new scope |
 
 Outside V1: calculating appeal periods from general rules, automatic submissions to court platforms, a client portal, an accredited tax or electronic invoicing system, multioffice SaaS, a native application, or offline synchronization of confidential data.
+
+Owner decision, 18 November 2026: office operating expenses (rent, internet, utilities and office supplies) are outside V1. Finance covers fees, matter-specific reimbursable expenses and client advances; no office-expense screen, account, command or report is required. See [ADR 0004](../docs/adr/0004-exclude-office-operating-expenses.md).
 
 ## 3. Functional requirements
 
@@ -446,7 +448,7 @@ Upload accepts the formats and size defined by security, showing limits before s
 
 ## S11 — Accounts
 
-The interface has four clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل، مصاريف المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
+The interface has three clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل" (fees, matter expenses, client money). Office operating expenses are excluded by [ADR 0004](../docs/adr/0004-exclude-office-operating-expenses.md): no fourth section, entry form or report. Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
 
 | Form | Core fields |
 |---|---|
@@ -454,7 +456,6 @@ The interface has four clear literal sections: "الأتعاب، مصاريف ا
 | Receive money | Payer, date, amount, payment method, cash/account, classification, and allocation required; transfer reference and note optional; allocated total equals the amount |
 | Matter expense | Matter, date, amount, description/category, funding source, and whether reimbursable by the client required; receipt and linked proceeding optional |
 | Client advance / expense deposit | Client and matter, amount, date, and collection method required; balance is client money, not fee revenue |
-| Office expense | Date, amount, category, account, and description required; document optional; not charged to a client's receivable |
 | Full transaction reversal | Original transaction, date, and reason required; display-only amount matches the entire original, with no partial edit; preview reversal effects and dependencies before posting; prohibit repeated reversal |
 | Actual refund | Original transaction/source of money, beneficiary, refund amount, date, disbursement method, and reason required; may be partial within available limits; show whether it reopens a receivable or reduces an advance according to the original type |
 
@@ -635,7 +636,7 @@ These finances support internal management. The meaning is agreed/collected fees
 |---|---|---|
 | `FeeAgreement` | `matterId`, `clientMatterPartyId`, description, amount in piastres, date, charging method, agreement copy, status | One debt charge or `FeeCharge` installments; changing an agreement does not rewrite posted-entry history |
 | `FeeCharge` | `feeAgreementId`, installment description, due day, amount, `receivableLineId` | Each charge links to one posted debit line; installment totals match the approved agreement |
-| `Expense` | `expenseGroupId`, `matterId?`, `proceedingId?`, `clientMatterPartyId?`, description, category, day, amount, `funding: LAWYER/CLIENT_ADVANCE/OFFICE`, reimbursable, `evidenceDocumentId?`, `transactionId` | A reimbursable expense requires a matter and client; office expenses have no client; mixed funding creates two parts sharing group, transaction, and evidence, unique on `(expenseGroupId, funding)`; their sum matches the confirmed amount without duplicating the disbursement |
+| `Expense` | `expenseGroupId`, `matterId`, `proceedingId?`, `clientMatterPartyId`, description, category, day, amount, `funding: LAWYER/CLIENT_ADVANCE`, reimbursable, `evidenceDocumentId?`, `transactionId` | V1 records matter-specific expenses only, with a matter and client; no office operating expense category. Mixed funding creates two parts sharing group, transaction, and evidence, unique on `(expenseGroupId, funding)`; their sum matches the confirmed amount without duplicating the disbursement |
 | `MoneyAccount` | `type`, `matterId?`, `clientMatterPartyId?`, `cashMethod?` | Types below are fixed in code; the user does not create a general chart of accounts |
 | `MoneyTransaction` | `kind`, `status: DRAFT/POSTED`, transaction day, reference, description, `payerPartyId?`, `payeePartyId?`, `idempotencyRecordId`, `postedById`, `postedAt`, `reversalOfId?`, `refundOfId?`, `reason?` | Unique idempotency association; posted records immutable; one full reversal per transaction followed by a new correction; reversals and refunds retain the original reference; actual payer may differ from debtor |
 | `MoneyLine` | `transactionId`, `accountId`, `side: DEBIT/CREDIT`, `amountPiastres`, `matterId?`, `clientMatterPartyId?`, `originalLineId?` | Positive amount; one currency; total debits = total credits before posting; dimensions agree with the account; a refund/reversal line references its original line and cannot exceed it after earlier refunds |
@@ -643,9 +644,9 @@ These finances support internal management. The meaning is agreed/collected fees
 | `AdvanceApplication` | `advanceSourceCreditLineId`, `advanceDebitLineId`, `targetLineId`, amount, `reversalOfId?` | Tracks which advance receipt was used; the target is a cash-disbursement or fee-settlement line for the same client and matter; total use and refunds cannot exceed their source; fees are never deducted from advances automatically |
 | `Receipt` | `transactionId`, unique sequential number, year, payment source, payer, issue time, immutable header details | Management collection receipt, not described as a tax invoice; cancellation/refund appears through a linked receipt, not deletion of the original |
 
-`MoneyAccount` types: `CASH_CLEARING` for cash/transfers, `FEE_RECEIVABLE` for fee debt, `FEE_BASIS` as the counterpart for recording the management agreement, `EXPENSE_RECEIVABLE` for expenses recoverable from the client, `CLIENT_ADVANCE` for funds supplied for a particular client and matter, `OFFICE_EXPENSE` for nonrecoverable office expenses, and `OPENING_BRIDGE` as the counterpart for opening balances. `CLIENT_ADVANCE` is a liability; its available balance = credits − debits.
+`MoneyAccount` types: `CASH_CLEARING` for cash/transfers, `FEE_RECEIVABLE` for fee debt, `FEE_BASIS` as the counterpart for recording the management agreement, `EXPENSE_RECEIVABLE` for expenses recoverable from the client, `CLIENT_ADVANCE` for funds supplied for a particular client and matter, and `OPENING_BRIDGE` as the counterpart for opening balances. `CLIENT_ADVANCE` is a liability; its available balance = credits − debits. ADR 0004 excludes an OFFICE_EXPENSE account or funding mode from V1; do not pre-create a disabled office-expense subsystem.
 
-`MoneyTransaction.kind` values: `FEE_CHARGE`, `FEE_PAYMENT`, `REIMBURSABLE_EXPENSE`, `EXPENSE_REIMBURSEMENT`, `ADVANCE_RECEIPT`, `ADVANCE_SPEND`, `ADVANCE_TO_FEE`, `OFFICE_EXPENSE`, `MIXED_RECEIPT`, `REFUND`, `REVERSAL`, `OPENING_BALANCE`, `FEE_ADJUSTMENT`. Each kind accepts a defined account combination, not arbitrary journal entries from the UI. Record `REFUND` with its original type and reference so reports distinguish fee refunds from advance refunds.
+`MoneyTransaction.kind` values: `FEE_CHARGE`, `FEE_PAYMENT`, `REIMBURSABLE_EXPENSE`, `EXPENSE_REIMBURSEMENT`, `ADVANCE_RECEIPT`, `ADVANCE_SPEND`, `ADVANCE_TO_FEE`, `MIXED_RECEIPT`, `REFUND`, `REVERSAL`, `OPENING_BALANCE`, `FEE_ADJUSTMENT`. Each kind accepts a defined account combination, not arbitrary journal entries from the UI. OFFICE_EXPENSE is unsupported in V1 and must be rejected at server boundaries. Record `REFUND` with its original type and reference so reports distinguish fee refunds from advance refunds.
 
 When someone pays for two clients, `payerPartyId` identifies the payer, while each debt/advance line retains its owner and matter. The receipt displays an immutable allocation. Example: a 3,000 payment includes 2,000 toward client A's fees in matter S and 1,000 toward client B's advance in matter T: debit cash 300,000 piastres, credit A's fees 200,000, and credit B's advance 100,000. Do not split automatically equally, and do not reduce B's debt because A paid. The default UI starts with one client; another allocation is added deliberately.
 
@@ -783,13 +784,13 @@ An interrupted upload must not produce an empty document page labeled successful
 
 The payer does not have to be the debtor. If someone pays for two clients, allocate each part to its client, matter, and item type, displaying the breakdown in confirmation and the receipt. Selecting a payer alone does not transfer the clients' debts to that person or combine their balances into one account.
 
-## 9. Matter expense, client advance, and office expense
+## 9. Matter expense and client advance
 
 For the UI action “تسجيل مصروف” (record expense), choose the funding source before posting:
 
 - **Lawyer-funded and recoverable from the client:** an expense linked to a matter and client opens `EXPENSE_RECEIVABLE`. Client reimbursement settles the expense without increasing fee collections.
 - **Spending funds supplied by the client:** sufficient advance funds must exist for the same client and matter. Spending reduces `CLIENT_ADVANCE` without creating new expense debt. If the advance is insufficient, explicitly split the expense into an advance-funded part and a lawyer-funded part, or cancel until funding is selected. Implementation records two `Expense` parts sharing one `expenseGroupId` and evidence within one command and transaction. Their total equals the amount on screen, without introducing a general allocation table.
-- **Office expense:** internet or office supplies, for example, creates no client debt. It is not allocated to matters automatically.
+- **V1 scope:** office operating expenses such as rent, internet, utilities and supplies are excluded by ADR 0004. Do not offer them as a transaction choice or automatically allocate them to matters.
 
 Receiving 2,000 for expenses and then spending 700 must show: advance 1,300, expense incurred 700, and zero fee collection from these two transactions. Moving part of an advance to fees is a separate action with explanation and internal approval, not a button that hides the movement inside a balance.
 
@@ -801,7 +802,7 @@ The UI action “رد مبلغ فعلي” (refund money actually paid) is diffe
 
 Double-deduction prevention example: receive 5,000 in fees, then refund 1,000 = a 5,000 receipt and a 1,000 `REFUND`. Net cash is 4,000, and debt increases again by 1,000. Do not reverse the 5,000 and add another refund, or create a second refund entry when printing a receipt. If a 5,000 payment was recorded twice but actually received once, reverse only the duplicate record without disbursing money. Misclassifying money actually received between fees and advance is corrected through a noncash reclassification adjustment using an entry format approved in the financial task.
 
-Every correction appears in the statement with its date and references. The matter summary shows four separate amounts: remaining fees, expenses due, available advance, and office expenses if any. The father's UI presents transaction meanings rather than debit/credit account names.
+Every correction appears in the statement with its date and references. The matter summary shows three separate amounts: remaining fees, matter expenses due, and available advance. The father's UI presents transaction meanings rather than debit/credit account names. No office operating-expense total is included in V1.
 
 ## 11. Close and archive a matter
 
@@ -1240,7 +1241,7 @@ An initial organizational estimate is 6–10 weeks of part-time work, including 
 | Task | Scope | Submission requirement |
 |---|---|---|
 | T13 Ledger and collection | Limited account dictionary, balanced posting, fees/payment/allocation/receipt | 15,000 fees minus 5,000 collected = 10,000 outstanding; no floats or edits to posted entries |
-| T14 Expenses and client advances | Lawyer-funded expenses, advances, reimbursement, office expenses | The 1,200 reimbursable expense remains separate; spending an advance reduces the client liability without recording income |
+| T14 Matter expenses and client advances | Lawyer-funded reimbursable matter expenses, advances and reimbursement; office operating expenses excluded by ADR 0004 | The 1,200 reimbursable expense remains separate; spending an advance reduces the client liability without recording income; unsupported office-expense classification is rejected |
 | T15a Reversal | Full reversal of an erroneous entry; release allocations with reason and immutable history | Reverse only once; retain history; no duplicate actual cash outflow |
 | T15b Refunds and adjustments | Partial/full refund and fee adjustment with allocations | Refundable-amount limits, one cash movement, no treating reversal as an actual refund, safe concurrency |
 | T15c Distribution and statement | Multi-client payments, consolidated statement, restricted opening-balance command for T21, reconciliation | Payer differs from debtor; no over-allocation; opening positions do not count as collection; balances match acceptance examples |
@@ -1567,6 +1568,8 @@ status: proposed
 
 A single income/expense screen can confuse fee collection, expense reimbursement, and client funds supplied for spending. Use a limited management subledger with balanced transactions, correction through reversals, and allocations, behind a simplified lawyer-facing UI. The simpler alternative of CRUD on directly editable balances weakens auditability; the trade-off is that the financial milestone requires transaction tests and review of more examples. This provides internal financial organization, not a claim of tax compliance or a complete statutory accounting system.
 
+Scope clarification, 18 November 2026: [ADR 0004](../docs/adr/0004-exclude-office-operating-expenses.md) excludes office operating expenses. The balanced subledger continues to separate fees, matter-expense receivables and client-advance liabilities; it is not an office overhead/profit accounting system.
+
 ---
 
 Source: `docs/adr/0003-initial-malware-scan-deferral.md`
@@ -1592,6 +1595,27 @@ If scanning is explicitly enabled later, scanner outage, timeout, inconclusive r
 ## Acceptance and precedence
 
 Initial AC-10 checks non-malware rejection, authorization, truthful unscanned status, policy attribution and atomic publication. Scanner execution/detection tests are deferred, not passed. T12 reuses the configured T11 validation path; T18 omits the scanner service for this policy. Earlier reviews/submissions remain historical evidence. This owner-approved ADR and updated canonical documents override earlier scanner-mandatory wording in generic/local skills; preserve installed agent/skill assets.
+
+---
+
+Source: `docs/adr/0004-exclude-office-operating-expenses.md`
+
+---
+status: accepted-owner-decision
+date: 2026-11-18
+---
+
+# Exclude office operating expenses from V1
+
+The owner explicitly stated that rent, internet and general office operating expenses are not needed. Remove that feature from V1 rather than implementing unused screens, accounts or categories. Reintroduction requires a separately requested scope decision; it is not automatically scheduled for a later task.
+
+Finance retains fees, matter-specific expenses paid by the lawyer and recoverable from a client, reimbursements, and client money supplied for spending. Mixed lawyer/client-advance funding, truthful statements, allocations, refunds, immutable postings, audit and concurrency protections remain required. The familiar 15,000 / 5,000 / 1,200 and advance 2,000 / spend 700 examples do not change.
+
+Do not implement OFFICE_EXPENSE accounts or transaction kinds, OFFICE expense funding, overhead categories, rent/internet entry forms, office-expense dashboard totals or reports. Expense records in this slice have a matter and client; no automatic overhead allocation or profit calculation is introduced. Unsupported office-expense classifications must fail server validation without writes.
+
+This is a planning-scope change before financial implementation. It removes no existing financial data and authorizes no database reset, historical-entry deletion or application deployment. T14's title/scope/checks, routing source, canonical product/schema/workflow/screen documents and generated handoff bundles are updated. T13 and T15 financial integrity requirements remain unchanged.
+
+Installed Agency/project skills may describe a broader ledger including office expenses. This explicit owner decision and current task scope take precedence. Preserve installed assets; do not delete or rewrite them merely to remove that generic wording. No changes are needed to ongoing T06 matter/proceeding implementation.
 
 ---
 
@@ -3009,7 +3033,7 @@ Inspect Arabic confirmation/statements at 390/768/1440. Run actual lint/typechec
 
 Source: `docs/tasks/T14.md`
 
-# T14 — Reimbursable expenses, client advances, and office expenses
+# T14 — Reimbursable matter expenses and client advances
 
 ```text
 Agency Agent assignment (required):
@@ -3019,7 +3043,7 @@ Agency Agent assignment (required):
 - Supporting specialist: use the agency-test-automation-engineer skill/profile for its scoped pass. Read .agents/skills/testing-test-automation-engineer/SKILL.md and verify its YAML name is agency-test-automation-engineer.
 - Native execution is required: use invoke_subagent to launch the lead and each assigned support as distinct real sessions using .agents/agents/<profile-name>.md. Read docs/AGENCY_AGENTS.md for the preflight, ownership, snapshot, and evidence contract. Reading profiles or performing same-session role passes does not satisfy this assignment.
 - Run the canonical-name or registered-native-alias preflight in docs/AGENCY_AGENTS.md before dependent implementation. If a canonical TypeName is rejected but define_subagent is available, register its canonical instructions under the documented lawoffice-native- alias and actually invoke that alias; record the profile/definition/type/ID mapping. This is native registration, not a persona fallback. If the bounded native preflight fails, report BLOCKED_NATIVE_AGENTS and stop dependent implementation. Do not continue directly, install/upgrade tools, change the model, or invent an agent ID.
-- Task focus: Separate reimbursable expenses, office costs and advances with locked balance checks and independent expected outcomes.
+- Task focus: Separate reimbursable matter expenses and client advances with locked balance checks and independent expected outcomes; office operating expenses are excluded by owner-approved ADR 0004.
 - Resolve profile and definition paths from the current workspace root. A skill name is its frontmatter name, not its folder name. Read the project-local files in full; do not infer activation from a directory listing. If a required profile is missing/unreadable or has the wrong name, stop dependent implementation and report the exact name/path. Do not delete extra installed profiles, install replacements, or silently substitute one.
 - The parent coordinates the task; the delegated lead implements owned paths. Give each child the task ID, role, required references/skills, owned paths, snapshot SHA, allowed actions, and checks. Freeze a committed checkpoint before support review; supports inspect that snapshot in separate contexts and use separate worktrees when commands could conflict. Reconcile findings through the lead and rerun affected checks. Parallelize independent work only; do not write the same files concurrently or spawn nested agents. Preserve the approved LawOffice stack, task scope, project skills, and Codex review ownership.
 - Before submission, record actual native invocation/conversation IDs for all assigned roles, definition paths, profile metadata/path/SHA-256, ownership, inspected SHA, concrete findings/actions, lead reconciliation, and test results. Mark missing runtime evidence NOT RUN; a portable validator or a profile-load list does not prove execution. Do not self-approve or merge main.
@@ -3048,9 +3072,9 @@ Read GLOSSARY.md; docs/ROADMAP.md M5/T14; docs/PRD.md FR-08/12; docs/DATA_MODEL.
 
 Own expense/advance/reimbursement commands and reads in src/modules/finance/, corresponding S11 forms and matter summaries, Expense/AdvanceApplication and necessary documented account/line migrations, and financial tests. Reuse T13 posting and authorization rules. Do not add refunds, reversals, automatic allocation across clients, general bookkeeping, or production data. Evidence attachments use existing private Document authorization, not a new public file path.
 
-Implement distinct choices for lawyer-funded reimbursable expense, spending a client's advance, and nonrecoverable office expense. Expense reimbursement settles EXPENSE_RECEIVABLE without becoming fee income. Advance receipt increases CLIENT_ADVANCE; spending reduces that liability without creating a second expense receivable. Enforce same-client/matter lineage and sufficient funds with locks within the posting transaction. Mixed funding is two Expense records sharing expenseGroupId, transaction and evidence, with total exactly matching the confirmed amount. No automatic conversion of client funds into fees. Any documented advance-to-fee operation must be explicit, balanced and separately identified. Keep cash, fees, expenses and client money distinct; no editable balances.
+Read docs/adr/0004-exclude-office-operating-expenses.md. Implement distinct choices for lawyer-funded reimbursable matter expense and spending a client's advance. Office operating expenses (rent, internet, utilities and supplies) are outside V1: no office-expense account, funding enum, command, form, summary or report. Reject unsupported office-expense classifications explicitly. This owner decision supersedes older installed profile/skill references to office expenses; preserve those installed assets. Expense reimbursement settles EXPENSE_RECEIVABLE without becoming fee income. Advance receipt increases CLIENT_ADVANCE; spending reduces that liability without creating a second expense receivable. Enforce same-client/matter lineage and sufficient funds with locks within the posting transaction. Mixed funding is two Expense records sharing expenseGroupId, transaction and evidence, with total exactly matching the confirmed amount. No automatic conversion of client funds into fees. Any documented advance-to-fee operation must be explicit, balanced and separately identified. Keep cash, fees, matter expenses and client money distinct; no editable balances.
 
-Use real PostgreSQL and test-first behavior. Extend the existing example: 15,000 fees, 5,000 collected, lawyer-funded 1,200 => fees due 10,000 and expenses due 1,200; reimbursement => expenses zero, fees unchanged. Advance 2,000 and spending 700 => available advance 1,300 and zero fee income from those actions. Verify office expenses create no client debt, split funding is not double-counted, and evidence authorization holds. Reject cross-client use, overspending under concurrent requests, duplicate posting, mismatched split totals, unauthorized calls, and audit failure. Keep original posted entries immutable.
+Use real PostgreSQL and test-first behavior. Extend the existing example: 15,000 fees, 5,000 collected, lawyer-funded 1,200 => fees due 10,000 and expenses due 1,200; reimbursement => expenses zero, fees unchanged. Advance 2,000 and spending 700 => available advance 1,300 and zero fee income from those actions. Verify unsupported office-expense requests are rejected without rows, split funding is not double-counted, and evidence authorization holds. Reject cross-client use, overspending under concurrent requests, duplicate posting, mismatched split totals, unauthorized calls, and audit failure. Keep original posted entries immutable.
 
 Inspect Arabic funding explanations/confirmations and four separate summary amounts at 390/768/1440. Run actual lint/typecheck, financial unit/integration/E2E checks and build. Save commands/exit codes, base commit, migrations, expected-versus-actual postings, screenshots and NOT RUN limits to docs/reviews/T14-submission.md. Stop for Codex review; no T15a.
 ```

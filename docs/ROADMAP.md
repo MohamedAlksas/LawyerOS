@@ -64,7 +64,7 @@ An initial organizational estimate is 6–10 weeks of part-time work, including 
 | Task | Scope | Submission requirement |
 |---|---|---|
 | T13 Ledger and collection | Limited account dictionary, balanced posting, fees/payment/allocation/receipt | 15,000 fees minus 5,000 collected = 10,000 outstanding; no floats or edits to posted entries |
-| T14 Expenses and client advances | Lawyer-funded expenses, advances, reimbursement, office expenses | The 1,200 reimbursable expense remains separate; spending an advance reduces the client liability without recording income |
+| T14 Matter expenses and client advances | Lawyer-funded reimbursable matter expenses, advances and reimbursement; office operating expenses excluded by ADR 0004 | The 1,200 reimbursable expense remains separate; spending an advance reduces the client liability without recording income; unsupported office-expense classification is rejected |
 | T15a Reversal | Full reversal of an erroneous entry; release allocations with reason and immutable history | Reverse only once; retain history; no duplicate actual cash outflow |
 | T15b Refunds and adjustments | Partial/full refund and fee adjustment with allocations | Refundable-amount limits, one cash movement, no treating reversal as an actual refund, safe concurrency |
 | T15c Distribution and statement | Multi-client payments, consolidated statement, restricted opening-balance command for T21, reconciliation | Payer differs from debtor; no over-allocation; opening positions do not count as collection; balances match acceptance examples |
