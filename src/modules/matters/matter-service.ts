@@ -19,6 +19,12 @@ import {
   ProceedingPartySummaryDTO,
   MatterAuthorizationSummaryDTO,
   DuplicateCourtWarningDTO,
+  PartyMatterAssociationDTO,
+  PartyMatterAssociationsResult,
+  GetPartyMatterAssociationsParams,
+  FindSimilarProceedingsParams,
+  SimilarProceedingCandidateDTO,
+  FindSimilarProceedingsResult,
   OpenMatterInput,
   OpenMatterResult,
   UpdateMatterInput,
@@ -46,6 +52,9 @@ import {
   linkMatterAuthorizationSchema,
   unlinkMatterAuthorizationSchema,
   searchMattersParamsSchema,
+  getPartyMatterAssociationsSchema,
+  findSimilarProceedingsSchema,
+  parseCalendarDateToUtc,
   UnauthorizedError,
   MatterValidationError,
   LastClientRequiredError,
@@ -58,6 +67,16 @@ import {
   NotFoundError,
   UnsupportedTransitionError,
 } from './matter-types';
+
+function extractOperationVersion(payload: unknown, fallback: number): number {
+  if (payload && typeof payload === 'object' && 'version' in payload) {
+    const v = (payload as { version?: unknown }).version;
+    if (typeof v === 'number' && Number.isInteger(v)) {
+      return v;
+    }
+  }
+  return fallback;
+}
 
 export interface ServiceExecutionOptions {
   prismaOverride?: PrismaClient;
@@ -389,18 +408,6 @@ async function getMatterInternal(
   return mapMatterToDTO(matter);
 }
 
-function extractOperationVersion(payload: unknown, fallback: number): number {
-  if (
-    payload !== null &&
-    typeof payload === 'object' &&
-    'version' in payload &&
-    typeof (payload as { version?: unknown }).version === 'number'
-  ) {
-    return (payload as { version: number }).version;
-  }
-  return fallback;
-}
-
 function toEasternArabicDigits(str: string): string {
   return str.replace(/[0-9]/g, (d) => String.fromCharCode(0x0660 + parseInt(d, 10)));
 }
@@ -605,12 +612,8 @@ export async function openMatter(
       // 4. Atomically allocate fileCode (Cairo year sequence with SELECT ... FOR UPDATE)
       const fileCode = await allocateFileCode(tx);
 
-      // Parse openingDate safely
-      let openingDateVal: Date | null = null;
-      if (input.openingDate) {
-        const [y, m, d] = input.openingDate.split('-').map(Number);
-        openingDateVal = new Date(Date.UTC(y, m - 1, d));
-      }
+      // Parse openingDate safely using strict calendar parsing
+      const openingDateVal = parseCalendarDateToUtc(input.openingDate);
 
       // 5. Create Matter
       const matter = await tx.matter.create({
@@ -794,17 +797,8 @@ export async function updateMatter(
         }
       }
 
-      let openingDateVal: Date | null = null;
-      if (input.openingDate) {
-        const [y, m, d] = input.openingDate.split('-').map(Number);
-        openingDateVal = new Date(Date.UTC(y, m - 1, d));
-      }
-
-      let closingDateVal: Date | null = null;
-      if (input.closingDate) {
-        const [y, m, d] = input.closingDate.split('-').map(Number);
-        closingDateVal = new Date(Date.UTC(y, m - 1, d));
-      }
+      const openingDateVal = parseCalendarDateToUtc(input.openingDate);
+      const closingDateVal = parseCalendarDateToUtc(input.closingDate);
 
       const nextVersion = existing.version + 1;
 
@@ -1093,6 +1087,7 @@ export async function updateMatterParty(
           include: { party: true },
         });
         if (!currentParty) throw new NotFoundError('طرف الملف غير موجود.');
+        const opVersion = extractOperationVersion(claim.resultPayload, currentParty.version);
         return {
           id: currentParty.id,
           matterId: currentParty.matterId,
@@ -1103,6 +1098,7 @@ export async function updateMatterParty(
           billingEnabled: currentParty.billingEnabled,
           notes: currentParty.notes,
           version: currentParty.version,
+          operationVersion: opVersion,
           createdAt: currentParty.createdAt.toISOString(),
         };
       }
@@ -1209,6 +1205,7 @@ export async function updateMatterParty(
         billingEnabled: updated.billingEnabled,
         notes: updated.notes,
         version: updated.version,
+        operationVersion: nextVersion,
         createdAt: updated.createdAt.toISOString(),
       };
 
@@ -1243,6 +1240,7 @@ export async function updateMatterParty(
           include: { party: true },
         });
         if (!currentParty) throw new NotFoundError('طرف الملف غير موجود.');
+        const opVersion = extractOperationVersion(resolved.resultPayload, currentParty.version);
         return {
           id: currentParty.id,
           matterId: currentParty.matterId,
@@ -1253,6 +1251,7 @@ export async function updateMatterParty(
           billingEnabled: currentParty.billingEnabled,
           notes: currentParty.notes,
           version: currentParty.version,
+          operationVersion: opVersion,
           createdAt: currentParty.createdAt.toISOString(),
         };
       }
@@ -1340,6 +1339,56 @@ export async function unlinkMatterParty(
         }
       }
 
+      // C02: Cascade removal of linked ProceedingParty records with deterministic Proceeding lock order & version bumps
+      const linkedProceedingParties = await tx.proceedingParty.findMany({
+        where: { matterPartyId: input.id },
+        select: {
+          id: true,
+          proceedingId: true,
+          capacityText: true,
+          legalCapacity: true,
+        },
+      });
+
+      if (linkedProceedingParties.length > 0) {
+        const affectedProceedingIds = Array.from(
+          new Set(linkedProceedingParties.map((p) => p.proceedingId))
+        ).sort();
+
+        // Lock proceedings in deterministic order
+        await tx.$queryRaw`
+          SELECT "id", "version"
+          FROM "proceeding"
+          WHERE "id" IN (${Prisma.join(affectedProceedingIds)})
+          ORDER BY "id" ASC
+          FOR UPDATE;
+        `;
+
+        // Advance each affected proceeding's version
+        await tx.$executeRaw`
+          UPDATE "proceeding"
+          SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" IN (${Prisma.join(affectedProceedingIds)});
+        `;
+
+        // Record audit events for each cascaded removal
+        for (const pp of linkedProceedingParties) {
+          await recordAuditEvent(tx, {
+            userId: actor.id,
+            action: 'PROCEEDING_PARTY_CASCADE_REMOVED',
+            entityType: 'ProceedingParty',
+            entityId: pp.id,
+            changedFields: {
+              proceedingId: pp.proceedingId,
+              matterPartyId: input.id,
+              capacityText: pp.capacityText,
+              legalCapacity: pp.legalCapacity,
+              reason: 'MATTER_PARTY_UNLINKED',
+            },
+          });
+        }
+      }
+
       await tx.matterParty.delete({
         where: { id: input.id },
       });
@@ -1421,7 +1470,9 @@ export async function addProceeding(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getProceedingDTO(tx, resourceId);
+        const dto = await getProceedingDTO(tx, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
 
       // Lock parent matter row
@@ -1458,11 +1509,7 @@ export async function addProceeding(
         input.yearLabel
       );
 
-      let filingDateVal: Date | null = null;
-      if (input.filingDate) {
-        const [y, m, d] = input.filingDate.split('-').map(Number);
-        filingDateVal = new Date(Date.UTC(y, m - 1, d));
-      }
+      const filingDateVal = parseCalendarDateToUtc(input.filingDate);
 
       const proceeding = await tx.proceeding.create({
         data: {
@@ -1502,7 +1549,7 @@ export async function addProceeding(
           if (!capacityVal) {
             throw new MatterValidationError('الصفة القضائية مطلوبة للطرف في القيد القضائي.');
           }
-          await tx.proceedingParty.create({
+          const createdParty = await tx.proceedingParty.create({
             data: {
               proceedingId: proceeding.id,
               matterPartyId: partyInput.matterPartyId,
@@ -1510,6 +1557,19 @@ export async function addProceeding(
               legalCapacity: partyInput.legalCapacity ?? null,
               notes: partyInput.notes?.trim() ?? null,
               createdById: actor.id,
+            },
+          });
+          await recordAuditEvent(tx, {
+            userId: actor.id,
+            action: 'LINK_PROCEEDING_PARTY',
+            entityType: 'ProceedingParty',
+            entityId: createdParty.id,
+            changedFields: {
+              proceedingId: proceeding.id,
+              matterPartyId: partyInput.matterPartyId,
+              capacityText: capacityVal,
+              legalCapacity: partyInput.legalCapacity ?? null,
+              ...(partyInput.notes ? { hasNotes: true } : {}),
             },
           });
         }
@@ -1532,6 +1592,7 @@ export async function addProceeding(
 
       const dto = await getProceedingDTO(tx, proceeding.id);
       dto.duplicateWarning = duplicateWarning;
+      dto.operationVersion = 1;
 
       await completeIdempotencyKey(tx, {
         actorId: actor.id,
@@ -1559,7 +1620,9 @@ export async function addProceeding(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getProceedingDTO(prisma, resourceId);
+        const dto = await getProceedingDTO(prisma, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
       return addProceeding(actor, rawInput, options);
     }
@@ -1598,7 +1661,9 @@ export async function updateProceeding(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getProceedingDTO(tx, resourceId);
+        const dto = await getProceedingDTO(tx, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
 
       // Lock parent matter row
@@ -1656,11 +1721,7 @@ export async function updateProceeding(
         input.id
       );
 
-      let filingDateVal: Date | null = null;
-      if (input.filingDate) {
-        const [y, m, d] = input.filingDate.split('-').map(Number);
-        filingDateVal = new Date(Date.UTC(y, m - 1, d));
-      }
+      const filingDateVal = parseCalendarDateToUtc(input.filingDate);
 
       const nextVersion = existing.version + 1;
 
@@ -1710,7 +1771,7 @@ export async function updateProceeding(
             },
           });
           if (existingParty) {
-            await tx.proceedingParty.update({
+            const updatedParty = await tx.proceedingParty.update({
               where: { id: existingParty.id },
               data: {
                 capacityText: capacityVal,
@@ -1718,8 +1779,19 @@ export async function updateProceeding(
                 notes: partyInput.notes !== undefined ? (partyInput.notes?.trim() ?? null) : existingParty.notes,
               },
             });
+            await recordAuditEvent(tx, {
+              userId: actor.id,
+              action: 'UPDATE_PROCEEDING_PARTY',
+              entityType: 'ProceedingParty',
+              entityId: updatedParty.id,
+              changedFields: {
+                capacityText: capacityVal,
+                legalCapacity: partyInput.legalCapacity ?? null,
+                ...(partyInput.notes !== undefined ? { hasNotes: Boolean(partyInput.notes?.trim()) } : {}),
+              },
+            });
           } else {
-            await tx.proceedingParty.create({
+            const createdParty = await tx.proceedingParty.create({
               data: {
                 proceedingId: input.id,
                 matterPartyId: partyInput.matterPartyId,
@@ -1727,6 +1799,19 @@ export async function updateProceeding(
                 legalCapacity: partyInput.legalCapacity ?? null,
                 notes: partyInput.notes?.trim() ?? null,
                 createdById: actor.id,
+              },
+            });
+            await recordAuditEvent(tx, {
+              userId: actor.id,
+              action: 'LINK_PROCEEDING_PARTY',
+              entityType: 'ProceedingParty',
+              entityId: createdParty.id,
+              changedFields: {
+                proceedingId: input.id,
+                matterPartyId: partyInput.matterPartyId,
+                capacityText: capacityVal,
+                legalCapacity: partyInput.legalCapacity ?? null,
+                ...(partyInput.notes ? { hasNotes: true } : {}),
               },
             });
           }
@@ -1750,6 +1835,7 @@ export async function updateProceeding(
 
       const dto = await getProceedingDTO(tx, updated.id);
       dto.duplicateWarning = duplicateWarning;
+      dto.operationVersion = nextVersion;
 
       await completeIdempotencyKey(tx, {
         actorId: actor.id,
@@ -1777,7 +1863,9 @@ export async function updateProceeding(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getProceedingDTO(prisma, resourceId);
+        const dto = await getProceedingDTO(prisma, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
       return updateProceeding(actor, rawInput, options);
     }
@@ -1816,7 +1904,9 @@ export async function linkProceedingParty(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getProceedingPartyDTO(tx, resourceId);
+        const dto = await getProceedingPartyDTO(tx, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, dto.version ?? 1);
+        return { ...dto, operationVersion: opVersion };
       }
 
       // 1. Look up proceeding to get parent matterId
@@ -1840,8 +1930,8 @@ export async function linkProceedingParty(
         throw new NotFoundError('القيد القضائي غير موجود.');
       }
 
-      // 4. Validate expectedVersion if supplied
-      if (input.expectedVersion !== undefined && proceeding.version !== input.expectedVersion) {
+      // 4. Validate expectedVersion unconditionally (C01)
+      if (proceeding.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError('رقم نسخة القيد القضائي غير متطابق.');
       }
 
@@ -1893,10 +1983,12 @@ export async function linkProceedingParty(
         auditAction = 'LINK_PROCEEDING_PARTY';
       }
 
+      const nextProceedingVersion = proceeding.version + 1;
+
       // Increment proceeding version
       await tx.$executeRaw`
         UPDATE "proceeding"
-        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        SET "version" = ${nextProceedingVersion}, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${proceeding.id};
       `;
 
@@ -1915,7 +2007,7 @@ export async function linkProceedingParty(
         changedFields: {
           capacityText: capacityVal,
           legalCapacity: input.legalCapacity,
-          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+          ...(input.notes !== undefined ? { hasNotes: Boolean(input.notes?.trim()) } : {}),
         },
       });
 
@@ -1927,6 +2019,7 @@ export async function linkProceedingParty(
         capacityText: partyRecord.capacityText,
         legalCapacity: partyRecord.legalCapacity,
         notes: partyRecord.notes,
+        operationVersion: nextProceedingVersion,
       };
 
       await completeIdempotencyKey(tx, {
@@ -1938,7 +2031,7 @@ export async function linkProceedingParty(
         resultPayload: {
           operation: auditAction,
           resourceId: partyRecord.id,
-          version: 1,
+          version: nextProceedingVersion,
           acknowledgedAt: new Date().toISOString(),
         },
       });
@@ -1955,7 +2048,9 @@ export async function linkProceedingParty(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getProceedingPartyDTO(prisma, resourceId);
+        const dto = await getProceedingPartyDTO(prisma, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version ?? 1);
+        return { ...dto, operationVersion: opVersion };
       }
       return linkProceedingParty(actor, rawInput, options);
     }
@@ -2014,8 +2109,8 @@ export async function unlinkProceedingParty(
         throw new NotFoundError('القيد القضائي غير موجود.');
       }
 
-      // 4. Validate expectedVersion if supplied
-      if (input.expectedVersion !== undefined && proceeding.version !== input.expectedVersion) {
+      // 4. Validate expectedVersion unconditionally (C01)
+      if (proceeding.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError('رقم نسخة القيد القضائي غير متطابق.');
       }
 
@@ -2030,10 +2125,12 @@ export async function unlinkProceedingParty(
         where: { id: input.id },
       });
 
+      const nextProceedingVersion = proceeding.version + 1;
+
       // Increment proceeding version
       await tx.$executeRaw`
         UPDATE "proceeding"
-        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        SET "version" = ${nextProceedingVersion}, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${proceeding.id};
       `;
 
@@ -2060,6 +2157,7 @@ export async function unlinkProceedingParty(
         resultPayload: {
           operation: 'UNLINK_PROCEEDING_PARTY',
           resourceId: input.id,
+          version: nextProceedingVersion,
           acknowledgedAt: new Date().toISOString(),
         },
       });
@@ -2363,7 +2461,14 @@ export async function searchMatters(
   if (params.status) where.status = params.status;
   if (params.practiceAreaId) where.practiceAreaId = params.practiceAreaId;
 
-  if (params.clientId) {
+  if (params.partyId) {
+    where.parties = {
+      some: {
+        partyId: params.partyId,
+        ...(params.role ? { role: params.role } : {}),
+      },
+    };
+  } else if (params.clientId) {
     where.parties = {
       some: {
         partyId: params.clientId,
@@ -2423,5 +2528,161 @@ export async function searchMatters(
   return {
     matters: matters.map(mapMatterToDTO),
     total,
+  };
+}
+
+export async function getPartyMatterAssociations(
+  actor: Actor,
+  rawParams: GetPartyMatterAssociationsParams
+): Promise<PartyMatterAssociationsResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  let params: GetPartyMatterAssociationsParams;
+  try {
+    params = getPartyMatterAssociationsSchema.parse(rawParams);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = getPrismaClient();
+
+  const where: Prisma.MatterPartyWhereInput = {
+    partyId: params.partyId,
+    ...(params.role ? { role: params.role } : {}),
+  };
+
+  const limit = params.limit ?? 50;
+  const offset = params.offset ?? 0;
+
+  const [associations, total] = await Promise.all([
+    prisma.matterParty.findMany({
+      where,
+      include: {
+        matter: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.matterParty.count({ where }),
+  ]);
+
+  const dtos: PartyMatterAssociationDTO[] = associations.map((mp) => ({
+    matterPartyId: mp.id,
+    matterId: mp.matter.id,
+    fileCode: mp.matter.fileCode,
+    title: mp.matter.title,
+    kind: mp.matter.kind,
+    status: mp.matter.status,
+    role: mp.role,
+    isPrimaryContact: mp.isPrimaryContact,
+    billingEnabled: mp.billingEnabled,
+    notes: mp.notes,
+    openingDate: mp.matter.openingDate ? mp.matter.openingDate.toISOString().slice(0, 10) : null,
+    closingDate: mp.matter.closingDate ? mp.matter.closingDate.toISOString().slice(0, 10) : null,
+    createdAt: mp.createdAt.toISOString(),
+  }));
+
+  return {
+    associations: dtos,
+    total,
+  };
+}
+
+export async function findSimilarProceedings(
+  actor: Actor,
+  rawParams: FindSimilarProceedingsParams
+): Promise<FindSimilarProceedingsResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  let params: FindSimilarProceedingsParams;
+  try {
+    params = findSimilarProceedingsSchema.parse(rawParams);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = getPrismaClient();
+
+  const normNumber = normalizeArabicDigits(params.numberText.trim());
+  const normYear = params.yearLabel ? normalizeArabicDigits(params.yearLabel.trim()) : null;
+
+  const where: Prisma.ProceedingWhereInput = {
+    courtId: params.courtId,
+    ...(params.excludeProceedingId ? { id: { not: params.excludeProceedingId } } : {}),
+  };
+
+  const proceedings = await prisma.proceeding.findMany({
+    where,
+    include: {
+      court: true,
+      matter: {
+        select: { id: true, fileCode: true, title: true },
+      },
+    },
+    take: 100,
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const candidates: SimilarProceedingCandidateDTO[] = [];
+  let hasDirectMatch = false;
+
+  for (const proc of proceedings) {
+    if (!proc.numberText) continue;
+    const procNormNumber = normalizeArabicDigits(proc.numberText.trim());
+    const procNormYear = proc.yearLabel ? normalizeArabicDigits(proc.yearLabel.trim()) : null;
+
+    let reason: string | null = null;
+    if (procNormNumber === normNumber && normYear && procNormYear === normYear) {
+      reason = 'تطابق تام في رقم الدعوى وسنة القيد في نفس المحكمة';
+      hasDirectMatch = true;
+    } else if (procNormNumber === normNumber) {
+      reason = 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)';
+    }
+
+    if (reason) {
+      candidates.push({
+        id: proc.id,
+        matterId: proc.matter.id,
+        matterFileCode: proc.matter.fileCode,
+        matterTitle: proc.matter.title,
+        courtId: proc.court.id,
+        courtName: proc.court.name,
+        instance: proc.instance,
+        numberText: proc.numberText,
+        yearLabel: proc.yearLabel,
+        status: proc.status,
+        similarityReason: reason,
+      });
+    }
+  }
+
+  // Sort direct matches first
+  candidates.sort((a, b) => {
+    const aDirect = a.similarityReason.startsWith('تطابق تام');
+    const bDirect = b.similarityReason.startsWith('تطابق تام');
+    if (aDirect && !bDirect) return -1;
+    if (!aDirect && bDirect) return 1;
+    return 0;
+  });
+
+  const limit = params.limit ?? 10;
+  return {
+    candidates: candidates.slice(0, limit),
+    hasDirectMatch,
   };
 }

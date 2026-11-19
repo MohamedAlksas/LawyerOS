@@ -90,6 +90,7 @@ describe('T06 Round 2 Regression & Defect Verification', () => {
       proceedingId: proceeding.id,
       matterPartyId: mp.id,
       capacityText: 'Initial Capacity Text',
+      expectedVersion: proceeding.version,
       idempotencyKey: `cap-init-${crypto.randomUUID()}`,
     });
 
@@ -105,6 +106,7 @@ describe('T06 Round 2 Regression & Defect Verification', () => {
       proceedingId: proceeding.id,
       matterPartyId: mp.id,
       capacityText: 'Device B Updated Capacity',
+      expectedVersion: procAfterInit.version,
       idempotencyKey: `cap-b-${crypto.randomUUID()}`,
     });
 
@@ -224,6 +226,7 @@ describe('T06 Round 2 Regression & Defect Verification', () => {
         proceedingId: proceeding.id,
         matterPartyId: mp.id,
         capacityText: 'Concurrent Capacity Update',
+        expectedVersion: proceeding.version,
         idempotencyKey: `cap-concurrent-${crypto.randomUUID()}`,
       }),
     ]);

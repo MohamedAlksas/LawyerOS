@@ -1,6 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { getPrismaClient } from '@/lib/auth';
-import { seedT04Owner, deleteT04Owner, signInWithTotp, T04Owner } from '../helpers/t04-auth';
+import {
+  seedT04Owner,
+  deleteT04Owner,
+  signInWithTotp,
+  currentTotp,
+  revokeAllSessionsForUser,
+  T04Owner,
+} from '../helpers/t04-auth';
 import { cleanupPartyFixtures, setupTestEncryptionKeys } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 
@@ -252,6 +259,153 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // User inputs are still intact after dismiss
     await expect(page.getByTestId('proceeding-number-input')).toHaveValue('9988');
     await expect(page.getByTestId(`capacity-text-${matterPartyId}`)).toHaveValue('المدعي بالحق المدني المعدل');
+  });
+
+  test('signed-out deep link preserves returnTo and settles on destination matter after login and MFA (C21) @matters', async ({
+    browser,
+  }) => {
+    test.setTimeout(120_000);
+
+    // 1. Create a test matter in DB
+    const matter = await prisma.matter.create({
+      data: {
+        fileCode: '2026/7771',
+        title: 'ملف تجربة التوجيه الآمن بعد الدخول',
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdMatterIds.push(matter.id);
+
+    // 2. Open an unauthenticated browser context
+    const unauthContext = await browser.newContext();
+    const page = await unauthContext.newPage();
+
+    try {
+      // 3. Navigate directly to matter deep link
+      await page.goto(`/matters/${matter.id}`);
+
+      // 4. Verify redirected to login with returnTo
+      await expect(page).toHaveURL((url) => {
+        return (
+          url.pathname === '/login' &&
+          url.searchParams.get('error') === 'session_expired' &&
+          url.searchParams.get('returnTo') === `/matters/${matter.id}`
+        );
+      });
+
+      // 5. Fill credentials and submit
+      await page.locator('#email').fill(owner.email);
+      await page.locator('#password').fill(owner.password);
+      await page.locator('button[type="submit"]').click();
+
+      // 6. Verify forward to verify with returnTo preserved
+      await expect(page).toHaveURL((url) => {
+        return (
+          url.pathname === '/verify' &&
+          url.searchParams.get('returnTo') === `/matters/${matter.id}`
+        );
+      });
+
+      // 7. Fill TOTP code and submit
+      const code = await currentTotp(owner.totpSecret);
+      await page.locator('#totpCode').fill(code);
+      await page.locator('button[type="submit"]').click();
+
+      // 8. Assert browser settles on target deep link and NOT home '/'
+      await page.waitForURL((url) => url.pathname === `/matters/${matter.id}`);
+      expect(page.url()).toContain(`/matters/${matter.id}`);
+      await expect(page.getByRole('heading', { level: 1 })).toContainText(matter.title);
+    } finally {
+      await unauthContext.close();
+    }
+  });
+
+  test('unfinished MFA preserves returnTo when returning to login (C21) @matters', async ({
+    browser,
+  }) => {
+    test.setTimeout(90_000);
+
+    const unauthContext = await browser.newContext();
+    const page = await unauthContext.newPage();
+
+    try {
+      // 1. Visit /matters/new signed out
+      await page.goto('/matters/new');
+      await expect(page).toHaveURL((url) => {
+        return (
+          url.pathname === '/login' &&
+          url.searchParams.get('returnTo') === '/matters/new'
+        );
+      });
+
+      // 2. Submit credentials to reach verify step
+      await page.locator('#email').fill(owner.email);
+      await page.locator('#password').fill(owner.password);
+      await page.locator('button[type="submit"]').click();
+      await expect(page).toHaveURL(/\/verify\?returnTo=%2Fmatters%2Fnew/);
+
+      // 3. User cancels MFA and returns to login
+      const backToLoginBtn = page.getByRole('button', { name: 'العودة إلى شاشة تسجيل الدخول' });
+      await expect(backToLoginBtn).toBeVisible();
+      await backToLoginBtn.click();
+
+      // 4. Verify returnTo is safely preserved on login
+      await expect(page).toHaveURL((url) => {
+        return (
+          url.pathname === '/login' &&
+          url.searchParams.get('returnTo') === '/matters/new'
+        );
+      });
+    } finally {
+      await unauthContext.close();
+    }
+  });
+
+  test('preserves in-memory form inputs and renders explicit recovery banner on mid-form session revocation (C21) @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+
+    // 1. Navigate to matter create form
+    await page.goto('/matters/new');
+    await expect(page).toHaveURL(/\/matters\/new/);
+
+    // 2. Populate form fields in memory
+    const testTitle = 'دعوى تعويض عن إخلال عقدي تجريبي';
+    const testSummary = 'ملخص محفوظ في الذاكرة لتجربة استرجاع الجلسة عند الإلغاء';
+    const testNotes = 'ملاحظات تدقيق أمان الهوية';
+
+    await page.getByTestId('matter-title-input').fill(testTitle);
+    await page.getByTestId('matter-summary-textarea').fill(testSummary);
+    await page.getByTestId('matter-notes-textarea').fill(testNotes);
+
+    // 3. Simulate mid-journey server session revocation
+    const revokedCount = await revokeAllSessionsForUser(owner.id);
+    expect(revokedCount).toBeGreaterThan(0);
+
+    // 4. User attempts form submission with revoked session
+    await page.getByTestId('matter-submit-button').click();
+
+    // 5. Verify explicit session expired recovery alert is displayed
+    const recoveryAlert = page.getByTestId('session-expired-recovery-alert');
+    await expect(recoveryAlert).toBeVisible();
+    await expect(recoveryAlert).toContainText('انتهت صلاحية الجلسة أو تم إلغاؤها');
+    await expect(recoveryAlert).toContainText('تم الحفاظ على كافة البيانات والتعديلات المدخلة في ذاكرة الصفحة دون فقدان');
+
+    // 6. Verify in-memory inputs were NOT wiped or lost
+    await expect(page.getByTestId('matter-title-input')).toHaveValue(testTitle);
+    await expect(page.getByTestId('matter-summary-textarea')).toHaveValue(testSummary);
+    await expect(page.getByTestId('matter-notes-textarea')).toHaveValue(testNotes);
+
+    // 7. Verify recovery action link points to login with target="_blank"
+    const loginLink = page.getByTestId('session-recovery-login-link');
+    await expect(loginLink).toBeVisible();
+    await expect(loginLink).toHaveAttribute('href', '/login');
+    await expect(loginLink).toHaveAttribute('target', '_blank');
   });
 });
 

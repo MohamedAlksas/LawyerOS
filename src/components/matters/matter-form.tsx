@@ -1,9 +1,10 @@
 ﻿'use client';
 
-import React, { useState, useId } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { openMatterAction, updateMatterAction } from '@/modules/matters/matter-actions';
+import { searchPartiesAction } from '@/modules/parties/actions';
 import {
   MatterDTO,
   MatterKind,
@@ -20,6 +21,7 @@ import {
 interface OptionItem {
   id: string;
   name: string;
+  isActive?: boolean;
 }
 
 interface ClientOptionItem {
@@ -57,26 +59,83 @@ export function MatterForm({
   const [summary, setSummary] = useState(initialMatter?.summary || '');
   const [notes, setNotes] = useState(initialMatter?.notes || '');
 
-  // Client Selection for Create mode
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [clientSearchQuery, setClientSearchQuery] = useState('');
-
   // UI States
   const [isSaving, setIsSaving] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
-  // Stable Idempotency Key in memory
-  const [idempotencyKey] = useState(() => generateClientRequestId('mform'));
+  // In-memory Idempotency Key (frozen across transport retries, regenerated on validation change)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('mform'));
+
+  // C17: Client Selection with Server-Backed Normalized Search
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [selectedClientObj, setSelectedClientObj] = useState<ClientOptionItem | null>(null);
+  const [clientSearchQuery, setClientSearchQuery] = useState('');
+  const [partiesList, setPartiesList] = useState<ClientOptionItem[]>(parties);
+  const [isSearchingClient, setIsSearchingClient] = useState(false);
+  const [clientSearchError, setClientSearchError] = useState<string | null>(null);
+  const searchGenRef = useRef(0);
+  const prevMatterRef = useRef(initialMatter);
+
+  // C10: Reset complete form snapshot when initialMatter updates or page reloads
+  useEffect(() => {
+    if (initialMatter && prevMatterRef.current !== initialMatter) {
+      prevMatterRef.current = initialMatter;
+      setTitle(initialMatter.title || '');
+      setKind(initialMatter.kind || 'LITIGATION');
+      setStatus(initialMatter.status || 'ACTIVE');
+      setPracticeAreaId(initialMatter.practiceAreaId || '');
+      setPaperLocationId(initialMatter.paperLocationId || '');
+      setOpeningDate(initialMatter.openingDate || new Date().toISOString().slice(0, 10));
+      setClosingDate(initialMatter.closingDate || '');
+      setSummary(initialMatter.summary || '');
+      setNotes(initialMatter.notes || '');
+      setConcurrencyConflict(false);
+      setGeneralError(null);
+    }
+  }, [initialMatter]);
 
   const formId = useId();
 
-  const filteredParties = clientSearchQuery.trim()
-    ? parties.filter((p) => p.name.toLowerCase().includes(clientSearchQuery.trim().toLowerCase()))
-    : parties.slice(0, 10);
+  const handleClientSearchChange = async (queryText: string) => {
+    setClientSearchQuery(queryText);
+    const gen = ++searchGenRef.current;
+    if (!queryText.trim()) {
+      setPartiesList(parties);
+      setClientSearchError(null);
+      setIsSearchingClient(false);
+      return;
+    }
+    setIsSearchingClient(true);
+    setClientSearchError(null);
+    try {
+      const res = await searchPartiesAction({ query: queryText.trim(), limit: 20 });
+      if (gen !== searchGenRef.current) return;
+      if (res.success) {
+        setPartiesList(
+          res.data.parties.map((p) => ({
+            id: p.id,
+            name: p.name,
+            primaryPhone: p.primaryPhone,
+          }))
+        );
+      } else {
+        setClientSearchError(res.error || 'تعذر البحث في دليل الأطراف.');
+      }
+    } catch {
+      if (gen === searchGenRef.current) {
+        setClientSearchError('حدث خطأ أثناء الاتصال بالخادم للبحث عن الأطراف.');
+      }
+    } finally {
+      if (gen === searchGenRef.current) {
+        setIsSearchingClient(false);
+      }
+    }
+  };
 
-  const selectedClient = parties.find((p) => p.id === selectedClientId);
+  const selectedClient = selectedClientObj || partiesList.find((p) => p.id === selectedClientId) || parties.find((p) => p.id === selectedClientId);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +143,7 @@ export function MatterForm({
     setGeneralError(null);
     setFieldErrors({});
     setConcurrencyConflict(false);
+    setSessionExpired(false);
 
     try {
       if (isEdit && initialMatter) {
@@ -104,9 +164,20 @@ export function MatterForm({
 
         const res = await updateMatterAction(payload);
         if (!res.success) {
-          if (res.code === 'CONCURRENCY_CONFLICT') {
+          if (
+            res.code === 'SESSION_EXPIRED' ||
+            res.code === 'UNAUTHENTICATED' ||
+            res.code === 'SESSION_INACTIVE'
+          ) {
+            setSessionExpired(true);
+            setGeneralError(
+              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير النموذج. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
+            );
+          } else if (res.code === 'CONCURRENCY_CONFLICT') {
             setConcurrencyConflict(true);
           } else {
+            // Validation error: refresh idempotency key for next modified attempt
+            setIdempotencyKey(generateClientRequestId('mform'));
             setGeneralError(res.error || 'تعذر تعديل بيانات الملف.');
             if (res.fieldErrors) setFieldErrors(res.fieldErrors);
           }
@@ -131,8 +202,20 @@ export function MatterForm({
 
         const res = await openMatterAction(payload);
         if (!res.success) {
-          setGeneralError(res.error || 'تعذر فتح ملف القضية.');
-          if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+          if (
+            res.code === 'SESSION_EXPIRED' ||
+            res.code === 'UNAUTHENTICATED' ||
+            res.code === 'SESSION_INACTIVE'
+          ) {
+            setSessionExpired(true);
+            setGeneralError(
+              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير النموذج. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
+            );
+          } else {
+            setIdempotencyKey(generateClientRequestId('mform'));
+            setGeneralError(res.error || 'تعذر فتح ملف القضية.');
+            if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+          }
           setIsSaving(false);
           return;
         }
@@ -140,8 +223,9 @@ export function MatterForm({
         router.push(`/matters/${res.data.matter.id}`);
       }
     } catch (err: unknown) {
+      // C09: Do NOT regenerate idempotencyKey on uncertain transport error so retry resubmits same operation
       setGeneralError(
-        err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ البيانات.'
+        err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ البيانات. يمكنك إعادة المحاولة بأمان.'
       );
       setIsSaving(false);
     }
@@ -195,6 +279,41 @@ export function MatterForm({
               className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px]"
             >
               تحديث الصفحة وتحميل أحدث البيانات
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Session Expired Recovery Alert */}
+      {sessionExpired && (
+        <div
+          role="alert"
+          data-testid="session-expired-recovery-alert"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>🔒</span>
+            <span>انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير النموذج</span>
+          </div>
+          <p className="text-xs leading-relaxed">
+            تم الحفاظ على كافة البيانات والتعديلات المدخلة في ذاكرة الصفحة دون فقدان. يرجى تسجيل الدخول في نافذة جديدة لتجديد الجلسة ثم العودة هنا والضغط على زر &quot;إعادة محاولة الحفظ&quot; لإتمام العملية الأصلية.
+          </p>
+          <div className="flex items-center gap-3 pt-1">
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="session-recovery-login-link"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+            <button
+              type="submit"
+              data-testid="session-recovery-retry-button"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors"
+            >
+              إعادة محاولة الحفظ
             </button>
           </div>
         </div>
@@ -281,11 +400,21 @@ export function MatterForm({
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="">— غير محدد —</option>
-                {practiceAreas.map((pa) => (
-                  <option key={pa.id} value={pa.id}>
-                    {pa.name}
-                  </option>
-                ))}
+                {practiceAreas.map((pa) => {
+                  const isCurrent = pa.id === practiceAreaId;
+                  if (pa.isActive === false && !isCurrent) {
+                    return (
+                      <option key={pa.id} value={pa.id} disabled>
+                        {pa.name} (معطل)
+                      </option>
+                    );
+                  }
+                  return (
+                    <option key={pa.id} value={pa.id}>
+                      {pa.name} {pa.isActive === false ? ' (معطل - تاريخي)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
@@ -306,7 +435,7 @@ export function MatterForm({
               />
             </div>
 
-            {/* Status (Edit mode only) */}
+            {/* Status (Edit mode only - C14: excludes ARCHIVED in T06) */}
             {isEdit && (
               <div className="space-y-1">
                 <label htmlFor={`${formId}-status`} className="block text-xs font-bold text-[#172A35]">
@@ -323,7 +452,6 @@ export function MatterForm({
                   <option value="DRAFT">{MATTER_STATUS_LABELS.DRAFT}</option>
                   <option value="ON_HOLD">{MATTER_STATUS_LABELS.ON_HOLD}</option>
                   <option value="CLOSED">{MATTER_STATUS_LABELS.CLOSED}</option>
-                  <option value="ARCHIVED">{MATTER_STATUS_LABELS.ARCHIVED}</option>
                 </select>
               </div>
             )}
@@ -347,7 +475,7 @@ export function MatterForm({
           )}
         </div>
 
-        {/* Section 2: Initial Client Selection (Create Mode only) */}
+        {/* Section 2: Initial Client Selection (Create Mode only - C17 Normalized Bounded Search) */}
         {!isEdit && (
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
@@ -385,7 +513,10 @@ export function MatterForm({
                 <button
                   type="button"
                   data-testid="remove-selected-client-button"
-                  onClick={() => setSelectedClientId('')}
+                  onClick={() => {
+                    setSelectedClientId('');
+                    setSelectedClientObj(null);
+                  }}
                   className="text-xs font-semibold text-red-700 hover:text-red-900 p-1 rounded"
                 >
                   إزالة واختيار موكل آخر
@@ -396,30 +527,35 @@ export function MatterForm({
                 <input
                   type="text"
                   value={clientSearchQuery}
-                  onChange={(e) => setClientSearchQuery(e.target.value)}
-                  placeholder="ابحث عن موكل بالاسم..."
+                  onChange={(e) => handleClientSearchChange(e.target.value)}
+                  placeholder="ابحث عن موكل بالاسم (يدعم التوحيد اللغوي للألف والهمزة)..."
                   aria-label="البحث عن موكل في دليل الأطراف"
                   data-testid="client-search-input"
                   className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
 
-                {parties.length === 0 ? (
+                {isSearchingClient ? (
+                  <p className="text-xs text-[#4D606A] italic">جارٍ البحث في دليل الأطراف...</p>
+                ) : clientSearchError ? (
+                  <p className="text-xs text-red-600 font-medium">{clientSearchError}</p>
+                ) : partiesList.length === 0 ? (
                   <p className="text-xs text-[#4D606A] italic">
-                    لا يوجد أطراف مسجلة بدليل الأطراف حتى الآن. يمكنك حفظ الملف كمسودة أو{' '}
+                    لم يتم العثور على أطراف مطابقة للبحث. يمكنك حفظ الملف كمسودة أو{' '}
                     <Link href="/parties/new" className="text-[#14566B] underline font-bold">
                       إضافة طرف جديد أولاً
                     </Link>.
                   </p>
-                ) : filteredParties.length === 0 ? (
-                  <p className="text-xs text-[#4D606A] italic">لم يتم العثور على أطراف مطابقة للبحث.</p>
                 ) : (
                   <div className="max-h-48 overflow-y-auto divide-y divide-[#E8EEF1] border border-[#D5DFE3] rounded-[6px]">
-                    {filteredParties.map((p) => (
+                    {partiesList.map((p) => (
                       <button
                         key={p.id}
                         type="button"
                         data-testid={`select-client-option-${p.id}`}
-                        onClick={() => setSelectedClientId(p.id)}
+                        onClick={() => {
+                          setSelectedClientId(p.id);
+                          setSelectedClientObj(p);
+                        }}
                         className="w-full text-right p-2.5 text-xs hover:bg-[#F4F6F7] flex items-center justify-between transition-colors min-h-[40px]"
                       >
                         <span className="font-bold text-[#172A35]">{p.name}</span>
@@ -458,11 +594,21 @@ export function MatterForm({
               className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
             >
               <option value="">— غير محدد —</option>
-              {storageLocations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
-                </option>
-              ))}
+              {storageLocations.map((loc) => {
+                const isCurrent = loc.id === paperLocationId;
+                if (loc.isActive === false && !isCurrent) {
+                  return (
+                    <option key={loc.id} value={loc.id} disabled>
+                      {loc.name} (معطل)
+                    </option>
+                  );
+                }
+                return (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name} {loc.isActive === false ? ' (معطل - تاريخي)' : ''}
+                  </option>
+                );
+              })}
             </select>
             {!paperLocationId && (
               <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded border border-amber-200 mt-1">

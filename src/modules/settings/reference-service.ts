@@ -42,6 +42,18 @@ function extractResourceId(claim: { resultId?: string | null; resultPayload?: un
   return resourceId ?? '';
 }
 
+function extractOperationVersion(payload: unknown, fallback: number): number {
+  if (
+    payload !== null &&
+    typeof payload === 'object' &&
+    'version' in payload &&
+    typeof (payload as { version?: unknown }).version === 'number'
+  ) {
+    return (payload as { version: number }).version;
+  }
+  return fallback;
+}
+
 function assertActorAuthorized(actor: Actor | undefined | null, permission: Permission): void {
   if (!actor || !actor.id || !actor.role) {
     throw new UnauthorizedError('غير مصرح. يرجى تسجيل الدخول أولاً.');
@@ -80,13 +92,10 @@ function mapOfficeSettingsToDTO(settings: {
 async function getOfficeSettingsInternal(
   prismaOrTx: PrismaClient | Prisma.TransactionClient
 ): Promise<OfficeSettingsDTO> {
-  let settings = await prismaOrTx.officeSettings.findUnique({
-    where: { id: SINGLETON_ID },
-  });
-
-  if (!settings) {
-    settings = await prismaOrTx.officeSettings.create({
-      data: {
+  try {
+    const settings = await prismaOrTx.officeSettings.upsert({
+      where: { id: SINGLETON_ID },
+      create: {
         id: SINGLETON_ID,
         officeName: 'مكتب المحاماة',
         currency: 'EGP',
@@ -94,10 +103,21 @@ async function getOfficeSettingsInternal(
         version: 1,
         updatedById: 'system',
       },
+      update: {},
     });
+    return mapOfficeSettingsToDTO(settings);
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      const existing = await prismaOrTx.officeSettings.findUniqueOrThrow({
+        where: { id: SINGLETON_ID },
+      });
+      return mapOfficeSettingsToDTO(existing);
+    }
+    throw err;
   }
-
-  return mapOfficeSettingsToDTO(settings);
 }
 
 export async function getOfficeSettings(actor?: Actor): Promise<OfficeSettingsDTO> {
@@ -136,7 +156,9 @@ export async function updateOfficeSettings(
       });
 
       if (claim.isReplay) {
-        return await getOfficeSettingsInternal(tx);
+        const dto = await getOfficeSettingsInternal(tx);
+        const opVersion = extractOperationVersion(claim.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
 
       // 2. Lock and retrieve current settings
@@ -202,6 +224,7 @@ export async function updateOfficeSettings(
       });
 
       const resultDTO = mapOfficeSettingsToDTO(updated);
+      resultDTO.operationVersion = nextVersion;
 
       // 4. Complete idempotency with minimal safe metadata
       await completeIdempotencyKey(tx, {
@@ -229,7 +252,9 @@ export async function updateOfficeSettings(
         payload: input,
       });
       if (resolved) {
-        return await getOfficeSettingsInternal(prisma);
+        const dto = await getOfficeSettingsInternal(prisma);
+        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
       return updateOfficeSettings(actor, rawInput);
     }
@@ -403,7 +428,9 @@ export async function createReferenceItem(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getReferenceItemDTO(tx, input.type, resourceId);
+        const dto = await getReferenceItemDTO(tx, input.type, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, 1);
+        return { ...dto, operationVersion: opVersion };
       }
 
       let createdDTO: ReferenceItemDTO;
@@ -505,6 +532,7 @@ export async function createReferenceItem(
         },
       });
 
+      createdDTO.operationVersion = 1;
       return createdDTO;
     });
   } catch (err) {
@@ -517,7 +545,9 @@ export async function createReferenceItem(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getReferenceItemDTO(prisma, input.type, resourceId);
+        const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, 1);
+        return { ...dto, operationVersion: opVersion };
       }
       return createReferenceItem(actor, rawInput);
     }
@@ -555,7 +585,9 @@ export async function updateReferenceItem(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getReferenceItemDTO(tx, input.type, resourceId);
+        const dto = await getReferenceItemDTO(tx, input.type, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, 1);
+        return { ...dto, operationVersion: opVersion };
       }
 
       let updatedDTO: ReferenceItemDTO;
@@ -675,6 +707,7 @@ export async function updateReferenceItem(
         },
       });
 
+      updatedDTO.operationVersion = updatedDTO.version;
       return updatedDTO;
     });
   } catch (err) {
@@ -687,7 +720,9 @@ export async function updateReferenceItem(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getReferenceItemDTO(prisma, input.type, resourceId);
+        const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+        return { ...dto, operationVersion: opVersion };
       }
       return updateReferenceItem(actor, rawInput);
     }

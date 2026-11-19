@@ -46,12 +46,14 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
       ? (params.kind as MatterKind)
       : undefined;
 
+  const rawStatus = params.status === 'SUSPENDED' ? 'ON_HOLD' : params.status;
   const validStatus: MatterStatus | undefined =
-    params.status && ['ACTIVE', 'DRAFT', 'SUSPENDED', 'CLOSED'].includes(params.status)
-      ? (params.status as MatterStatus)
+    rawStatus && ['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'].includes(rawStatus)
+      ? (rawStatus as MatterStatus)
       : undefined;
 
   let initialResult: SearchMattersResult = { matters: [], total: 0 };
+  let initialError: string | undefined = undefined;
   try {
     initialResult = await searchMatters(
       {
@@ -63,8 +65,8 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
       },
       actor
     );
-  } catch {
-    // Graceful fallback to client loading
+  } catch (err) {
+    initialError = err instanceof Error ? err.message : 'تعذر تحميل ملفات القضايا من الخادم.';
   }
 
   return (
@@ -75,6 +77,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         initialQuery={params.query || ''}
         initialKind={validKind}
         initialStatus={validStatus}
+        initialError={initialError}
       />
     </div>
   );

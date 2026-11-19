@@ -85,7 +85,7 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
     <div className="py-2">
       <ProceedingForm
         matter={matter}
-        courts={courts.map((c) => ({ id: c.id, name: c.name }))}
+        courts={courts.map((c) => ({ id: c.id, name: c.name, isActive: c.isActive }))}
       />
     </div>
   );

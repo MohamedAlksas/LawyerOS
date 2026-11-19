@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useId, useMemo } from 'react';
+import React, { useState, useEffect, useId, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -20,6 +20,8 @@ import {
 } from '@/modules/matters/matter-types';
 import {
   PROCEEDING_INSTANCE_LABELS,
+  PROCEEDING_STATUS_LABELS,
+  PROCEEDING_STATUS_CLASSES,
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   generateClientRequestId,
 } from '../matters/matter-ui-types';
@@ -32,12 +34,21 @@ interface PartyCapacityState {
 interface CourtOption {
   id: string;
   name: string;
+  isActive?: boolean;
 }
 
 interface ProceedingFormProps {
   matter: MatterDTO;
   courts: CourtOption[];
   initialProceeding?: ProceedingSummaryDTO;
+}
+
+function normalizeDocketText(s?: string | null): string {
+  if (!s) return '';
+  return s
+    .trim()
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
+    .toLowerCase();
 }
 
 export function ProceedingForm({
@@ -57,9 +68,7 @@ export function ProceedingForm({
     initialProceeding?.parentProceedingId || ''
   );
   const [numberText, setNumberText] = useState(initialProceeding?.numberText || '');
-  const [yearLabel, setYearLabel] = useState(
-    initialProceeding?.yearLabel || new Date().getFullYear().toString()
-  );
+  const [yearLabel, setYearLabel] = useState(initialProceeding?.yearLabel || '');
   const [registerType, setRegisterType] = useState(initialProceeding?.registerType || '');
   const [circuit, setCircuit] = useState(initialProceeding?.circuit || '');
   const [filingDate, setFilingDate] = useState(initialProceeding?.filingDate || '');
@@ -67,6 +76,15 @@ export function ProceedingForm({
   const [status, setStatus] = useState<ProceedingStatus>(
     initialProceeding?.status || 'ACTIVE'
   );
+
+  // Track which matter parties are included in this proceeding (C12)
+  const [includedPartyIds, setIncludedPartyIds] = useState<Set<string>>(() => {
+    if (initialProceeding?.parties) {
+      return new Set(initialProceeding.parties.map((p) => p.matterPartyId));
+    }
+    // On new proceeding creation, matter parties start included as candidates
+    return new Set((matter.parties || []).map((mp) => mp.id));
+  });
 
   // Legal Capacities per matter party (storing both legalCapacity and capacityText)
   const [partyCapacities, setPartyCapacities] = useState<Record<string, PartyCapacityState>>(() => {
@@ -86,7 +104,7 @@ export function ProceedingForm({
           capacityText: existing.capacityText ?? '',
         };
       } else {
-        // Sensible defaults with notice to verify
+        // Default capacities for candidates with requirement to verify
         const defaultLegalCapacity: ProceedingLegalCapacity =
           mp.role === 'CLIENT'
             ? instance === 'APPEAL'
@@ -116,11 +134,52 @@ export function ProceedingForm({
     return initial;
   });
 
+  // Full snapshot synchronization on initialProceeding change (C10)
+  useEffect(() => {
+    if (initialProceeding) {
+      setCourtId(initialProceeding.courtId || '');
+      setInstance(initialProceeding.instance || 'FIRST_INSTANCE');
+      setParentProceedingId(initialProceeding.parentProceedingId || '');
+      setNumberText(initialProceeding.numberText || '');
+      setYearLabel(initialProceeding.yearLabel || '');
+      setRegisterType(initialProceeding.registerType || '');
+      setCircuit(initialProceeding.circuit || '');
+      setFilingDate(initialProceeding.filingDate || '');
+      setClaimAmount(initialProceeding.claimAmount || '');
+      setStatus(initialProceeding.status || 'ACTIVE');
+
+      const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
+      for (const p of initialProceeding.parties || []) {
+        existingPartiesMap.set(p.matterPartyId, p);
+      }
+      const newIncluded = new Set<string>();
+      const newCapacities: Record<string, PartyCapacityState> = {};
+      for (const mp of matter.parties || []) {
+        const existing = existingPartiesMap.get(mp.id);
+        if (existing) {
+          newIncluded.add(mp.id);
+          newCapacities[mp.id] = {
+            legalCapacity: existing.legalCapacity ?? 'OTHER',
+            capacityText: existing.capacityText ?? '',
+          };
+        } else {
+          newCapacities[mp.id] = {
+            legalCapacity: 'OTHER',
+            capacityText: '',
+          };
+        }
+      }
+      setIncludedPartyIds(newIncluded);
+      setPartyCapacities(newCapacities);
+    }
+  }, [initialProceeding, matter.parties]);
+
   // UI States
   const [isSaving, setIsSaving] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // In-memory Idempotency Key (refreshed on conflict/failure for safe retry)
   const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('proc'));
@@ -137,17 +196,31 @@ export function ProceedingForm({
   // Docket Incomplete Check
   const isDocketIncomplete = !numberText.trim() || !yearLabel.trim() || !registerType.trim();
 
-  // Similarity Check: Check if another proceeding in the same matter has the same number & year
+  // Similarity Check: Check if another proceeding in the same matter has the same normalized number & year (C18)
   const similarProceeding = useMemo(() => {
-    if (!numberText.trim() || !yearLabel.trim()) return null;
+    const normNum = normalizeDocketText(numberText);
+    const normYear = normalizeDocketText(yearLabel);
+    if (!normNum || !normYear) return null;
     return (matter.proceedings || []).find(
       (p) =>
         (!initialProceeding || p.id !== initialProceeding.id) &&
-        p.numberText?.trim() === numberText.trim() &&
-        p.yearLabel?.trim() === yearLabel.trim() &&
+        normalizeDocketText(p.numberText) === normNum &&
+        normalizeDocketText(p.yearLabel) === normYear &&
         (!courtId || p.courtId === courtId)
     );
   }, [matter.proceedings, initialProceeding, numberText, yearLabel, courtId]);
+
+  const togglePartyInclusion = (partyId: string, included: boolean) => {
+    setIncludedPartyIds((prev) => {
+      const next = new Set(prev);
+      if (included) {
+        next.add(partyId);
+      } else {
+        next.delete(partyId);
+      }
+      return next;
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,18 +228,25 @@ export function ProceedingForm({
     setGeneralError(null);
     setFieldErrors({});
     setConcurrencyConflict(false);
+    setSessionExpired(false);
 
     // If docket is incomplete, force status to DRAFT
     const finalStatus: ProceedingStatus = isDocketIncomplete ? 'DRAFT' : status;
 
-    // Assemble party capacities for atomic submission
-    const assembledParties: ProceedingPartyInput[] = Object.entries(partyCapacities).map(
-      ([matterPartyId, capState]) => ({
-        matterPartyId,
-        legalCapacity: capState.legalCapacity,
-        capacityText: capState.capacityText.trim() || undefined,
-      })
-    );
+    // Assemble party capacities ONLY for explicitly included parties (C12)
+    const assembledParties: ProceedingPartyInput[] = (matter.parties || [])
+      .filter((mp) => includedPartyIds.has(mp.id))
+      .map((mp) => {
+        const capState = partyCapacities[mp.id] || {
+          legalCapacity: 'OTHER' as ProceedingLegalCapacity,
+          capacityText: '',
+        };
+        return {
+          matterPartyId: mp.id,
+          legalCapacity: capState.legalCapacity,
+          capacityText: capState.capacityText.trim() || undefined,
+        };
+      });
 
     try {
       if (isEdit && initialProceeding) {
@@ -190,13 +270,23 @@ export function ProceedingForm({
 
         const res = await updateProceedingAction(payload);
         if (!res.success) {
-          // Generate new idempotency key so retry doesn't trigger payload mismatch
-          setIdempotencyKey(generateClientRequestId('proc'));
-          if (res.code === 'CONCURRENCY_CONFLICT') {
+          if (
+            res.code === 'SESSION_EXPIRED' ||
+            res.code === 'UNAUTHENTICATED' ||
+            res.code === 'SESSION_INACTIVE'
+          ) {
+            setSessionExpired(true);
+            setGeneralError(
+              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
+            );
+            // C09: Do not regenerate key on auth/session expiry so user can retry original operation
+          } else if (res.code === 'CONCURRENCY_CONFLICT') {
             setConcurrencyConflict(true);
+            setIdempotencyKey(generateClientRequestId('proc'));
           } else {
             setGeneralError(res.error || 'تعذر تعديل بيانات القيد القضائي.');
             if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+            setIdempotencyKey(generateClientRequestId('proc'));
           }
           setIsSaving(false);
           return;
@@ -222,9 +312,21 @@ export function ProceedingForm({
 
         const res = await addProceedingAction(payload);
         if (!res.success) {
-          setIdempotencyKey(generateClientRequestId('proc'));
-          setGeneralError(res.error || 'تعذر تسجيل القيد القضائي.');
-          if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+          if (
+            res.code === 'SESSION_EXPIRED' ||
+            res.code === 'UNAUTHENTICATED' ||
+            res.code === 'SESSION_INACTIVE'
+          ) {
+            setSessionExpired(true);
+            setGeneralError(
+              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
+            );
+            // C09: Do not regenerate key on auth/session expiry
+          } else {
+            setGeneralError(res.error || 'تعذر تسجيل القيد القضائي.');
+            if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+            setIdempotencyKey(generateClientRequestId('proc'));
+          }
           setIsSaving(false);
           return;
         }
@@ -232,7 +334,7 @@ export function ProceedingForm({
         router.push(`/matters/${matter.id}`);
       }
     } catch (err: unknown) {
-      setIdempotencyKey(generateClientRequestId('proc'));
+      // C09: Freeze key on transport/network error - DO NOT regenerate key for retry
       setGeneralError(
         err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ البيانات.'
       );
@@ -301,6 +403,41 @@ export function ProceedingForm({
         </div>
       )}
 
+      {/* Session Expired Recovery Alert */}
+      {sessionExpired && (
+        <div
+          role="alert"
+          data-testid="session-expired-recovery-alert"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>🔒</span>
+            <span>انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد</span>
+          </div>
+          <p className="leading-relaxed">
+            تم الحفاظ على كافة البيانات والتعديلات المدخلة في ذاكرة الصفحة دون فقدان. يرجى تسجيل الدخول في نافذة جديدة لتجديد الجلسة ثم العودة هنا والضغط على زر &quot;إعادة محاولة الحفظ&quot; لإتمام العملية الأصلية.
+          </p>
+          <div className="flex items-center gap-3 pt-1">
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="session-recovery-login-link"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+            <button
+              type="submit"
+              data-testid="session-recovery-retry-button"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors"
+            >
+              إعادة محاولة الحفظ
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Error Alert */}
       {generalError && (
         <div
@@ -320,7 +457,7 @@ export function ProceedingForm({
         </div>
       )}
 
-      {/* Similarity Alert (Non-blocking) */}
+      {/* Similarity Alert (Non-blocking) (C18) */}
       {similarProceeding && (
         <div
           role="alert"
@@ -332,6 +469,15 @@ export function ProceedingForm({
             يوجد بالفعل قيد قضائي مسجل في هذا الملف بنفس رقم الدعوى (
             <bdi dir="ltr" className="font-mono font-bold">{similarProceeding.numberText} لسنة {similarProceeding.yearLabel}</bdi> — {similarProceeding.courtName}
             ). يمكنك متابعة الحفظ بشكل طبيعي إذا كانت هذه دعوى منفصلة (مثل دعوى فرعية أو متقابلة).
+            {similarProceeding.id && (
+              <Link
+                href={`/matters/${matter.id}/proceedings/${similarProceeding.id}`}
+                target="_blank"
+                className="text-[#14566B] font-bold underline inline-block mr-2"
+              >
+                عرض القيد القائم ↗
+              </Link>
+            )}
           </p>
         </div>
       )}
@@ -344,7 +490,7 @@ export function ProceedingForm({
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Court */}
+            {/* Court (C19) */}
             <div className="space-y-1">
               <label htmlFor={`${formId}-court`} className="block text-xs font-bold text-[#172A35]">
                 المحكمة أو الجهة القضائية <span className="text-red-600">*</span>
@@ -358,11 +504,22 @@ export function ProceedingForm({
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="">— اختر المحكمة —</option>
-                {courts.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {courts.map((c) => {
+                  const isInactive = c.isActive === false;
+                  const isSelected = c.id === courtId;
+                  if (isInactive && !isSelected) {
+                    return (
+                      <option key={c.id} value={c.id} disabled>
+                        {c.name} (معطلة)
+                      </option>
+                    );
+                  }
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {isInactive ? '(معطلة - محتفظ بها تاريخياً)' : ''}
+                    </option>
+                  );
+                })}
               </select>
               <p className="text-[11px] text-[#4D606A]">
                 المحكمة إلزامية حتى في المسودات لتحديد مقر انعقاد الجلسة.
@@ -441,6 +598,9 @@ export function ProceedingForm({
                   className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[36px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                 >
                   <option value="ACTIVE">قيد نشط بالمحكمة</option>
+                  <option value="AWAITING_JUDGMENT">حجز للحكم</option>
+                  <option value="DECIDED">محكوم فيه</option>
+                  <option value="CLOSED">منتهي ومغلق</option>
                   <option value="DRAFT">مسودة قيد</option>
                 </select>
               </div>
@@ -548,14 +708,14 @@ export function ProceedingForm({
           </div>
         </div>
 
-        {/* Section 3: Legal Capacities in this Proceeding */}
+        {/* Section 3: Legal Capacities in this Proceeding (C12) */}
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
           <div className="pb-2 border-b border-[#E8EEF1]">
             <h2 className="text-base font-bold text-[#172A35]">
               الصفات القانونية للأطراف في هذا القيد
             </h2>
             <p className="text-xs text-[#4D606A] mt-1 leading-relaxed">
-              تحدد صفة كل طرف في هذه الدرجة القضائية (مثلاً: الموكل مدعي أو مستأنف ضده). يجب مراجعة وتأكيد الصفة والمسمى الإجرائي لكل طرف في هذا القيد القضائي قبل الحفظ (لا يتم الاعتماد التلقائي دون مراجعة).
+              تحدد صفة كل طرف في هذه الدرجة القضائية (مثلاً: الموكل مدعي أو مستأنف ضده). يتم الحفاظ على الروابط القائمة، مع إمكانية إدراج أو استبعاد أي طرف بقرار صريح دون استنتاج تلقائي للصفة.
             </p>
           </div>
 
@@ -564,82 +724,142 @@ export function ProceedingForm({
               لا توجد أطراف مسجلة في هذا الملف بعد لتعيين صفاتهم القضائية.
             </p>
           ) : (
-            <div className="space-y-3">
-              {(matter.parties || []).map((mp) => {
-                const currentCap = partyCapacities[mp.id] || {
-                  legalCapacity: 'OTHER' as ProceedingLegalCapacity,
-                  capacityText: '',
-                };
-
-                return (
-                  <div
-                    key={mp.id}
-                    className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3.5 bg-[#F9FBFC] rounded-[6px] border border-[#E8EEF1] text-xs"
-                  >
-                    <div className="space-y-0.5 min-w-[140px]">
-                      <span className="font-bold text-sm text-[#172A35] block">
-                        {mp.partyName}
-                      </span>
-                      <span className="text-[#4D606A]">
-                        صفته بالملف: {mp.role === 'CLIENT' ? 'موكل' : mp.role === 'OPPONENT' ? 'خصم' : 'طرف آخر'}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-lg">
-                      <div className="flex items-center gap-1.5 sm:w-1/2">
-                        <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
-                          الصفة القانونية:
-                        </label>
-                        <select
-                          id={`capacity-${mp.id}`}
-                          value={currentCap.legalCapacity}
-                          onChange={(e) =>
-                            setPartyCapacities((prev) => ({
-                              ...prev,
-                              [mp.id]: {
-                                ...prev[mp.id],
-                                legalCapacity: e.target.value as ProceedingLegalCapacity,
-                              },
-                            }))
-                          }
-                          data-testid={`capacity-select-${mp.id}`}
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
-                        >
-                          {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
-                            <option key={cap} value={cap}>
-                              {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 sm:w-1/2">
-                        <label htmlFor={`capacity-text-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
-                          المسمى الإجرائي:
-                        </label>
-                        <input
-                          id={`capacity-text-${mp.id}`}
-                          type="text"
-                          maxLength={100}
-                          value={currentCap.capacityText}
-                          onChange={(e) =>
-                            setPartyCapacities((prev) => ({
-                              ...prev,
-                              [mp.id]: {
-                                ...prev[mp.id],
-                                capacityText: e.target.value,
-                              },
-                            }))
-                          }
-                          placeholder="مثال: مدعي، بصفته..."
-                          data-testid={`capacity-text-${mp.id}`}
-                          className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
-                        />
-                      </div>
-                    </div>
+            <div className="space-y-4">
+              {/* Included Parties */}
+              <div className="space-y-3">
+                <span className="text-xs font-bold text-[#172A35] block">
+                  الأطراف المقيدة بصفات إجرائية في هذا القيد:
+                </span>
+                {(matter.parties || []).filter((mp) => includedPartyIds.has(mp.id)).length === 0 ? (
+                  <div className="p-3 bg-amber-50 rounded border border-amber-200 text-xs text-amber-900">
+                    لم يتم إدراج أي طرف بصفة إجرائية في هذا القيد حتى الآن. يمكنك إدراج طرف من قائمة المرشحين أدناه.
                   </div>
-                );
-              })}
+                ) : (
+                  (matter.parties || [])
+                    .filter((mp) => includedPartyIds.has(mp.id))
+                    .map((mp) => {
+                      const currentCap = partyCapacities[mp.id] || {
+                        legalCapacity: 'OTHER' as ProceedingLegalCapacity,
+                        capacityText: '',
+                      };
+
+                      return (
+                        <div
+                          key={mp.id}
+                          className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3.5 bg-[#F9FBFC] rounded-[6px] border border-[#E8EEF1] text-xs"
+                        >
+                          <div className="space-y-0.5 min-w-[140px]">
+                            <span className="font-bold text-sm text-[#172A35] block">
+                              {mp.partyName}
+                            </span>
+                            <span className="text-[#4D606A]">
+                              صفته بالملف: {mp.role === 'CLIENT' ? 'موكل' : mp.role === 'OPPONENT' ? 'خصم' : 'طرف آخر'}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-lg">
+                            <div className="flex items-center gap-1.5 sm:w-1/2">
+                              <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
+                                الصفة القانونية:
+                              </label>
+                              <select
+                                id={`capacity-${mp.id}`}
+                                value={currentCap.legalCapacity}
+                                onChange={(e) =>
+                                  setPartyCapacities((prev) => ({
+                                    ...prev,
+                                    [mp.id]: {
+                                      ...prev[mp.id],
+                                      legalCapacity: e.target.value as ProceedingLegalCapacity,
+                                    },
+                                  }))
+                                }
+                                data-testid={`capacity-select-${mp.id}`}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                              >
+                                {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
+                                  <option key={cap} value={cap}>
+                                    {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 sm:w-1/2">
+                              <label htmlFor={`capacity-text-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
+                                المسمى الإجرائي:
+                              </label>
+                              <input
+                                id={`capacity-text-${mp.id}`}
+                                type="text"
+                                maxLength={100}
+                                value={currentCap.capacityText}
+                                onChange={(e) =>
+                                  setPartyCapacities((prev) => ({
+                                    ...prev,
+                                    [mp.id]: {
+                                      ...prev[mp.id],
+                                      capacityText: e.target.value,
+                                    },
+                                  }))
+                                }
+                                placeholder="مثال: مدعي، بصفته..."
+                                data-testid={`capacity-text-${mp.id}`}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 flex items-center justify-end">
+                            <button
+                              type="button"
+                              data-testid={`remove-party-${mp.id}`}
+                              onClick={() => togglePartyInclusion(mp.id, false)}
+                              className="px-2 py-1 text-xs text-red-600 hover:text-red-800 hover:bg-red-50 rounded border border-red-200 transition-colors"
+                              title="استبعاد الطرف من هذا القيد"
+                            >
+                              ✕ استبعاد
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+
+              {/* Unlinked Candidate Parties */}
+              {(matter.parties || []).filter((mp) => !includedPartyIds.has(mp.id)).length > 0 && (
+                <div className="pt-3 border-t border-[#E8EEF1] space-y-2">
+                  <span className="text-xs font-bold text-[#4D606A] block">
+                    أطراف القضية غير المدرجة في هذا القيد (مرشحون للإدراج):
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(matter.parties || [])
+                      .filter((mp) => !includedPartyIds.has(mp.id))
+                      .map((mp) => (
+                        <div
+                          key={mp.id}
+                          className="flex items-center justify-between p-2.5 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs"
+                        >
+                          <div className="space-y-0.5">
+                            <span className="font-semibold text-[#172A35] block">{mp.partyName}</span>
+                            <span className="text-[11px] text-[#4D606A]">
+                              {mp.role === 'CLIENT' ? 'موكل' : mp.role === 'OPPONENT' ? 'خصم' : 'طرف آخر'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            data-testid={`add-party-to-proceeding-${mp.id}`}
+                            onClick={() => togglePartyInclusion(mp.id, true)}
+                            className="px-2.5 py-1 bg-white hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded border border-[#14566B]/30 transition-colors"
+                          >
+                            + إدراج بالدعوى
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

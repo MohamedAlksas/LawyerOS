@@ -27,6 +27,7 @@ export interface MatterPartySummaryDTO {
   billingEnabled: boolean;
   notes?: string | null;
   version: number;
+  operationVersion?: number;
   createdAt: string;
 }
 
@@ -38,6 +39,8 @@ export interface ProceedingPartySummaryDTO {
   capacityText: string;
   legalCapacity?: ProceedingLegalCapacity | null;
   notes?: string | null;
+  version?: number;
+  operationVersion?: number;
 }
 
 export interface DuplicateCourtWarningDTO {
@@ -64,6 +67,7 @@ export interface ProceedingSummaryDTO {
   claimAmount?: string | null;
   status: ProceedingStatus;
   version: number;
+  operationVersion?: number;
   createdAt: string;
   parties?: ProceedingPartySummaryDTO[];
   duplicateWarning?: DuplicateCourtWarningDTO | null;
@@ -219,14 +223,14 @@ export interface LinkProceedingPartyInput {
   capacityText?: string;
   legalCapacity?: ProceedingLegalCapacity | null;
   notes?: string | null;
-  expectedVersion?: number;
+  expectedVersion: number;
   idempotencyKey: string;
 }
 
 export interface UnlinkProceedingPartyInput {
   id: string;
   proceedingId: string;
-  expectedVersion?: number;
+  expectedVersion: number;
   idempotencyKey: string;
 }
 
@@ -247,6 +251,8 @@ export interface SearchMattersParams {
   kind?: MatterKind;
   status?: MatterStatus;
   clientId?: string;
+  partyId?: string;
+  role?: MatterPartyRole;
   courtId?: string;
   practiceAreaId?: string;
   limit?: number;
@@ -256,6 +262,67 @@ export interface SearchMattersParams {
 export interface SearchMattersResult {
   matters: MatterDTO[];
   total: number;
+}
+
+// ==========================================
+// Party Matter Associations (C16)
+// ==========================================
+export interface PartyMatterAssociationDTO {
+  matterPartyId: string;
+  matterId: string;
+  fileCode: string;
+  title: string;
+  kind: MatterKind;
+  status: MatterStatus;
+  role: MatterPartyRole;
+  isPrimaryContact: boolean;
+  billingEnabled: boolean;
+  notes?: string | null;
+  openingDate?: string | null;
+  closingDate?: string | null;
+  createdAt: string;
+}
+
+export interface PartyMatterAssociationsResult {
+  associations: PartyMatterAssociationDTO[];
+  total: number;
+}
+
+export interface GetPartyMatterAssociationsParams {
+  partyId: string;
+  role?: MatterPartyRole;
+  limit?: number;
+  offset?: number;
+}
+
+// ==========================================
+// Advisory Similar Proceedings Preflight (C18)
+// ==========================================
+export interface FindSimilarProceedingsParams {
+  courtId: string;
+  numberText: string;
+  yearLabel?: string | null;
+  excludeProceedingId?: string | null;
+  limit?: number;
+}
+
+export interface SimilarProceedingCandidateDTO {
+  id: string;
+  matterId: string;
+  matterFileCode: string;
+  matterTitle: string;
+  courtId: string;
+  courtName: string;
+  instance: ProceedingInstance;
+  numberText?: string | null;
+  yearLabel?: string | null;
+  status: ProceedingStatus;
+  similarityReason: string;
+}
+
+export interface FindSimilarProceedingsResult {
+  candidates: SimilarProceedingCandidateDTO[];
+  hasDirectMatch: boolean;
 }
 
 // ==========================================
@@ -270,6 +337,7 @@ export function validateStrictCalendarDate(val: string): boolean {
   const month = parseInt(monthStr, 10);
   const day = parseInt(dayStr, 10);
 
+  if (year < 1000 || year > 9999) return false;
   if (month < 1 || month > 12) return false;
   if (day < 1 || day > 31) return false;
 
@@ -277,6 +345,22 @@ export function validateStrictCalendarDate(val: string): boolean {
   const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
   return day <= daysInMonth[month - 1];
+}
+
+export function parseCalendarDateToUtc(val: string | null | undefined): Date | null {
+  if (!val) return null;
+  const trimmed = val.trim();
+  if (!trimmed) return null;
+  if (!validateStrictCalendarDate(trimmed)) {
+    throw new MatterValidationError('تاريخ غير صالح في التقويم (يجب أن يكون بصيغة YYYY-MM-DD وتاريخ حقيقي غير وهمي).');
+  }
+  const [yearStr, monthStr, dayStr] = trimmed.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  const d = new Date(Date.UTC(2000, month - 1, day));
+  d.setUTCFullYear(year);
+  return d;
 }
 
 export const strictDateSchema = z.string().refine((val) => validateStrictCalendarDate(val), {
@@ -427,7 +511,7 @@ export const linkProceedingPartySchema = z
     capacityText: z.string().max(100, 'الصفة القضائية لا تتجاوز 100 حرف').optional(),
     legalCapacity: z.nativeEnum(ProceedingLegalCapacity).nullable().optional(),
     notes: z.string().max(1000).nullable().optional(),
-    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب').optional(),
+    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة للقيد القضائي مطلوب'),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict()
@@ -443,7 +527,7 @@ export const unlinkProceedingPartySchema = z
   .object({
     id: z.string().uuid('معرف صفة الطرف بالقيد غير صالح'),
     proceedingId: z.string().uuid('معرف القيد القضائي غير صالح'),
-    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب').optional(),
+    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة للقيد القضائي مطلوب'),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();
@@ -470,10 +554,31 @@ export const searchMattersParamsSchema = z
     kind: z.nativeEnum(MatterKind).optional(),
     status: z.nativeEnum(MatterStatus).optional(),
     clientId: z.string().uuid().optional(),
+    partyId: z.string().uuid().optional(),
+    role: z.nativeEnum(MatterPartyRole).optional(),
     courtId: z.string().uuid().optional(),
     practiceAreaId: z.string().uuid().optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const getPartyMatterAssociationsSchema = z
+  .object({
+    partyId: z.string().uuid('معرف الطرف غير صالح'),
+    role: z.nativeEnum(MatterPartyRole).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const findSimilarProceedingsSchema = z
+  .object({
+    courtId: z.string().uuid('معرف المحكمة مطلوب'),
+    numberText: z.string().trim().min(1, 'رقم الدعوى مطلوب').max(100),
+    yearLabel: z.string().trim().max(20).nullable().optional(),
+    excludeProceedingId: z.string().uuid().nullable().optional(),
+    limit: z.number().int().min(1).max(20).optional(),
   })
   .strict();
 

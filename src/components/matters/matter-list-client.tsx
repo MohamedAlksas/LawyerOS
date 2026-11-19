@@ -22,6 +22,7 @@ interface MatterListClientProps {
   initialQuery?: string;
   initialKind?: MatterKind;
   initialStatus?: MatterStatus;
+  initialError?: string;
 }
 
 export function MatterListClient({
@@ -30,6 +31,7 @@ export function MatterListClient({
   initialQuery = '',
   initialKind,
   initialStatus,
+  initialError,
 }: MatterListClientProps) {
   const [query, setQuery] = useState(initialQuery);
   const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
@@ -37,7 +39,7 @@ export function MatterListClient({
   const [matters, setMatters] = useState<MatterDTO[]>(initialMatters);
   const [totalCount, setTotalCount] = useState<number>(initialTotal);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError || null);
 
   const requestGenRef = useRef(0);
 
@@ -219,7 +221,7 @@ export function MatterListClient({
             >
               الكل
             </button>
-            {(['ACTIVE', 'DRAFT', 'SUSPENDED', 'CLOSED'] as MatterStatus[]).map((st) => (
+            {(['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'] as MatterStatus[]).map((st) => (
               <button
                 key={st}
                 type="button"

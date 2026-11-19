@@ -17,6 +17,8 @@ import {
   unlinkMatterAuthorization,
   getMatter,
   searchMatters,
+  getPartyMatterAssociations,
+  findSimilarProceedings,
 } from './matter-service';
 import {
   MatterDTO,
@@ -24,6 +26,10 @@ import {
   ProceedingSummaryDTO,
   ProceedingPartySummaryDTO,
   MatterAuthorizationSummaryDTO,
+  PartyMatterAssociationsResult,
+  GetPartyMatterAssociationsParams,
+  FindSimilarProceedingsParams,
+  FindSimilarProceedingsResult,
   OpenMatterInput,
   OpenMatterResult,
   UpdateMatterInput,
@@ -355,6 +361,30 @@ export async function searchMattersAction(
   try {
     const actor = await verifyActionSecurity();
     const data = await searchMatters(params, actor);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function getPartyMatterAssociationsAction(
+  params: GetPartyMatterAssociationsParams
+): Promise<ActionResult<PartyMatterAssociationsResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await getPartyMatterAssociations(actor, params);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function findSimilarProceedingsAction(
+  params: FindSimilarProceedingsParams
+): Promise<ActionResult<FindSimilarProceedingsResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await findSimilarProceedings(actor, params);
     return { success: true, data };
   } catch (error) {
     return handleActionError(error);

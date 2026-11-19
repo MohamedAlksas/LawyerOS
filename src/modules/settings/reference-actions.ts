@@ -18,11 +18,9 @@ import {
   UpdateReferenceItemInput,
   ReferenceItemType,
   ReferenceValidationError,
-} from './reference-types';
-import {
   ConcurrencyConflictError,
   NotFoundError,
-} from '../matters/matter-types';
+} from './reference-types';
 import {
   IdempotencyPayloadMismatchError,
   IdempotencyConcurrentConflictError,

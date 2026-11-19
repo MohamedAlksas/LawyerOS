@@ -15,6 +15,7 @@ export interface OfficeSettingsDTO {
   timeZone: string;
   version: number;
   updatedAt: string;
+  operationVersion?: number;
 }
 
 export interface ReferenceItemDTO {
@@ -28,6 +29,7 @@ export interface ReferenceItemDTO {
   version: number;
   createdAt: string;
   updatedAt: string;
+  operationVersion?: number;
 }
 
 export interface UpdateOfficeSettingsInput {
@@ -72,7 +74,7 @@ export interface ListReferenceItemsParams {
 // ==========================================
 export const updateOfficeSettingsSchema = z
   .object({
-    officeName: z.string().min(1, 'اسم المكتب مطلوب').max(200, 'اسم المكتب لا يتجاوز 200 حرف').trim(),
+    officeName: z.string().trim().min(1, 'اسم المكتب مطلوب').max(200, 'اسم المكتب لا يتجاوز 200 حرف'),
     lawyerName: z.string().max(200).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     email: z.string().email('البريد الإلكتروني غير صالح').max(200).nullable().optional(),
@@ -86,7 +88,7 @@ export const updateOfficeSettingsSchema = z
 export const createReferenceItemSchema = z
   .object({
     type: z.nativeEnum(ReferenceItemType, { message: 'نوع الجدول المرجعي غير صالح' }),
-    name: z.string().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف').trim(),
+    name: z.string().trim().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف'),
     code: z.string().max(50).nullable().optional(),
     circuitTypes: z.array(z.string().max(100)).optional(),
     notes: z.string().max(1000).nullable().optional(),
@@ -99,7 +101,7 @@ export const updateReferenceItemSchema = z
     type: z.nativeEnum(ReferenceItemType, { message: 'نوع الجدول المرجعي غير صالح' }),
     id: z.string().uuid('معرف العنصر المرجعي غير صالح'),
     expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب'),
-    name: z.string().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف').trim(),
+    name: z.string().trim().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف'),
     code: z.string().max(50).nullable().optional(),
     circuitTypes: z.array(z.string().max(100)).optional(),
     notes: z.string().max(1000).nullable().optional(),

@@ -35,14 +35,14 @@ export default async function NewMatterPage() {
   const [practiceAreas, storageLocations, partiesResult] = await Promise.all([
     listReferenceItems('PRACTICE_AREA', false, actor).catch(() => []),
     listReferenceItems('STORAGE_LOCATION', false, actor).catch(() => []),
-    searchParties(actor, { limit: 100 }).catch(() => ({ parties: [] })),
+    searchParties(actor, { limit: 50 }).catch(() => ({ parties: [] })),
   ]);
 
   return (
     <div className="py-2">
       <MatterForm
-        practiceAreas={practiceAreas.map((pa) => ({ id: pa.id, name: pa.name }))}
-        storageLocations={storageLocations.map((sl) => ({ id: sl.id, name: sl.name }))}
+        practiceAreas={practiceAreas.map((pa) => ({ id: pa.id, name: pa.name, isActive: pa.isActive }))}
+        storageLocations={storageLocations.map((sl) => ({ id: sl.id, name: sl.name, isActive: sl.isActive }))}
         parties={partiesResult.parties.map((p) => ({
           id: p.id,
           name: p.name,

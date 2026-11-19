@@ -56,17 +56,25 @@ export function ReferenceSettingsClient({
   const [itemError, setItemError] = useState<string | null>(null);
   const [itemSuccessMessage, setItemSuccessMessage] = useState<string | null>(null);
 
+  // Edit Item Modal State (C19)
+  const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(null);
+  const [editItemName, setEditItemName] = useState('');
+  const [editItemCode, setEditItemCode] = useState('');
+  const [editItemNotes, setEditItemNotes] = useState('');
+  const [editItemIsActive, setEditItemIsActive] = useState(true);
+  const [isSavingEditItem, setIsSavingEditItem] = useState(false);
+  const [editItemError, setEditItemError] = useState<string | null>(null);
+
   // Filter for Reference Items
   const [filterActiveOnly, setFilterActiveOnly] = useState(false);
 
-  // Handle Office Settings Save
+  // Handle Office Settings Save (C09: frozen key on transport retry)
+  const [officeIdempotencyKey, setOfficeIdempotencyKey] = useState(() => generateClientRequestId('off'));
   const handleSaveOffice = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingOffice(true);
     setOfficeMessage(null);
     setOfficeError(null);
-
-    const idempotencyKey = generateClientRequestId('off');
 
     try {
       const res = await updateOfficeSettingsAction({
@@ -77,33 +85,35 @@ export function ReferenceSettingsClient({
         address: address.trim() || null,
         taxNumber: taxNumber.trim() || null,
         expectedVersion: officeSettings.version,
-        idempotencyKey,
+        idempotencyKey: officeIdempotencyKey,
       });
 
       if (!res.success) {
         setOfficeError(res.error || 'تعذر حفظ بيانات المكتب.');
         setIsSavingOffice(false);
+        setOfficeIdempotencyKey(generateClientRequestId('off'));
         return;
       }
 
       setOfficeSettings(res.data);
       setOfficeMessage('تم حفظ بيانات المكتب بنجاح.');
       setIsSavingOffice(false);
+      setOfficeIdempotencyKey(generateClientRequestId('off'));
       router.refresh();
     } catch (err: unknown) {
+      // C09: Keep key frozen on transport error
       setOfficeError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
       setIsSavingOffice(false);
     }
   };
 
-  // Handle Create Reference Item
+  // Handle Create Reference Item (C09: frozen key on transport retry)
+  const [createItemKey, setCreateItemKey] = useState(() => generateClientRequestId('ritem'));
   const handleCreateItem = async (type: ReferenceItemType) => {
     if (!newItemName.trim()) return;
     setIsCreatingItem(true);
     setItemError(null);
     setItemSuccessMessage(null);
-
-    const idempotencyKey = generateClientRequestId('ritem');
 
     try {
       const res = await createReferenceItemAction({
@@ -111,12 +121,13 @@ export function ReferenceSettingsClient({
         name: newItemName.trim(),
         code: newItemCode.trim() || null,
         notes: newItemNotes.trim() || null,
-        idempotencyKey,
+        idempotencyKey: createItemKey,
       });
 
       if (!res.success) {
         setItemError(res.error || 'تعذر إضافة العنصر المرجعي.');
         setIsCreatingItem(false);
+        setCreateItemKey(generateClientRequestId('ritem'));
         return;
       }
 
@@ -133,10 +144,66 @@ export function ReferenceSettingsClient({
       setNewItemNotes('');
       setItemSuccessMessage('تمت إضافة العنصر المرجعي بنجاح.');
       setIsCreatingItem(false);
+      setCreateItemKey(generateClientRequestId('ritem'));
       router.refresh();
     } catch (err: unknown) {
+      // C09: Keep key frozen on transport error
       setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
       setIsCreatingItem(false);
+    }
+  };
+
+  // Open Edit Modal (C19)
+  const handleOpenEditModal = (item: ReferenceItemDTO) => {
+    setEditingItem(item);
+    setEditItemName(item.name);
+    setEditItemCode(item.code || '');
+    setEditItemNotes(item.notes || '');
+    setEditItemIsActive(item.isActive);
+    setEditItemError(null);
+  };
+
+  // Handle Save Edited Reference Item (C19)
+  const handleSaveEditItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem || !editItemName.trim()) return;
+    setIsSavingEditItem(true);
+    setEditItemError(null);
+
+    const idempotencyKey = generateClientRequestId('edititem');
+
+    try {
+      const res = await updateReferenceItemAction({
+        id: editingItem.id,
+        type: editingItem.type,
+        expectedVersion: editingItem.version,
+        name: editItemName.trim(),
+        code: editItemCode.trim() || null,
+        notes: editItemNotes.trim() || null,
+        isActive: editItemIsActive,
+        idempotencyKey,
+      });
+
+      if (!res.success) {
+        setEditItemError(res.error || 'تعذر حفظ تعديلات العنصر المرجعي.');
+        setIsSavingEditItem(false);
+        return;
+      }
+
+      const updater = (prev: ReferenceItemDTO[]) =>
+        prev.map((i) => (i.id === editingItem.id ? res.data : i));
+
+      if (editingItem.type === 'COURT') setCourts(updater);
+      else if (editingItem.type === 'PRACTICE_AREA') setPracticeAreas(updater);
+      else if (editingItem.type === 'STORAGE_LOCATION') setStorageLocations(updater);
+
+      setItemSuccessMessage('تم حفظ تعديلات العنصر المرجعي بنجاح.');
+      setEditingItem(null);
+      setIsSavingEditItem(false);
+      router.refresh();
+    } catch (err: unknown) {
+      setEditItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      setIsSavingEditItem(false);
     }
   };
 
@@ -296,10 +363,11 @@ export function ReferenceSettingsClient({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="office-name-input" className="block text-xs font-bold text-[#172A35]">
                   اسم المكتب / المنشأة القانونية <span className="text-red-600">*</span>
                 </label>
                 <input
+                  id="office-name-input"
                   type="text"
                   required
                   value={officeName}
@@ -311,8 +379,9 @@ export function ReferenceSettingsClient({
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">اسم المحامي المسؤول</label>
+                <label htmlFor="lawyer-name-input" className="block text-xs font-bold text-[#172A35]">اسم المحامي المسؤول</label>
                 <input
+                  id="lawyer-name-input"
                   type="text"
                   value={lawyerName}
                   onChange={(e) => setLawyerName(e.target.value)}
@@ -325,8 +394,9 @@ export function ReferenceSettingsClient({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">هاتف المكتب</label>
+                <label htmlFor="office-phone-input" className="block text-xs font-bold text-[#172A35]">هاتف المكتب</label>
                 <input
+                  id="office-phone-input"
                   type="text"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
@@ -338,8 +408,9 @@ export function ReferenceSettingsClient({
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">البريد الإلكتروني</label>
+                <label htmlFor="office-email-input" className="block text-xs font-bold text-[#172A35]">البريد الإلكتروني</label>
                 <input
+                  id="office-email-input"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -353,8 +424,9 @@ export function ReferenceSettingsClient({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">عنوان المقر</label>
+                <label htmlFor="office-address-input" className="block text-xs font-bold text-[#172A35]">عنوان المقر</label>
                 <input
+                  id="office-address-input"
                   type="text"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
@@ -365,8 +437,9 @@ export function ReferenceSettingsClient({
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">الرقم الضريبي / القيد بالنقابة</label>
+                <label htmlFor="office-tax-input" className="block text-xs font-bold text-[#172A35]">الرقم الضريبي / القيد بالنقابة</label>
                 <input
+                  id="office-tax-input"
                   type="text"
                   value={taxNumber}
                   onChange={(e) => setTaxNumber(e.target.value)}
@@ -438,10 +511,11 @@ export function ReferenceSettingsClient({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1 sm:col-span-2">
-                <label className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="reference-item-name-input" className="block text-xs font-bold text-[#172A35]">
                   الاسم <span className="text-red-600">*</span>
                 </label>
                 <input
+                  id="reference-item-name-input"
                   type="text"
                   required
                   value={newItemName}
@@ -459,8 +533,9 @@ export function ReferenceSettingsClient({
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#172A35]">كود مرجعي (اختياري)</label>
+                <label htmlFor="reference-item-code-input" className="block text-xs font-bold text-[#172A35]">كود مرجعي (اختياري)</label>
                 <input
+                  id="reference-item-code-input"
                   type="text"
                   value={newItemCode}
                   onChange={(e) => setNewItemCode(e.target.value)}
@@ -565,7 +640,15 @@ export function ReferenceSettingsClient({
                         </div>
                       </div>
 
-                      <div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          data-testid={`edit-reference-item-${item.id}`}
+                          onClick={() => handleOpenEditModal(item)}
+                          className="px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors"
+                        >
+                          تعديل
+                        </button>
                         <button
                           type="button"
                           data-testid={`toggle-active-${item.id}`}
@@ -584,6 +667,114 @@ export function ReferenceSettingsClient({
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Reference Item Modal (C19) */}
+      {editingItem && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-reference-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+        >
+          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs" dir="rtl" lang="ar-EG">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
+              <h2 id="edit-reference-title" className="text-base font-bold text-[#172A35]">
+                تعديل بيانات العنصر المرجعي
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {editItemError && (
+              <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] font-semibold">
+                ⚠️ {editItemError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditItem} className="space-y-4">
+              <div className="space-y-1">
+                <label htmlFor="edit-reference-name-input" className="block font-bold text-[#172A35]">
+                  الاسم <span className="text-red-600">*</span>
+                </label>
+                <input
+                  id="edit-reference-name-input"
+                  type="text"
+                  required
+                  value={editItemName}
+                  onChange={(e) => setEditItemName(e.target.value)}
+                  data-testid="edit-reference-item-name-input"
+                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="edit-reference-code-input" className="block font-bold text-[#172A35]">
+                  الكود المرجعي (اختياري)
+                </label>
+                <input
+                  id="edit-reference-code-input"
+                  type="text"
+                  value={editItemCode}
+                  onChange={(e) => setEditItemCode(e.target.value)}
+                  data-testid="edit-reference-item-code-input"
+                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="edit-reference-notes-input" className="block font-bold text-[#172A35]">
+                  ملاحظات (اختياري)
+                </label>
+                <textarea
+                  id="edit-reference-notes-input"
+                  rows={2}
+                  value={editItemNotes}
+                  onChange={(e) => setEditItemNotes(e.target.value)}
+                  data-testid="edit-reference-item-notes-input"
+                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  id="edit-reference-active-checkbox"
+                  type="checkbox"
+                  checked={editItemIsActive}
+                  onChange={(e) => setEditItemIsActive(e.target.checked)}
+                  data-testid="edit-reference-item-active-checkbox"
+                  className="w-4 h-4 text-[#14566B] rounded border-[#D5DFE3]"
+                />
+                <label htmlFor="edit-reference-active-checkbox" className="font-semibold text-[#172A35] cursor-pointer">
+                  عنصر نشط ومتاح للاختيار بالملفات والقضايا
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#E8EEF1]">
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEditItem || !editItemName.trim()}
+                  data-testid="save-edit-reference-item-button"
+                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[40px]"
+                >
+                  {isSavingEditItem ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

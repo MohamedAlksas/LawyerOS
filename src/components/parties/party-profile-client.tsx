@@ -1,11 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
-import { searchMattersAction } from '@/modules/matters/matter-actions';
-import { MatterDTO } from '@/modules/matters/matter-types';
+import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
+import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
 import { ClientProfileDTO } from '@/modules/parties/types';
+import {
+  MATTER_PARTY_ROLE_LABELS,
+  MATTER_STATUS_LABELS,
+} from '@/components/matters/matter-ui-types';
 import {
   PARTY_KIND_LABELS,
   IDENTIFICATION_TYPE_LABELS,
@@ -23,28 +27,32 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
 
-  const [linkedMatters, setLinkedMatters] = useState<MatterDTO[]>([]);
+  const [linkedMatters, setLinkedMatters] = useState<PartyMatterAssociationDTO[]>([]);
   const [isLoadingMatters, setIsLoadingMatters] = useState(true);
+  const [mattersError, setMattersError] = useState<string | null>(null);
+
+  const loadMatters = useCallback(async () => {
+    setIsLoadingMatters(true);
+    setMattersError(null);
+    try {
+      const res = await getPartyMatterAssociationsAction({ partyId: party.id });
+      if (!res.success) {
+        setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
+        return;
+      }
+      setLinkedMatters(res.data.associations);
+    } catch (err: unknown) {
+      setMattersError(
+        err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
+      );
+    } finally {
+      setIsLoadingMatters(false);
+    }
+  }, [party.id]);
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadMatters() {
-      try {
-        const res = await searchMattersAction({ clientId: party.id });
-        if (res.success && isMounted) {
-          setLinkedMatters(res.data.matters);
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (isMounted) setIsLoadingMatters(false);
-      }
-    }
     loadMatters();
-    return () => {
-      isMounted = false;
-    };
-  }, [party.id]);
+  }, [loadMatters]);
 
   const handleRevealIdentity = async () => {
     setIsRevealing(true);
@@ -302,7 +310,22 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
           </Link>
         </div>
 
-        {isLoadingMatters ? (
+        {mattersError ? (
+          <div
+            role="alert"
+            data-testid="party-matters-error-banner"
+            className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] flex items-center justify-between gap-2"
+          >
+            <span>⚠️ {mattersError}</span>
+            <button
+              type="button"
+              onClick={() => loadMatters()}
+              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        ) : isLoadingMatters ? (
           <p className="text-xs text-[#4D606A] italic">جارٍ تحميل ملفات القضايا المرتبطة...</p>
         ) : linkedMatters.length === 0 ? (
           <p className="text-xs text-[#4D606A] italic">لا توجد ملفات قضايا مسجلة لهذا الطرف بعد.</p>
@@ -310,29 +333,46 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
           <div className="divide-y divide-[#E8EEF1]">
             {linkedMatters.map((m) => (
               <div
-                key={m.id}
-                data-testid={`linked-matter-${m.id}`}
+                key={m.matterPartyId}
+                data-testid={`linked-matter-${m.matterId}`}
                 className="py-3 flex items-center justify-between gap-3 text-xs"
               >
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <bdi dir="ltr" className="font-mono font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
                       {m.fileCode}
                     </bdi>
                     <Link
-                      href={`/matters/${m.id}`}
+                      href={`/matters/${m.matterId}`}
                       className="font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
                     >
                       {m.title}
                     </Link>
+                    <span
+                      data-testid={`matter-role-badge-${m.matterId}`}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                        m.role === 'CLIENT'
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : m.role === 'OPPONENT'
+                          ? 'bg-rose-50 text-rose-800 border-rose-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {MATTER_PARTY_ROLE_LABELS[m.role]}
+                    </span>
+                    {m.isPrimaryContact && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                        جهة الاتصال الرئيسية
+                      </span>
+                    )}
                   </div>
                   <span className="text-[#4D606A] block">
-                    الحالة: {m.status === 'ACTIVE' ? 'نشط' : m.status === 'DRAFT' ? 'مسودة' : m.status === 'ON_HOLD' ? 'معلق' : m.status === 'ARCHIVED' ? 'مؤرشف' : 'مغلق'}
+                    الحالة: {MATTER_STATUS_LABELS[m.status] || m.status}
                   </span>
                 </div>
 
                 <Link
-                  href={`/matters/${m.id}`}
+                  href={`/matters/${m.matterId}`}
                   className="px-3 py-1.5 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] rounded border border-[#D5DFE3] min-h-[36px] flex items-center"
                 >
                   عرض الملف

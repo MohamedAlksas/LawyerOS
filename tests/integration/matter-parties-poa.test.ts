@@ -234,6 +234,7 @@ describe('T06-03 & T06-07: Office Roles, Primary Contacts & POA Associations', (
       proceedingId: proceeding.id,
       matterPartyId: clientMatterParty.id,
       legalCapacity: 'PLAINTIFF',
+      expectedVersion: proceeding.version,
       idempotencyKey: `link-plaintiff-${crypto.randomUUID()}`,
     });
     expect(clientCap.legalCapacity).toBe('PLAINTIFF');
@@ -244,6 +245,7 @@ describe('T06-03 & T06-07: Office Roles, Primary Contacts & POA Associations', (
       proceedingId: proceeding.id,
       matterPartyId: opponentMatterParty.id,
       legalCapacity: 'DEFENDANT',
+      expectedVersion: clientCap.version || 2,
       idempotencyKey: `link-defendant-${crypto.randomUUID()}`,
     });
     expect(oppCap.legalCapacity).toBe('DEFENDANT');
@@ -269,6 +271,7 @@ describe('T06-03 & T06-07: Office Roles, Primary Contacts & POA Associations', (
         proceedingId: proceeding.id,
         matterPartyId: foreignParty.id, // From foreign matter!
         legalCapacity: 'INTERVENOR',
+        expectedVersion: oppCap.version || 3,
         idempotencyKey: `cross-matter-cap-${crypto.randomUUID()}`,
       })
     ).rejects.toThrow(CrossMatterLinkForbiddenError);

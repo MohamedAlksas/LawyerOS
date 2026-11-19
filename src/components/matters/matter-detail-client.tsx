@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -24,7 +24,10 @@ import {
   MATTER_PARTY_ROLE_LABELS,
   PROCEEDING_INSTANCE_LABELS,
   PROCEEDING_STATUS_LABELS,
+  PROCEEDING_STATUS_CLASSES,
   PROCEEDING_LEGAL_CAPACITY_LABELS,
+  POA_REVIEW_STATUS_LABELS,
+  POA_REVIEW_STATUS_CLASSES,
   formatCairoDateOnly,
   generateClientRequestId,
 } from './matter-ui-types';
@@ -38,10 +41,14 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
   const [activeTab, setActiveTab] = useState<'parties' | 'proceedings' | 'authorizations' | 'summary' | 'audit'>('parties');
 
-  // Party Linking Modal / Form State
+  // Party Linking Modal / Form State (C11 guarded async lifecycle)
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
   const [partySearchQuery, setPartySearchQuery] = useState('');
   const [searchedParties, setSearchedParties] = useState<{ id: string; name: string }[]>([]);
+  const [isSearchingParty, setIsSearchingParty] = useState(false);
+  const [partySearchError, setPartySearchError] = useState<string | null>(null);
+  const partySearchGenRef = useRef(0);
+
   const [selectedPartyId, setSelectedPartyId] = useState('');
   const [selectedPartyRole, setSelectedPartyRole] = useState<MatterPartyRole>('CLIENT');
   const [isPrimaryContact, setIsPrimaryContact] = useState(false);
@@ -75,23 +82,42 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
   const handleOpenPartyModal = () => {
     setActionMessage(null);
     setPartyActionError(null);
+    setPartySearchError(null);
     setShowAddPartyModal(true);
   };
 
-  // Search Parties for Linking
+  // Search Parties for Linking (C11: separate query from selection, clear selection on text change, guard generation)
   const handleSearchParties = async (q: string) => {
     setPartySearchQuery(q);
+    setSelectedPartyId(''); // Clear selection immediately upon query modification
+    const gen = ++partySearchGenRef.current;
+
     if (!q.trim()) {
       setSearchedParties([]);
+      setIsSearchingParty(false);
+      setPartySearchError(null);
       return;
     }
+
+    setIsSearchingParty(true);
+    setPartySearchError(null);
+
     try {
       const res = await searchPartiesAction({ query: q.trim(), limit: 10 });
+      if (gen !== partySearchGenRef.current) return; // Stale delayed response, discard
       if (res.success) {
         setSearchedParties(res.data.parties.map((p) => ({ id: p.id, name: p.name })));
+      } else {
+        setPartySearchError(res.error || 'تعذر البحث عن الأطراف.');
       }
     } catch {
-      // ignore
+      if (gen === partySearchGenRef.current) {
+        setPartySearchError('حدث خطأ في الاتصال أثناء البحث.');
+      }
+    } finally {
+      if (gen === partySearchGenRef.current) {
+        setIsSearchingParty(false);
+      }
     }
   };
 
@@ -220,6 +246,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     const poaList: { id: string; poaNumberText: string; poaYearLabel: string; notarizationOffice: string; partyName: string }[] = [];
 
     try {
+      let anyFailed = false;
       for (const client of clients) {
         const res = await getClientProfileAction(client.partyId);
         if (res.success && res.data.powersOfAttorney) {
@@ -234,11 +261,17 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               });
             }
           }
+        } else if (!res.success) {
+          anyFailed = true;
         }
       }
       setAvailablePoas(poaList);
+      if (anyFailed && poaList.length === 0) {
+        setPoaActionError('تعذر تحميل بيانات التوكيلات لبعض الموكلين من الخادم.');
+      }
       setIsLoadingPoas(false);
     } catch {
+      setPoaActionError('حدث خطأ في الاتصال أثناء جلب التوكيلات.');
       setIsLoadingPoas(false);
     }
   };
@@ -562,10 +595,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <form onSubmit={handleLinkParty} className="space-y-4 text-xs">
                 {/* Search / Select Party */}
                 <div className="space-y-1">
-                  <label className="block font-bold text-[#172A35]">
+                  <label htmlFor="link-party-search-input" className="block font-bold text-[#172A35]">
                     اختر الطرف من دليل الأطراف <span className="text-red-600">*</span>
                   </label>
                   <input
+                    id="link-party-search-input"
                     type="text"
                     value={partySearchQuery}
                     onChange={(e) => handleSearchParties(e.target.value)}
@@ -573,6 +607,17 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                     data-testid="party-search-input"
                     className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
                   />
+
+                  {isSearchingParty && (
+                    <p className="text-xs text-[#4D606A] italic pt-1">جارٍ البحث في دليل الأطراف...</p>
+                  )}
+                  {partySearchError && (
+                    <p className="text-xs text-red-600 font-medium pt-1">{partySearchError}</p>
+                  )}
+                  {!isSearchingParty && !partySearchError && partySearchQuery.trim() && searchedParties.length === 0 && (
+                    <p className="text-xs text-[#4D606A] italic pt-1">لم يتم العثور على أطراف مطابقة.</p>
+                  )}
+
                   {searchedParties.length > 0 && (
                     <div className="max-h-36 overflow-y-auto border border-[#D5DFE3] rounded-[6px] divide-y divide-[#E8EEF1] mt-1 bg-white">
                       {searchedParties.map((p) => (
@@ -599,10 +644,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Role */}
                   <div className="space-y-1">
-                    <label className="block font-bold text-[#172A35]">
+                    <label htmlFor="link-party-role-select" className="block font-bold text-[#172A35]">
                       صفة الطرف في هذا الملف <span className="text-red-600">*</span>
                     </label>
                     <select
+                      id="link-party-role-select"
                       value={selectedPartyRole}
                       onChange={(e) => setSelectedPartyRole(e.target.value as MatterPartyRole)}
                       data-testid="party-role-select"
@@ -635,8 +681,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
                 {/* Notes */}
                 <div className="space-y-1">
-                  <label className="block font-bold text-[#172A35]">ملاحظات الطرف بالملف (اختياري)</label>
+                  <label htmlFor="link-party-notes-input" className="block font-bold text-[#172A35]">
+                    ملاحظات الطرف بالملف (اختياري)
+                  </label>
                   <input
+                    id="link-party-notes-input"
                     type="text"
                     value={partyNotes}
                     onChange={(e) => setPartyNotes(e.target.value)}
@@ -912,6 +961,13 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <Link
+                          href={`/matters/${matter.id}/proceedings/${proc.id}`}
+                          data-testid={`view-proceeding-${proc.id}`}
+                          className="px-3 py-1.5 bg-white hover:bg-[#F4F6F7] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#14566B]/30 transition-colors min-h-[36px] flex items-center"
+                        >
+                          عرض تفاصيل القيد
+                        </Link>
+                        <Link
                           href={`/matters/${matter.id}/proceedings/${proc.id}/edit`}
                           data-testid={`edit-proceeding-${proc.id}`}
                           className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px] flex items-center"
@@ -1028,10 +1084,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    <label className="block font-bold text-[#172A35]">
+                    <label htmlFor="poa-select-input" className="block font-bold text-[#172A35]">
                       اختر التوكيل <span className="text-red-600">*</span>
                     </label>
                     <select
+                      id="poa-select-input"
                       value={selectedPoaId}
                       onChange={(e) => setSelectedPoaId(e.target.value)}
                       data-testid="poa-select"
@@ -1115,13 +1172,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                     <span className="text-[#4D606A]">مكتب التوثيق: {auth.notarizationOffice}</span>
                     <span
                       data-testid="poa-review-badge"
-                      className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                        auth.humanReviewStatus === 'REVIEWED'
-                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                          : 'bg-amber-50 text-amber-800 border border-amber-200'
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                        POA_REVIEW_STATUS_CLASSES[auth.humanReviewStatus] || 'bg-amber-50 text-amber-800 border-amber-200'
                       }`}
                     >
-                      {auth.humanReviewStatus === 'REVIEWED' ? 'تم الفحص والمطابقة' : 'قيد المراجعة'}
+                      {POA_REVIEW_STATUS_LABELS[auth.humanReviewStatus] || auth.humanReviewStatus}
                     </span>
                   </div>
                 </div>

@@ -267,15 +267,37 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await expect(page.getByTestId('parent-proceeding-link')).toBeVisible();
     await expect(page.getByTestId('parent-proceeding-link')).toContainText('مرتبط بالدعوى السابقة');
 
-    // 14. Verify Party Profile now reflects this matter under linked matters
+    // 14. Contracted Proceeding Detail Route (C20)
+    await page.locator('[data-testid^="view-proceeding-"]').first().click();
+    await expect(page).toHaveURL(new RegExp(`/matters/${matterId}/proceedings/`));
+    await expect(page.getByTestId('proceeding-court-heading')).toBeVisible();
+    await expect(page.getByTestId('proceeding-docket-card')).toBeVisible();
+    await expect(page.getByTestId('proceeding-parties-card')).toBeVisible();
+    await expect(page.getByTestId('edit-proceeding-button')).toBeVisible();
+
+    // 15. Verify Party Profile reflects this matter under linked matters with role badge (C16)
     await page.goto(`/parties/${partyId}`);
     await expect(page.getByTestId('party-matters-section')).toBeVisible();
     await expect(page.getByTestId(`linked-matter-${matterId}`)).toBeVisible();
     await expect(page.getByTestId(`linked-matter-${matterId}`)).toContainText(matterTitle);
+    await expect(page.getByTestId(`matter-role-badge-${matterId}`)).toBeVisible();
+    await expect(page.getByTestId(`matter-role-badge-${matterId}`)).toContainText('موكل');
 
-    // 15. Reload to verify full persistence
+    // 16. Reference Item Editing (C19)
+    await page.goto('/settings/reference');
+    await page.getByTestId('tab-courts').click();
+    await expect(page.getByTestId(`edit-reference-item-${testCourtId}`)).toBeVisible();
+    await page.getByTestId(`edit-reference-item-${testCourtId}`).click();
+    await expect(page.getByTestId('edit-reference-item-name-input')).toBeVisible();
+    await page.getByTestId('edit-reference-item-name-input').fill('محكمة شمال القاهرة الابتدائية - المعدلة');
+    await page.getByTestId('save-edit-reference-item-button').click();
+    await expect(page.getByTestId('reference-success-banner')).toBeVisible();
+    await expect(page.getByText('محكمة شمال القاهرة الابتدائية - المعدلة')).toBeVisible();
+
+    // 17. Reload to verify full persistence
     await page.reload();
-    await expect(page.getByTestId(`linked-matter-${matterId}`)).toBeVisible();
+    await page.getByTestId('tab-courts').click();
+    await expect(page.getByText('محكمة شمال القاهرة الابتدائية - المعدلة')).toBeVisible();
   });
 });
 
