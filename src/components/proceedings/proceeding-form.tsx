@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useId, useMemo } from 'react';
+import React, { useState, useId, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -20,8 +20,6 @@ import {
 } from '@/modules/matters/matter-types';
 import {
   PROCEEDING_INSTANCE_LABELS,
-  PROCEEDING_STATUS_LABELS,
-  PROCEEDING_STATUS_CLASSES,
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   generateClientRequestId,
 } from '../matters/matter-ui-types';
@@ -135,44 +133,44 @@ export function ProceedingForm({
   });
 
   // Full snapshot synchronization on initialProceeding change (C10)
-  useEffect(() => {
-    if (initialProceeding) {
-      setCourtId(initialProceeding.courtId || '');
-      setInstance(initialProceeding.instance || 'FIRST_INSTANCE');
-      setParentProceedingId(initialProceeding.parentProceedingId || '');
-      setNumberText(initialProceeding.numberText || '');
-      setYearLabel(initialProceeding.yearLabel || '');
-      setRegisterType(initialProceeding.registerType || '');
-      setCircuit(initialProceeding.circuit || '');
-      setFilingDate(initialProceeding.filingDate || '');
-      setClaimAmount(initialProceeding.claimAmount || '');
-      setStatus(initialProceeding.status || 'ACTIVE');
+  const [prevProceeding, setPrevProceeding] = useState(initialProceeding);
+  if (initialProceeding && initialProceeding !== prevProceeding) {
+    setPrevProceeding(initialProceeding);
+    setCourtId(initialProceeding.courtId || '');
+    setInstance(initialProceeding.instance || 'FIRST_INSTANCE');
+    setParentProceedingId(initialProceeding.parentProceedingId || '');
+    setNumberText(initialProceeding.numberText || '');
+    setYearLabel(initialProceeding.yearLabel || '');
+    setRegisterType(initialProceeding.registerType || '');
+    setCircuit(initialProceeding.circuit || '');
+    setFilingDate(initialProceeding.filingDate || '');
+    setClaimAmount(initialProceeding.claimAmount || '');
+    setStatus(initialProceeding.status || 'ACTIVE');
 
-      const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
-      for (const p of initialProceeding.parties || []) {
-        existingPartiesMap.set(p.matterPartyId, p);
-      }
-      const newIncluded = new Set<string>();
-      const newCapacities: Record<string, PartyCapacityState> = {};
-      for (const mp of matter.parties || []) {
-        const existing = existingPartiesMap.get(mp.id);
-        if (existing) {
-          newIncluded.add(mp.id);
-          newCapacities[mp.id] = {
-            legalCapacity: existing.legalCapacity ?? 'OTHER',
-            capacityText: existing.capacityText ?? '',
-          };
-        } else {
-          newCapacities[mp.id] = {
-            legalCapacity: 'OTHER',
-            capacityText: '',
-          };
-        }
-      }
-      setIncludedPartyIds(newIncluded);
-      setPartyCapacities(newCapacities);
+    const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
+    for (const p of initialProceeding.parties || []) {
+      existingPartiesMap.set(p.matterPartyId, p);
     }
-  }, [initialProceeding, matter.parties]);
+    const newIncluded = new Set<string>();
+    const newCapacities: Record<string, PartyCapacityState> = {};
+    for (const mp of matter.parties || []) {
+      const existing = existingPartiesMap.get(mp.id);
+      if (existing) {
+        newIncluded.add(mp.id);
+        newCapacities[mp.id] = {
+          legalCapacity: existing.legalCapacity ?? 'OTHER',
+          capacityText: existing.capacityText ?? '',
+        };
+      } else {
+        newCapacities[mp.id] = {
+          legalCapacity: 'OTHER',
+          capacityText: '',
+        };
+      }
+    }
+    setIncludedPartyIds(newIncluded);
+    setPartyCapacities(newCapacities);
+  }
 
   // UI States
   const [isSaving, setIsSaving] = useState(false);

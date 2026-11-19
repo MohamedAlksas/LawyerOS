@@ -51,8 +51,28 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   }, [party.id]);
 
   useEffect(() => {
-    loadMatters();
-  }, [loadMatters]);
+    let ignore = false;
+    getPartyMatterAssociationsAction({ partyId: party.id })
+      .then((res) => {
+        if (ignore) return;
+        setIsLoadingMatters(false);
+        if (!res.success) {
+          setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
+          return;
+        }
+        setLinkedMatters(res.data.associations);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setIsLoadingMatters(false);
+        setMattersError(
+          err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
+        );
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [party.id]);
 
   const handleRevealIdentity = async () => {
     setIsRevealing(true);
