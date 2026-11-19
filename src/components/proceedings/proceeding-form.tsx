@@ -6,12 +6,12 @@ import { useRouter } from 'next/navigation';
 import {
   addProceedingAction,
   updateProceedingAction,
-  linkProceedingPartyAction,
 } from '@/modules/matters/matter-actions';
 import {
   MatterDTO,
   ProceedingSummaryDTO,
   ProceedingPartySummaryDTO,
+  ProceedingPartyInput,
   ProceedingInstance,
   ProceedingStatus,
   ProceedingLegalCapacity,
@@ -122,8 +122,8 @@ export function ProceedingForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
 
-  // Stable in-memory Idempotency Key
-  const [idempotencyKey] = useState(() => generateClientRequestId('proc'));
+  // In-memory Idempotency Key (refreshed on conflict/failure for safe retry)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('proc'));
 
   const formId = useId();
 
@@ -159,6 +159,15 @@ export function ProceedingForm({
     // If docket is incomplete, force status to DRAFT
     const finalStatus: ProceedingStatus = isDocketIncomplete ? 'DRAFT' : status;
 
+    // Assemble party capacities for atomic submission
+    const assembledParties: ProceedingPartyInput[] = Object.entries(partyCapacities).map(
+      ([matterPartyId, capState]) => ({
+        matterPartyId,
+        legalCapacity: capState.legalCapacity,
+        capacityText: capState.capacityText.trim() || undefined,
+      })
+    );
+
     try {
       if (isEdit && initialProceeding) {
         const payload: UpdateProceedingInput = {
@@ -175,11 +184,14 @@ export function ProceedingForm({
           filingDate: filingDate || null,
           claimAmount: claimAmount.trim() || null,
           status: finalStatus,
+          parties: assembledParties,
           idempotencyKey,
         };
 
         const res = await updateProceedingAction(payload);
         if (!res.success) {
+          // Generate new idempotency key so retry doesn't trigger payload mismatch
+          setIdempotencyKey(generateClientRequestId('proc'));
           if (res.code === 'CONCURRENCY_CONFLICT') {
             setConcurrencyConflict(true);
           } else {
@@ -188,22 +200,6 @@ export function ProceedingForm({
           }
           setIsSaving(false);
           return;
-        }
-
-        // Link / update capacities for all parties
-        for (const [matterPartyId, capState] of Object.entries(partyCapacities)) {
-          const capRes = await linkProceedingPartyAction({
-            proceedingId: initialProceeding.id,
-            matterPartyId,
-            legalCapacity: capState.legalCapacity,
-            capacityText: capState.capacityText.trim() || undefined,
-            idempotencyKey: `${idempotencyKey}_cap_${matterPartyId}`,
-          });
-          if (!capRes.success) {
-            setGeneralError(capRes.error || 'تعذر حفظ الصفات القضائية للأطراف.');
-            setIsSaving(false);
-            return;
-          }
         }
 
         router.push(`/matters/${matter.id}`);
@@ -220,37 +216,23 @@ export function ProceedingForm({
           filingDate: filingDate || null,
           claimAmount: claimAmount.trim() || null,
           status: finalStatus,
+          parties: assembledParties,
           idempotencyKey,
         };
 
         const res = await addProceedingAction(payload);
         if (!res.success) {
+          setIdempotencyKey(generateClientRequestId('proc'));
           setGeneralError(res.error || 'تعذر تسجيل القيد القضائي.');
           if (res.fieldErrors) setFieldErrors(res.fieldErrors);
           setIsSaving(false);
           return;
         }
 
-        // Link capacities for all parties
-        const newProceedingId = res.data.id;
-        for (const [matterPartyId, capState] of Object.entries(partyCapacities)) {
-          const capRes = await linkProceedingPartyAction({
-            proceedingId: newProceedingId,
-            matterPartyId,
-            legalCapacity: capState.legalCapacity,
-            capacityText: capState.capacityText.trim() || undefined,
-            idempotencyKey: `${idempotencyKey}_cap_${matterPartyId}`,
-          });
-          if (!capRes.success) {
-            setGeneralError(capRes.error || 'تعذر حفظ الصفات القضائية للأطراف.');
-            setIsSaving(false);
-            return;
-          }
-        }
-
         router.push(`/matters/${matter.id}`);
       }
     } catch (err: unknown) {
+      setIdempotencyKey(generateClientRequestId('proc'));
       setGeneralError(
         err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ البيانات.'
       );
@@ -290,14 +272,32 @@ export function ProceedingForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-2 text-xs"
         >
           <span className="font-bold block text-sm">⚠️ تعارض في التعديل المتزامن</span>
-          <p>تم تعديل هذا القيد من مستخدم آخر أثناء تحريرك. يرجى تحديث الصفحة وإعادة المحاولة.</p>
-          <button
-            type="button"
-            onClick={() => router.refresh()}
-            className="px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px]"
-          >
-            تحديث الصفحة
-          </button>
+          <p>تم تعديل هذا القيد من مستخدم آخر أثناء تحريرك. تم الاحتفاظ ببياناتك المدخلة في الذاكرة. يرجى تحديث الصفحة للحصول على أحدث إصدار ثم إعادة الحفظ.</p>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIdempotencyKey(generateClientRequestId('proc'));
+                setConcurrencyConflict(false);
+                router.refresh();
+              }}
+              data-testid="conflict-reload-button"
+              className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] transition-colors"
+            >
+              تحديث الصفحة واسترجاع أحدث نسخة
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIdempotencyKey(generateClientRequestId('proc'));
+                setConcurrencyConflict(false);
+              }}
+              data-testid="conflict-dismiss-button"
+              className="px-3 py-1.5 bg-white border border-amber-400 text-amber-900 font-semibold rounded-[6px] hover:bg-amber-100 transition-colors"
+            >
+              متابعة المحاولة بالبيانات الحالية
+            </button>
+          </div>
         </div>
       )}
 

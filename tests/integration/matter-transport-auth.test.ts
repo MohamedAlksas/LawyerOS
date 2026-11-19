@@ -183,6 +183,8 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   let existingMatterId: string;
   let existingProcId: string;
   let existingMatterPartyId: string;
+  let existingAuthId: string;
+  let existingProcPartyId: string;
 
   let verifiedSessionCookie: string;
   let unverifiedMfaSessionCookie: string;
@@ -271,6 +273,18 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           INSERT INTO "proceeding" ("id", "matterId", "courtId", "instance", "numberText", "yearLabel", "registerType", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
           VALUES ($1, $2, $3, 'FIRST_INSTANCE', '777', '2026', 'تجاري كلي', 'ACTIVE', 1, $4, $4, now(), now())
         `, [existingProcId, existingMatterId, existingCourtId, ownerUserId]);
+
+        existingAuthId = crypto.randomUUID();
+        await client.query(`
+          INSERT INTO "matter_authorization" ("id", "matterId", "powerOfAttorneyId", "createdById", "createdAt")
+          VALUES ($1, $2, $3, $4, now())
+        `, [existingAuthId, existingMatterId, existingPoaId, ownerUserId]);
+
+        existingProcPartyId = crypto.randomUUID();
+        await client.query(`
+          INSERT INTO "proceeding_party" ("id", "proceedingId", "matterPartyId", "capacityText", "legalCapacity", "createdById", "createdAt")
+          VALUES ($1, $2, $3, 'مدعي بالحق المدني', 'PLAINTIFF', $4, now())
+        `, [existingProcPartyId, existingProcId, existingMatterPartyId, ownerUserId]);
 
         // Setup real unverified MFA OWNER session
         const nomfaUserId = 'user-owner-nomfa-matter';
@@ -487,13 +501,13 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     expect(preCheck.status).toBe(200);
     expect(preCheck.body).toContain('"success":true');
 
-    // Revoke exactly one row in DB and verify rowCount === 1
+    // Genuinely revoke exactly one session row in DB (deletion, not expiration) and verify rowCount === 1
     const rawToken = decodeURIComponent(revokedCookieToken!).split('.')[0];
-    const updateResult = await dedicatedPool.query(
-      'UPDATE "session" SET "expiresAt" = now() - interval \'1 hour\' WHERE token = $1',
+    const deleteResult = await dedicatedPool.query(
+      'DELETE FROM "session" WHERE token = $1',
       [rawToken]
     );
-    expect(updateResult.rowCount).toBe(1);
+    expect(deleteResult.rowCount).toBe(1);
   }, 90000);
 
   afterAll(async () => {
@@ -544,7 +558,16 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   }
 
   function getTargetActions(): Array<{ name: string; args: unknown[] }> {
-    return [
+    const candidates: Array<{ name: string; args: unknown[] }> = [
+      // 1. Reads
+      {
+        name: 'searchMattersAction',
+        args: [{
+          query: 'نزاع تجاري',
+          limit: 10,
+        }],
+      },
+      // 2. Matter Lifecycle
       {
         name: 'openMatterAction',
         args: [{
@@ -564,13 +587,43 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-upd-${crypto.randomUUID()}`,
         }],
       },
+      // 3. Matter-Party Relationships
+      {
+        name: 'linkMatterPartyAction',
+        args: [{
+          matterId: existingMatterId,
+          partyId: existingPartyId,
+          role: 'CLIENT',
+          idempotencyKey: `unauth-lmp-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'updateMatterPartyAction',
+        args: [{
+          id: existingMatterPartyId,
+          matterId: existingMatterId,
+          expectedVersion: 1,
+          role: 'CLIENT',
+          idempotencyKey: `unauth-ump-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'unlinkMatterPartyAction',
+        args: [{
+          id: existingMatterPartyId,
+          matterId: existingMatterId,
+          expectedVersion: 1,
+          idempotencyKey: `unauth-unmp-${crypto.randomUUID()}`,
+        }],
+      },
+      // 4. Proceedings Lifecycle
       {
         name: 'addProceedingAction',
         args: [{
           matterId: existingMatterId,
           courtId: existingCourtId,
           instance: 'FIRST_INSTANCE',
-          idempotencyKey: `unauth-proc-${crypto.randomUUID()}`,
+          idempotencyKey: `unauth-addproc-${crypto.randomUUID()}`,
         }],
       },
       {
@@ -582,15 +635,63 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           courtId: existingCourtId,
           instance: 'FIRST_INSTANCE',
           status: 'DRAFT',
-          idempotencyKey: `unauth-uproc-${crypto.randomUUID()}`,
+          idempotencyKey: `unauth-updproc-${crypto.randomUUID()}`,
         }],
       },
+      // 5. Proceeding-Party Relationships (if exported in manifest)
+      {
+        name: 'linkProceedingPartyAction',
+        args: [{
+          proceedingId: existingProcId,
+          matterPartyId: existingMatterPartyId,
+          capacityText: 'مدعي بالحق المدني',
+          idempotencyKey: `unauth-lpp-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'unlinkProceedingPartyAction',
+        args: [{
+          id: existingProcPartyId,
+          proceedingId: existingProcId,
+          expectedVersion: 1,
+          idempotencyKey: `unauth-unpp-${crypto.randomUUID()}`,
+        }],
+      },
+      // 6. Matter Authorizations (POA)
       {
         name: 'linkMatterAuthorizationAction',
         args: [{
           matterId: existingMatterId,
           powerOfAttorneyId: existingPoaId,
-          idempotencyKey: `unauth-poa-${crypto.randomUUID()}`,
+          idempotencyKey: `unauth-lma-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'unlinkMatterAuthorizationAction',
+        args: [{
+          id: existingAuthId,
+          matterId: existingMatterId,
+          expectedVersion: 1,
+          idempotencyKey: `unauth-unma-${crypto.randomUUID()}`,
+        }],
+      },
+      // 7. Reference Settings & Office Profile
+      {
+        name: 'createReferenceItemAction',
+        args: [{
+          type: 'COURT',
+          name: 'محكمة غير مصرحة',
+          idempotencyKey: `unauth-ref-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'updateReferenceItemAction',
+        args: [{
+          type: 'COURT',
+          id: existingCourtId,
+          name: 'محكمة معدلة غير مصرحة',
+          expectedVersion: 1,
+          idempotencyKey: `unauth-uref-${crypto.randomUUID()}`,
         }],
       },
       {
@@ -601,19 +702,25 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-set-${crypto.randomUUID()}`,
         }],
       },
+      // 8. Direct Reads (if exported in manifest)
       {
-        name: 'createReferenceItemAction',
-        args: [{
-          type: 'COURT',
-          name: 'محكمة غير مصرحة',
-          idempotencyKey: `unauth-ref-${crypto.randomUUID()}`,
-        }],
+        name: 'getMatterAction',
+        args: [existingMatterId],
+      },
+      {
+        name: 'getOfficeSettingsAction',
+        args: [],
       },
     ];
+
+    // Filter strictly to exposed Server Actions in the built client manifest
+    const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
+    expect(exposed.length).toBeGreaterThanOrEqual(10);
+    return exposed;
   }
 
   describe('1. Unauthenticated Transport (Missing Session Cookie)', () => {
-    it('rejects unauthenticated HTTP requests across all 7 target server actions', async () => {
+    it('rejects unauthenticated HTTP requests across all target server actions', async () => {
       const actions = getTargetActions();
 
       for (const item of actions) {
@@ -629,7 +736,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('2. Expired Session Transport', () => {
-    it('rejects expired session HTTP requests across all 7 target server actions', async () => {
+    it('rejects expired session HTTP requests across all target server actions', async () => {
       const actions = getTargetActions();
 
       for (const item of actions) {
@@ -645,7 +752,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('3. Genuinely Revoked Session Transport', () => {
-    it('rejects revoked session across all target actions after rowCount === 1 revocation', async () => {
+    it('rejects revoked session across all target actions after rowCount === 1 deletion', async () => {
       const actions = getTargetActions();
 
       for (const item of actions) {
@@ -677,57 +784,8 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('5. MAINTAINER Role Denial (Least Privilege)', () => {
-    it('strictly denies MAINTAINER access to matter, proceeding, and POA actions', async () => {
-      const confidentialActions: Array<{ name: string; args: unknown[] }> = [
-        {
-          name: 'openMatterAction',
-          args: [{
-            title: 'محاولة صيانة لفتح ملف',
-            kind: 'LITIGATION',
-            idempotencyKey: `maint-open-${crypto.randomUUID()}`,
-          }],
-        },
-        {
-          name: 'updateMatterAction',
-          args: [{
-            id: existingMatterId,
-            expectedVersion: 1,
-            title: 'تعديل صيانة',
-            kind: 'LITIGATION',
-            status: 'ACTIVE',
-            idempotencyKey: `maint-upd-${crypto.randomUUID()}`,
-          }],
-        },
-        {
-          name: 'addProceedingAction',
-          args: [{
-            matterId: existingMatterId,
-            courtId: existingCourtId,
-            instance: 'FIRST_INSTANCE',
-            idempotencyKey: `maint-proc-${crypto.randomUUID()}`,
-          }],
-        },
-        {
-          name: 'updateProceedingAction',
-          args: [{
-            id: existingProcId,
-            matterId: existingMatterId,
-            expectedVersion: 1,
-            courtId: existingCourtId,
-            instance: 'FIRST_INSTANCE',
-            status: 'DRAFT',
-            idempotencyKey: `maint-uproc-${crypto.randomUUID()}`,
-          }],
-        },
-        {
-          name: 'linkMatterAuthorizationAction',
-          args: [{
-            matterId: existingMatterId,
-            powerOfAttorneyId: existingPoaId,
-            idempotencyKey: `maint-poa-${crypto.randomUUID()}`,
-          }],
-        },
-      ];
+    it('strictly denies MAINTAINER access to matter, proceeding, POA, and reference settings actions', async () => {
+      const confidentialActions = getTargetActions();
 
       for (const item of confidentialActions) {
         const res = await postServerAction(item.name, item.args, { cookie: maintainerSessionCookie });

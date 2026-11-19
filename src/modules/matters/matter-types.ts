@@ -172,6 +172,13 @@ export interface UnlinkMatterPartyInput {
   idempotencyKey: string;
 }
 
+export interface ProceedingPartyInput {
+  matterPartyId: string;
+  capacityText?: string;
+  legalCapacity?: ProceedingLegalCapacity | null;
+  notes?: string | null;
+}
+
 export interface AddProceedingInput {
   matterId: string;
   courtId: string;
@@ -184,6 +191,7 @@ export interface AddProceedingInput {
   filingDate?: string | null;
   claimAmount?: string | null;
   status?: ProceedingStatus;
+  parties?: ProceedingPartyInput[];
   idempotencyKey: string;
 }
 
@@ -201,6 +209,7 @@ export interface UpdateProceedingInput {
   filingDate?: string | null;
   claimAmount?: string | null;
   status: ProceedingStatus;
+  parties?: ProceedingPartyInput[];
   idempotencyKey: string;
 }
 
@@ -210,12 +219,14 @@ export interface LinkProceedingPartyInput {
   capacityText?: string;
   legalCapacity?: ProceedingLegalCapacity | null;
   notes?: string | null;
+  expectedVersion?: number;
   idempotencyKey: string;
 }
 
 export interface UnlinkProceedingPartyInput {
   id: string;
   proceedingId: string;
+  expectedVersion?: number;
   idempotencyKey: string;
 }
 
@@ -279,7 +290,9 @@ export const openMatterSchema = z
   .object({
     title: z.string().trim().min(1, 'عنوان الملف مطلوب').max(200, 'عنوان الملف لا يتجاوز 200 حرف'),
     kind: z.nativeEnum(MatterKind, { message: 'نوع العمل القانوني غير صالح' }),
-    status: z.nativeEnum(MatterStatus).optional(),
+    status: z.enum(['DRAFT', 'ACTIVE', 'ON_HOLD'], {
+      message: 'حالة الملف غير صالحة للإنشاء (الحالات المدعومة عند الإنشاء: مسودة، نشط، معلق)',
+    }).optional(),
     practiceAreaId: z.string().uuid('معرف دائرة التخصص غير صالح').nullable().optional(),
     openingDate: strictDateSchema.nullable().optional(),
     summary: z.string().max(2000, 'الملخص لا يتجاوز 2000 حرف').nullable().optional(),
@@ -353,6 +366,22 @@ export const unlinkMatterPartySchema = z
   })
   .strict();
 
+export const proceedingPartyInputSchema = z
+  .object({
+    matterPartyId: z.string().uuid('معرف طرف الملف غير صالح'),
+    capacityText: z.string().max(100, 'الصفة القضائية لا تتجاوز 100 حرف').optional(),
+    legalCapacity: z.nativeEnum(ProceedingLegalCapacity).nullable().optional(),
+    notes: z.string().max(1000).nullable().optional(),
+  })
+  .strict()
+  .refine(
+    (data) => Boolean(data.capacityText?.trim() || data.legalCapacity),
+    {
+      message: 'الصفة القضائية مطلوبة للطرف في القيد القضائي.',
+      path: ['capacityText'],
+    }
+  );
+
 export const addProceedingSchema = z
   .object({
     matterId: z.string().uuid('معرف الملف غير صالح'),
@@ -366,6 +395,7 @@ export const addProceedingSchema = z
     filingDate: strictDateSchema.nullable().optional(),
     claimAmount: z.string().max(50).nullable().optional(),
     status: z.nativeEnum(ProceedingStatus).optional(),
+    parties: z.array(proceedingPartyInputSchema).optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();
@@ -385,6 +415,7 @@ export const updateProceedingSchema = z
     filingDate: strictDateSchema.nullable().optional(),
     claimAmount: z.string().max(50).nullable().optional(),
     status: z.nativeEnum(ProceedingStatus, { message: 'حالة القيد القضائي غير صالحة' }),
+    parties: z.array(proceedingPartyInputSchema).optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();
@@ -396,6 +427,7 @@ export const linkProceedingPartySchema = z
     capacityText: z.string().max(100, 'الصفة القضائية لا تتجاوز 100 حرف').optional(),
     legalCapacity: z.nativeEnum(ProceedingLegalCapacity).nullable().optional(),
     notes: z.string().max(1000).nullable().optional(),
+    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب').optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict()
@@ -411,6 +443,7 @@ export const unlinkProceedingPartySchema = z
   .object({
     id: z.string().uuid('معرف صفة الطرف بالقيد غير صالح'),
     proceedingId: z.string().uuid('معرف القيد القضائي غير صالح'),
+    expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب').optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();

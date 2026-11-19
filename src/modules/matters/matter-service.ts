@@ -4,7 +4,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
-import { normalizeArabicDigits } from '@/lib/normalization';
+import { normalizeArabicDigits, normalizeArabicText } from '@/lib/normalization';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -389,6 +389,18 @@ async function getMatterInternal(
   return mapMatterToDTO(matter);
 }
 
+function extractOperationVersion(payload: unknown, fallback: number): number {
+  if (
+    payload !== null &&
+    typeof payload === 'object' &&
+    'version' in payload &&
+    typeof (payload as { version?: unknown }).version === 'number'
+  ) {
+    return (payload as { version: number }).version;
+  }
+  return fallback;
+}
+
 function toEasternArabicDigits(str: string): string {
   return str.replace(/[0-9]/g, (d) => String.fromCharCode(0x0660 + parseInt(d, 10)));
 }
@@ -419,10 +431,14 @@ function expandSearchVariants(query: string): string[] {
       const replaced = words.map((w) => w.replace(/^[اأإآٱ]/, alef)).join(' ');
       variants.add(replaced);
     }
-    const taaReplaced = words.map((w) => w.replace(/ة$/, 'ه').replace(/ه$/, 'ة')).join(' ');
-    variants.add(taaReplaced);
-    const yaaReplaced = words.map((w) => w.replace(/ي$/, 'ى').replace(/ى$/, 'ي')).join(' ');
-    variants.add(yaaReplaced);
+    const toTaa = words.map((w) => w.replace(/ه$/, 'ة')).join(' ');
+    variants.add(toTaa);
+    const toHaa = words.map((w) => w.replace(/ة$/, 'ه')).join(' ');
+    variants.add(toHaa);
+    const toAlefMaqsura = words.map((w) => w.replace(/ي$/, 'ى')).join(' ');
+    variants.add(toAlefMaqsura);
+    const toYaa = words.map((w) => w.replace(/ى$/, 'ي')).join(' ');
+    variants.add(toYaa);
   }
 
   return Array.from(variants).filter(Boolean);
@@ -538,6 +554,11 @@ export async function openMatter(
     throw err;
   }
 
+  const rawStatus = (rawInput as unknown as Record<string, unknown>).status;
+  if (rawStatus === 'ARCHIVED' || (input.status as string) === 'ARCHIVED') {
+    throw new MatterValidationError('لا يمكن إنشاء ملف جديد بحالة مؤرشفة.');
+  }
+
   const targetStatus = input.status ?? 'DRAFT';
   if (targetStatus === 'ACTIVE' && !input.initialClientId) {
     throw new LastClientRequiredError('لا يمكن فتح ملف نشط دون تحديد موكل أساسي على الأقل.');
@@ -558,10 +579,11 @@ export async function openMatter(
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
         const currentMatter = await getMatterInternal(tx, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, 1);
         return {
           matter: currentMatter,
           fileCode: currentMatter.fileCode,
-          operationVersion: currentMatter.version,
+          operationVersion: opVersion,
         };
       }
 
@@ -595,6 +617,7 @@ export async function openMatter(
         data: {
           fileCode,
           title: input.title.trim(),
+          titleNormalized: normalizeArabicText(input.title),
           kind: input.kind,
           status: targetStatus,
           practiceAreaId: input.practiceAreaId ?? null,
@@ -678,10 +701,11 @@ export async function openMatter(
       if (resolved) {
         const resourceId = extractResourceId(resolved);
         const currentMatter = await getMatterInternal(prisma, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, 1);
         return {
           matter: currentMatter,
           fileCode: currentMatter.fileCode,
-          operationVersion: currentMatter.version,
+          operationVersion: opVersion,
         };
       }
       return openMatter(actor, rawInput, options);
@@ -727,9 +751,10 @@ export async function updateMatter(
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
         const currentMatter = await getMatterInternal(tx, resourceId);
+        const opVersion = extractOperationVersion(claim.resultPayload, currentMatter.version);
         return {
           matter: currentMatter,
-          operationVersion: currentMatter.version,
+          operationVersion: opVersion,
         };
       }
 
@@ -787,6 +812,7 @@ export async function updateMatter(
         where: { id: input.id },
         data: {
           title: input.title.trim(),
+          titleNormalized: normalizeArabicText(input.title),
           kind: input.kind,
           status: input.status,
           practiceAreaId: input.practiceAreaId ?? null,
@@ -841,9 +867,10 @@ export async function updateMatter(
       if (resolved) {
         const resourceId = extractResourceId(resolved);
         const currentMatter = await getMatterInternal(prisma, resourceId);
+        const opVersion = extractOperationVersion(resolved.resultPayload, currentMatter.version);
         return {
           matter: currentMatter,
-          operationVersion: currentMatter.version,
+          operationVersion: opVersion,
         };
       }
       return updateMatter(actor, rawInput, options);
@@ -1461,6 +1488,33 @@ export async function addProceeding(
         },
       });
 
+      // Atomically link initial parties/capacities if provided
+      if (input.parties && input.parties.length > 0) {
+        for (const partyInput of input.parties) {
+          const matterParty = await tx.matterParty.findUnique({
+            where: { id: partyInput.matterPartyId },
+          });
+          if (!matterParty) throw new NotFoundError('طرف الملف غير موجود.');
+          if (matterParty.matterId !== input.matterId) {
+            throw new CrossMatterLinkForbiddenError('لا يمكن ربط صفة تقاضي لطرف غير منضم لنفس ملف القضية.');
+          }
+          const capacityVal = (partyInput.capacityText?.trim() || (partyInput.legalCapacity ? String(partyInput.legalCapacity) : '')).slice(0, 100);
+          if (!capacityVal) {
+            throw new MatterValidationError('الصفة القضائية مطلوبة للطرف في القيد القضائي.');
+          }
+          await tx.proceedingParty.create({
+            data: {
+              proceedingId: proceeding.id,
+              matterPartyId: partyInput.matterPartyId,
+              capacityText: capacityVal,
+              legalCapacity: partyInput.legalCapacity ?? null,
+              notes: partyInput.notes?.trim() ?? null,
+              createdById: actor.id,
+            },
+          });
+        }
+      }
+
       // Increment parent matter version
       await tx.$executeRaw`
         UPDATE "matter"
@@ -1476,28 +1530,8 @@ export async function addProceeding(
         changedFields: { courtId: input.courtId, instance: input.instance, numberText: input.numberText },
       });
 
-      const dto: ProceedingSummaryDTO = {
-        id: proceeding.id,
-        matterId: proceeding.matterId,
-        courtId: proceeding.courtId,
-        courtName: proceeding.court.name,
-        instance: proceeding.instance,
-        parentProceedingId: proceeding.parentProceedingId,
-        parentProceedingSummary: proceeding.parentProceeding
-          ? `${proceeding.parentProceeding.court.name} - ${proceeding.parentProceeding.numberText ?? ''}/${proceeding.parentProceeding.yearLabel ?? ''}`
-          : null,
-        registerType: proceeding.registerType,
-        circuit: proceeding.circuit,
-        numberText: proceeding.numberText,
-        yearLabel: proceeding.yearLabel,
-        filingDate: proceeding.filingDate ? proceeding.filingDate.toISOString().slice(0, 10) : null,
-        claimAmount: proceeding.claimAmount,
-        status: proceeding.status,
-        version: proceeding.version,
-        createdAt: proceeding.createdAt.toISOString(),
-        parties: [],
-        duplicateWarning,
-      };
+      const dto = await getProceedingDTO(tx, proceeding.id);
+      dto.duplicateWarning = duplicateWarning;
 
       await completeIdempotencyKey(tx, {
         actorId: actor.id,
@@ -1653,6 +1687,52 @@ export async function updateProceeding(
         },
       });
 
+      // Atomically link / update parties and capacities if provided
+      if (input.parties && input.parties.length > 0) {
+        for (const partyInput of input.parties) {
+          const matterParty = await tx.matterParty.findUnique({
+            where: { id: partyInput.matterPartyId },
+          });
+          if (!matterParty) throw new NotFoundError('طرف الملف غير موجود.');
+          if (matterParty.matterId !== input.matterId) {
+            throw new CrossMatterLinkForbiddenError('لا يمكن ربط صفة تقاضي لطرف غير منضم لنفس ملف القضية.');
+          }
+          const capacityVal = (partyInput.capacityText?.trim() || (partyInput.legalCapacity ? String(partyInput.legalCapacity) : '')).slice(0, 100);
+          if (!capacityVal) {
+            throw new MatterValidationError('الصفة القضائية مطلوبة للطرف في القيد القضائي.');
+          }
+          const existingParty = await tx.proceedingParty.findUnique({
+            where: {
+              proceedingId_matterPartyId: {
+                proceedingId: input.id,
+                matterPartyId: partyInput.matterPartyId,
+              },
+            },
+          });
+          if (existingParty) {
+            await tx.proceedingParty.update({
+              where: { id: existingParty.id },
+              data: {
+                capacityText: capacityVal,
+                legalCapacity: partyInput.legalCapacity ?? null,
+                notes: partyInput.notes !== undefined ? (partyInput.notes?.trim() ?? null) : existingParty.notes,
+              },
+            });
+          } else {
+            await tx.proceedingParty.create({
+              data: {
+                proceedingId: input.id,
+                matterPartyId: partyInput.matterPartyId,
+                capacityText: capacityVal,
+                legalCapacity: partyInput.legalCapacity ?? null,
+                notes: partyInput.notes?.trim() ?? null,
+                createdById: actor.id,
+              },
+            });
+          }
+        }
+      }
+
       // Increment parent matter version
       await tx.$executeRaw`
         UPDATE "matter"
@@ -1668,36 +1748,8 @@ export async function updateProceeding(
         changedFields: { numberText: updated.numberText, status: updated.status },
       });
 
-      const dto: ProceedingSummaryDTO = {
-        id: updated.id,
-        matterId: updated.matterId,
-        courtId: updated.courtId,
-        courtName: updated.court.name,
-        instance: updated.instance,
-        parentProceedingId: updated.parentProceedingId,
-        parentProceedingSummary: updated.parentProceeding
-          ? `${updated.parentProceeding.court.name} - ${updated.parentProceeding.numberText ?? ''}/${updated.parentProceeding.yearLabel ?? ''}`
-          : null,
-        registerType: updated.registerType,
-        circuit: updated.circuit,
-        numberText: updated.numberText,
-        yearLabel: updated.yearLabel,
-        filingDate: updated.filingDate ? updated.filingDate.toISOString().slice(0, 10) : null,
-        claimAmount: updated.claimAmount,
-        status: updated.status,
-        version: updated.version,
-        createdAt: updated.createdAt.toISOString(),
-        parties: updated.parties.map((pp) => ({
-          id: pp.id,
-          proceedingId: pp.proceedingId,
-          matterPartyId: pp.matterPartyId,
-          partyName: pp.matterParty.party.name,
-          capacityText: pp.capacityText,
-          legalCapacity: pp.legalCapacity,
-          notes: pp.notes,
-        })),
-        duplicateWarning,
-      };
+      const dto = await getProceedingDTO(tx, updated.id);
+      dto.duplicateWarning = duplicateWarning;
 
       await completeIdempotencyKey(tx, {
         actorId: actor.id,
@@ -1767,16 +1819,31 @@ export async function linkProceedingParty(
         return await getProceedingPartyDTO(tx, resourceId);
       }
 
-      // Lock proceeding row
+      // 1. Look up proceeding to get parent matterId
+      const procRef = await tx.proceeding.findUnique({
+        where: { id: input.proceedingId },
+        select: { id: true, matterId: true },
+      });
+      if (!procRef) throw new NotFoundError('القيد القضائي غير موجود.');
+
+      // 2. Lock parent matter row FIRST
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+        SELECT "id", "version" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
+      `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      // 3. Lock proceeding row SECOND
       const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number }>>`
         SELECT "id", "matterId", "version" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
       `;
-      if (!proceeding) throw new NotFoundError('القيد القضائي غير موجود.');
+      if (!proceeding || proceeding.matterId !== procRef.matterId) {
+        throw new NotFoundError('القيد القضائي غير موجود.');
+      }
 
-      // Lock parent matter row
-      await tx.$executeRaw`
-        SELECT "id" FROM "matter" WHERE "id" = ${proceeding.matterId} FOR UPDATE;
-      `;
+      // 4. Validate expectedVersion if supplied
+      if (input.expectedVersion !== undefined && proceeding.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError('رقم نسخة القيد القضائي غير متطابق.');
+      }
 
       const matterParty = await tx.matterParty.findUnique({
         where: { id: input.matterPartyId },
@@ -1825,6 +1892,13 @@ export async function linkProceedingParty(
         });
         auditAction = 'LINK_PROCEEDING_PARTY';
       }
+
+      // Increment proceeding version
+      await tx.$executeRaw`
+        UPDATE "proceeding"
+        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${proceeding.id};
+      `;
 
       // Increment parent matter version
       await tx.$executeRaw`
@@ -1919,14 +1993,31 @@ export async function unlinkProceedingParty(
 
       if (claim.isReplay) return;
 
-      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string }>>`
-        SELECT "id", "matterId" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
-      `;
-      if (!proceeding) throw new NotFoundError('القيد القضائي غير موجود.');
+      // 1. Look up proceeding to get parent matterId
+      const procRef = await tx.proceeding.findUnique({
+        where: { id: input.proceedingId },
+        select: { id: true, matterId: true },
+      });
+      if (!procRef) throw new NotFoundError('القيد القضائي غير موجود.');
 
-      await tx.$executeRaw`
-        SELECT "id" FROM "matter" WHERE "id" = ${proceeding.matterId} FOR UPDATE;
+      // 2. Lock parent matter row FIRST
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+        SELECT "id", "version" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
       `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      // 3. Lock proceeding row SECOND
+      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number }>>`
+        SELECT "id", "matterId", "version" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
+      `;
+      if (!proceeding || proceeding.matterId !== procRef.matterId) {
+        throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      // 4. Validate expectedVersion if supplied
+      if (input.expectedVersion !== undefined && proceeding.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError('رقم نسخة القيد القضائي غير متطابق.');
+      }
 
       const existing = await tx.proceedingParty.findUnique({
         where: { id: input.id },
@@ -1938,6 +2029,13 @@ export async function unlinkProceedingParty(
       await tx.proceedingParty.delete({
         where: { id: input.id },
       });
+
+      // Increment proceeding version
+      await tx.$executeRaw`
+        UPDATE "proceeding"
+        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${proceeding.id};
+      `;
 
       // Increment parent matter version
       await tx.$executeRaw`
@@ -2284,8 +2382,12 @@ export async function searchMatters(
 
   if (params.query && params.query.trim().length > 0) {
     const queryVariants = expandSearchVariants(params.query);
+    const normQuery = normalizeArabicText(params.query);
 
     const orClauses: Prisma.MatterWhereInput[] = [];
+    if (normQuery) {
+      orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+    }
     for (const v of queryVariants) {
       orClauses.push({ title: { contains: v, mode: 'insensitive' } });
       orClauses.push({ fileCode: { contains: v, mode: 'insensitive' } });

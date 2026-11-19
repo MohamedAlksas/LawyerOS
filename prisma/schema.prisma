@@ -323,6 +323,7 @@ model Matter {
   id              String            @id @default(uuid())
   fileCode        String            @unique
   title           String
+  titleNormalized String?
   kind            MatterKind
   status          MatterStatus      @default(DRAFT)
   practiceAreaId  String?
@@ -347,6 +348,7 @@ model Matter {
   @@index([kind])
   @@index([practiceAreaId])
   @@index([paperLocationId])
+  @@index([titleNormalized])
   @@map("matter")
 }
 
