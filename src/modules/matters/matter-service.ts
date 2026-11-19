@@ -232,6 +232,21 @@ function validateProceedingCompleteness(
   }
 }
 
+function resolveDefaultCapacityText(capacityText?: string | null, legalCapacity?: string | null): string {
+  if (capacityText && capacityText.trim()) {
+    return capacityText.trim().slice(0, 100);
+  }
+  switch (legalCapacity) {
+    case 'PLAINTIFF': return 'مدعي';
+    case 'DEFENDANT': return 'مدعى عليه';
+    case 'APPELLANT': return 'مستأنف';
+    case 'APPELLEE': return 'مستأنف ضده';
+    case 'INTERVENOR': return 'متدخل';
+    case 'OTHER': return 'صفة أخرى';
+    default: return legalCapacity ? String(legalCapacity).slice(0, 100) : '';
+  }
+}
+
 /**
  * Advisory check for similar court registration identities.
  * Does not block creation or updates.
@@ -919,6 +934,7 @@ export async function linkMatterParty(
           billingEnabled: createdParty.billingEnabled,
           notes: createdParty.notes,
           version: createdParty.version,
+          operationVersion: extractOperationVersion(claim.resultPayload, createdParty.version),
           createdAt: createdParty.createdAt.toISOString(),
         };
       }
@@ -998,6 +1014,7 @@ export async function linkMatterParty(
         billingEnabled: created.billingEnabled,
         notes: created.notes,
         version: created.version,
+        operationVersion: created.version,
         createdAt: created.createdAt.toISOString(),
       };
 
@@ -1042,6 +1059,7 @@ export async function linkMatterParty(
           billingEnabled: createdParty.billingEnabled,
           notes: createdParty.notes,
           version: createdParty.version,
+          operationVersion: extractOperationVersion(resolved.resultPayload, createdParty.version),
           createdAt: createdParty.createdAt.toISOString(),
         };
       }
@@ -1116,9 +1134,11 @@ export async function updateMatterParty(
         partyId: string;
         role: string;
         isPrimaryContact: boolean;
+        billingEnabled: boolean;
+        notes: string | null;
         version: number;
       }>>`
-        SELECT "id", "matterId", "partyId", "role", "isPrimaryContact", "version"
+        SELECT "id", "matterId", "partyId", "role", "isPrimaryContact", "billingEnabled", "notes", "version"
         FROM "matter_party"
         WHERE "id" = ${input.id}
         FOR UPDATE;
@@ -1171,9 +1191,9 @@ export async function updateMatterParty(
         where: { id: input.id },
         data: {
           role: input.role,
-          isPrimaryContact: Boolean(input.isPrimaryContact),
-          billingEnabled: Boolean(input.billingEnabled),
-          notes: input.notes?.trim() ?? null,
+          isPrimaryContact: input.isPrimaryContact ?? existing.isPrimaryContact,
+          billingEnabled: input.billingEnabled ?? existing.billingEnabled,
+          notes: input.notes !== undefined ? (input.notes?.trim() ?? null) : existing.notes,
           version: nextVersion,
           updatedById: actor.id,
         },
@@ -1545,7 +1565,7 @@ export async function addProceeding(
           if (matterParty.matterId !== input.matterId) {
             throw new CrossMatterLinkForbiddenError('لا يمكن ربط صفة تقاضي لطرف غير منضم لنفس ملف القضية.');
           }
-          const capacityVal = (partyInput.capacityText?.trim() || (partyInput.legalCapacity ? String(partyInput.legalCapacity) : '')).slice(0, 100);
+          const capacityVal = resolveDefaultCapacityText(partyInput.capacityText, partyInput.legalCapacity);
           if (!capacityVal) {
             throw new MatterValidationError('الصفة القضائية مطلوبة للطرف في القيد القضائي.');
           }
@@ -1748,8 +1768,31 @@ export async function updateProceeding(
         },
       });
 
-      // Atomically link / update parties and capacities if provided
-      if (input.parties && input.parties.length > 0) {
+      // Atomically reconcile proceeding-party membership. `parties: undefined`
+      // means "leave membership unchanged"; an explicit array (including [])
+      // is the desired set, so links omitted from it are removed with audit.
+      if (input.parties !== undefined) {
+        const desiredIds = new Set(input.parties.map((p) => p.matterPartyId));
+        const existingLinks = await tx.proceedingParty.findMany({
+          where: { proceedingId: input.id },
+          select: { id: true, matterPartyId: true },
+        });
+        for (const link of existingLinks) {
+          if (!desiredIds.has(link.matterPartyId)) {
+            await tx.proceedingParty.delete({ where: { id: link.id } });
+            await recordAuditEvent(tx, {
+              userId: actor.id,
+              action: 'UNLINK_PROCEEDING_PARTY',
+              entityType: 'ProceedingParty',
+              entityId: link.id,
+              changedFields: {
+                proceedingId: input.id,
+                matterPartyId: link.matterPartyId,
+              },
+            });
+          }
+        }
+
         for (const partyInput of input.parties) {
           const matterParty = await tx.matterParty.findUnique({
             where: { id: partyInput.matterPartyId },
@@ -1758,7 +1801,7 @@ export async function updateProceeding(
           if (matterParty.matterId !== input.matterId) {
             throw new CrossMatterLinkForbiddenError('لا يمكن ربط صفة تقاضي لطرف غير منضم لنفس ملف القضية.');
           }
-          const capacityVal = (partyInput.capacityText?.trim() || (partyInput.legalCapacity ? String(partyInput.legalCapacity) : '')).slice(0, 100);
+          const capacityVal = resolveDefaultCapacityText(partyInput.capacityText, partyInput.legalCapacity);
           if (!capacityVal) {
             throw new MatterValidationError('الصفة القضائية مطلوبة للطرف في القيد القضائي.');
           }
@@ -1945,7 +1988,7 @@ export async function linkProceedingParty(
         throw new CrossMatterLinkForbiddenError('لا يمكن ربط صفة تقاضي لطرف غير منضم لنفس ملف القضية.');
       }
 
-      const capacityVal = (input.capacityText?.trim() || (input.legalCapacity ? String(input.legalCapacity) : '')).slice(0, 100);
+      const capacityVal = resolveDefaultCapacityText(input.capacityText, input.legalCapacity);
 
       const existing = await tx.proceedingParty.findUnique({
         where: {
@@ -2207,7 +2250,11 @@ export async function linkMatterAuthorization(
 
       if (claim.isReplay) {
         const resourceId = extractResourceId(claim);
-        return await getMatterAuthorizationDTO(tx, resourceId);
+        const dto = await getMatterAuthorizationDTO(tx, resourceId);
+        return {
+          ...dto,
+          operationVersion: extractOperationVersion(claim.resultPayload, 1),
+        };
       }
 
       // Lock parent matter row
@@ -2269,6 +2316,7 @@ export async function linkMatterAuthorization(
         humanReviewStatus: poa.humanReviewStatus,
         partyId: poa.partyId,
         partyName: poa.party.name,
+        operationVersion: 1,
         createdAt: auth.createdAt.toISOString(),
       };
 
@@ -2298,7 +2346,11 @@ export async function linkMatterAuthorization(
       });
       if (resolved) {
         const resourceId = extractResourceId(resolved);
-        return await getMatterAuthorizationDTO(prisma, resourceId);
+        const dto = await getMatterAuthorizationDTO(prisma, resourceId);
+        return {
+          ...dto,
+          operationVersion: extractOperationVersion(resolved.resultPayload, 1),
+        };
       }
       return linkMatterAuthorization(actor, rawInput);
     }
@@ -2621,54 +2673,67 @@ export async function findSimilarProceedings(
   const normNumber = normalizeArabicDigits(params.numberText.trim());
   const normYear = params.yearLabel ? normalizeArabicDigits(params.yearLabel.trim()) : null;
 
-  const where: Prisma.ProceedingWhereInput = {
-    courtId: params.courtId,
-    ...(params.excludeProceedingId ? { id: { not: params.excludeProceedingId } } : {}),
-  };
+  // Filter the normalized docket identity in SQL before the result limit. A
+  // fixed "latest 100 rows, then filter in memory" window hides older matches
+  // whenever the court has enough newer unrelated proceedings.
+  const excludeClause = params.excludeProceedingId
+    ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
+    : Prisma.empty;
 
-  const proceedings = await prisma.proceeding.findMany({
-    where,
-    include: {
-      court: true,
-      matter: {
-        select: { id: true, fileCode: true, title: true },
-      },
-    },
-    take: 100,
-    orderBy: { createdAt: 'desc' },
-  });
+  const proceedings = await prisma.$queryRaw<Array<{
+    id: string;
+    matterId: string;
+    courtId: string;
+    instance: string;
+    numberText: string | null;
+    yearLabel: string | null;
+    status: string;
+    fileCode: string;
+    title: string;
+    courtName: string;
+  }>>`
+    SELECT
+      p."id", p."matterId", p."courtId", p."instance", p."numberText",
+      p."yearLabel", p."status", m."fileCode", m."title", c."name" AS "courtName"
+    FROM "proceeding" p
+    JOIN "matter" m ON m."id" = p."matterId"
+    JOIN "court" c ON c."id" = p."courtId"
+    WHERE p."courtId" = ${params.courtId}
+      AND p."numberText" IS NOT NULL
+      AND trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber}
+      ${excludeClause}
+    ORDER BY p."createdAt" DESC
+    LIMIT 100
+  `;
 
   const candidates: SimilarProceedingCandidateDTO[] = [];
   let hasDirectMatch = false;
 
   for (const proc of proceedings) {
     if (!proc.numberText) continue;
-    const procNormNumber = normalizeArabicDigits(proc.numberText.trim());
     const procNormYear = proc.yearLabel ? normalizeArabicDigits(proc.yearLabel.trim()) : null;
 
     let reason: string | null = null;
-    if (procNormNumber === normNumber && normYear && procNormYear === normYear) {
+    if (normYear && procNormYear === normYear) {
       reason = 'تطابق تام في رقم الدعوى وسنة القيد في نفس المحكمة';
       hasDirectMatch = true;
-    } else if (procNormNumber === normNumber) {
+    } else {
       reason = 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)';
     }
 
-    if (reason) {
-      candidates.push({
-        id: proc.id,
-        matterId: proc.matter.id,
-        matterFileCode: proc.matter.fileCode,
-        matterTitle: proc.matter.title,
-        courtId: proc.court.id,
-        courtName: proc.court.name,
-        instance: proc.instance,
-        numberText: proc.numberText,
-        yearLabel: proc.yearLabel,
-        status: proc.status,
-        similarityReason: reason,
-      });
-    }
+    candidates.push({
+      id: proc.id,
+      matterId: proc.matterId,
+      matterFileCode: proc.fileCode,
+      matterTitle: proc.title,
+      courtId: proc.courtId,
+      courtName: proc.courtName,
+      instance: proc.instance as SimilarProceedingCandidateDTO['instance'],
+      numberText: proc.numberText,
+      yearLabel: proc.yearLabel,
+      status: proc.status as SimilarProceedingCandidateDTO['status'],
+      similarityReason: reason,
+    });
   }
 
   // Sort direct matches first

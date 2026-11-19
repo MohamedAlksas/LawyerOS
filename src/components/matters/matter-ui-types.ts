@@ -116,3 +116,32 @@ export function generateClientRequestId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
 }
 
+/**
+ * Returns the office calendar date (Africa/Cairo) as YYYY-MM-DD.
+ * Using UTC's toISOString() near midnight would suggest yesterday's/tomorrow's
+ * date depending on the offset.
+ */
+export function getCairoTodayDate(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Cairo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const year = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${year}-${month}-${day}`;
+}
+
+export const AUTH_RECOVERY_CODES = [
+  'SESSION_EXPIRED',
+  'UNAUTHENTICATED',
+  'SESSION_INACTIVE',
+  'MFA_REQUIRED',
+] as const;
+
+export function isAuthRecoveryCode(code?: string | null): boolean {
+  return Boolean(code && (AUTH_RECOVERY_CODES as readonly string[]).includes(code));
+}
+

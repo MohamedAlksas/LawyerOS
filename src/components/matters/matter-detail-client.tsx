@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -38,6 +38,15 @@ interface MatterDetailClientProps {
 export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
   const router = useRouter();
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
+  // U8: router.refresh() supplies a newly confirmed aggregate. Replace the
+  // optimistic local copy with it instead of keeping the first server render.
+  const prevInitialMatterRef = useRef(initialMatter);
+  useEffect(() => {
+    if (initialMatter !== prevInitialMatterRef.current) {
+      prevInitialMatterRef.current = initialMatter;
+      setMatter(initialMatter);
+    }
+  }, [initialMatter]);
   const [activeTab, setActiveTab] = useState<'parties' | 'proceedings' | 'authorizations' | 'summary' | 'audit'>('parties');
 
   // Party Linking Modal / Form State (C11 guarded async lifecycle)
@@ -64,6 +73,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
   const [isLoadingPoas, setIsLoadingPoas] = useState(false);
   const [isSubmittingPoa, setIsSubmittingPoa] = useState(false);
   const [poaActionError, setPoaActionError] = useState<string | null>(null);
+  const poaLoadGenRef = useRef(0);
 
   // General Notification / Error
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -82,17 +92,29 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     setActionMessage(null);
     setPartyActionError(null);
     setPartySearchError(null);
+    partySearchGenRef.current++;
+    setSearchedParties([]);
     setShowAddPartyModal(true);
   };
 
-  // Search Parties for Linking (C11: separate query from selection, clear selection on text change, guard generation)
+  const closePartyModal = () => {
+    // U4: invalidate any in-flight search so a late response cannot repopulate
+    // the panel after it was closed.
+    partySearchGenRef.current++;
+    setSearchedParties([]);
+    setIsSearchingParty(false);
+    setShowAddPartyModal(false);
+  };
+
+  // Search Parties for Linking (C11/U4: separate query from selection, clear
+  // stale rows on query change, and invalidate generations on selection/close)
   const handleSearchParties = async (q: string) => {
     setPartySearchQuery(q);
-    setSelectedPartyId(''); // Clear selection immediately upon query modification
+    setSelectedPartyId('');
+    setSearchedParties([]);
     const gen = ++partySearchGenRef.current;
 
     if (!q.trim()) {
-      setSearchedParties([]);
       setIsSearchingParty(false);
       setPartySearchError(null);
       return;
@@ -147,6 +169,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       }
 
       setShowAddPartyModal(false);
+      partySearchGenRef.current++;
+      setSearchedParties([]);
       setSelectedPartyId('');
       setPartySearchQuery('');
       setPartyNotes('');
@@ -208,6 +232,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
         expectedVersion: partyLink.version,
         role: partyLink.role,
         isPrimaryContact: !partyLink.isPrimaryContact,
+        billingEnabled: partyLink.billingEnabled,
         notes: partyLink.notes,
         idempotencyKey,
       });
@@ -217,17 +242,12 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
         return;
       }
 
+      // U8/S5: reconcile the confirmed DTO (including the independent billing
+      // setting) instead of assuming only the checkbox changed. The refreshed
+      // server aggregate then normalizes any cascade effects.
       setMatter((prev) => ({
         ...prev,
-        parties: prev.parties?.map((p) => {
-          if (p.id === partyLink.id) {
-            return { ...p, isPrimaryContact: !p.isPrimaryContact, version: p.version + 1 };
-          }
-          if (!partyLink.isPrimaryContact && p.isPrimaryContact) {
-            return { ...p, isPrimaryContact: false };
-          }
-          return p;
-        }),
+        parties: prev.parties?.map((p) => (p.id === partyLink.id ? res.data : p)),
       }));
       router.refresh();
       setActionMessage('تم تحديث جهة الاتصال الأساسية بنجاح.');
@@ -238,16 +258,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   // Load POAs for linking
   const handleOpenPoaModal = async () => {
+    const gen = ++poaLoadGenRef.current;
     setActionMessage(null);
+    setAvailablePoas([]);
+    setSelectedPoaId('');
     setShowAddPoaModal(true);
     setIsLoadingPoas(true);
     setPoaActionError(null);
     const poaList: { id: string; poaNumberText: string; poaYearLabel: string; notarizationOffice: string; partyName: string }[] = [];
 
     try {
-      let anyFailed = false;
+      let failedClients = 0;
       for (const client of clients) {
         const res = await getClientProfileAction(client.partyId);
+        if (gen !== poaLoadGenRef.current) return;
         if (res.success && res.data.powersOfAttorney) {
           for (const poa of res.data.powersOfAttorney) {
             if (!authorizations.some((a) => a.powerOfAttorneyId === poa.id)) {
@@ -261,18 +285,30 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             }
           }
         } else if (!res.success) {
-          anyFailed = true;
+          failedClients++;
         }
       }
+      if (gen !== poaLoadGenRef.current) return;
       setAvailablePoas(poaList);
-      if (anyFailed && poaList.length === 0) {
-        setPoaActionError('تعذر تحميل بيانات التوكيلات لبعض الموكلين من الخادم.');
+      // U8: a partial failure is not an empty result. Report both the confirmed
+      // list and the clients whose POAs could not be read.
+      if (failedClients > 0) {
+        setPoaActionError(
+          `تعذر تحميل توكيلات ${failedClients} من الموكلين. المعروض ${poaList.length} توكيلاً فقط وليس قائمة كاملة؛ يمكنك إعادة المحاولة.`
+        );
       }
       setIsLoadingPoas(false);
     } catch {
-      setPoaActionError('حدث خطأ في الاتصال أثناء جلب التوكيلات.');
+      if (gen !== poaLoadGenRef.current) return;
+      setPoaActionError('حدث خطأ في الاتصال أثناء جلب التوكيلات. القائمة المعروضة غير كاملة.');
       setIsLoadingPoas(false);
     }
+  };
+
+  const closePoaModal = () => {
+    poaLoadGenRef.current++;
+    setIsLoadingPoas(false);
+    setShowAddPoaModal(false);
   };
 
   // Link POA
@@ -298,6 +334,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       }
 
       setShowAddPoaModal(false);
+      poaLoadGenRef.current++;
       setSelectedPoaId('');
       setIsSubmittingPoa(false);
       router.refresh();
@@ -584,7 +621,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setShowAddPartyModal(false)}
+                  onClick={closePartyModal}
                   className="text-xs text-[#4D606A] hover:text-[#172A35] p-1"
                 >
                   ✕ إغلاق
@@ -625,6 +662,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                           type="button"
                           data-testid={`select-party-${p.id}`}
                           onClick={() => {
+                            // Selection invalidates any in-flight query response.
+                            partySearchGenRef.current++;
                             setSelectedPartyId(p.id);
                             setPartySearchQuery(p.name);
                             setSearchedParties([]);
@@ -696,7 +735,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowAddPartyModal(false)}
+                    onClick={closePartyModal}
                     className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3]"
                   >
                     إلغاء
@@ -1058,7 +1097,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setShowAddPoaModal(false)}
+                  onClick={closePoaModal}
                   className="text-xs text-[#4D606A] hover:text-[#172A35] p-1"
                 >
                   ✕ إغلاق
@@ -1066,7 +1105,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               </div>
 
               {poaActionError && (
-                <p className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded">
+                <p
+                  role="alert"
+                  data-testid="poa-load-error"
+                  className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded"
+                >
                   ⚠️ {poaActionError}
                 </p>
               )}
@@ -1075,12 +1118,30 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 {isLoadingPoas ? (
                   <p className="text-[#4D606A]">جارٍ تحميل التوكيلات المتاحة للموكلين...</p>
                 ) : availablePoas.length === 0 ? (
-                  <div className="p-3 bg-amber-50 rounded border border-amber-200 text-amber-900 space-y-1">
-                    <p className="font-bold">لا توجد توكيلات متاحة لربطها حالياً.</p>
-                    <p>
-                      تأكد من إضافة موكل للملف أولاً، ثم تسجيل سند وكالة في صفحة ملف الموكل بدليل الأطراف.
-                    </p>
-                  </div>
+                  poaActionError ? (
+                    <div
+                      data-testid="poa-load-failure"
+                      className="p-3 bg-red-50 rounded border border-red-200 text-red-900 space-y-2"
+                    >
+                      <p className="font-bold">تعذر تحميل قائمة التوكيلات بالكامل.</p>
+                      <p>هذا ليس فراغاً مؤكداً؛ لم نتمكن من قراءة بيانات كل الموكلين. أعد المحاولة.</p>
+                      <button
+                        type="button"
+                        onClick={handleOpenPoaModal}
+                        data-testid="retry-load-poas"
+                        className="px-3 py-1.5 bg-white border border-red-300 text-red-900 font-semibold rounded-[6px] min-h-[32px]"
+                      >
+                        إعادة محاولة تحميل التوكيلات
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-amber-50 rounded border border-amber-200 text-amber-900 space-y-1">
+                      <p className="font-bold">لا توجد توكيلات متاحة لربطها حالياً.</p>
+                      <p>
+                        تأكد من إضافة موكل للملف أولاً، ثم تسجيل سند وكالة في صفحة ملف الموكل بدليل الأطراف.
+                      </p>
+                    </div>
+                  )
                 ) : (
                   <div className="space-y-1">
                     <label htmlFor="poa-select-input" className="block font-bold text-[#172A35]">
@@ -1106,7 +1167,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={() => setShowAddPoaModal(false)}
+                    onClick={closePoaModal}
                     className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3]"
                   >
                     إلغاء

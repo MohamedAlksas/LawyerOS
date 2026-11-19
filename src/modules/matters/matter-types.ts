@@ -84,6 +84,7 @@ export interface MatterAuthorizationSummaryDTO {
   humanReviewStatus: string;
   partyId: string;
   partyName: string;
+  operationVersion?: number;
   createdAt: string;
 }
 

@@ -1,19 +1,22 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   OfficeSettingsDTO,
   ReferenceItemDTO,
   ReferenceItemType,
+  UpdateOfficeSettingsInput,
+  CreateReferenceItemInput,
+  UpdateReferenceItemInput,
 } from '@/modules/settings/reference-types';
 import {
   updateOfficeSettingsAction,
   createReferenceItemAction,
   updateReferenceItemAction,
 } from '@/modules/settings/reference-actions';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface ReferenceSettingsClientProps {
   initialOfficeSettings: OfficeSettingsDTO;
@@ -29,34 +32,46 @@ export function ReferenceSettingsClient({
   initialStorageLocations,
 }: ReferenceSettingsClientProps) {
   const router = useRouter();
+
+  // Navigation tab: 'office' | 'courts' | 'practice_areas' | 'storage_locations'
   const [activeTab, setActiveTab] = useState<'office' | 'courts' | 'practice_areas' | 'storage_locations'>('office');
 
   // Office Settings State
   const [officeSettings, setOfficeSettings] = useState<OfficeSettingsDTO>(initialOfficeSettings);
-  const [officeName, setOfficeName] = useState(officeSettings.officeName);
-  const [lawyerName, setLawyerName] = useState(officeSettings.lawyerName || '');
-  const [phone, setPhone] = useState(officeSettings.phone || '');
-  const [email, setEmail] = useState(officeSettings.email || '');
-  const [address, setAddress] = useState(officeSettings.address || '');
-  const [taxNumber, setTaxNumber] = useState(officeSettings.taxNumber || '');
+  const [officeName, setOfficeName] = useState(initialOfficeSettings.officeName);
+  const [lawyerName, setLawyerName] = useState(initialOfficeSettings.lawyerName || '');
+  const [phone, setPhone] = useState(initialOfficeSettings.phone || '');
+  const [email, setEmail] = useState(initialOfficeSettings.email || '');
+  const [address, setAddress] = useState(initialOfficeSettings.address || '');
+  const [taxNumber, setTaxNumber] = useState(initialOfficeSettings.taxNumber || '');
   const [isSavingOffice, setIsSavingOffice] = useState(false);
   const [officeMessage, setOfficeMessage] = useState<string | null>(null);
   const [officeError, setOfficeError] = useState<string | null>(null);
+  const [officePending, setOfficePending] = useState(false);
+  const [officeSessionExpired, setOfficeSessionExpired] = useState(false);
+  const [officeDirty, setOfficeDirty] = useState(false);
+  const [officeFieldErrors, setOfficeFieldErrors] = useState<Record<string, string>>({});
+  const officePendingRef = useRef<{ key: string; payload: UpdateOfficeSettingsInput } | null>(null);
 
   // Reference Items Lists
   const [courts, setCourts] = useState<ReferenceItemDTO[]>(initialCourts);
   const [practiceAreas, setPracticeAreas] = useState<ReferenceItemDTO[]>(initialPracticeAreas);
   const [storageLocations, setStorageLocations] = useState<ReferenceItemDTO[]>(initialStorageLocations);
 
-  // New Item Form State
-  const [isCreatingItem, setIsCreatingItem] = useState(false);
+  // New Reference Item Input State
   const [newItemName, setNewItemName] = useState('');
   const [newItemCode, setNewItemCode] = useState('');
   const [newItemNotes, setNewItemNotes] = useState('');
+  const [isCreatingItem, setIsCreatingItem] = useState(false);
   const [itemError, setItemError] = useState<string | null>(null);
   const [itemSuccessMessage, setItemSuccessMessage] = useState<string | null>(null);
+  const [itemFieldErrors, setItemFieldErrors] = useState<Record<string, string>>({});
+  const [itemPending, setItemPending] = useState(false);
+  const [itemSessionExpired, setItemSessionExpired] = useState(false);
+  const [itemDraftDirty, setItemDraftDirty] = useState(false);
+  const itemPendingRef = useRef<{ key: string; payload: CreateReferenceItemInput } | null>(null);
 
-  // Edit Item Modal State (C19)
+  // Edit Item Modal State (C19/U9)
   const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(null);
   const [editItemName, setEditItemName] = useState('');
   const [editItemCode, setEditItemCode] = useState('');
@@ -64,72 +79,225 @@ export function ReferenceSettingsClient({
   const [editItemIsActive, setEditItemIsActive] = useState(true);
   const [isSavingEditItem, setIsSavingEditItem] = useState(false);
   const [editItemError, setEditItemError] = useState<string | null>(null);
+  const [editItemFieldErrors, setEditItemFieldErrors] = useState<Record<string, string>>({});
+  const [editItemPending, setEditItemPending] = useState(false);
+  const [editItemSessionExpired, setEditItemSessionExpired] = useState(false);
+  const editPendingRef = useRef<{ key: string; payload: UpdateReferenceItemInput } | null>(null);
+  const editDialogRef = useRef<HTMLDivElement>(null);
+  const lastFocusedOpenerRef = useRef<HTMLElement | null>(null);
 
   // Filter for Reference Items
   const [filterActiveOnly, setFilterActiveOnly] = useState(false);
 
-  // Handle Office Settings Save (C09: frozen key on transport retry)
+  // Dirty navigation guard (U10)
+  useEffect(() => {
+    const isAnyDirty = officeDirty || itemDraftDirty;
+    if (!isAnyDirty || isSavingOffice || isCreatingItem || isSavingEditItem) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [officeDirty, itemDraftDirty, isSavingOffice, isCreatingItem, isSavingEditItem]);
+
+  // Modal Focus Trap, Escape key listener, and Opener focus restore (U9)
+  useEffect(() => {
+    if (!editingItem) return;
+
+    // Focus the first interactive element inside the modal
+    const dialog = editDialogRef.current;
+    if (dialog) {
+      const firstInput = dialog.querySelector<HTMLInputElement | HTMLButtonElement>('input:not([disabled]), button:not([disabled])');
+      firstInput?.focus();
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setEditingItem(null);
+        editPendingRef.current = null;
+        setEditItemPending(false);
+        setEditItemSessionExpired(false);
+        return;
+      }
+
+      if (e.key === 'Tab' && dialog) {
+        const focusable = dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      lastFocusedOpenerRef.current?.focus();
+    };
+  }, [editingItem]);
+
+  // Handle Office Settings Save (C09/U1: frozen key & payload across retries)
   const [officeIdempotencyKey, setOfficeIdempotencyKey] = useState(() => generateClientRequestId('off'));
+
   const handleSaveOffice = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingOffice(true);
     setOfficeMessage(null);
     setOfficeError(null);
+    setOfficeFieldErrors({});
+    setOfficeSessionExpired(false);
+
+    let op = officePendingRef.current;
+    if (!op) {
+      op = {
+        key: officeIdempotencyKey,
+        payload: {
+          officeName: officeName.trim(),
+          lawyerName: lawyerName.trim() || null,
+          phone: phone.trim() || null,
+          email: email.trim() || null,
+          address: address.trim() || null,
+          taxNumber: taxNumber.trim() || null,
+          expectedVersion: officeSettings.version,
+          idempotencyKey: officeIdempotencyKey,
+        },
+      };
+      officePendingRef.current = op;
+    }
 
     try {
-      const res = await updateOfficeSettingsAction({
-        officeName: officeName.trim(),
-        lawyerName: lawyerName.trim() || null,
-        phone: phone.trim() || null,
-        email: email.trim() || null,
-        address: address.trim() || null,
-        taxNumber: taxNumber.trim() || null,
-        expectedVersion: officeSettings.version,
-        idempotencyKey: officeIdempotencyKey,
-      });
+      const res = await updateOfficeSettingsAction(op.payload);
 
       if (!res.success) {
-        setOfficeError(res.error || 'تعذر حفظ بيانات المكتب.');
+        if (isAuthRecoveryCode(res.code)) {
+          setOfficeSessionExpired(true);
+          setOfficePending(true);
+          setOfficeError(
+            'انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.'
+          );
+        } else if (res.code === 'CONCURRENCY_CONFLICT') {
+          officePendingRef.current = null;
+          setOfficePending(false);
+          setOfficeIdempotencyKey(generateClientRequestId('off'));
+          setOfficeError('تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم آخر. يرجى تحديث الصفحة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+        ) {
+          setOfficePending(true);
+          setOfficeError(
+            res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح أو ابدأ تعديلاً جديداً.'
+          );
+        } else {
+          officePendingRef.current = null;
+          setOfficePending(false);
+          setOfficeIdempotencyKey(generateClientRequestId('off'));
+          setOfficeError(res.error || 'تعذر حفظ بيانات المكتب.');
+          if (res.fieldErrors) setOfficeFieldErrors(res.fieldErrors);
+        }
         setIsSavingOffice(false);
-        setOfficeIdempotencyKey(generateClientRequestId('off'));
         return;
       }
 
+      officePendingRef.current = null;
+      setOfficePending(false);
+      setOfficeDirty(false);
+      setOfficeSessionExpired(false);
       setOfficeSettings(res.data);
       setOfficeMessage('تم حفظ بيانات المكتب بنجاح.');
       setIsSavingOffice(false);
       setOfficeIdempotencyKey(generateClientRequestId('off'));
       router.refresh();
     } catch (err: unknown) {
-      // C09: Keep key frozen on transport error
-      setOfficeError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      setOfficePending(true);
+      setOfficeError(
+        err instanceof Error
+          ? err.message
+          : 'حدث خطأ في الاتصال أثناء حفظ بيانات المكتب. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
+      );
       setIsSavingOffice(false);
     }
   };
 
-  // Handle Create Reference Item (C09: frozen key on transport retry)
+  const handleStartNewOfficeEdit = () => {
+    officePendingRef.current = null;
+    setOfficePending(false);
+    setOfficeSessionExpired(false);
+    setOfficeError(null);
+    setOfficeIdempotencyKey(generateClientRequestId('off'));
+    setOfficeDirty(true);
+  };
+
+  // Handle Create Reference Item (C09/U1: frozen key on transport retry)
   const [createItemKey, setCreateItemKey] = useState(() => generateClientRequestId('ritem'));
+
   const handleCreateItem = async (type: ReferenceItemType) => {
     if (!newItemName.trim()) return;
     setIsCreatingItem(true);
     setItemError(null);
     setItemSuccessMessage(null);
+    setItemFieldErrors({});
+    setItemSessionExpired(false);
+
+    let op = itemPendingRef.current;
+    if (!op) {
+      op = {
+        key: createItemKey,
+        payload: {
+          type,
+          name: newItemName.trim(),
+          code: newItemCode.trim() || null,
+          notes: newItemNotes.trim() || null,
+          idempotencyKey: createItemKey,
+        },
+      };
+      itemPendingRef.current = op;
+    }
 
     try {
-      const res = await createReferenceItemAction({
-        type,
-        name: newItemName.trim(),
-        code: newItemCode.trim() || null,
-        notes: newItemNotes.trim() || null,
-        idempotencyKey: createItemKey,
-      });
+      const res = await createReferenceItemAction(op.payload);
 
       if (!res.success) {
-        setItemError(res.error || 'تعذر إضافة العنصر المرجعي.');
+        if (isAuthRecoveryCode(res.code)) {
+          setItemSessionExpired(true);
+          setItemPending(true);
+          setItemError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+        ) {
+          setItemPending(true);
+          setItemError(res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.');
+        } else {
+          itemPendingRef.current = null;
+          setItemPending(false);
+          setCreateItemKey(generateClientRequestId('ritem'));
+          setItemError(res.error || 'تعذر إضافة العنصر المرجعي.');
+          if (res.fieldErrors) setItemFieldErrors(res.fieldErrors);
+        }
         setIsCreatingItem(false);
-        setCreateItemKey(generateClientRequestId('ritem'));
         return;
       }
+
+      itemPendingRef.current = null;
+      setItemPending(false);
+      setItemDraftDirty(false);
+      setItemSessionExpired(false);
 
       if (type === 'COURT') {
         setCourts((prev) => [...prev, res.data]);
@@ -147,48 +315,97 @@ export function ReferenceSettingsClient({
       setCreateItemKey(generateClientRequestId('ritem'));
       router.refresh();
     } catch (err: unknown) {
-      // C09: Keep key frozen on transport error
-      setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      setItemPending(true);
+      setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء إضافة العنصر المرجعي.');
       setIsCreatingItem(false);
     }
   };
 
-  // Open Edit Modal (C19)
-  const handleOpenEditModal = (item: ReferenceItemDTO) => {
+  const handleStartNewItemCreate = () => {
+    itemPendingRef.current = null;
+    setItemPending(false);
+    setItemSessionExpired(false);
+    setItemError(null);
+    setCreateItemKey(generateClientRequestId('ritem'));
+    setItemDraftDirty(true);
+  };
+
+  // Open Edit Modal (C19/U9)
+  const handleOpenEditModal = (item: ReferenceItemDTO, openerElement?: HTMLElement) => {
+    lastFocusedOpenerRef.current = openerElement || (document.activeElement as HTMLElement);
     setEditingItem(item);
     setEditItemName(item.name);
     setEditItemCode(item.code || '');
     setEditItemNotes(item.notes || '');
     setEditItemIsActive(item.isActive);
     setEditItemError(null);
+    setEditItemFieldErrors({});
+    setEditItemPending(false);
+    setEditItemSessionExpired(false);
+    editPendingRef.current = null;
   };
 
-  // Handle Save Edited Reference Item (C19)
+  // Handle Save Edited Reference Item (C19/U1/U9)
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem || !editItemName.trim()) return;
     setIsSavingEditItem(true);
     setEditItemError(null);
+    setEditItemFieldErrors({});
+    setEditItemSessionExpired(false);
 
-    const idempotencyKey = generateClientRequestId('edititem');
+    let op = editPendingRef.current;
+    if (!op) {
+      const key = generateClientRequestId('edititem');
+      op = {
+        key,
+        payload: {
+          id: editingItem.id,
+          type: editingItem.type,
+          expectedVersion: editingItem.version,
+          name: editItemName.trim(),
+          code: editItemCode.trim() || null,
+          notes: editItemNotes.trim() || null,
+          isActive: editItemIsActive,
+          idempotencyKey: key,
+        },
+      };
+      editPendingRef.current = op;
+    }
 
     try {
-      const res = await updateReferenceItemAction({
-        id: editingItem.id,
-        type: editingItem.type,
-        expectedVersion: editingItem.version,
-        name: editItemName.trim(),
-        code: editItemCode.trim() || null,
-        notes: editItemNotes.trim() || null,
-        isActive: editItemIsActive,
-        idempotencyKey,
-      });
+      const res = await updateReferenceItemAction(op.payload);
 
       if (!res.success) {
-        setEditItemError(res.error || 'تعذر حفظ تعديلات العنصر المرجعي.');
+        if (isAuthRecoveryCode(res.code)) {
+          setEditItemSessionExpired(true);
+          setEditItemPending(true);
+          setEditItemError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (res.code === 'CONCURRENCY_CONFLICT') {
+          editPendingRef.current = null;
+          setEditItemPending(false);
+          setEditItemError('تعارض في التعديل المتزامن: تم تعديل هذا العنصر من مستخدم آخر.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+        ) {
+          setEditItemPending(true);
+          setEditItemError(res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.');
+        } else {
+          editPendingRef.current = null;
+          setEditItemPending(false);
+          setEditItemError(res.error || 'تعذر حفظ تعديلات العنصر المرجعي.');
+          if (res.fieldErrors) setEditItemFieldErrors(res.fieldErrors);
+        }
         setIsSavingEditItem(false);
         return;
       }
+
+      editPendingRef.current = null;
+      setEditItemPending(false);
+      setEditItemSessionExpired(false);
 
       const updater = (prev: ReferenceItemDTO[]) =>
         prev.map((i) => (i.id === editingItem.id ? res.data : i));
@@ -202,9 +419,17 @@ export function ReferenceSettingsClient({
       setIsSavingEditItem(false);
       router.refresh();
     } catch (err: unknown) {
-      setEditItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      setEditItemPending(true);
+      setEditItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ تعديلات العنصر.');
       setIsSavingEditItem(false);
     }
+  };
+
+  const handleStartNewEditItem = () => {
+    editPendingRef.current = null;
+    setEditItemPending(false);
+    setEditItemSessionExpired(false);
+    setEditItemError(null);
   };
 
   // Handle Toggle Active/Inactive
@@ -243,12 +468,12 @@ export function ReferenceSettingsClient({
       );
       router.refresh();
     } catch (err: unknown) {
-      setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء تعديل حالة العنصر.');
     }
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto space-y-6">
       {/* Page Header */}
       <div className="pb-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -346,7 +571,79 @@ export function ReferenceSettingsClient({
             </div>
           )}
 
-          {officeError && (
+          {/* Session Recovery Banner (U3) */}
+          {officeSessionExpired && (
+            <div
+              role="alert"
+              data-testid="office-session-recovery-alert"
+              className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>🔒</span>
+                <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
+              </div>
+              <p className="leading-relaxed">
+                تم الحفاظ على بيانات المكتب في الذاكرة. يرجى تسجيل الدخول أو إكمال التحقق (MFA) في نافذة جديدة
+                ثم العودة والضغط على &quot;إعادة محاولة الحفظ&quot;.
+              </p>
+              <div className="flex items-center gap-3 pt-1">
+                <a
+                  href="/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="office-session-login-link"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                >
+                  فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                </a>
+                <button
+                  type="submit"
+                  form="office-settings-form"
+                  data-testid="office-session-retry-button"
+                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                >
+                  إعادة محاولة الحفظ
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Frozen Operation Banner (U1) */}
+          {officePending && (
+            <div
+              role="alert"
+              data-testid="office-operation-pending-banner"
+              className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>⏳</span>
+                <span>العملية الأصلية معلّقة بانتظار نتيجة مؤكدة</span>
+              </div>
+              <p className="leading-relaxed">
+                أُبقيت العملية بنفس المفتاح والبيانات المجمّدة. أعد المحاولة بنفس المفتاح أو ابدأ تعديلاً جديداً.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  form="office-settings-form"
+                  data-testid="office-operation-retry-button"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  إعادة محاولة العملية الأصلية
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartNewOfficeEdit}
+                  data-testid="office-operation-start-new-button"
+                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  بدء تعديل جديد
+                </button>
+              </div>
+            </div>
+          )}
+
+          {officeError && !officeSessionExpired && !officePending && (
             <div
               role="alert"
               data-testid="office-error-banner"
@@ -356,122 +653,146 @@ export function ReferenceSettingsClient({
             </div>
           )}
 
-          <form onSubmit={handleSaveOffice} className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
-            <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
-              الملف التعريفي للمكتب
-            </h2>
+          <form
+            id="office-settings-form"
+            onSubmit={handleSaveOffice}
+            onChange={() => setOfficeDirty(true)}
+            className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4"
+          >
+            <fieldset disabled={officePending} className="space-y-4 border-0 p-0 m-0 min-w-0">
+              <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
+                الملف التعريفي للمكتب
+              </h2>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label htmlFor="office-name-input" className="block text-xs font-bold text-[#172A35]">
-                  اسم المكتب / المنشأة القانونية <span className="text-red-600">*</span>
-                </label>
-                <input
-                  id="office-name-input"
-                  type="text"
-                  required
-                  value={officeName}
-                  onChange={(e) => setOfficeName(e.target.value)}
-                  placeholder="مثال: مكتب الأستاذ / محمد عادل المحامي"
-                  data-testid="office-name-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label htmlFor="office-name-input" className="block text-xs font-bold text-[#172A35]">
+                    اسم المكتب / المنشأة القانونية <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="office-name-input"
+                    type="text"
+                    required
+                    value={officeName}
+                    onChange={(e) => setOfficeName(e.target.value)}
+                    placeholder="مثال: مكتب الأستاذ / محمد عادل المحامي"
+                    data-testid="office-name-input"
+                    aria-invalid={Boolean(officeFieldErrors['officeName'])}
+                    aria-describedby={officeFieldErrors['officeName'] ? 'office-name-error' : undefined}
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                  {officeFieldErrors['officeName'] && (
+                    <p id="office-name-error" role="alert" className="text-xs text-red-600 font-semibold">
+                      {officeFieldErrors['officeName']}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="lawyer-name-input" className="block text-xs font-bold text-[#172A35]">
+                    اسم المحامي المسؤول
+                  </label>
+                  <input
+                    id="lawyer-name-input"
+                    type="text"
+                    value={lawyerName}
+                    onChange={(e) => setLawyerName(e.target.value)}
+                    placeholder="اسم المحامي بالنقض أو الاستئناف"
+                    data-testid="lawyer-name-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label htmlFor="lawyer-name-input" className="block text-xs font-bold text-[#172A35]">اسم المحامي المسؤول</label>
-                <input
-                  id="lawyer-name-input"
-                  type="text"
-                  value={lawyerName}
-                  onChange={(e) => setLawyerName(e.target.value)}
-                  placeholder="اسم المحامي بالنقض أو الاستئناف"
-                  data-testid="lawyer-name-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
-              </div>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label htmlFor="office-phone-input" className="block text-xs font-bold text-[#172A35]">
+                    هاتف المكتب
+                  </label>
+                  <input
+                    id="office-phone-input"
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="010XXXXXXXX"
+                    data-testid="office-phone-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
+                    dir="ltr"
+                  />
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label htmlFor="office-phone-input" className="block text-xs font-bold text-[#172A35]">هاتف المكتب</label>
-                <input
-                  id="office-phone-input"
-                  type="text"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="010XXXXXXXX"
-                  data-testid="office-phone-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
-                  dir="ltr"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label htmlFor="office-email-input" className="block text-xs font-bold text-[#172A35]">البريد الإلكتروني</label>
-                <input
-                  id="office-email-input"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="lawyer@example.com"
-                  data-testid="office-email-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
-                  dir="ltr"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label htmlFor="office-address-input" className="block text-xs font-bold text-[#172A35]">عنوان المقر</label>
-                <input
-                  id="office-address-input"
-                  type="text"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="العنوان ومقر المكتب"
-                  data-testid="office-address-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
+                <div className="space-y-1">
+                  <label htmlFor="office-email-input" className="block text-xs font-bold text-[#172A35]">
+                    البريد الإلكتروني
+                  </label>
+                  <input
+                    id="office-email-input"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="lawyer@example.com"
+                    data-testid="office-email-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
+                    dir="ltr"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label htmlFor="office-tax-input" className="block text-xs font-bold text-[#172A35]">الرقم الضريبي / القيد بالنقابة</label>
-                <input
-                  id="office-tax-input"
-                  type="text"
-                  value={taxNumber}
-                  onChange={(e) => setTaxNumber(e.target.value)}
-                  placeholder="الرقم الضريبي"
-                  data-testid="office-tax-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
-              </div>
-            </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label htmlFor="office-address-input" className="block text-xs font-bold text-[#172A35]">
+                    عنوان المقر
+                  </label>
+                  <input
+                    id="office-address-input"
+                    type="text"
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    placeholder="العنوان ومقر المكتب"
+                    data-testid="office-address-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                </div>
 
-            {/* Display-only System Defaults */}
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs text-[#4D606A] flex flex-wrap gap-4">
-              <div>
-                <span className="font-semibold text-[#172A35]">العملة المعتمدة: </span>
-                <span>الجنيه المصري (ج.م)</span>
+                <div className="space-y-1">
+                  <label htmlFor="office-tax-input" className="block text-xs font-bold text-[#172A35]">
+                    الرقم الضريبي / القيد بالنقابة
+                  </label>
+                  <input
+                    id="office-tax-input"
+                    type="text"
+                    value={taxNumber}
+                    onChange={(e) => setTaxNumber(e.target.value)}
+                    placeholder="الرقم الضريبي"
+                    data-testid="office-tax-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                </div>
               </div>
-              <div>
-                <span className="font-semibold text-[#172A35]">النطاق الزمني: </span>
-                <span>توقيت القاهرة (Africa/Cairo)</span>
-              </div>
-            </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                type="submit"
-                disabled={isSavingOffice}
-                data-testid="save-office-button"
-                className="px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-sm rounded-[6px] min-h-[44px] shadow-xs"
-              >
-                {isSavingOffice ? 'جارٍ الحفظ...' : 'حفظ بيانات المكتب'}
-              </button>
-            </div>
+              {/* Display-only System Defaults */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-[6px] text-xs text-[#4D606A] flex flex-wrap gap-4">
+                <div>
+                  <span className="font-semibold text-[#172A35]">العملة المعتمدة: </span>
+                  <span>الجنيه المصري (ج.م)</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-[#172A35]">النطاق الزمني: </span>
+                  <span>توقيت القاهرة (Africa/Cairo)</span>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isSavingOffice || officePending}
+                  data-testid="save-office-button"
+                  className="px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-sm rounded-[6px] min-h-[44px] shadow-xs"
+                >
+                  {isSavingOffice ? 'جارٍ الحفظ...' : 'حفظ بيانات المكتب'}
+                </button>
+              </div>
+            </fieldset>
           </form>
         </div>
       )}
@@ -489,7 +810,95 @@ export function ReferenceSettingsClient({
             </div>
           )}
 
-          {itemError && (
+          {/* Session Recovery Banner for Items (U3) */}
+          {itemSessionExpired && (
+            <div
+              role="alert"
+              data-testid="item-session-recovery-alert"
+              className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>🔒</span>
+                <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
+              </div>
+              <p className="leading-relaxed">
+                تم الحفاظ على بيانات العنصر في الذاكرة. يرجى تسجيل الدخول أو إكمال التحقق (MFA) في نافذة جديدة
+                ثم العودة والضغط على &quot;إعادة محاولة الإضافة&quot;.
+              </p>
+              <div className="flex items-center gap-3 pt-1">
+                <a
+                  href="/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="item-session-login-link"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                >
+                  فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const type: ReferenceItemType =
+                      activeTab === 'courts'
+                        ? 'COURT'
+                        : activeTab === 'practice_areas'
+                        ? 'PRACTICE_AREA'
+                        : 'STORAGE_LOCATION';
+                    handleCreateItem(type);
+                  }}
+                  data-testid="item-session-retry-button"
+                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                >
+                  إعادة محاولة الإضافة
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Frozen Operation Banner for Items (U1) */}
+          {itemPending && (
+            <div
+              role="alert"
+              data-testid="item-operation-pending-banner"
+              className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>⏳</span>
+                <span>عملية الإضافة معلّقة بانتظار نتيجة مؤكدة</span>
+              </div>
+              <p className="leading-relaxed">
+                أُبقيت العملية بنفس المفتاح والبيانات المجمّدة.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const type: ReferenceItemType =
+                      activeTab === 'courts'
+                        ? 'COURT'
+                        : activeTab === 'practice_areas'
+                        ? 'PRACTICE_AREA'
+                        : 'STORAGE_LOCATION';
+                    handleCreateItem(type);
+                  }}
+                  data-testid="item-operation-retry-button"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  إعادة محاولة العملية الأصلية
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartNewItemCreate}
+                  data-testid="item-operation-start-new-button"
+                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  بدء إضافة جديدة
+                </button>
+              </div>
+            </div>
+          )}
+
+          {itemError && !itemSessionExpired && !itemPending && (
             <div
               role="alert"
               data-testid="reference-error-banner"
@@ -509,62 +918,79 @@ export function ReferenceSettingsClient({
                 : '+ إضافة مكان حفظ ورقي جديد'}
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-1 sm:col-span-2">
-                <label htmlFor="reference-item-name-input" className="block text-xs font-bold text-[#172A35]">
-                  الاسم <span className="text-red-600">*</span>
-                </label>
-                <input
-                  id="reference-item-name-input"
-                  type="text"
-                  required
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  placeholder={
-                    activeTab === 'courts'
-                      ? 'مثال: محكمة جنوب الجيزة الابتدائية'
-                      : activeTab === 'practice_areas'
-                      ? 'مثال: تعويضات ومدني كلي'
-                      : 'مثال: دولاب أ - رف 3'
-                  }
-                  data-testid="reference-item-name-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
+            <fieldset disabled={itemPending} className="space-y-3 border-0 p-0 m-0 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1 sm:col-span-2">
+                  <label htmlFor="reference-item-name-input" className="block text-xs font-bold text-[#172A35]">
+                    الاسم <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="reference-item-name-input"
+                    type="text"
+                    required
+                    value={newItemName}
+                    onChange={(e) => {
+                      setNewItemName(e.target.value);
+                      setItemDraftDirty(true);
+                    }}
+                    placeholder={
+                      activeTab === 'courts'
+                        ? 'مثال: محكمة جنوب الجيزة الابتدائية'
+                        : activeTab === 'practice_areas'
+                        ? 'مثال: تعويضات ومدني كلي'
+                        : 'مثال: دولاب أ - رف 3'
+                    }
+                    data-testid="reference-item-name-input"
+                    aria-invalid={Boolean(itemFieldErrors['name'])}
+                    aria-describedby={itemFieldErrors['name'] ? 'reference-item-name-error' : undefined}
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                  {itemFieldErrors['name'] && (
+                    <p id="reference-item-name-error" role="alert" className="text-xs text-red-600 font-semibold">
+                      {itemFieldErrors['name']}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="reference-item-code-input" className="block text-xs font-bold text-[#172A35]">
+                    كود مرجعي (اختياري)
+                  </label>
+                  <input
+                    id="reference-item-code-input"
+                    type="text"
+                    value={newItemCode}
+                    onChange={(e) => {
+                      setNewItemCode(e.target.value);
+                      setItemDraftDirty(true);
+                    }}
+                    placeholder="مثال: CRT-GIZA-01"
+                    data-testid="reference-item-code-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label htmlFor="reference-item-code-input" className="block text-xs font-bold text-[#172A35]">كود مرجعي (اختياري)</label>
-                <input
-                  id="reference-item-code-input"
-                  type="text"
-                  value={newItemCode}
-                  onChange={(e) => setNewItemCode(e.target.value)}
-                  placeholder="مثال: CRT-GIZA-01"
-                  data-testid="reference-item-code-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  disabled={isCreatingItem || itemPending || !newItemName.trim()}
+                  data-testid="add-reference-item-button"
+                  onClick={() => {
+                    const type: ReferenceItemType =
+                      activeTab === 'courts'
+                        ? 'COURT'
+                        : activeTab === 'practice_areas'
+                        ? 'PRACTICE_AREA'
+                        : 'STORAGE_LOCATION';
+                    handleCreateItem(type);
+                  }}
+                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-xs rounded-[6px] min-h-[40px]"
+                >
+                  {isCreatingItem ? 'جارٍ الإضافة...' : 'إضافة للقائمة المرجعية'}
+                </button>
               </div>
-            </div>
-
-            <div className="flex justify-end pt-1">
-              <button
-                type="button"
-                disabled={isCreatingItem || !newItemName.trim()}
-                data-testid="add-reference-item-button"
-                onClick={() => {
-                  const type: ReferenceItemType =
-                    activeTab === 'courts'
-                      ? 'COURT'
-                      : activeTab === 'practice_areas'
-                      ? 'PRACTICE_AREA'
-                      : 'STORAGE_LOCATION';
-                  handleCreateItem(type);
-                }}
-                className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-xs rounded-[6px] min-h-[40px]"
-              >
-                {isCreatingItem ? 'جارٍ الإضافة...' : 'إضافة للقائمة المرجعية'}
-              </button>
-            </div>
+            </fieldset>
           </div>
 
           {/* List of Items */}
@@ -580,13 +1006,13 @@ export function ReferenceSettingsClient({
                 )
               </span>
 
-              <label className="inline-flex items-center gap-1.5 text-xs text-[#4D606A] cursor-pointer">
+              <label className="flex items-center gap-1.5 text-xs text-[#4D606A] cursor-pointer">
                 <input
                   type="checkbox"
                   checked={filterActiveOnly}
                   onChange={(e) => setFilterActiveOnly(e.target.checked)}
                   data-testid="filter-active-only-checkbox"
-                  className="w-4 h-4 text-[#14566B] rounded border-[#D5DFE3]"
+                  className="w-3.5 h-3.5 text-[#14566B] rounded border-[#D5DFE3]"
                 />
                 <span>عرض النشطة فقط</span>
               </label>
@@ -600,33 +1026,35 @@ export function ReferenceSettingsClient({
                   ? practiceAreas
                   : storageLocations;
 
-              const filteredList = filterActiveOnly
+              const filtered = filterActiveOnly
                 ? currentList.filter((item) => item.isActive)
                 : currentList;
 
-              if (filteredList.length === 0) {
+              if (filtered.length === 0) {
                 return (
                   <p className="text-xs text-[#4D606A] italic py-4 text-center">
-                    لا توجد عناصر مسجلة في هذا القسم حالياً.
+                    {filterActiveOnly ? 'لا توجد عناصر نشطة مطابقة للفلتر.' : 'لا توجد عناصر مسجلة بعد في هذا القسم.'}
                   </p>
                 );
               }
 
               return (
                 <div className="divide-y divide-[#E8EEF1]">
-                  {filteredList.map((item) => (
+                  {filtered.map((item) => (
                     <div
                       key={item.id}
                       data-testid={`reference-item-row-${item.id}`}
-                      className="py-3 flex items-center justify-between gap-3 text-xs"
+                      className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs"
                     >
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-[#172A35]">{item.name}</span>
+                          <span className="font-bold text-sm text-[#172A35]">
+                            {item.name}
+                          </span>
                           {item.code && (
-                            <bdi dir="ltr" className="text-[10px] font-mono text-[#4D606A] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
                               {item.code}
-                            </bdi>
+                            </span>
                           )}
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -644,7 +1072,7 @@ export function ReferenceSettingsClient({
                         <button
                           type="button"
                           data-testid={`edit-reference-item-${item.id}`}
-                          onClick={() => handleOpenEditModal(item)}
+                          onClick={(e) => handleOpenEditModal(item, e.currentTarget)}
                           className="px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors"
                         >
                           تعديل
@@ -671,7 +1099,7 @@ export function ReferenceSettingsClient({
         </div>
       )}
 
-      {/* Edit Reference Item Modal (C19) */}
+      {/* Edit Reference Item Modal (C19/U1/U9) */}
       {editingItem && (
         <div
           role="dialog"
@@ -679,101 +1107,181 @@ export function ReferenceSettingsClient({
           aria-labelledby="edit-reference-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
         >
-          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs" dir="rtl" lang="ar-EG">
+          <div
+            ref={editDialogRef}
+            className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs"
+            dir="rtl"
+            lang="ar-EG"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
               <h2 id="edit-reference-title" className="text-base font-bold text-[#172A35]">
                 تعديل بيانات العنصر المرجعي
               </h2>
               <button
                 type="button"
-                onClick={() => setEditingItem(null)}
-                className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm"
+                onClick={() => {
+                  setEditingItem(null);
+                  editPendingRef.current = null;
+                  setEditItemPending(false);
+                  setEditItemSessionExpired(false);
+                }}
+                aria-label="إغلاق نافذة تعديل العنصر المرجعي"
+                className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm min-h-[36px] min-w-[36px] flex items-center justify-center"
               >
                 ✕
               </button>
             </div>
 
-            {editItemError && (
+            {/* Session Recovery Banner for Edit Modal (U3) */}
+            {editItemSessionExpired && (
+              <div
+                role="alert"
+                data-testid="edit-session-recovery-alert"
+                className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-2 text-xs"
+              >
+                <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق.</p>
+                <div className="flex items-center gap-2">
+                  <a
+                    href="/login"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded hover:bg-[#114252] inline-block"
+                  >
+                    تسجيل الدخول في نافذة جديدة ↗
+                  </a>
+                  <button
+                    type="submit"
+                    form="edit-reference-item-form"
+                    className="px-2.5 py-1 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded"
+                  >
+                    إعادة محاولة الحفظ
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Frozen Operation Banner for Edit Modal (U1) */}
+            {editItemPending && (
+              <div
+                role="alert"
+                data-testid="edit-operation-pending-banner"
+                className="p-3 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-2 text-xs"
+              >
+                <p className="font-bold">العملية الأصلية معلّقة بانتظار نتيجة مؤكدة.</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    form="edit-reference-item-form"
+                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded"
+                  >
+                    إعادة المحاولة
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStartNewEditItem}
+                    className="px-2.5 py-1 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded"
+                  >
+                    بدء تعديل جديد
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {editItemError && !editItemSessionExpired && !editItemPending && (
               <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] font-semibold">
                 ⚠️ {editItemError}
               </div>
             )}
 
-            <form onSubmit={handleSaveEditItem} className="space-y-4">
-              <div className="space-y-1">
-                <label htmlFor="edit-reference-name-input" className="block font-bold text-[#172A35]">
-                  الاسم <span className="text-red-600">*</span>
-                </label>
-                <input
-                  id="edit-reference-name-input"
-                  type="text"
-                  required
-                  value={editItemName}
-                  onChange={(e) => setEditItemName(e.target.value)}
-                  data-testid="edit-reference-item-name-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
-              </div>
+            <form id="edit-reference-item-form" onSubmit={handleSaveEditItem} className="space-y-4">
+              <fieldset disabled={editItemPending} className="space-y-4 border-0 p-0 m-0 min-w-0">
+                <div className="space-y-1">
+                  <label htmlFor="edit-reference-name-input" className="block font-bold text-[#172A35]">
+                    الاسم <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    id="edit-reference-name-input"
+                    type="text"
+                    required
+                    value={editItemName}
+                    onChange={(e) => setEditItemName(e.target.value)}
+                    data-testid="edit-reference-item-name-input"
+                    aria-invalid={Boolean(editItemFieldErrors['name'])}
+                    aria-describedby={editItemFieldErrors['name'] ? 'edit-reference-name-error' : undefined}
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                  {editItemFieldErrors['name'] && (
+                    <p id="edit-reference-name-error" role="alert" className="text-xs text-red-600 font-semibold">
+                      {editItemFieldErrors['name']}
+                    </p>
+                  )}
+                </div>
 
-              <div className="space-y-1">
-                <label htmlFor="edit-reference-code-input" className="block font-bold text-[#172A35]">
-                  الكود المرجعي (اختياري)
-                </label>
-                <input
-                  id="edit-reference-code-input"
-                  type="text"
-                  value={editItemCode}
-                  onChange={(e) => setEditItemCode(e.target.value)}
-                  data-testid="edit-reference-item-code-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
-                />
-              </div>
+                <div className="space-y-1">
+                  <label htmlFor="edit-reference-code-input" className="block font-bold text-[#172A35]">
+                    الكود المرجعي (اختياري)
+                  </label>
+                  <input
+                    id="edit-reference-code-input"
+                    type="text"
+                    value={editItemCode}
+                    onChange={(e) => setEditItemCode(e.target.value)}
+                    data-testid="edit-reference-item-code-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <label htmlFor="edit-reference-notes-input" className="block font-bold text-[#172A35]">
-                  ملاحظات (اختياري)
-                </label>
-                <textarea
-                  id="edit-reference-notes-input"
-                  rows={2}
-                  value={editItemNotes}
-                  onChange={(e) => setEditItemNotes(e.target.value)}
-                  data-testid="edit-reference-item-notes-input"
-                  className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px]"
-                />
-              </div>
+                <div className="space-y-1">
+                  <label htmlFor="edit-reference-notes-input" className="block font-bold text-[#172A35]">
+                    ملاحظات (اختياري)
+                  </label>
+                  <textarea
+                    id="edit-reference-notes-input"
+                    rows={2}
+                    value={editItemNotes}
+                    onChange={(e) => setEditItemNotes(e.target.value)}
+                    data-testid="edit-reference-item-notes-input"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px]"
+                  />
+                </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  id="edit-reference-active-checkbox"
-                  type="checkbox"
-                  checked={editItemIsActive}
-                  onChange={(e) => setEditItemIsActive(e.target.checked)}
-                  data-testid="edit-reference-item-active-checkbox"
-                  className="w-4 h-4 text-[#14566B] rounded border-[#D5DFE3]"
-                />
-                <label htmlFor="edit-reference-active-checkbox" className="font-semibold text-[#172A35] cursor-pointer">
-                  عنصر نشط ومتاح للاختيار بالملفات والقضايا
-                </label>
-              </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    id="edit-reference-active-checkbox"
+                    type="checkbox"
+                    checked={editItemIsActive}
+                    onChange={(e) => setEditItemIsActive(e.target.checked)}
+                    data-testid="edit-reference-item-active-checkbox"
+                    className="w-4 h-4 text-[#14566B] rounded border-[#D5DFE3]"
+                  />
+                  <label htmlFor="edit-reference-active-checkbox" className="font-semibold text-[#172A35] cursor-pointer">
+                    عنصر نشط ومتاح للاختيار بالملفات والقضايا
+                  </label>
+                </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-[#E8EEF1]">
-                <button
-                  type="button"
-                  onClick={() => setEditingItem(null)}
-                  className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEditItem || !editItemName.trim()}
-                  data-testid="save-edit-reference-item-button"
-                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[40px]"
-                >
-                  {isSavingEditItem ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
-                </button>
-              </div>
+                <div className="flex justify-end gap-2 pt-3 border-t border-[#E8EEF1]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingItem(null);
+                      editPendingRef.current = null;
+                      setEditItemPending(false);
+                      setEditItemSessionExpired(false);
+                    }}
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEditItem || editItemPending || !editItemName.trim()}
+                    data-testid="save-edit-reference-item-button"
+                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[40px]"
+                  >
+                    {isSavingEditItem ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
+                  </button>
+                </div>
+              </fieldset>
             </form>
           </div>
         </div>
@@ -781,4 +1289,3 @@ export function ReferenceSettingsClient({
     </div>
   );
 }
-

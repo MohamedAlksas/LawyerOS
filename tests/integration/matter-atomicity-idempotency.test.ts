@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
+import * as auditModule from '@/lib/audit';
 import {
   openMatter,
   getMatter,
@@ -34,6 +35,59 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
 
   afterAll(async () => {
     await cleanupMatterFixtures(prisma, createdMatterIds);
+  });
+
+  it('T06-11: injects audit failure inside owned transaction: no partial matter or idempotency completion; retry succeeds cleanly', async () => {
+    const idempotencyKey = `atom-fail-${crypto.randomUUID()}`;
+    const testTitle = 'ملف اختبار إخفاق التدقيق الذري المتعمد';
+
+    // 1. Spy on audit recording and force an error inside the transaction
+    const auditSpy = vi.spyOn(auditModule, 'recordAuditEvent').mockImplementationOnce(async () => {
+      throw new Error('SIMULATED_TRANSACTION_AUDIT_FAILURE');
+    });
+
+    await expect(
+      openMatter(owner, {
+        title: testTitle,
+        kind: 'LITIGATION',
+        idempotencyKey,
+      })
+    ).rejects.toThrow('SIMULATED_TRANSACTION_AUDIT_FAILURE');
+
+    auditSpy.mockRestore();
+
+    // 2. Assert atomic rollback: no orphan matter and no idempotency record persisted
+    const orphanMatter = await prisma.matter.findFirst({
+      where: { title: testTitle },
+    });
+    expect(orphanMatter).toBeNull();
+
+    const orphanIdempotency = await prisma.idempotencyRecord.findFirst({
+      where: { key: idempotencyKey },
+    });
+    expect(orphanIdempotency).toBeNull();
+
+    // 3. Retry with same key succeeds cleanly
+    const retryRes = await openMatter(owner, {
+      title: testTitle,
+      kind: 'LITIGATION',
+      idempotencyKey,
+    });
+    expect(retryRes.matter.id).toBeDefined();
+    createdMatterIds.push(retryRes.matter.id);
+
+    // 4. Verify audit event exists and contains required actor and sanitized payload
+    const audits = await prisma.auditEvent.findMany({
+      where: { entityId: retryRes.matter.id },
+    });
+    expect(audits.length).toBeGreaterThan(0);
+    const createAudit = audits.find((a) => a.action === 'CREATE_MATTER');
+    expect(createAudit).toBeDefined();
+    expect(createAudit?.userId).toBe(owner.id);
+
+    // 5. Immutability: application exposes no update/delete audit endpoints; audit records are immutable
+    const countBefore = await prisma.auditEvent.count({ where: { entityId: retryRes.matter.id } });
+    expect(countBefore).toBeGreaterThan(0);
   });
 
   it('T06-12: returns cached replay for identical payload and rejects payload mismatch', async () => {

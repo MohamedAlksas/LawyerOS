@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useId, useMemo } from 'react';
+import React, { useState, useId, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   addProceedingAction,
   updateProceedingAction,
+  findSimilarProceedingsAction,
 } from '@/modules/matters/matter-actions';
 import {
   MatterDTO,
@@ -17,11 +18,13 @@ import {
   ProceedingLegalCapacity,
   AddProceedingInput,
   UpdateProceedingInput,
+  SimilarProceedingCandidateDTO,
 } from '@/modules/matters/matter-types';
 import {
   PROCEEDING_INSTANCE_LABELS,
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   generateClientRequestId,
+  isAuthRecoveryCode,
 } from '../matters/matter-ui-types';
 
 interface PartyCapacityState {
@@ -39,14 +42,6 @@ interface ProceedingFormProps {
   matter: MatterDTO;
   courts: CourtOption[];
   initialProceeding?: ProceedingSummaryDTO;
-}
-
-function normalizeDocketText(s?: string | null): string {
-  if (!s) return '';
-  return s
-    .trim()
-    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632))
-    .toLowerCase();
 }
 
 export function ProceedingForm({
@@ -72,19 +67,22 @@ export function ProceedingForm({
   const [filingDate, setFilingDate] = useState(initialProceeding?.filingDate || '');
   const [claimAmount, setClaimAmount] = useState(initialProceeding?.claimAmount || '');
   const [status, setStatus] = useState<ProceedingStatus>(
-    initialProceeding?.status || 'ACTIVE'
+    initialProceeding?.status || 'DRAFT'
   );
 
-  // Track which matter parties are included in this proceeding (C12)
+  // Track which matter parties are explicitly included in this proceeding (C12/U2).
+  // A new proceeding starts with no inferred membership: every unlinked party is
+  // a candidate that requires a deliberate inclusion decision.
   const [includedPartyIds, setIncludedPartyIds] = useState<Set<string>>(() => {
     if (initialProceeding?.parties) {
       return new Set(initialProceeding.parties.map((p) => p.matterPartyId));
     }
-    // On new proceeding creation, matter parties start included as candidates
-    return new Set((matter.parties || []).map((mp) => mp.id));
+    return new Set();
   });
 
-  // Legal Capacities per matter party (storing both legalCapacity and capacityText)
+  // Legal Capacities per matter party (storing both legalCapacity and capacityText).
+  // Only existing links carry a saved capacity; new candidates start unset so the
+  // capacity is an explicit choice rather than an inferred CLIENT/OPPONENT value.
   const [partyCapacities, setPartyCapacities] = useState<Record<string, PartyCapacityState>>(() => {
     const initial: Record<string, PartyCapacityState> = {};
     const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
@@ -96,38 +94,15 @@ export function ProceedingForm({
 
     for (const mp of matter.parties || []) {
       const existing = existingPartiesMap.get(mp.id);
-      if (existing) {
-        initial[mp.id] = {
-          legalCapacity: existing.legalCapacity ?? 'OTHER',
-          capacityText: existing.capacityText ?? '',
-        };
-      } else {
-        // Default capacities for candidates with requirement to verify
-        const defaultLegalCapacity: ProceedingLegalCapacity =
-          mp.role === 'CLIENT'
-            ? instance === 'APPEAL'
-              ? 'APPELLEE'
-              : 'PLAINTIFF'
-            : mp.role === 'OPPONENT'
-              ? instance === 'APPEAL'
-                ? 'APPELLANT'
-                : 'DEFENDANT'
-              : 'OTHER';
-        const defaultCapacityText =
-          defaultLegalCapacity === 'PLAINTIFF'
-            ? 'مدعي'
-            : defaultLegalCapacity === 'DEFENDANT'
-              ? 'مدعى عليه'
-              : defaultLegalCapacity === 'APPELLEE'
-                ? 'مستأنف ضده'
-                : defaultLegalCapacity === 'APPELLANT'
-                  ? 'مستأنف'
-                  : 'طرف آخر';
-        initial[mp.id] = {
-          legalCapacity: defaultLegalCapacity,
-          capacityText: defaultCapacityText,
-        };
-      }
+      initial[mp.id] = existing
+        ? {
+            legalCapacity: existing.legalCapacity ?? 'OTHER',
+            capacityText: existing.capacityText ?? '',
+          }
+        : {
+            legalCapacity: mp.role === 'CLIENT' ? 'PLAINTIFF' : mp.role === 'OPPONENT' ? 'DEFENDANT' : 'OTHER',
+            capacityText: mp.role === 'CLIENT' ? 'مدعي' : mp.role === 'OPPONENT' ? 'مدعى عليه' : '',
+          };
     }
     return initial;
   });
@@ -163,8 +138,8 @@ export function ProceedingForm({
         };
       } else {
         newCapacities[mp.id] = {
-          legalCapacity: 'OTHER',
-          capacityText: '',
+          legalCapacity: mp.role === 'CLIENT' ? 'PLAINTIFF' : mp.role === 'OPPONENT' ? 'DEFENDANT' : 'OTHER',
+          capacityText: mp.role === 'CLIENT' ? 'مدعي' : mp.role === 'OPPONENT' ? 'مدعى عليه' : '',
         };
       }
     }
@@ -178,11 +153,43 @@ export function ProceedingForm({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [incompleteDraftAcknowledged, setIncompleteDraftAcknowledged] = useState(
+    initialProceeding?.status === 'DRAFT'
+  );
 
-  // In-memory Idempotency Key (refreshed on conflict/failure for safe retry)
+  // In-memory Idempotency Key plus the frozen semantic payload for the original
+  // operation. A retry after an uncertain outcome must reuse both.
   const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('proc'));
+  const pendingOperationRef = useRef<{
+    key: string;
+    kind: 'create' | 'update';
+    payload: AddProceedingInput | UpdateProceedingInput;
+  } | null>(null);
+  const [operationPending, setOperationPending] = useState(false);
 
   const formId = useId();
+  const formDomId = `${formId}-form`;
+
+  // U9: bind server field errors to their controls for assistive technology.
+  const fieldErrorProps = (field: string) =>
+    fieldErrors[field]
+      ? {
+          'aria-invalid': true as const,
+          'aria-describedby': `${formId}-${field}-error`,
+        }
+      : {};
+  const renderFieldError = (field: string) =>
+    fieldErrors[field] ? (
+      <p
+        id={`${formId}-${field}-error`}
+        role="alert"
+        data-testid={`proceeding-field-error-${field}`}
+        className="text-[11px] font-semibold text-[#A4262C]"
+      >
+        {fieldErrors[field]}
+      </p>
+    ) : null;
 
   // Potential Parent Proceedings (must be in the same matter, and not self)
   const candidateParents = useMemo(() => {
@@ -194,19 +201,58 @@ export function ProceedingForm({
   // Docket Incomplete Check
   const isDocketIncomplete = !numberText.trim() || !yearLabel.trim() || !registerType.trim();
 
-  // Similarity Check: Check if another proceeding in the same matter has the same normalized number & year (C18)
-  const similarProceeding = useMemo(() => {
-    const normNum = normalizeDocketText(numberText);
-    const normYear = normalizeDocketText(yearLabel);
-    if (!normNum || !normYear) return null;
-    return (matter.proceedings || []).find(
-      (p) =>
-        (!initialProceeding || p.id !== initialProceeding.id) &&
-        normalizeDocketText(p.numberText) === normNum &&
-        normalizeDocketText(p.yearLabel) === normYear &&
-        (!courtId || p.courtId === courtId)
-    );
-  }, [matter.proceedings, initialProceeding, numberText, yearLabel, courtId]);
+  // Similarity preflight: call the authorized normalized lookup against the
+  // server (all matters in the same court, not just the loaded Matter's stale
+  // local list). Requests are generation-guarded so late responses cannot
+  // replace results for a newer docket identity.
+  const [similarCandidates, setSimilarCandidates] = useState<SimilarProceedingCandidateDTO[]>([]);
+  const [similarLookupError, setSimilarLookupError] = useState<string | null>(null);
+  const [isLookingUpSimilar, setIsLookingUpSimilar] = useState(false);
+  const [similarRetryNonce, setSimilarRetryNonce] = useState(0);
+  const similarGenRef = useRef(0);
+
+  useEffect(() => {
+    const trimmedNumber = numberText.trim();
+    const gen = ++similarGenRef.current;
+
+    const timer = window.setTimeout(async () => {
+      if (!courtId || !trimmedNumber) {
+        if (gen !== similarGenRef.current) return;
+        setSimilarCandidates([]);
+        setSimilarLookupError(null);
+        setIsLookingUpSimilar(false);
+        return;
+      }
+
+      setIsLookingUpSimilar(true);
+      try {
+        const res = await findSimilarProceedingsAction({
+          courtId,
+          numberText: trimmedNumber,
+          yearLabel: yearLabel.trim() || null,
+          excludeProceedingId: initialProceeding?.id ?? null,
+          limit: 10,
+        });
+        if (gen !== similarGenRef.current) return;
+        if (res.success) {
+          setSimilarCandidates(res.data.candidates);
+          setSimilarLookupError(null);
+        } else {
+          setSimilarLookupError(res.error || 'تعذر تنفيذ فحص التشابه.');
+        }
+      } catch {
+        if (gen === similarGenRef.current) {
+          setSimilarLookupError('حدث خطأ في الاتصال أثناء فحص التشابه.');
+        }
+      } finally {
+        if (gen === similarGenRef.current) setIsLookingUpSimilar(false);
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [courtId, numberText, yearLabel, initialProceeding?.id, similarRetryNonce]);
 
   const togglePartyInclusion = (partyId: string, included: boolean) => {
     setIncludedPartyIds((prev) => {
@@ -228,115 +274,162 @@ export function ProceedingForm({
     setConcurrencyConflict(false);
     setSessionExpired(false);
 
-    // If docket is incomplete, force status to DRAFT
-    const finalStatus: ProceedingStatus = isDocketIncomplete ? 'DRAFT' : status;
+    let operation = pendingOperationRef.current;
+    if (!operation) {
+      // U5: never silently downgrade an existing or explicitly requested non-draft state.
+      // An incomplete docket can only be saved after the user affirmatively
+      // chooses the draft outcome when editing an active/non-draft proceeding.
+      if (isDocketIncomplete && isEdit && initialProceeding?.status !== 'DRAFT' && !incompleteDraftAcknowledged) {
+        setGeneralError(
+          'بيانات القيد غير مكتملة (رقم الدعوى/السنة/نوع الجدول). اختر حفظ القيد كمسودة صراحةً، أو استكمل البيانات للحفظ بالحالة المطلوبة.'
+        );
+        setFieldErrors({ status: 'الحالة المطلوبة تتطلب استكمال بيانات القيد أو تأكيد الحفظ كمسودة.' });
+        setIsSaving(false);
+        return;
+      }
 
-    // Assemble party capacities ONLY for explicitly included parties (C12)
-    const assembledParties: ProceedingPartyInput[] = (matter.parties || [])
-      .filter((mp) => includedPartyIds.has(mp.id))
-      .map((mp) => {
-        const capState = partyCapacities[mp.id] || {
-          legalCapacity: 'OTHER' as ProceedingLegalCapacity,
-          capacityText: '',
+      const finalStatus: ProceedingStatus = isDocketIncomplete
+        ? 'DRAFT'
+        : (!isEdit && status === 'DRAFT' ? 'ACTIVE' : status);
+
+      // Assemble party capacities ONLY for explicitly included parties (C12)
+      const assembledParties: ProceedingPartyInput[] = (matter.parties || [])
+        .filter((mp) => includedPartyIds.has(mp.id))
+        .map((mp) => {
+          const capState = partyCapacities[mp.id] || {
+            legalCapacity: 'OTHER' as ProceedingLegalCapacity,
+            capacityText: '',
+          };
+          return {
+            matterPartyId: mp.id,
+            legalCapacity: capState.legalCapacity,
+            capacityText: capState.capacityText.trim() || undefined,
+          };
+        });
+
+      if (isEdit && initialProceeding) {
+        operation = {
+          key: idempotencyKey,
+          kind: 'update',
+          payload: {
+            id: initialProceeding.id,
+            matterId: matter.id,
+            expectedVersion: initialProceeding.version,
+            courtId,
+            instance,
+            parentProceedingId: parentProceedingId || null,
+            registerType: registerType.trim() || null,
+            circuit: circuit.trim() || null,
+            numberText: numberText.trim() || null,
+            yearLabel: yearLabel.trim() || null,
+            filingDate: filingDate || null,
+            claimAmount: claimAmount.trim() || null,
+            status: finalStatus,
+            parties: assembledParties,
+            idempotencyKey,
+          } satisfies UpdateProceedingInput,
         };
-        return {
-          matterPartyId: mp.id,
-          legalCapacity: capState.legalCapacity,
-          capacityText: capState.capacityText.trim() || undefined,
+      } else {
+        operation = {
+          key: idempotencyKey,
+          kind: 'create',
+          payload: {
+            matterId: matter.id,
+            courtId,
+            instance,
+            parentProceedingId: parentProceedingId || null,
+            registerType: registerType.trim() || null,
+            circuit: circuit.trim() || null,
+            numberText: numberText.trim() || null,
+            yearLabel: yearLabel.trim() || null,
+            filingDate: filingDate || null,
+            claimAmount: claimAmount.trim() || null,
+            status: finalStatus,
+            parties: assembledParties,
+            idempotencyKey,
+          } satisfies AddProceedingInput,
         };
-      });
+      }
+      pendingOperationRef.current = operation;
+    }
 
     try {
-      if (isEdit && initialProceeding) {
-        const payload: UpdateProceedingInput = {
-          id: initialProceeding.id,
-          matterId: matter.id,
-          expectedVersion: initialProceeding.version,
-          courtId,
-          instance,
-          parentProceedingId: parentProceedingId || null,
-          registerType: registerType.trim() || null,
-          circuit: circuit.trim() || null,
-          numberText: numberText.trim() || null,
-          yearLabel: yearLabel.trim() || null,
-          filingDate: filingDate || null,
-          claimAmount: claimAmount.trim() || null,
-          status: finalStatus,
-          parties: assembledParties,
-          idempotencyKey,
-        };
+      const res =
+        operation.kind === 'update'
+          ? await updateProceedingAction(operation.payload as UpdateProceedingInput)
+          : await addProceedingAction(operation.payload as AddProceedingInput);
 
-        const res = await updateProceedingAction(payload);
-        if (!res.success) {
-          if (
-            res.code === 'SESSION_EXPIRED' ||
-            res.code === 'UNAUTHENTICATED' ||
-            res.code === 'SESSION_INACTIVE'
-          ) {
-            setSessionExpired(true);
-            setGeneralError(
-              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
-            );
-            // C09: Do not regenerate key on auth/session expiry so user can retry original operation
-          } else if (res.code === 'CONCURRENCY_CONFLICT') {
-            setConcurrencyConflict(true);
-            setIdempotencyKey(generateClientRequestId('proc'));
-          } else {
-            setGeneralError(res.error || 'تعذر تعديل بيانات القيد القضائي.');
-            if (res.fieldErrors) setFieldErrors(res.fieldErrors);
-            setIdempotencyKey(generateClientRequestId('proc'));
-          }
-          setIsSaving(false);
-          return;
+      if (!res.success) {
+        if (isAuthRecoveryCode(res.code)) {
+          setSessionExpired(true);
+          setOperationPending(true);
+          setGeneralError(
+            'انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تحرير القيد. تم تجميد العملية الأصلية والحفاظ على البيانات في الذاكرة؛ سجّل الدخول في نافذة جديدة ثم أعد محاولة الحفظ الأصلية.'
+          );
+        } else if (res.code === 'CONCURRENCY_CONFLICT') {
+          pendingOperationRef.current = null;
+          setOperationPending(false);
+          setIdempotencyKey(generateClientRequestId('proc'));
+          setConcurrencyConflict(true);
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+        ) {
+          setOperationPending(true);
+          setGeneralError(
+            res.error ||
+              'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية الأصلية مجمّدة؛ أعد المحاولة أو ابدأ تعديلاً جديداً بعد التحقق من النتيجة.'
+          );
+        } else {
+          pendingOperationRef.current = null;
+          setOperationPending(false);
+          setIdempotencyKey(generateClientRequestId('proc'));
+          setGeneralError(res.error || 'تعذر حفظ القيد القضائي.');
+          if (res.fieldErrors) setFieldErrors(res.fieldErrors);
         }
-
-        router.push(`/matters/${matter.id}`);
-      } else {
-        const payload: AddProceedingInput = {
-          matterId: matter.id,
-          courtId,
-          instance,
-          parentProceedingId: parentProceedingId || null,
-          registerType: registerType.trim() || null,
-          circuit: circuit.trim() || null,
-          numberText: numberText.trim() || null,
-          yearLabel: yearLabel.trim() || null,
-          filingDate: filingDate || null,
-          claimAmount: claimAmount.trim() || null,
-          status: finalStatus,
-          parties: assembledParties,
-          idempotencyKey,
-        };
-
-        const res = await addProceedingAction(payload);
-        if (!res.success) {
-          if (
-            res.code === 'SESSION_EXPIRED' ||
-            res.code === 'UNAUTHENTICATED' ||
-            res.code === 'SESSION_INACTIVE'
-          ) {
-            setSessionExpired(true);
-            setGeneralError(
-              'انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد. تم الحفاظ على كافة البيانات المدخلة في الذاكرة.'
-            );
-            // C09: Do not regenerate key on auth/session expiry
-          } else {
-            setGeneralError(res.error || 'تعذر تسجيل القيد القضائي.');
-            if (res.fieldErrors) setFieldErrors(res.fieldErrors);
-            setIdempotencyKey(generateClientRequestId('proc'));
-          }
-          setIsSaving(false);
-          return;
-        }
-
-        router.push(`/matters/${matter.id}`);
+        setIsSaving(false);
+        return;
       }
+
+      pendingOperationRef.current = null;
+      setOperationPending(false);
+      setIsDirty(false);
+      router.push(`/matters/${matter.id}`);
     } catch (err: unknown) {
-      // C09: Freeze key on transport/network error - DO NOT regenerate key for retry
+      setOperationPending(true);
       setGeneralError(
-        err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء حفظ البيانات.'
+        err instanceof Error
+          ? err.message
+          : 'حدث خطأ في الاتصال أثناء حفظ البيانات. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
       );
       setIsSaving(false);
+    }
+  };
+
+  const handleStartNewEdit = () => {
+    pendingOperationRef.current = null;
+    setOperationPending(false);
+    setSessionExpired(false);
+    setGeneralError(null);
+    setIdempotencyKey(generateClientRequestId('proc'));
+    setIsDirty(true);
+  };
+
+  useEffect(() => {
+    if (!isDirty || isSaving) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty, isSaving]);
+
+  const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (isDirty && !window.confirm('لديك تغييرات غير محفوظة. هل تريد المغادرة وفقدانها؟')) {
+      event.preventDefault();
     }
   };
 
@@ -410,10 +503,12 @@ export function ProceedingForm({
         >
           <div className="flex items-center gap-2 font-bold text-sm">
             <span>🔒</span>
-            <span>انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير القيد</span>
+            <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تحرير القيد</span>
           </div>
           <p className="leading-relaxed">
-            تم الحفاظ على كافة البيانات والتعديلات المدخلة في ذاكرة الصفحة دون فقدان. يرجى تسجيل الدخول في نافذة جديدة لتجديد الجلسة ثم العودة هنا والضغط على زر &quot;إعادة محاولة الحفظ&quot; لإتمام العملية الأصلية.
+            تم الحفاظ على كافة البيانات والتعديلات المدخلة في ذاكرة الصفحة دون فقدان. يرجى تسجيل الدخول
+            أو إكمال التحقق (MFA) في نافذة جديدة لتجديد الجلسة ثم العودة هنا والضغط على زر
+            &quot;إعادة محاولة الحفظ&quot; لإتمام العملية الأصلية بنفس المفتاح والبيانات المجمّدة.
           </p>
           <div className="flex items-center gap-3 pt-1">
             <a
@@ -427,10 +522,48 @@ export function ProceedingForm({
             </a>
             <button
               type="submit"
+              form={formDomId}
               data-testid="session-recovery-retry-button"
-              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
             >
               إعادة محاولة الحفظ
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Frozen original operation (uncertain outcome) */}
+      {operationPending && (
+        <div
+          role="alert"
+          data-testid="operation-pending-banner"
+          className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>⏳</span>
+            <span>العملية الأصلية معلّقة بانتظار نتيجة مؤكدة</span>
+          </div>
+          <p className="text-xs leading-relaxed">
+            أُبقيت العملية الأصلية بنفس المفتاح ونفس البيانات المجمّدة. الحقول معطّلة حتى تتأكد النتيجة؛
+            إعادة المحاولة لا تنشئ عملية مكررة. إذا كنت تريد اعتماد تعديلات جديدة بدلاً منها، ابدأ
+            تعديلاً جديداً صراحةً.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              form={formDomId}
+              data-testid="operation-retry-button"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+            >
+              إعادة محاولة العملية الأصلية
+            </button>
+            <button
+              type="button"
+              onClick={handleStartNewEdit}
+              data-testid="operation-start-new-button"
+              className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+            >
+              بدء تعديل جديد (يتخلى عن العملية المعلّقة)
             </button>
           </div>
         </div>
@@ -455,32 +588,81 @@ export function ProceedingForm({
         </div>
       )}
 
-      {/* Similarity Alert (Non-blocking) (C18) */}
-      {similarProceeding && (
+      {/* Similarity preflight (C18/U7): server-backed, court-scoped and
+          normalized, so cross-matter and post-load records are visible. */}
+      {similarLookupError && (
         <div
           role="alert"
-          data-testid="similarity-warning-banner"
-          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-1 text-xs shadow-xs"
+          data-testid="similarity-lookup-error"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-1 text-xs"
         >
-          <span className="font-bold block text-sm">⚠️ تنبيه تشابه في أرقام القيد القضائي</span>
+          <span className="font-bold block text-sm">⚠️ تعذر إكمال فحص التشابه</span>
           <p className="leading-relaxed">
-            يوجد بالفعل قيد قضائي مسجل في هذا الملف بنفس رقم الدعوى (
-            <bdi dir="ltr" className="font-mono font-bold">{similarProceeding.numberText} لسنة {similarProceeding.yearLabel}</bdi> — {similarProceeding.courtName}
-            ). يمكنك متابعة الحفظ بشكل طبيعي إذا كانت هذه دعوى منفصلة (مثل دعوى فرعية أو متقابلة).
-            {similarProceeding.id && (
-              <Link
-                href={`/matters/${matter.id}/proceedings/${similarProceeding.id}`}
-                target="_blank"
-                className="text-[#14566B] font-bold underline inline-block mr-2"
-              >
-                عرض القيد القائم ↗
-              </Link>
-            )}
+            {similarLookupError} يمكنك متابعة الحفظ، لكن يُنصح بإعادة المحاولة قبل اعتماد رقم القيد.
           </p>
+          <button
+            type="button"
+            onClick={() => setSimilarRetryNonce((n) => n + 1)}
+            data-testid="similarity-retry-button"
+            className="px-3 py-1.5 bg-white border border-amber-400 text-amber-900 font-semibold rounded-[6px] min-h-[32px]"
+          >
+            إعادة محاولة الفحص
+          </button>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      {isLookingUpSimilar && !similarLookupError && (
+        <p
+          role="status"
+          data-testid="similarity-lookup-pending"
+          className="text-xs text-[#4D606A]"
+        >
+          جارٍ فحص أرقام القيد المتشابهة في نفس المحكمة...
+        </p>
+      )}
+
+      {!isLookingUpSimilar && similarCandidates.length > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="similarity-warning-banner"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-2 text-xs shadow-xs"
+        >
+          <span className="font-bold block text-sm">⚠️ أرقام قيد متشابهة في نفس المحكمة</span>
+          <p className="leading-relaxed">
+            عُثر على قيود قضائية مطابقة بعد التطبيع. راجعها قبل الحفظ؛ ويمكنك متابعة تسجيل قيد جديد
+            إذا كانت هذه دعوى منفصلة (مثل دعوى فرعية أو متقابلة).
+          </p>
+          <ul className="space-y-1.5">
+            {similarCandidates.map((candidate) => (
+              <li key={candidate.id} data-testid={`similarity-candidate-${candidate.id}`}>
+                <Link
+                  href={`/matters/${candidate.matterId}/proceedings/${candidate.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#14566B] font-bold underline"
+                >
+                  <bdi dir="ltr" className="font-mono">
+                    {candidate.numberText || '—'} لسنة {candidate.yearLabel || '—'}
+                  </bdi>
+                  {' '}— {candidate.matterFileCode} ({candidate.matterTitle}) ↗
+                </Link>
+                <span className="block text-[11px] text-amber-800">
+                  {candidate.courtName} — {candidate.similarityReason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <form
+        id={formDomId}
+        onSubmit={handleSubmit}
+        onChange={() => setIsDirty(true)}
+        className="space-y-6"
+      >
+      <fieldset disabled={operationPending} className="space-y-6 border-0 p-0 m-0 min-w-0">
         {/* Section 1: Court & Instance */}
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
           <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
@@ -499,6 +681,7 @@ export function ProceedingForm({
                 value={courtId}
                 onChange={(e) => setCourtId(e.target.value)}
                 data-testid="proceeding-court-select"
+                {...fieldErrorProps('courtId')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="">— اختر المحكمة —</option>
@@ -519,6 +702,7 @@ export function ProceedingForm({
                   );
                 })}
               </select>
+              {renderFieldError('courtId')}
               <p className="text-[11px] text-[#4D606A]">
                 المحكمة إلزامية حتى في المسودات لتحديد مقر انعقاد الجلسة.
               </p>
@@ -605,6 +789,30 @@ export function ProceedingForm({
             )}
           </div>
 
+          {isDocketIncomplete && isEdit && initialProceeding?.status !== 'DRAFT' && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] space-y-1">
+              <label
+                htmlFor={`${formId}-incompleteAck`}
+                className="flex items-start gap-2 text-xs text-amber-950"
+              >
+                <input
+                  id={`${formId}-incompleteAck`}
+                  type="checkbox"
+                  checked={incompleteDraftAcknowledged}
+                  onChange={(e) => setIncompleteDraftAcknowledged(e.target.checked)}
+                  data-testid="incomplete-draft-acknowledgement"
+                  className="mt-0.5 h-4 w-4 accent-[#14566B]"
+                />
+                <span>
+                  أوافق صراحةً على حفظ هذا القيد كمسودة لأن رقم الدعوى أو السنة أو نوع الجدول غير
+                  مكتمل. لن تُستبدل الحالة المختارة بصمت: الحفظ بالحالة النشطة يتطلب استكمال بيانات
+                  القيد أولاً.
+                </span>
+              </label>
+              {renderFieldError('status')}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Number Text */}
             <div className="space-y-1">
@@ -618,8 +826,10 @@ export function ProceedingForm({
                 onChange={(e) => setNumberText(e.target.value)}
                 placeholder="مثال: 1234 أو 0045/ب"
                 data-testid="proceeding-number-input"
+                {...fieldErrorProps('numberText')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('numberText')}
               <p className="text-[10px] text-[#4D606A]">يحتفظ بالأصفار والحروف</p>
             </div>
 
@@ -635,8 +845,10 @@ export function ProceedingForm({
                 onChange={(e) => setYearLabel(e.target.value)}
                 placeholder="مثال: 2026 أو 1447هـ"
                 data-testid="proceeding-year-input"
+                {...fieldErrorProps('yearLabel')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('yearLabel')}
             </div>
 
             {/* Register / Docket Type */}
@@ -651,8 +863,10 @@ export function ProceedingForm({
                 onChange={(e) => setRegisterType(e.target.value)}
                 placeholder="مثال: مدني كلي، جنح، عمالي"
                 data-testid="proceeding-register-type-input"
+                {...fieldErrorProps('registerType')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('registerType')}
             </div>
           </div>
 
@@ -669,8 +883,10 @@ export function ProceedingForm({
                 onChange={(e) => setCircuit(e.target.value)}
                 placeholder="مثال: الدائرة 7 إيجارات"
                 data-testid="proceeding-circuit-input"
+                {...fieldErrorProps('circuit')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('circuit')}
             </div>
 
             {/* Filing Date */}
@@ -684,8 +900,10 @@ export function ProceedingForm({
                 value={filingDate}
                 onChange={(e) => setFilingDate(e.target.value)}
                 data-testid="proceeding-filing-date-input"
+                {...fieldErrorProps('filingDate')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('filingDate')}
             </div>
 
             {/* Claim Amount */}
@@ -700,8 +918,10 @@ export function ProceedingForm({
                 onChange={(e) => setClaimAmount(e.target.value)}
                 placeholder="مثال: 50000"
                 data-testid="proceeding-claim-amount-input"
+                {...fieldErrorProps('claimAmount')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {renderFieldError('claimAmount')}
             </div>
           </div>
         </div>
@@ -862,10 +1082,13 @@ export function ProceedingForm({
           )}
         </div>
 
+        </fieldset>
+
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <Link
             href={`/matters/${matter.id}`}
+            onClick={handleCancelNavigation}
             className="w-full sm:w-auto px-5 py-2.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] text-center min-h-[44px] flex items-center justify-center transition-colors"
           >
             إلغاء والعودة للملف
@@ -873,7 +1096,7 @@ export function ProceedingForm({
 
           <button
             type="submit"
-            disabled={isSaving || !courtId}
+            disabled={isSaving || operationPending || !courtId}
             data-testid="proceeding-submit-button"
             className="w-full sm:w-auto px-8 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-sm font-bold rounded-[6px] shadow-xs min-h-[44px] flex items-center justify-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
           >

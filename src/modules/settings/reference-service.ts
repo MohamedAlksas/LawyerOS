@@ -161,7 +161,20 @@ export async function updateOfficeSettings(
         return { ...dto, operationVersion: opVersion };
       }
 
-      // 2. Lock and retrieve current settings
+      // 2. Initialize the singleton before locking. SELECT ... FOR UPDATE cannot
+      // lock a row that does not exist, so two first writers would both choose
+      // version 1 and overwrite each other. ON CONFLICT makes initialization
+      // serializable: the second writer blocks until the first commits, then
+      // observes the committed version under the normal version comparison.
+      await tx.$executeRaw`
+        INSERT INTO "office_settings"
+          ("id", "officeName", "currency", "timeZone", "version", "updatedById", "updatedAt")
+        VALUES
+          (${SINGLETON_ID}, 'مكتب المحاماة', 'EGP', 'Africa/Cairo', 1, 'system', CURRENT_TIMESTAMP)
+        ON CONFLICT ("id") DO NOTHING;
+      `;
+
+      // 3. Lock and retrieve current settings
       const [current] = await tx.$queryRaw<Array<{
         id: string;
         version: number;
@@ -172,15 +185,15 @@ export async function updateOfficeSettings(
         FOR UPDATE;
       `;
 
-      if (current && current.version !== input.expectedVersion) {
+      if (!current) {
         throw new ConcurrencyConflictError();
       }
 
-      if (!current && input.expectedVersion !== 1) {
+      if (current.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError();
       }
 
-      const nextVersion = current ? current.version + 1 : 1;
+      const nextVersion = current.version + 1;
 
       const updated = await tx.officeSettings.upsert({
         where: { id: SINGLETON_ID },

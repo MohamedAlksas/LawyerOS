@@ -6,8 +6,10 @@ import { normalizeArabicText } from '@/lib/normalization';
 import {
   openMatter,
   linkMatterParty,
+  updateMatterParty,
   unlinkMatterParty,
   addProceeding,
+  updateProceeding,
   linkProceedingParty,
   unlinkProceedingParty,
   searchMatters,
@@ -340,6 +342,40 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
     });
     expect(procReplay.id).toBe(proc.id);
     expect(procReplay.operationVersion).toBe(1);
+
+    // 4. Matter-party link replay after intervening edit (S3)
+    const clientP = await makeParty('طرف فحص إعادة تشغيل العلاقة');
+    const linkKey = `link-p-replay-${crypto.randomUUID()}`;
+    const initialLink = await linkMatterParty(actor, {
+      matterId: m.matter.id,
+      partyId: clientP.id,
+      role: 'CLIENT',
+      idempotencyKey: linkKey,
+    });
+    expect(initialLink.version).toBe(1);
+    expect(initialLink.operationVersion).toBe(1);
+
+    // Intervening edit bumps version to 2
+    const updatedLink = await updateMatterParty(actor, {
+      id: initialLink.id,
+      matterId: m.matter.id,
+      expectedVersion: initialLink.version,
+      role: 'OPPONENT',
+      notes: 'تعديل وسيط لتغيير الصفة',
+      idempotencyKey: `upd-p-${crypto.randomUUID()}`,
+    });
+    expect(updatedLink.version).toBe(2);
+
+    // Replaying original linkKey returns current live version (2) AND original operationVersion (1)
+    const linkReplay = await linkMatterParty(actor, {
+      matterId: m.matter.id,
+      partyId: clientP.id,
+      role: 'CLIENT',
+      idempotencyKey: linkKey,
+    });
+    expect(linkReplay.id).toBe(initialLink.id);
+    expect(linkReplay.version).toBe(2);
+    expect(linkReplay.operationVersion).toBe(1);
   });
 
   // =========================================================================
@@ -367,6 +403,59 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
     // Verify SQL query using the normalized form finds the matter
     const searchResult = await searchMatters({ query: 'شركة الامل والانشاءات 123' }, actor);
     expect(searchResult.matters.some((item) => item.id === m.matter.id)).toBe(true);
+
+    // Direct SQL migration backfill test over pre-existing raw rows (S1)
+    const rawTitles = [
+      ' دَعْوَى شَرِكَةِ  الأَهْرَامِ لِلتَّجَارَةِ (١٢٣)ـ  ',
+      'استئناف حُكْمِ جُنَحِ العَجُوزَةِ رَقْمُ ٤٥٦/۲۰۲۶',
+      '  إِلْزَامُ شَرِكَةِ التَّعْمِيرِ بِسَدَادِ  ١٠٠٠٠٠٠ ج.م.  ',
+      'أَإِآٱةىئؤـ١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹',
+    ];
+
+    for (const rawTitle of rawTitles) {
+      const testMatterId = crypto.randomUUID();
+      createdMatterIds.push(testMatterId);
+      const fileCode = `MIG-${crypto.randomUUID().slice(0, 8)}`;
+
+      // Insert row directly simulating pre-migration state where titleNormalized was null/stale
+      await prisma.$executeRaw`
+        INSERT INTO "matter" ("id", "fileCode", "title", "titleNormalized", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+        VALUES (${testMatterId}, ${fileCode}, ${rawTitle}, 'PRE_MIGRATION_UNNORMALIZED', 'LITIGATION', 'ACTIVE', 1, ${actor.id}, ${actor.id}, now(), now());
+      `;
+
+      // Run the exact SQL migration backfill statement from Migration 9
+      await prisma.$executeRaw`
+        UPDATE "matter"
+        SET "titleNormalized" = trim(
+          regexp_replace(
+            regexp_replace(
+              translate(
+                lower("title"),
+                '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱةىئؤ',
+                '01234567890123456789ااااهييو'
+              ),
+              '[ً-ٰٟـ]',
+              '',
+              'g'
+            ),
+            '\\s+',
+            ' ',
+            'g'
+          )
+        )
+        WHERE "id" = ${testMatterId};
+      `;
+
+      const backfilled = await prisma.matter.findUniqueOrThrow({
+        where: { id: testMatterId },
+        select: { title: true, titleNormalized: true },
+      });
+
+      // Assert original title is preserved exactly
+      expect(backfilled.title).toBe(rawTitle);
+      // Assert SQL backfill matches canonical TypeScript normalization
+      expect(backfilled.titleNormalized).toBe(normalizeArabicText(rawTitle));
+    }
   });
 
   // =========================================================================
@@ -679,5 +768,269 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
     });
     expect(diffCourtRes.hasDirectMatch).toBe(false);
     expect(diffCourtRes.candidates).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // S2: Concurrent office settings update serialization
+  // =========================================================================
+  it('S2: concurrent updates to office settings with same expectedVersion serialize; exactly one succeeds and one throws ConcurrencyConflictError', async () => {
+    const current = await getOfficeSettings(actor);
+    const key1 = `office-race-1-${crypto.randomUUID()}`;
+    const key2 = `office-race-2-${crypto.randomUUID()}`;
+
+    const [res1, res2] = await Promise.allSettled([
+      updateOfficeSettings(actor, {
+        officeName: 'مكتب المحاماة المتحد - فرع أ',
+        expectedVersion: current.version,
+        idempotencyKey: key1,
+      }),
+      updateOfficeSettings(actor, {
+        officeName: 'مكتب المحاماة المتحد - فرع ب',
+        expectedVersion: current.version,
+        idempotencyKey: key2,
+      }),
+    ]);
+
+    const fulfilled = [res1, res2].filter((r) => r.status === 'fulfilled');
+    const rejected = [res1, res2].filter((r) => r.status === 'rejected');
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason.name).toBe('ConcurrencyConflictError');
+  });
+
+  // =========================================================================
+  // S4: updateProceeding atomic party exclusion / membership reconciliation
+  // =========================================================================
+  it('S4: updateProceeding reconciles desired parties atomically (removes unmentioned with audit, clears all with [], preserves on undefined)', async () => {
+    const court = await makeCourt(`S4 Court ${crypto.randomUUID().slice(0, 6)}`);
+    const client1 = await makeParty('طرف قيد أول');
+    const client2 = await makeParty('طرف قيد ثان');
+
+    const m = await openMatter(actor, {
+      title: 'ملف فحص استبعاد أطراف القيد القضائي',
+      kind: 'LITIGATION',
+      initialClientId: client1.id,
+      idempotencyKey: `m-s4-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+    const client1Mp = m.matter.parties![0];
+
+    const link2 = await linkMatterParty(actor, {
+      matterId: m.matter.id,
+      partyId: client2.id,
+      role: 'OPPONENT',
+      idempotencyKey: `m-s4-p2-${crypto.randomUUID()}`,
+    });
+
+    // Create proceeding with both parties bundled
+    const proc = await addProceeding(actor, {
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      parties: [
+        { matterPartyId: client1Mp.id, capacityText: 'مدعي' },
+        { matterPartyId: link2.id, capacityText: 'مدعى عليه' },
+      ],
+      idempotencyKey: `proc-s4-${crypto.randomUUID()}`,
+    });
+    expect(proc.version).toBe(1);
+    expect(proc.parties).toHaveLength(2);
+
+    // 1. Omit client2 from parties array -> client2 link is deleted, audit emitted, version bumped
+    const upd1 = await updateProceeding(actor, {
+      id: proc.id,
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      expectedVersion: proc.version,
+      parties: [
+        { matterPartyId: client1Mp.id, capacityText: 'مدعي وحيد معدل' },
+      ],
+      idempotencyKey: `upd-proc-s4-1-${crypto.randomUUID()}`,
+    });
+    expect(upd1.version).toBe(2);
+
+    const remainingAfterOmission = await prisma.proceedingParty.findMany({
+      where: { proceedingId: proc.id },
+    });
+    expect(remainingAfterOmission).toHaveLength(1);
+    expect(remainingAfterOmission[0].matterPartyId).toBe(client1Mp.id);
+
+    const unlinkAudits = await prisma.auditEvent.findMany({
+      where: {
+        action: 'UNLINK_PROCEEDING_PARTY',
+        changedFields: {
+          path: ['proceedingId'],
+          equals: proc.id,
+        },
+      },
+    });
+    expect(unlinkAudits.length).toBeGreaterThan(0);
+
+    // 2. parties: undefined -> leaves membership untouched
+    const upd2 = await updateProceeding(actor, {
+      id: proc.id,
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      expectedVersion: upd1.version,
+      circuit: 'الدائرة الأولى مدني',
+      // parties is undefined!
+      idempotencyKey: `upd-proc-s4-2-${crypto.randomUUID()}`,
+    });
+    expect(upd2.version).toBe(3);
+
+    const remainingAfterUndefined = await prisma.proceedingParty.findMany({
+      where: { proceedingId: proc.id },
+    });
+    expect(remainingAfterUndefined).toHaveLength(1);
+    expect(remainingAfterUndefined[0].matterPartyId).toBe(client1Mp.id);
+
+    // 3. parties: [] -> clears all proceeding party links
+    const upd3 = await updateProceeding(actor, {
+      id: proc.id,
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      expectedVersion: upd2.version,
+      parties: [],
+      idempotencyKey: `upd-proc-s4-3-${crypto.randomUUID()}`,
+    });
+    expect(upd3.version).toBe(4);
+
+    const remainingAfterEmpty = await prisma.proceedingParty.findMany({
+      where: { proceedingId: proc.id },
+    });
+    expect(remainingAfterEmpty).toHaveLength(0);
+  });
+
+  // =========================================================================
+  // S5: updateMatterParty preserves omitted billing preference and notes
+  // =========================================================================
+  it('S5: updateMatterParty preserves omitted billingEnabled, isPrimaryContact, and notes on partial update', async () => {
+    const client = await makeParty('طرف فحص تفضيلات الفوترة');
+
+    const m = await openMatter(actor, {
+      title: 'ملف فحص الحفاظ على تفضيلات الفوترة',
+      kind: 'LITIGATION',
+      initialClientId: client.id,
+      idempotencyKey: `m-s5-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+    const clientMp = m.matter.parties![0];
+
+    // Initial update configuring billing, primary contact, and notes
+    const initialConfig = await updateMatterParty(actor, {
+      id: clientMp.id,
+      matterId: m.matter.id,
+      expectedVersion: clientMp.version,
+      role: 'CLIENT',
+      billingEnabled: true,
+      isPrimaryContact: true,
+      notes: 'ملاحظات أولية سرية للفوترة والاتصال',
+      idempotencyKey: `upd-s5-1-${crypto.randomUUID()}`,
+    });
+    expect(initialConfig.billingEnabled).toBe(true);
+    expect(initialConfig.isPrimaryContact).toBe(true);
+    expect(initialConfig.notes).toBe('ملاحظات أولية سرية للفوترة والاتصال');
+    expect(initialConfig.version).toBe(clientMp.version + 1);
+
+    // Partial update omitting billingEnabled, isPrimaryContact, and notes
+    const partialUpdate = await updateMatterParty(actor, {
+      id: clientMp.id,
+      matterId: m.matter.id,
+      expectedVersion: initialConfig.version,
+      role: 'CLIENT',
+      idempotencyKey: `upd-s5-2-${crypto.randomUUID()}`,
+    });
+
+    // Assert that billingEnabled, isPrimaryContact, and notes were preserved, NOT reset to default false/null
+    expect(partialUpdate.billingEnabled).toBe(true);
+    expect(partialUpdate.isPrimaryContact).toBe(true);
+    expect(partialUpdate.notes).toBe('ملاحظات أولية سرية للفوترة والاتصال');
+
+    // Update only notes (omitting billingEnabled and isPrimaryContact)
+    const notesUpdate = await updateMatterParty(actor, {
+      id: clientMp.id,
+      matterId: m.matter.id,
+      expectedVersion: partialUpdate.version,
+      role: 'CLIENT',
+      notes: 'ملاحظات محدثة',
+      idempotencyKey: `upd-s5-3-${crypto.randomUUID()}`,
+    });
+
+    expect(notesUpdate.billingEnabled).toBe(true);
+    expect(notesUpdate.isPrimaryContact).toBe(true);
+    expect(notesUpdate.notes).toBe('ملاحظات محدثة');
+  });
+
+  // =========================================================================
+  // S6: findSimilarProceedings SQL filter preserves older matches past LIMIT 100
+  // =========================================================================
+  it('S6: findSimilarProceedings finds matching proceeding even when 105 newer unrelated proceedings exist in same court', async () => {
+    const court = await makeCourt(`S6 Court ${crypto.randomUUID().slice(0, 6)}`);
+
+    const mTarget = await openMatter(actor, {
+      title: 'ملف القضية المستهدفة',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-s6-target-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(mTarget.matter.id);
+
+    // 1. Create the older matching proceeding (number: 888/ب, year: 2024)
+    const olderMatching = await addProceeding(actor, {
+      matterId: mTarget.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      registerType: 'مدني كلي',
+      numberText: '888/ب',
+      yearLabel: '2024',
+      status: 'ACTIVE',
+      idempotencyKey: `proc-s6-target-${crypto.randomUUID()}`,
+    });
+
+    // 2. Insert 105 newer unrelated proceedings in the same court with a different numberText (e.g. 111/س)
+    const mFiller = await openMatter(actor, {
+      title: 'ملف القضايا المتعددة الحشو',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-s6-filler-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(mFiller.matter.id);
+
+    const fillerData = Array.from({ length: 105 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      matterId: mFiller.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE' as const,
+      registerType: 'مدني كلي',
+      numberText: `999/حشو-${i}`,
+      yearLabel: '2026',
+      status: 'ACTIVE' as const,
+      version: 1,
+      createdById: actor.id,
+      updatedById: actor.id,
+    }));
+
+    await prisma.proceeding.createMany({
+      data: fillerData,
+    });
+
+    // 3. Query findSimilarProceedings with normalized Eastern Arabic digits '٨٨٨/ب' and year '2024'
+    const searchRes = await findSimilarProceedings(actor, {
+      courtId: court.id,
+      numberText: '٨٨٨/ب',
+      yearLabel: '2024',
+    });
+
+    // Assert that the older matching proceeding is returned as direct match!
+    expect(searchRes.hasDirectMatch).toBe(true);
+    expect(searchRes.candidates.length).toBeGreaterThanOrEqual(1);
+    expect(searchRes.candidates[0].id).toBe(olderMatching.id);
+    expect(searchRes.candidates[0].similarityReason).toContain('تطابق تام');
   });
 });

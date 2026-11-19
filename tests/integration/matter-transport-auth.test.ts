@@ -702,7 +702,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-set-${crypto.randomUUID()}`,
         }],
       },
-      // 8. Direct Reads (if exported in manifest)
+      // 8. Direct Reads & Queries
       {
         name: 'getMatterAction',
         args: [existingMatterId],
@@ -710,6 +710,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       {
         name: 'getOfficeSettingsAction',
         args: [],
+      },
+      {
+        name: 'getPartyMatterAssociationsAction',
+        args: [{
+          partyId: existingPartyId,
+          limit: 10,
+        }],
+      },
+      {
+        name: 'findSimilarProceedingsAction',
+        args: [{
+          courtId: existingCourtId,
+          numberText: '777',
+        }],
       },
     ];
 

@@ -226,6 +226,14 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await page.getByTestId('proceeding-circuit-input').fill('الدائرة 4 تعويضات');
     await expect(page.getByTestId('proceeding-status-select')).toBeVisible();
     await page.getByTestId('proceeding-status-select').selectOption('ACTIVE');
+
+    // Deliberately include candidate parties into proceeding (U2 / C12)
+    const addPartyBtns = page.locator('[data-testid^="add-party-to-proceeding-"]');
+    const partyCount = await addPartyBtns.count();
+    for (let i = 0; i < partyCount; i++) {
+      await addPartyBtns.first().click();
+    }
+
     await page.locator('[data-testid^="capacity-text-"]').first().fill('المدعي الأصلي');
     await page.getByTestId('proceeding-submit-button').click();
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
 import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
@@ -30,29 +30,50 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   const [linkedMatters, setLinkedMatters] = useState<PartyMatterAssociationDTO[]>([]);
   const [isLoadingMatters, setIsLoadingMatters] = useState(true);
   const [mattersError, setMattersError] = useState<string | null>(null);
+  const [mattersPage, setMattersPage] = useState(0);
+  const [mattersTotal, setMattersTotal] = useState(0);
+  const mattersGenRef = useRef(0);
+  const MATTERS_PAGE_SIZE = 50;
+  const mattersTotalPages = Math.max(1, Math.ceil(mattersTotal / MATTERS_PAGE_SIZE));
 
-  const loadMatters = useCallback(async () => {
-    setIsLoadingMatters(true);
-    setMattersError(null);
-    try {
-      const res = await getPartyMatterAssociationsAction({ partyId: party.id });
-      if (!res.success) {
-        setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
-        return;
+  const loadMatters = useCallback(
+    async (pageIndex: number) => {
+      const gen = ++mattersGenRef.current;
+      setIsLoadingMatters(true);
+      setMattersError(null);
+      try {
+        const res = await getPartyMatterAssociationsAction({
+          partyId: party.id,
+          limit: MATTERS_PAGE_SIZE,
+          offset: pageIndex * MATTERS_PAGE_SIZE,
+        });
+        if (gen !== mattersGenRef.current) return;
+        if (!res.success) {
+          setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
+          return;
+        }
+        setLinkedMatters(res.data.associations);
+        setMattersTotal(res.data.total);
+        setMattersPage(pageIndex);
+      } catch (err: unknown) {
+        if (gen !== mattersGenRef.current) return;
+        setMattersError(
+          err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
+        );
+      } finally {
+        if (gen === mattersGenRef.current) setIsLoadingMatters(false);
       }
-      setLinkedMatters(res.data.associations);
-    } catch (err: unknown) {
-      setMattersError(
-        err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
-      );
-    } finally {
-      setIsLoadingMatters(false);
-    }
-  }, [party.id]);
+    },
+    [party.id]
+  );
 
   useEffect(() => {
     let ignore = false;
-    getPartyMatterAssociationsAction({ partyId: party.id })
+    getPartyMatterAssociationsAction({
+      partyId: party.id,
+      limit: MATTERS_PAGE_SIZE,
+      offset: 0,
+    })
       .then((res) => {
         if (ignore) return;
         setIsLoadingMatters(false);
@@ -61,6 +82,8 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
           return;
         }
         setLinkedMatters(res.data.associations);
+        setMattersTotal(res.data.total);
+        setMattersPage(0);
       })
       .catch((err: unknown) => {
         if (ignore) return;
@@ -320,7 +343,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
         <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
           <h2 className="text-base font-bold text-[#172A35]">
-            📁 ملفات القضايا والنزاعات المرتبطة ({linkedMatters.length})
+            📁 ملفات القضايا والنزاعات المرتبطة ({mattersError ? '—' : isLoadingMatters && mattersTotal === 0 ? '…' : mattersTotal})
           </h2>
           <Link
             href="/matters/new"
@@ -339,7 +362,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
             <span>⚠️ {mattersError}</span>
             <button
               type="button"
-              onClick={() => loadMatters()}
+              onClick={() => loadMatters(mattersPage)}
               className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
             >
               إعادة المحاولة
@@ -350,7 +373,8 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
         ) : linkedMatters.length === 0 ? (
           <p className="text-xs text-[#4D606A] italic">لا توجد ملفات قضايا مسجلة لهذا الطرف بعد.</p>
         ) : (
-          <div className="divide-y divide-[#E8EEF1]">
+          <div className="space-y-3">
+            <div className="divide-y divide-[#E8EEF1]">
             {linkedMatters.map((m) => (
               <div
                 key={m.matterPartyId}
@@ -399,6 +423,34 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
                 </Link>
               </div>
             ))}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 text-[11px] text-[#4D606A]">
+              <span data-testid="party-matters-count">
+                عرض {linkedMatters.length} من {mattersTotal} ارتباط — صفحة {mattersPage + 1} من{' '}
+                {mattersTotalPages}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => loadMatters(mattersPage - 1)}
+                  disabled={mattersPage <= 0 || isLoadingMatters}
+                  data-testid="party-matters-prev"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                >
+                  السابق
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loadMatters(mattersPage + 1)}
+                  disabled={mattersPage + 1 >= mattersTotalPages || isLoadingMatters}
+                  data-testid="party-matters-next"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                >
+                  التالي
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
