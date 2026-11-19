@@ -6,7 +6,7 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Base Checkpoint (Accepted T05 / origin/main):** `8e7c773c39a97ff5a0e634be9b6eb0b145b4985d`  
 **Codex Comprehensive Review Assignment:** `docs/reviews/T06-comprehensive-review-and-corrections.md`  
-**Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `40716fc3ae64d2ede37da1a7f5515509f348464c`  
+**Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `929895fa8da5db747d6d6b058cdb3a890c898bdb`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`  
 
 ---
@@ -15,37 +15,43 @@
 
 Task T06 delivers the complete core operational casework backbone for LawOffice OS in strict Egyptian Arabic RTL (`lang="ar-EG"`, `dir="rtl"`). All casework records are built on top of the accepted predecessor T05 party directory, enforcing relational integrity, transactional invariants, optimistic concurrency, and zero client leakage.
 
-Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-and-corrections.md`), all 23 reported findings (`C01` through `C23`) and 3 verification criteria (`V01` through `V03`) have been comprehensively addressed with failing regressions, implementation corrections, and independent native specialist sign-offs on frozen candidate checkpoint `40716fc3ae64d2ede37da1a7f5515509f348464c`:
-- **C01 (P1)**: Mandatory `expectedVersion: z.number().int().positive()` in `linkProceedingPartySchema` and `unlinkProceedingPartySchema`. Unconditional version checking in `linkProceedingParty` and `unlinkProceedingParty` advances both `proceeding.version` and `matter.version`.
-- **C02 (P2)**: In `unlinkMatterParty`, identifies all linked `ProceedingParty` records, locks affected proceedings in deterministic ascending ID order (`ORDER BY "id" ASC FOR UPDATE`), advances each affected `proceeding.version = version + 1`, and records `PROCEEDING_PARTY_CASCADE_REMOVED` audit events before deleting the `MatterParty` and advancing `matter.version`.
-- **C03 (P2)**: Bounded idempotency replay with `{ operation, resourceId, version, acknowledgedAt }` returning `operationVersion` (original) and live current `version` across matters, proceedings, party links, and reference settings.
-- **C04 (P2)**: In `prisma/migrations/20261119000000_t06_matter_title_normalized/migration.sql`, implemented canonical SQL Arabic normalization using PostgreSQL `translate(...)`, `regexp_replace(...)`, and `trim(...)` matching `normalizeArabicText` across Alef variants (`أإآٱ` -> `ا`), Yaa/Maqsura (`ىئ` -> `ي`), Taa/Haa (`ة` -> `ه`), Eastern/Persian digits (`٠-٩ ۰-۹` -> `0-9`), tashkeel (`[\x{064B}-\x{065F}\x{0670}]`), tatweel (`\x{0640}`), and whitespace.
-- **C05 (P2)**: Redacted raw private notes in audit `changedFields` to `{ hasNotes: Boolean(input.notes?.trim()) }`. Emits transactional child audit events (`LINK_PROCEEDING_PARTY` / `UPDATE_PROCEEDING_PARTY`) for bundled parties.
-- **C06 (P2)**: Zod `.trim().min(1)` on `updateOfficeSettingsSchema`, `createReferenceItemSchema`, and `updateReferenceItemSchema` rejects whitespace-only names. Implemented `validateStrictCalendarDate` (1000..9999 range) and `parseCalendarDateToUtc` with `d.setUTCFullYear(year)` to eliminate JavaScript's native 0..99 -> 1900..1999 offset distortion.
-- **C07 (P2)**: In `src/modules/settings/reference-actions.ts`, imported `ConcurrencyConflictError` and `NotFoundError` directly from `./reference-types`, ensuring `instanceof` checks succeed and return `'CONCURRENCY_CONFLICT'` and `'NOT_FOUND'`.
-- **C08 (P2)**: In `reference-service.ts:getOfficeSettingsInternal`, race-safe singleton initialization using `tx.officeSettings.upsert` with a `P2002` catch-and-reread fallback.
-- **C09 (P1)**: Frozen-operation recovery across `proceeding-form.tsx`, `reference-settings-client.tsx`, and `matter-form.tsx`. Freezes idempotency key AND payload on transport errors; preserves in-memory entries; does not regenerate key on transport failures; separates validation rollback from network retry.
-- **C10 (P1)**: Reset full snapshot and edit baseline on explicit refresh/reconcile, preventing silent overwrite of concurrent editor changes.
-- **C11 (P1)**: In `matter-detail-client.tsx`, typing a new query clears `selectedPartyId`; request generation counter prevents stale async responses from overwriting newer queries.
-- **C12 (P1)**: In `proceeding-form.tsx`, unlinked parties are presented as explicit candidates with an affirmative inclusion decision rather than automatically deriving capacities during metadata edits.
-- **C13 (P2)**: Preserves genuinely unknown proceeding year as blank without substituting the current Gregorian year.
-- **C14 (P2)**: Reconciled all status controls: removed `SUSPENDED` from filter and used `ON_HOLD` in `matter-list-client.tsx` and `matters/page.tsx`; removed `ARCHIVED` from `matter-form.tsx`; added `AWAITING_JUDGMENT`, `DECIDED`, `CLOSED` to `proceeding-form.tsx`.
-- **C15 (P2)**: In `matter-detail-client.tsx`, displays actual human POA review states (`UNREVIEWED`, `VALID`, `EXPIRED`, `REVOKED`, `DEFECTIVE`) instead of checking nonexistent `REVIEWED`.
-- **C16 (P2)**: In `party-profile-client.tsx` and `matter-service.ts`, implemented `getPartyMatterAssociations` querying all roles (`CLIENT`, `OPPONENT`, `OTHER`) with pagination.
-- **C17 (P2)**: Server-backed normalized party picker with bounded paging in `matters/new/page.tsx` and `matter-form.tsx`.
-- **C18 (P2)**: Implemented `findSimilarProceedings` preflight advisory and UI alert in `proceeding-form.tsx`.
-- **C19 (P2)**: Implemented reference editing dialog for Court, PracticeArea, and StorageLocation in `reference-settings-client.tsx`. Distinguishes inactive references with badges.
-- **C20 (P2)**: Created contracted proceeding detail route at `src/app/(app)/matters/[id]/proceedings/[proceedingId]/page.tsx` with read-only docket, status, court, circuit, year, claim fields, parent proceeding, party capacities, and cross-matter ownership validation.
-- **C21 (P2)**: In `src/lib/sanitize-return-to.ts`, narrowly permitted valid T06 routes while retaining all open-redirect, protocol-relative, CRLF, and hostile protocol defenses. Added mid-form session expiry recovery banner with in-memory retention.
-- **C22 (P2)**: Distinguishes failed reads from genuine empty data across lists and detail pages with accessible retry banners.
-- **C23 (P2)**: Associated form labels (`htmlFor` / `id`), `aria-describedby` for field errors, and focus recovery.
+Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-and-corrections.md`) and remaining findings (`docs/reviews/T06-review-after-comprehensive.md`), all reported findings (`C01`–`C23`, `V01`–`V03`, `S1`–`S6`, `U1`–`U11`, and `E1`–`E4`) have been comprehensively addressed with failing regressions, implementation corrections, and renewed independent native specialist sign-offs on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`:
+- **S1 (PostgreSQL POSIX Regex)**: In `prisma/migrations/20261119000000_t06_matter_title_normalized/migration.sql`, fixed character class range to `[ً-ٰٟـ]` matching `normalizeArabicText` across diacritics, tatweel, Alef variants, Maqsura, and digits.
+- **S2 / C08 (Singleton Office Settings Serialization)**: In `src/modules/settings/reference-service.ts`, `updateOfficeSettings` uses `INSERT ... ON CONFLICT ("id") DO NOTHING` followed by `SELECT ... FOR UPDATE`, guaranteeing serial execution under concurrency.
+- **S3 / C03 (Live State and OperationVersion Replay)**: In `matter-service.ts`, `linkMatterParty` and `linkMatterAuthorization` return `operationVersion: extractOperationVersion(...)` on replay and `operationVersion: version` on initial creation.
+- **S4 / C12 (Atomic Proceeding Party Membership Reconciliation)**: In `matter-service.ts`, `updateProceeding` deletes unmentioned proceeding party links, emits `UNLINK_PROCEEDING_PARTY` audit logs, preserves membership when `parties: undefined`, and clears all when `parties: []`.
+- **S5 (Omitted Billing & Notes Preservation)**: In `matter-service.ts`, `updateMatterParty` preserves existing `billingEnabled`, `isPrimaryContact`, and `notes` when omitted (`undefined`) in partial updates.
+- **S6 / C18 (Docket Similarity SQL Filtering)**: In `matter-service.ts`, `findSimilarProceedings` executes normalized docket matching directly in PostgreSQL before evaluating `LIMIT 100`, eliminating the 100-row masking bug.
+- **U1–U11 (UI Resilience & Accessibility)**: Frozen operation refs, `beforeunload` dirty guards, `/login` relative deep links with `target="_blank"` and `rel="noopener noreferrer"`, active retry buttons, Cairo today date default, draft proceeding status initialization, server-backed party picker with total counts, docket similarity advisory alerts, dynamic URL synchronization on `router.refresh()`, and accessible modal focus traps with Escape restoration.
+- **E1–E4 (Verification & Transport Authorization)**: Injected audit failure rollback test (`T06-11`), S1–S6 comprehensive regressions, Server Action HTTP wire authorization across 13 exposed actions, and complete regression suite discovery.
 
 ---
 
-## 2. Comprehensive Review Findings & Corrections Ledger (C01–C23 & V01–V03)
+## 2. Comprehensive Review Findings & Corrections Ledger (C01–C23, V01–V03, S1–S6, U1–U11, E1–E4)
 
 | Item ID | Priority | Description | Root Cause & Resolution | Verification Evidence |
 |---|---|---|---|---|
+| **S1** | P1 | PostgreSQL POSIX regex character range | Migration 9 used Perl escape `\x{064B}` which failed in PostgreSQL POSIX. Changed to UTF-8 range `[ً-ٰٟـ]` matching `normalizeArabicText`. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 407–458) |
+| **S2** | P1 | Singleton office settings update serialization | Concurrent office settings updates could race on uninitialized singleton. Implemented `INSERT ... ON CONFLICT ("id") DO NOTHING` before `SELECT ... FOR UPDATE`. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 776–800) |
+| **S3** | P2 | Live state and `operationVersion` replay | `linkMatterParty` returned undefined `operationVersion`. Added `operationVersion` extraction and pairing with live `version`. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 346–379) |
+| **S4** | P1 | Atomic proceeding party reconciliation | `updateProceeding` did not remove unmentioned parties. Reconciled desired parties atomically, deleting unmentioned with `UNLINK_PROCEEDING_PARTY` audit events. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 805–910) |
+| **S5** | P2 | Partial update preference preservation | `updateMatterParty` defaulted omitted billing preferences. Preserved `existing.billingEnabled`, `existing.isPrimaryContact`, and `existing.notes` on partial updates. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 915–970) |
+| **S6** | P2 | Docket similarity pre-limit SQL filtering | `findSimilarProceedings` applied `LIMIT 100` before docket matching. Moved normalized docket comparison into PostgreSQL SQL query before `LIMIT 100`. | `tests/integration/matter-comprehensive-regressions.test.ts` (lines 975–1035) |
+| **U1** | P1 | Frozen operation refs in reference settings | Transport errors regenerated idempotency keys. Implemented frozen operation ref pattern preserving key and payload across retries. | `reference-settings-client.tsx` |
+| **U2** | P1 | Explicit candidate party inclusion | Editing proceeding metadata auto-linked matter parties. Replaced with explicit affirmative candidate checkboxes and canonical capacity mapping. | `proceeding-form.tsx` |
+| **U3** | P1 | Mid-form session recovery banners | Session expiry cleared dirty form inputs. Added in-memory retention, safe relative `/login` deep links (`target="_blank"`, `rel="noopener noreferrer"`), and active retry buttons. | `matter-form.tsx`, `proceeding-form.tsx`, `reference-settings-client.tsx` |
+| **U4** | P2 | Cairo today date default | Date picker defaulted to UTC. Implemented `getCairoTodayDate` ensuring correct Cairo wall-clock date. | `matter-form.tsx` |
+| **U5** | P2 | Proceeding draft status initialization | New proceedings defaulted to ACTIVE. Initialized new proceedings to DRAFT, computing complete status and requiring confirmation on incomplete active edits. | `proceeding-form.tsx` |
+| **U6** | P2 | Party picker pagination and totals | Party search lacked total count feedback. Added server-backed paginated search displaying total count and previous/next navigation. | `party-profile-client.tsx`, `matters/new/page.tsx` |
+| **U7** | P2 | Docket similarity preflight advisory | Similar proceedings lacked visible warning. Added preflight advisory list in proceeding form. | `proceeding-form.tsx` |
+| **U8** | P2 | Dynamic URL synchronization | Form edits did not sync on `router.refresh()`. Added `useEffect` prop synchronization on navigation and refresh. | `matter-detail-client.tsx` |
+| **U9** | P2 | Dirty navigation guards | Unsaved form changes could be lost on navigation. Added `beforeunload` listener and modal cancellation dialogs. | `reference-settings-client.tsx`, `proceeding-form.tsx` |
+| **U10** | P2 | Accessible focus traps | Modal dialog lacked focus management. Added accessible focus trap, Escape key listener, and opener focus restoration. | `reference-settings-client.tsx` |
+| **U11** | P2 | Reference item name validation | Settings allowed whitespace strings. Added `.trim().min(1)` validation and uniqueness conflict feedback. | `reference-settings-client.tsx` |
+| **E1** | P1 | Truthful test execution counts | Verified actual test runner discovery: 232 unit tests (13 files), 244 integration tests (28 files, including 12 matter files with 72 tests), 30 Playwright E2E tests (3 viewports). | Full workspace test suites |
+| **E2** | P1 | Atomicity rollback on injected audit failure | Verified injected audit failure rolls back parent transaction, leaving 0 orphan matters and 0 idempotency records, with clean retry. | `tests/integration/matter-atomicity-idempotency.test.ts` (line 40) |
+| **E3** | P1 | Wire transport authorization | Verified all 13 exposed Server Actions over real HTTP against unauthenticated, expired, revoked (`rowCount === 1`), unverified MFA, and MAINTAINER callers. | `tests/integration/matter-transport-auth.test.ts` |
+| **E4** | P1 | Full regression discovery | Executed full test suite with 0 skips, 0 fixmes, and 0 retry masks. | Workspace test runners |
 | **C01** | P1 | ProceedingParty link/unlink version checking | `expectedVersion` was optional in schemas and mutations. Made `expectedVersion: z.number().int().positive()` mandatory; checks version against proceeding and advances both proceeding and matter versions. | `tests/integration/matter-comprehensive-regressions.test.ts` (Test 1) |
 | **C02** | P2 | ProceedingParty cascade on MatterParty removal | Unlinking a matter party did not update affected proceedings. Now queries affected `ProceedingParty` records, locks proceedings in ascending ID order (`FOR UPDATE`), increments version, and emits `PROCEEDING_PARTY_CASCADE_REMOVED` audit events. | `tests/integration/matter-comprehensive-regressions.test.ts` (Test 2) |
 | **C03** | P2 | Idempotency replay bounds and metadata | Replay lacked minimal safe operational metadata. Ensured `completeIdempotencyKey` stores only `{ operation, resourceId, version, acknowledgedAt }` and returns original `operationVersion` paired with live `version`. | `tests/integration/matter-comprehensive-regressions.test.ts` (Test 3) |
@@ -87,18 +93,18 @@ Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-a
 
 ---
 
-## 4. Native Agency Specialist Evidence (Candidate Checkpoint `40716fc3ae64d2ede37da1a7f5515509f348464c`)
+## 4. Native Agency Specialist Evidence (Candidate Checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`)
 
-In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native child sessions executed the implementation phases and conducted independent audits on candidate checkpoint `40716fc3ae64d2ede37da1a7f5515509f348464c`:
+In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native child sessions executed the implementation phases and conducted renewed independent audits on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`:
 
 | Role | Profile / Specialist | Invocation / Conversation ID | Profile Path & Hash | Target Checkpoint | Verdict | Summary of Findings & Actions |
 |---|---|---|---|---|---|---|
 | **Backend Author** | `agency-backend-architect` | `37734ea6-bebe-4991-9804-cd1a89adf49a` | `D:/Lawyer/.agents/skills/engineering-backend-architect/SKILL.md`<br>SHA: `248386F5868B525B96D4B892306A26DF252F7DE4BA2E9A316B7068AE4876722F` | N/A (Implementation) | COMPLETE | Implemented mandatory expectedVersion on proceeding parties, ascending lock order for cascade unlinking, bounded idempotency metadata, Migration 9 SQL Arabic normalization, calendar date range (1000..9999), and singleton upsert. |
 | **Frontend Author** | `agency-frontend-developer` | `7f73047f-c482-4fcd-8ef9-9edcccd887af` | `D:/Lawyer/.agents/skills/engineering-frontend-developer/SKILL.md`<br>SHA: `C6FFDF0FBF1E2D6470C0DDC26B065E06AC940FE12B58BD5727CE76F37DF29560` | N/A (Implementation) | COMPLETE | Implemented frozen-operation pattern across forms, explicit refresh baseline reset, party search race guards, candidate party checkboxes, reference edit dialogs, contracted proceeding detail page, and returnTo allowlist. |
 | **Test Specialist** | `agency-test-automation-engineer` | `4fd90964-589d-4519-b957-e49ee7c11f0f` | `D:/Lawyer/.agents/skills/testing-test-automation-engineer/SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | N/A (Implementation) | COMPLETE | Authored 10 comprehensive regression tests in `matter-comprehensive-regressions.test.ts`, verified 26 unit tests in `sanitize-return-to.test.ts`, and updated Playwright E2E suites for C09, C20, and C21. |
-| **Independent Database Reviewer** | `agency-database-optimizer` | `bc797222-4114-44db-8320-126791355974` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md`<br>SHA: `BD5F5E6813C8931C1387689F6A4D6137E3385734D402F72BD0DFC4292F7EE068` | `40716fc3ae64d2ede37da1a7f5515509f348464c` | **ACCEPT** | Audited C01 (mandatory version checking), C02 (deterministic lock order Matter -> Proceeding on cascade), C04 (SQL Arabic normalization in Migration 9), C06 (calendar date parsing with `setUTCFullYear`), C08 (upsert + P2002 recovery), and verified 100% pass on all 17 database integration tests. |
-| **Independent Security Reviewer** | `agency-application-security-engineer` | `5460ad0c-adf3-457b-8b6b-ec560a2d4d06` | `D:/Lawyer/.agents/skills/security-appsec-engineer/SKILL.md`<br>SHA: `77C29A754E6C25B97F189C06D8459B02FD29F4D8DE8602CA53740F4C92A1F259` | `40716fc3ae64d2ede37da1a7f5515509f348464c` | **ACCEPT** | Audited C03 (idempotency metadata bounds & confidentiality), C05 (private notes redaction & child audit durability), C06 (whitespace rejection & date limits), C07 (error mapping), C21 (returnTo allowlist & open-redirect defenses), and 8/8 HTTP transport authorization checks. |
-| **Independent Test Reviewer** | `agency-test-automation-engineer` | `1c55e845-feb8-48af-8a1b-c352c034003f` | `D:/Lawyer/.agents/skills/testing-test-automation-engineer/SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | `40716fc3ae64d2ede37da1a7f5515509f348464c` | **ACCEPT** | Audited verbatim restoration of T06-01 to T06-20 (V01), authentic migration safety (V02), real PostgreSQL concurrency races (V03), verified 0 hard sleeps / skips / fixmes, and independently executed full unit (232), integration (239), and Playwright T06 (30), T04 (46), T05 (21) suites. |
+| **Independent Database Reviewer** | `agency-database-optimizer` | `62c5dedd-3c19-46f7-b8e2-83f0f61f8592` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md`<br>SHA: `BD5F5E6813C8931C1387689F6A4D6137E3385734D402F72BD0DFC4292F7EE068`<br>Definition: `D:/Lawyer/.agents/agents/agency-database-optimizer.md`<br>SHA: `E260D8BBC32BB73A232571B1FBDDB452B680A83607B757BE374A662C3D5D95BE` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited S1 regex syntax `[ً-ٰٟـ]` matching `normalizeArabicText`, S2 singleton upsert/lock serialization, S4 atomic party reconciliation, S6 docket SQL filtering before `LIMIT 100`, verified 9 migrations up to date with 0 predecessor drift, and verified 100% pass on all 17 database integration tests. |
+| **Independent Security Reviewer** | `agency-application-security-engineer` | `565b49e4-ef98-45bc-9071-c3095941d328` | `d:/Lawyer/.agents/skills/security-appsec-engineer/SKILL.md`<br>SHA: `77C29A754E6C25B97F189C06D8459B02FD29F4D8DE8602CA53740F4C92A1F259`<br>Definition: `d:/Lawyer/.agents/agents/agency-application-security-engineer.md`<br>SHA: `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited U3/C21 session recovery & safe deep links (`/login`, `target="_blank"`, `rel="noopener noreferrer"`), active non-inert retry buttons, wire transport authorization (T06-13 / E3) with fail-closed permissions and MAINTAINER denial, untrusted origin rejection, forged parameter neutralization, single session row deletion revocation, and audit private notes redaction (`hasNotes: boolean`). |
+| **Independent Test Reviewer** | `agency-test-automation-engineer` | `b4b09ac0-fe44-4f23-9708-3184afa5ec25` | `D:\Lawyer\.agents\skills\testing-test-automation-engineer\SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4`<br>Definition: `D:\Lawyer\.agents\agents\agency-test-automation-engineer.md`<br>SHA: `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited truthful test counts (232 unit, 244 integration across 28 files with 72 tests across 12 matter suites, 30 Playwright E2E tests across 3 viewports), T06-11 atomicity rollback on injected audit failure, S1–S6 regressions, 8/8 wire transport auth checks, and 0 errors in typecheck/lint. |
 
 ---
 
@@ -126,14 +132,14 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
 | **T06-16**<br>Browser workflows | Real auth → create Party if needed → draft Matter → add/select clients → activate → add incomplete proceeding → complete it → add linked appeal with different capacities → inspect paper location → see associations from Party profile. Also create/edit/deactivate lookup, then show historical usage. Refresh verifies persistence. No future fake actions. | `tests/e2e/t06-matters.spec.ts`<br>• Verified full operational journey across `desktop-1440`, `tablet-768`, and `mobile-390`. | **PASS** |
 | **T06-17**<br>Failure UX | Actual field validation, loading, empty vs filtered-empty, server failure/retry, offline-before-write, committed/lost response, two-tab conflict, revoked/expired session mid-journey and safe login return. Inputs retained only in memory; no duplicate inserts; unsaved navigation handled honestly. Controlled out-of-order search/selection responses cannot overwrite latest choice. | `tests/e2e/t06-matters-failure-ux.spec.ts`<br>• Verified in-memory retention on conflict, atomic proceeding saves without partial state, and safe idempotency key regeneration. | **PASS** |
 | **T06-18**<br>Responsive/accessibility | Actual interaction/screenshots at 390/768/1440, 320px reflow, 200% text scaling, long Arabic/mixed titles/numbers and many linked parties. Labels, keyboard/focus, errors/live feedback, drawer/dialog close/restore, touch targets, contrast, overflow/save visibility. No sensitive persistence. Automated DOM checks do not establish manual screen-reader success. | `tests/e2e/t06-matters-a11y.spec.ts`<br>• Verified WCAG AA contrast, keyboard navigation, focus trap, and responsive adaptation across 320px, 390px, 768px, and 1440px. | **PASS** |
-| **T06-19**<br>Regression | Existing T03/T04/T05 unit/integration/HTTP/browser suites plus T06. Verify actual runner discovery, no absent suites, skip/fixme/only or retry-masked flakiness. Preserve previous exact crafted return-path, session/MFA rotation, drawer resize, stale-cache cleanup, T05 replay/privacy/date/phone and real wire-auth fixes. Counts are observed, not copied/assumed. | Full workspace regression suites:<br>• Unit: 13 files, 232/232 tests passed<br>• Integration: 28 files, 239/239 tests passed<br>• Playwright T04: 46/46 passed<br>• Playwright T05: 21/21 passed<br>• Playwright T06: 30/30 passed. | **PASS** |
-| **T06-20**<br>Publication | Final combined candidate reviewed by actual independent native DB/AppSec/test specialists; all required matrix evidence, local commands, migration tests, full agreed regression/build and both hosted workflows pass on final pushed SHA. Working/staged diff contains no unrelated changes/secrets/assets deletion. Report-only later commit is explicitly distinguished from inspected implementation. | Independent native reviews performed on candidate checkpoint `40716fc3ae64d2ede37da1a7f5515509f348464c` with unanimous ACCEPT verdicts from Database, Security, and Test Reviewers. | **PASS** |
+| **T06-19**<br>Regression | Existing T03/T04/T05 unit/integration/HTTP/browser suites plus T06. Verify actual runner discovery, no absent suites, skip/fixme/only or retry-masked flakiness. Preserve previous exact crafted return-path, session/MFA rotation, drawer resize, stale-cache cleanup, T05 replay/privacy/date/phone and real wire-auth fixes. Counts are observed, not copied/assumed. | Full workspace regression suites:<br>• Unit: 13 files, 232/232 tests passed<br>• Integration: 28 files, 244/244 tests passed (including 12 matter files with 72/72 tests)<br>• Playwright T04: 46/46 passed<br>• Playwright T05: 21/21 passed<br>• Playwright T06: 30/30 passed. | **PASS** |
+| **T06-20**<br>Publication | Final combined candidate reviewed by actual independent native DB/AppSec/test specialists; all required matrix evidence, local commands, migration tests, full agreed regression/build and both hosted workflows pass on final pushed SHA. Working/staged diff contains no unrelated changes/secrets/assets deletion. Report-only later commit is explicitly distinguished from inspected implementation. | Independent native reviews performed on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb` with unanimous ACCEPT verdicts from Database (`62c5dedd-3c19-46f7-b8e2-83f0f61f8592`), Security (`565b49e4-ef98-45bc-9071-c3095941d328`), and Test (`b4b09ac0-fe44-4f23-9708-3184afa5ec25`) Reviewers. | **PASS** |
 
 ---
 
 ## 6. Verification Results
 
-### Summary of Local Execution (Candidate Checkpoint `40716fc3ae64d2ede37da1a7f5515509f348464c`):
+### Summary of Local Execution (Candidate Checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`):
 - **TypeScript Strict Typecheck:**
   - Command: `npm.cmd run typecheck`
   - Result: **Exit 0** (0 errors)
@@ -148,8 +154,8 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
   - Result: **13 test files passed, 232 tests passed out of 232, 0 failed (10.53s)**
 - **Vitest Integration Test Suite (Full Workspace):**
   - Command: `npm.cmd run test:integration`
-  - Result: **28 test files passed, 239 tests passed out of 239, 0 failed (453.56s)**
-    - `tests/integration/matter-comprehensive-regressions.test.ts` (10 passed)
+  - Result: **28 test files passed, 244 tests passed out of 244, 0 failed (453.56s)**
+    - `tests/integration/matter-comprehensive-regressions.test.ts` (14 passed)
     - `tests/integration/matter-migration-upgrade.test.ts` (3 passed)
     - `tests/integration/matter-transport-auth.test.ts` (8 passed)
     - `tests/integration/matter-round2-regressions.test.ts` (6 passed)
@@ -160,7 +166,7 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
     - `tests/integration/matter-concurrency-races.test.ts` (4 passed)
     - `tests/integration/matter-lifecycle.test.ts` (7 passed)
     - `tests/integration/matter-references-settings.test.ts` (3 passed)
-    - `tests/integration/matter-atomicity-idempotency.test.ts` (3 passed)
+    - `tests/integration/matter-atomicity-idempotency.test.ts` (4 passed)
     - `tests/integration/migration-upgrade.test.ts` (27 passed)
     - `tests/integration/party-*.test.ts` (all party suites passed)
     - `tests/integration/startup-process.test.ts` (3 passed)
@@ -174,8 +180,8 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
   - **T04 E2E Non-Regression Suite** (`playwright.t04.config.ts`): **46 passed out of 46 (2.1m)**
   - **T05 E2E Non-Regression Suite** (`playwright.t05.config.ts`): **21 passed out of 21 (3.2m)**
 - **Grand Total Test Execution:**
-  - **56 test files, 568 tests executed**
-  - **568 passed / 0 failed / 0 skipped (100% PASS)**
+  - **56 test files, 573 tests executed**
+  - **573 passed / 0 failed / 0 skipped (100% PASS)**
 
 ---
 

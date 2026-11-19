@@ -37,9 +37,9 @@ enum MatterKind {
 enum MatterStatus {
   DRAFT         // مسودة قيد الفتح
   ACTIVE        // نشط وساري
-  SUSPENDED     // موقوف مؤقتاً
+  ON_HOLD       // معلق / موقوف مؤقتاً
   CLOSED        // منتهي ومغلق
-  // ARCHIVED is deferred to T07
+  ARCHIVED      // مؤرشف
 }
 
 enum MatterPartyRole {
@@ -58,9 +58,9 @@ enum ProceedingInstance {
 enum ProceedingStatus {
   DRAFT             // مسودة قيد لم يقيد بعد بالمحكمة
   ACTIVE            // متداول ومتصل بالجلسات
-  JUDGMENT_ISSUED   // صدر فيه حكم
-  SUSPENDED         // موقوف
-  CLOSED            // منتهي
+  AWAITING_JUDGMENT // محجوز للحكم
+  DECIDED           // صدر فيه حكم
+  CLOSED            // منتهي ومغلق
 }
 
 enum ProceedingLegalCapacity {
