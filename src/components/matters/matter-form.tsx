@@ -37,6 +37,7 @@ interface MatterFormProps {
   practiceAreas: OptionItem[];
   storageLocations: OptionItem[];
   parties?: ClientOptionItem[];
+  lookupError?: boolean;
 }
 
 export function MatterForm({
@@ -44,6 +45,7 @@ export function MatterForm({
   practiceAreas,
   storageLocations,
   parties = [],
+  lookupError,
 }: MatterFormProps) {
   const router = useRouter();
   const isEdit = Boolean(initialMatter);
@@ -235,13 +237,16 @@ export function MatterForm({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           // Outcome is uncertain: keep the frozen key/payload and never rotate.
           setOperationPending(true);
           setGeneralError(
-            res.error ||
-              'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية الأصلية مجمّدة؛ أعد المحاولة أو ابدأ تعديلاً جديداً بعد التحقق من النتيجة.'
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error ||
+                'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية الأصلية مجمّدة؛ أعد المحاولة أو ابدأ تعديلاً جديداً بعد التحقق من النتيجة.'
           );
         } else {
           // Definitive validation rejection: the transaction rolled back.
@@ -273,6 +278,11 @@ export function MatterForm({
   };
 
   const handleStartNewEdit = () => {
+    // P1/U1: Block dropping an unconfirmed creation to prevent duplicate row creation
+    if (!isEdit && operationPending) {
+      setGeneralError('يلزم التحقق من نتيجة إنشاء الملف الأصلي أو إعادة المحاولة لتفادي تكرار الإنشاء قبل بدء عملية جديدة.');
+      return;
+    }
     pendingOperationRef.current = null;
     setOperationPending(false);
     setSessionExpired(false);
@@ -292,18 +302,41 @@ export function MatterForm({
   }, [isDirty, isSaving]);
 
   const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (isDirty && !window.confirm('لديك تغييرات غير محفوظة. هل تريد المغادرة وفقدانها؟')) {
+    if ((isDirty || operationPending) && !window.confirm('لديك تغييرات غير محفوظة أو عملية قيد الانتظار. هل تريد المغادرة وفقدانها؟')) {
       event.preventDefault();
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
+      {/* Lookup read failure alert (U8) */}
+      {lookupError && (
+        <div
+          role="alert"
+          data-testid="lookup-read-error-banner"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>⚠️</span>
+            <span>تعذر تحميل بعض البيانات المرجعية بالكامل</span>
+          </div>
+          <p className="leading-relaxed">
+            حدث خطأ أثناء استرجاع دوائر التخصص أو أماكن الحفظ من الخادم. يمكنك إعادة تحميل الصفحة.
+          </p>
+          <Link
+            href={isEdit && initialMatter ? `/matters/${initialMatter.id}/edit` : '/matters/new'}
+            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+          >
+            إعادة تحميل الصفحة
+          </Link>
+        </div>
+      )}
+
       {/* Header */}
       <div className="pb-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1">
-            <Link href="/matters" className="hover:text-[#14566B] hover:underline">
+            <Link href="/matters" onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
               ملفات القضايا
             </Link>
             <span aria-hidden="true" className="mx-1.5">/</span>

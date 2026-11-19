@@ -2570,7 +2570,7 @@ export async function searchMatters(
           include: { powerOfAttorney: { include: { party: true } } },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: params.limit ?? 50,
       skip: params.offset ?? 0,
     }),
@@ -2619,7 +2619,7 @@ export async function getPartyMatterAssociations(
       include: {
         matter: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
       skip: offset,
     }),
@@ -2680,6 +2680,12 @@ export async function findSimilarProceedings(
     ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
     : Prisma.empty;
 
+  // S6: prioritize exact year match in SQL before LIMIT 100 so older exact matches
+  // are never hidden by 100+ newer entries in the same court with the same number but different years.
+  const yearPriorityClause = normYear
+    ? Prisma.sql`CASE WHEN trim(translate(COALESCE(p."yearLabel", ''), '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normYear} THEN 0 ELSE 1 END ASC,`
+    : Prisma.empty;
+
   const proceedings = await prisma.$queryRaw<Array<{
     id: string;
     matterId: string;
@@ -2702,7 +2708,9 @@ export async function findSimilarProceedings(
       AND p."numberText" IS NOT NULL
       AND trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber}
       ${excludeClause}
-    ORDER BY p."createdAt" DESC
+    ORDER BY
+      ${yearPriorityClause}
+      p."createdAt" DESC
     LIMIT 100
   `;
 

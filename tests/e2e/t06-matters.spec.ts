@@ -234,6 +234,13 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
       await addPartyBtns.first().click();
     }
 
+    // Explicitly select legal capacities for included parties (U2 / C12)
+    const capacitySelects = page.locator('[data-testid^="capacity-select-"]');
+    await capacitySelects.nth(0).selectOption('PLAINTIFF');
+    if ((await capacitySelects.count()) > 1) {
+      await capacitySelects.nth(1).selectOption('DEFENDANT');
+    }
+
     await page.locator('[data-testid^="capacity-text-"]').first().fill('المدعي الأصلي');
     await page.getByTestId('proceeding-submit-button').click();
 

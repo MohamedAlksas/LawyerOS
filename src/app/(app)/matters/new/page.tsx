@@ -32,11 +32,23 @@ export default async function NewMatterPage() {
     throw error;
   }
 
-  const [practiceAreas, storageLocations, partiesResult] = await Promise.all([
-    listReferenceItems('PRACTICE_AREA', false, actor).catch(() => []),
-    listReferenceItems('STORAGE_LOCATION', false, actor).catch(() => []),
-    searchParties(actor, { limit: 50 }).catch(() => ({ parties: [] })),
-  ]);
+  let practiceAreas: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let storageLocations: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let partiesResult: Awaited<ReturnType<typeof searchParties>> = { parties: [], totalCount: 0, page: 1, totalPages: 0 };
+  let lookupError = false;
+
+  try {
+    const [paRes, slRes, pRes] = await Promise.all([
+      listReferenceItems('PRACTICE_AREA', false, actor),
+      listReferenceItems('STORAGE_LOCATION', false, actor),
+      searchParties(actor, { limit: 50 }),
+    ]);
+    practiceAreas = paRes;
+    storageLocations = slRes;
+    partiesResult = pRes;
+  } catch {
+    lookupError = true;
+  }
 
   return (
     <div className="py-2">
@@ -48,6 +60,7 @@ export default async function NewMatterPage() {
           name: p.name,
           primaryPhone: p.primaryPhone,
         }))}
+        lookupError={lookupError}
       />
     </div>
   );

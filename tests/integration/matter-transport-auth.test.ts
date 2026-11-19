@@ -362,13 +362,26 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       }
     }
 
-    expect(actionIds.openMatterAction).toBeDefined();
-    expect(actionIds.updateMatterAction).toBeDefined();
-    expect(actionIds.addProceedingAction).toBeDefined();
-    expect(actionIds.updateProceedingAction).toBeDefined();
-    expect(actionIds.linkMatterAuthorizationAction).toBeDefined();
-    expect(actionIds.updateOfficeSettingsAction).toBeDefined();
-    expect(actionIds.createReferenceItemAction).toBeDefined();
+    const requiredActionNames = [
+      'searchMattersAction',
+      'openMatterAction',
+      'updateMatterAction',
+      'linkMatterPartyAction',
+      'updateMatterPartyAction',
+      'unlinkMatterPartyAction',
+      'addProceedingAction',
+      'updateProceedingAction',
+      'linkMatterAuthorizationAction',
+      'unlinkMatterAuthorizationAction',
+      'createReferenceItemAction',
+      'updateReferenceItemAction',
+      'updateOfficeSettingsAction',
+      'getPartyMatterAssociationsAction',
+      'findSimilarProceedingsAction',
+    ];
+    for (const name of requiredActionNames) {
+      expect(actionIds[name], `Missing actionId for ${name}`).toBeDefined();
+    }
 
     // 5. Allocate port and start production Next.js server
     serverPort = await getFreeLoopbackPort();
@@ -638,26 +651,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-updproc-${crypto.randomUUID()}`,
         }],
       },
-      // 5. Proceeding-Party Relationships (if exported in manifest)
-      {
-        name: 'linkProceedingPartyAction',
-        args: [{
-          proceedingId: existingProcId,
-          matterPartyId: existingMatterPartyId,
-          capacityText: 'مدعي بالحق المدني',
-          idempotencyKey: `unauth-lpp-${crypto.randomUUID()}`,
-        }],
-      },
-      {
-        name: 'unlinkProceedingPartyAction',
-        args: [{
-          id: existingProcPartyId,
-          proceedingId: existingProcId,
-          expectedVersion: 1,
-          idempotencyKey: `unauth-unpp-${crypto.randomUUID()}`,
-        }],
-      },
-      // 6. Matter Authorizations (POA)
+      // 5. Matter Authorizations (POA)
       {
         name: 'linkMatterAuthorizationAction',
         args: [{
@@ -675,7 +669,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-unma-${crypto.randomUUID()}`,
         }],
       },
-      // 7. Reference Settings & Office Profile
+      // 6. Reference Settings & Office Profile
       {
         name: 'createReferenceItemAction',
         args: [{
@@ -702,15 +696,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           idempotencyKey: `unauth-set-${crypto.randomUUID()}`,
         }],
       },
-      // 8. Direct Reads & Queries
-      {
-        name: 'getMatterAction',
-        args: [existingMatterId],
-      },
-      {
-        name: 'getOfficeSettingsAction',
-        args: [],
-      },
+      // 7. Direct Reads & Queries
       {
         name: 'getPartyMatterAssociationsAction',
         args: [{
@@ -728,8 +714,12 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     ];
 
     // Filter strictly to exposed Server Actions in the built client manifest
+    for (const item of candidates) {
+      expect(actionIds[item.name]).toBeDefined();
+    }
     const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
-    expect(exposed.length).toBeGreaterThanOrEqual(10);
+    expect(exposed.length).toBe(15);
+    expect(exposed.length).toBe(candidates.length);
     return exposed;
   }
 
@@ -745,6 +735,25 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         } else {
           expect([401, 403]).toContain(res.status);
         }
+      }
+
+      // Verify no denied writes, audit events, or idempotency keys were persisted
+      const unauthMatters = await dedicatedPool.query('SELECT count(*) FROM "matter" WHERE title LIKE $1', ['%غير مصرح%']);
+      expect(Number(unauthMatters.rows[0].count)).toBe(0);
+
+      const unauthIdemp = await dedicatedPool.query('SELECT count(*) FROM "idempotency_record" WHERE "key" LIKE $1', ['unauth-%']);
+      expect(Number(unauthIdemp.rows[0].count)).toBe(0);
+
+      const unauthAudit = await dedicatedPool.query('SELECT count(*) FROM "audit_event" WHERE "action" IN (\'OPEN_MATTER\', \'UPDATE_MATTER\', \'ADD_PROCEEDING\', \'UPDATE_OFFICE_SETTINGS\')');
+      expect(Number(unauthAudit.rows[0].count)).toBe(0);
+
+      // Verify privacy sentinels and protected page reads
+      const protectedPages = ['/matters', '/settings/reference', `/matters/${existingMatterId}`];
+      for (const p of protectedPages) {
+        const pageRes = await makeRequest(serverPort, { path: p });
+        expect([302, 303, 307, 308, 401, 403]).toContain(pageRes.status);
+        expect(pageRes.body).not.toContain('01099998888');
+        expect(pageRes.body).not.toContain('موكل نقل القضايا');
       }
     });
   });
@@ -810,6 +819,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect([403]).toContain(res.status);
         }
       }
+
+      // Verify no maintainer writes or idempotency records were stored
+      const maintMatters = await dedicatedPool.query('SELECT count(*) FROM "matter" WHERE title LIKE $1', ['%غير مصرح%']);
+      expect(Number(maintMatters.rows[0].count)).toBe(0);
+
+      // Verify protected page reads for MAINTAINER
+      const maintPageRes = await makeRequest(serverPort, {
+        path: '/matters',
+        headers: { Cookie: maintainerSessionCookie },
+      });
+      // Page either renders access-denied/empty state or redirects/forbids
+      expect([200, 302, 303, 307, 308, 403]).toContain(maintPageRes.status);
+      expect(maintPageRes.body).not.toContain('01099998888');
+      expect(maintPageRes.body).not.toContain('موكل نقل القضايا');
     });
   });
 
@@ -840,9 +863,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('FORBIDDEN');
         } else {
+          // Next.js framework Server Action CSRF protection surfaces mismatched Origin as 500 or 400
           expect([400, 403, 500]).toContain(res.status);
         }
       }
+
+      // Assert no denied writes, idempotency records, or audit logs were created
+      const countRes = await dedicatedPool.query('SELECT count(*)::int FROM matter WHERE title = $1', ['محاولة من أصل غير موثوق']);
+      expect(countRes.rows[0].count).toBe(0);
+
+      const idempRes = await dedicatedPool.query('SELECT count(*)::int FROM idempotency_record WHERE "key" LIKE $1', ['bad-origin-%']);
+      expect(idempRes.rows[0].count).toBe(0);
+
+      const auditRes = await dedicatedPool.query('SELECT count(*)::int FROM audit_event WHERE action = $1', ['OPEN_MATTER']);
+      expect(auditRes.rows[0].count).toBe(0);
     });
   });
 
@@ -925,6 +959,14 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(setRes.status).toBe(200);
       expect(setRes.body).toContain('"success":true');
       expect(setRes.body).toContain('مكتب المحاماة الرئيسي المتكامل');
+
+      // 4. Read protected page with verified owner session
+      const ownerPageRes = await makeRequest(serverPort, {
+        path: '/matters',
+        headers: { Cookie: verifiedSessionCookie },
+      });
+      expect(ownerPageRes.status).toBe(200);
+      expect(ownerPageRes.body).toContain('قضية النقل الشبكي الناجحة');
     });
   });
 });

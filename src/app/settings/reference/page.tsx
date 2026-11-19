@@ -34,12 +34,25 @@ export default async function ReferenceSettingsPage() {
     throw error;
   }
 
-  const [officeSettings, courts, practiceAreas, storageLocations] = await Promise.all([
-    getOfficeSettings(actor),
-    listReferenceItems('COURT', true, actor).catch(() => []),
-    listReferenceItems('PRACTICE_AREA', true, actor).catch(() => []),
-    listReferenceItems('STORAGE_LOCATION', true, actor).catch(() => []),
-  ]);
+  const officeSettings = await getOfficeSettings(actor);
+
+  let courts: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let practiceAreas: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let storageLocations: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let initialLookupError = false;
+
+  try {
+    const [cRes, paRes, slRes] = await Promise.all([
+      listReferenceItems('COURT', true, actor),
+      listReferenceItems('PRACTICE_AREA', true, actor),
+      listReferenceItems('STORAGE_LOCATION', true, actor),
+    ]);
+    courts = cRes;
+    practiceAreas = paRes;
+    storageLocations = slRes;
+  } catch {
+    initialLookupError = true;
+  }
 
   return (
     <div className="py-2">
@@ -48,6 +61,7 @@ export default async function ReferenceSettingsPage() {
         initialCourts={courts}
         initialPracticeAreas={practiceAreas}
         initialStorageLocations={storageLocations}
+        initialLookupError={initialLookupError}
       />
     </div>
   );

@@ -259,6 +259,33 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // User inputs are still intact after dismiss
     await expect(page.getByTestId('proceeding-number-input')).toHaveValue('9988');
     await expect(page.getByTestId(`capacity-text-${matterPartyId}`)).toHaveValue('المدعي بالحق المدني المعدل');
+
+    // 13. Recover from conflict by reloading latest snapshot and reapplying edits
+    await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}/edit`);
+    await page.waitForLoadState('networkidle');
+
+    // Adopted latest background circuit
+    await expect(page.getByTestId('proceeding-circuit-input')).toHaveValue('دائرة معدلة في الخلفية');
+
+    // Reapply user edits with fresh expectedVersion (now 2)
+    await page.getByTestId('proceeding-number-input').fill('9988');
+    await page.getByTestId(`capacity-text-${matterPartyId}`).fill('المدعي بالحق المدني المعدل');
+
+    // Submit form with updated expectedVersion
+    await page.getByTestId('proceeding-submit-button').click();
+
+    // Verify submission succeeds and redirects to matter/proceeding detail
+    await page.waitForURL((url) => url.pathname === `/matters/${matter.id}`);
+    expect(page.url()).toContain(`/matters/${matter.id}`);
+
+    // Verify persisted outcomes in DB: proceeding row has updated number and version 3
+    const dbProcFinal = await prisma.proceeding.findUnique({
+      where: { id: proceeding.id },
+      include: { parties: true },
+    });
+    expect(dbProcFinal?.numberText).toBe('9988');
+    expect(dbProcFinal?.version).toBe(3);
+    expect(dbProcFinal?.parties[0].capacityText).toBe('المدعي بالحق المدني المعدل');
   });
 
   test('signed-out deep link preserves returnTo and settles on destination matter after login and MFA (C21) @matters', async ({
@@ -406,6 +433,140 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await expect(loginLink).toBeVisible();
     await expect(loginLink).toHaveAttribute('href', '/login');
     await expect(loginLink).toHaveAttribute('target', '_blank');
+
+    // 8. Open login in new tab/page within same context to renew session via login & MFA
+    const loginPage = await page.context().newPage();
+    await signInWithTotp(loginPage, owner);
+    await loginPage.close();
+
+    // 9. Return to original page with frozen form and click session recovery retry button
+    const retryBtn = page.getByTestId('session-recovery-retry-button');
+    await expect(retryBtn).toBeVisible();
+    await retryBtn.click();
+
+    // 10. Verify submission completes successfully and navigates to the newly created matter
+    await page.waitForURL((url) => url.pathname.startsWith('/matters/') && url.pathname !== '/matters/new');
+    const newMatterId = new URL(page.url()).pathname.split('/').pop()!;
+    createdMatterIds.push(newMatterId);
+
+    // 11. Assert persisted matter in DB matches the in-memory preserved values
+    const createdMatter = await prisma.matter.findUnique({
+      where: { id: newMatterId },
+    });
+    expect(createdMatter).not.toBeNull();
+    expect(createdMatter?.title).toBe(testTitle);
+    expect(createdMatter?.createdById).toBe(owner.id);
+  });
+
+  test('recovers from transport-uncertain save via retry without creating duplicate records @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+
+    // 1. Navigate to matter create form
+    await page.goto('/matters/new');
+    await expect(page).toHaveURL(/\/matters\/new/);
+
+    const uniqueTitle = `دعوى التحقق من عدم التكرار ${Date.now()}`;
+    await page.getByTestId('matter-title-input').fill(uniqueTitle);
+
+    // 2. Intercept the first POST action request to simulate lost response (abort once)
+    let interceptedOnce = false;
+    await page.route('**/matters**', async (route) => {
+      if (route.request().method() === 'POST' && !interceptedOnce) {
+        interceptedOnce = true;
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+
+    // 3. Click submit
+    await page.getByTestId('matter-submit-button').click();
+
+    // 4. Verify operation pending / uncertain banner appears with retry button
+    const pendingBanner = page.getByTestId('operation-pending-banner');
+    await expect(pendingBanner).toBeVisible();
+
+    // 5. Unroute so retry goes through cleanly
+    await page.unroute('**/matters**');
+
+    // 6. Click retry original operation
+    const retryBtn = page.getByTestId('operation-retry-button');
+    await expect(retryBtn).toBeVisible();
+    await retryBtn.click();
+
+    // 7. Verify navigation settles on created matter
+    await page.waitForURL((url) => url.pathname.startsWith('/matters/') && url.pathname !== '/matters/new');
+    const createdId = new URL(page.url()).pathname.split('/').pop()!;
+    createdMatterIds.push(createdId);
+
+    // 8. Verify exactly ONE matter row was created in DB for this title (no duplicate records)
+    const matchingMatters = await prisma.matter.findMany({
+      where: { title: uniqueTitle },
+    });
+    expect(matchingMatters).toHaveLength(1);
+    expect(matchingMatters[0].id).toBe(createdId);
+  });
+
+  test('enforces focus trap and keyboard navigation inside reference edit modal (C23) @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    // Create a court to edit
+    const court = await prisma.court.create({
+      data: {
+        name: 'محكمة استئناف القاهرة الجديدة التجريبية',
+        code: 'CRT-CAIRO-E2E',
+        isActive: true,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdCourtIds.push(court.id);
+
+    // 1. Navigate to reference settings
+    await page.goto('/settings/reference');
+    await expect(page).toHaveURL(/\/settings\/reference/);
+
+    // 2. Click courts tab
+    await page.getByTestId('tab-courts').click();
+
+    // 3. Open Edit modal for the court
+    const editBtn = page.getByTestId(`edit-reference-item-${court.id}`);
+    await expect(editBtn).toBeVisible();
+    await editBtn.click();
+
+    const modal = page.getByRole('dialog');
+    await expect(modal).toBeVisible();
+
+    // Verify initial focus is trapped inside modal on name input
+    const nameInput = page.getByTestId('edit-reference-item-name-input');
+    await expect(nameInput).toBeFocused();
+
+    // Press Escape when unmodified closes modal cleanly
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+
+    // Re-open modal and type
+    await editBtn.click();
+    await expect(modal).toBeVisible();
+    await expect(nameInput).toBeFocused();
+    await nameInput.fill('محكمة استئناف القاهرة الجديدة المعدلة');
+
+    // Tab through interactive elements and verify focus remains within modal
+    await page.keyboard.press('Tab');
+    const codeInput = page.getByTestId('edit-reference-item-code-input');
+    await expect(codeInput).toBeFocused();
+
+    // Close via cancel button (confirm discard of unsaved changes)
+    page.once('dialog', (d) => d.accept());
+    const cancelBtn = modal.getByRole('button', { name: 'إلغاء' });
+    await cancelBtn.click();
+    await expect(modal).toBeHidden();
   });
 });
 

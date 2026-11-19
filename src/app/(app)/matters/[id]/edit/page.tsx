@@ -79,10 +79,20 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
     throw error;
   }
 
-  const [practiceAreas, storageLocations] = await Promise.all([
-    listReferenceItems('PRACTICE_AREA', true, actor).catch(() => []),
-    listReferenceItems('STORAGE_LOCATION', true, actor).catch(() => []),
-  ]);
+  let practiceAreas: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let storageLocations: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let lookupError = false;
+
+  try {
+    const [paRes, slRes] = await Promise.all([
+      listReferenceItems('PRACTICE_AREA', true, actor),
+      listReferenceItems('STORAGE_LOCATION', true, actor),
+    ]);
+    practiceAreas = paRes;
+    storageLocations = slRes;
+  } catch {
+    lookupError = true;
+  }
 
   return (
     <div className="py-2">
@@ -90,6 +100,7 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
         initialMatter={matter}
         practiceAreas={practiceAreas.map((pa) => ({ id: pa.id, name: pa.name, isActive: pa.isActive }))}
         storageLocations={storageLocations.map((sl) => ({ id: sl.id, name: sl.name, isActive: sl.isActive }))}
+        lookupError={lookupError}
       />
     </div>
   );

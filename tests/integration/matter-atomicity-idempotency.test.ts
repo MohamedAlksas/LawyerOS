@@ -6,7 +6,12 @@ import {
   openMatter,
   getMatter,
   searchMatters,
+  addProceeding,
 } from '@/modules/matters/matter-service';
+import {
+  getOfficeSettings,
+  updateOfficeSettings,
+} from '@/modules/settings/reference-service';
 import {
   createSyntheticActor,
   createSyntheticMaintainer,
@@ -88,6 +93,123 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
     // 5. Immutability: application exposes no update/delete audit endpoints; audit records are immutable
     const countBefore = await prisma.auditEvent.count({ where: { entityId: retryRes.matter.id } });
     expect(countBefore).toBeGreaterThan(0);
+  });
+
+  it('T06-11b: injects audit failure inside addProceeding transaction: rolls back child proceeding and preserves parent', async () => {
+    // 1. Create a parent matter
+    const m = await openMatter(owner, {
+      title: 'ملف لاختبار التراجع الذري للقيود الفرعية',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-parent-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+
+    // 2. Create a court
+    const court = await prisma.court.create({
+      data: {
+        name: `محكمة التراجع ${crypto.randomUUID().slice(0, 6)}`,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+
+    const procKey = `proc-atom-fail-${crypto.randomUUID()}`;
+
+    // 3. Spy on audit recording and force an error inside addProceeding
+    const auditSpy = vi.spyOn(auditModule, 'recordAuditEvent').mockImplementationOnce(async () => {
+      throw new Error('SIMULATED_CHILD_AUDIT_FAILURE');
+    });
+
+    await expect(
+      addProceeding(owner, {
+        matterId: m.matter.id,
+        courtId: court.id,
+        instance: 'FIRST_INSTANCE',
+        numberText: '7788',
+        yearLabel: '2026',
+        registerType: 'مدني كلي',
+        status: 'ACTIVE',
+        idempotencyKey: procKey,
+      })
+    ).rejects.toThrow('SIMULATED_CHILD_AUDIT_FAILURE');
+
+    auditSpy.mockRestore();
+
+    // 4. Verify atomic rollback: no orphan proceeding row was persisted in DB
+    const orphanProc = await prisma.proceeding.findFirst({
+      where: { matterId: m.matter.id },
+    });
+    expect(orphanProc).toBeNull();
+
+    // 5. Verify no orphan idempotency record
+    const orphanIdempotency = await prisma.idempotencyRecord.findFirst({
+      where: { key: procKey },
+    });
+    expect(orphanIdempotency).toBeNull();
+
+    // 6. Parent matter remains intact
+    const parentMatter = await prisma.matter.findUnique({
+      where: { id: m.matter.id },
+    });
+    expect(parentMatter).not.toBeNull();
+    expect(parentMatter?.version).toBe(m.matter.version);
+
+    // Clean up court
+    await prisma.court.delete({ where: { id: court.id } });
+  });
+
+  it('T06-11c: injects audit failure inside updateOfficeSettings transaction: rolls back office settings version and updates', async () => {
+    const current = await getOfficeSettings(owner);
+    const officeKey = `office-atom-fail-${crypto.randomUUID()}`;
+
+    const auditSpy = vi.spyOn(auditModule, 'recordAuditEvent').mockImplementationOnce(async () => {
+      throw new Error('SIMULATED_OFFICE_AUDIT_FAILURE');
+    });
+
+    await expect(
+      updateOfficeSettings(owner, {
+        officeName: 'مكتب تراجع التدقيق الذري',
+        expectedVersion: current.version,
+        idempotencyKey: officeKey,
+      })
+    ).rejects.toThrow('SIMULATED_OFFICE_AUDIT_FAILURE');
+
+    auditSpy.mockRestore();
+
+    // Verify office settings was NOT mutated
+    const afterFailed = await getOfficeSettings(owner);
+    expect(afterFailed.version).toBe(current.version);
+    expect(afterFailed.officeName).toBe(current.officeName);
+
+    // Verify no orphan idempotency record
+    const orphanIdempotency = await prisma.idempotencyRecord.findFirst({
+      where: { key: officeKey },
+    });
+    expect(orphanIdempotency).toBeNull();
+  });
+
+  it('T06-11d: audit events are append-only; application modules provide no mutation/deletion methods and audit row count remains strictly monotonic', async () => {
+    const initialCount = await prisma.auditEvent.count();
+
+    const m = await openMatter(owner, {
+      title: 'ملف فحص دوام التدقيق',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-audit-immutable-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+
+    const afterCreateCount = await prisma.auditEvent.count();
+    expect(afterCreateCount).toBeGreaterThan(initialCount);
+
+    const audits = await prisma.auditEvent.findMany({
+      where: { entityId: m.matter.id },
+    });
+    expect(audits.length).toBeGreaterThan(0);
+    const firstAudit = audits[0];
+
+    expect(firstAudit.action).toBe('CREATE_MATTER');
+    expect(firstAudit.entityType).toBe('Matter');
+    expect(firstAudit.userId).toBe(owner.id);
   });
 
   it('T06-12: returns cached replay for identical payload and rejects payload mismatch', async () => {

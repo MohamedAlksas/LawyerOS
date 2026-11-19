@@ -15,6 +15,8 @@ import {
   unlinkMatterPartyAction,
   linkMatterAuthorizationAction,
   unlinkMatterAuthorizationAction,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getMatterAction,
 } from '@/modules/matters/matter-actions';
 import { searchPartiesAction, getClientProfileAction } from '@/modules/parties/actions';
 import {
@@ -29,6 +31,7 @@ import {
   POA_REVIEW_STATUS_CLASSES,
   formatCairoDateOnly,
   generateClientRequestId,
+  isAuthRecoveryCode,
 } from './matter-ui-types';
 
 interface MatterDetailClientProps {
@@ -77,6 +80,72 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   // General Notification / Error
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Association Operations Recovery & Frozen Key (U1/U3)
+  type AssociationOp =
+    | {
+        kind: 'linkParty';
+        key: string;
+        payload: {
+          matterId: string;
+          partyId: string;
+          role: MatterPartyRole;
+          isPrimaryContact: boolean;
+          billingEnabled: boolean;
+          notes: string | null;
+        };
+        description: string;
+      }
+    | {
+        kind: 'unlinkParty';
+        key: string;
+        targetId: string;
+        partyName: string;
+        payload: {
+          id: string;
+          matterId: string;
+          expectedVersion: number;
+        };
+        description: string;
+      }
+    | {
+        kind: 'togglePrimary';
+        key: string;
+        targetId: string;
+        payload: {
+          id: string;
+          matterId: string;
+          expectedVersion: number;
+          role: MatterPartyRole;
+          isPrimaryContact: boolean;
+          billingEnabled?: boolean;
+          notes?: string | null;
+        };
+        description: string;
+      }
+    | {
+        kind: 'linkPoa';
+        key: string;
+        payload: {
+          matterId: string;
+          powerOfAttorneyId: string;
+        };
+        description: string;
+      }
+    | {
+        kind: 'unlinkPoa';
+        key: string;
+        targetId: string;
+        payload: {
+          id: string;
+          matterId: string;
+        };
+        description: string;
+      };
+
+  const pendingAssocOpRef = useRef<AssociationOp | null>(null);
+  const [pendingAssocOp, setPendingAssocOp] = useState<AssociationOp | null>(null);
+  const [assocSessionExpired, setAssocSessionExpired] = useState(false);
 
   const parties = matter.parties || [];
   const proceedings = matter.proceedings || [];
@@ -142,32 +211,46 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     }
   };
 
-  // Submit Link Party
-  const handleLinkParty = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPartyId) return;
+  // Execute Link Party (U1/U3 frozen recovery)
+  const executeLinkParty = async (op: Extract<AssociationOp, { kind: 'linkParty' }>) => {
     setIsSubmittingParty(true);
     setPartyActionError(null);
-
-    const idempotencyKey = generateClientRequestId('lp');
-
     try {
       const res = await linkMatterPartyAction({
-        matterId: matter.id,
-        partyId: selectedPartyId,
-        role: selectedPartyRole,
-        isPrimaryContact,
-        billingEnabled: false,
-        notes: partyNotes.trim() || null,
-        idempotencyKey,
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setPartyActionError(res.error || 'تعذر ربط الطرف بالملف.');
+        if (isAuthRecoveryCode(res.code)) {
+          setAssocSessionExpired(true);
+          setPendingAssocOp(op);
+          setPartyActionError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setPendingAssocOp(op);
+          setPartyActionError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          pendingAssocOpRef.current = null;
+          setPendingAssocOp(null);
+          setPartyActionError(res.error || 'تعذر ربط الطرف بالملف.');
+        }
         setIsSubmittingParty(false);
         return;
       }
 
+      pendingAssocOpRef.current = null;
+      setPendingAssocOp(null);
+      setAssocSessionExpired(false);
       setShowAddPartyModal(false);
       partySearchGenRef.current++;
       setSearchedParties([]);
@@ -183,77 +266,181 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       }));
       setActionMessage('تم ربط الطرف بالملف بنجاح.');
     } catch (err: unknown) {
+      setPendingAssocOp(op);
       setPartyActionError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
       setIsSubmittingParty(false);
     }
   };
 
-  // Unlink Party
-  const handleUnlinkParty = async (partyLink: MatterPartySummaryDTO) => {
-    if (!confirm(`هل أنت متأكد من إزالة الطرف "${partyLink.partyName}" من هذا الملف؟`)) {
-      return;
-    }
-    setPartyActionError(null);
-    const idempotencyKey = generateClientRequestId('up');
+  const handleLinkParty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPartyId) return;
 
+    let op = pendingAssocOpRef.current;
+    if (!op || op.kind !== 'linkParty') {
+      op = {
+        kind: 'linkParty',
+        key: generateClientRequestId('lp'),
+        payload: {
+          matterId: matter.id,
+          partyId: selectedPartyId,
+          role: selectedPartyRole,
+          isPrimaryContact,
+          billingEnabled: false,
+          notes: partyNotes.trim() || null,
+        },
+        description: 'ربط طرف بالملف',
+      };
+      pendingAssocOpRef.current = op;
+    }
+    await executeLinkParty(op as Extract<AssociationOp, { kind: 'linkParty' }>);
+  };
+
+  // Execute Unlink Party (U1/U3 frozen recovery)
+  const executeUnlinkParty = async (op: Extract<AssociationOp, { kind: 'unlinkParty' }>) => {
+    setPartyActionError(null);
     try {
       const res = await unlinkMatterPartyAction({
-        id: partyLink.id,
-        matterId: matter.id,
-        expectedVersion: partyLink.version,
-        idempotencyKey,
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setPartyActionError(res.error || 'تعذر إزالة الطرف.');
+        if (isAuthRecoveryCode(res.code)) {
+          setAssocSessionExpired(true);
+          setPendingAssocOp(op);
+          setPartyActionError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setPendingAssocOp(op);
+          setPartyActionError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          pendingAssocOpRef.current = null;
+          setPendingAssocOp(null);
+          setPartyActionError(res.error || 'تعذر إزالة الطرف.');
+        }
         return;
       }
 
+      pendingAssocOpRef.current = null;
+      setPendingAssocOp(null);
+      setAssocSessionExpired(false);
       setMatter((prev) => ({
         ...prev,
-        parties: prev.parties?.filter((p) => p.id !== partyLink.id),
+        parties: prev.parties?.filter((p) => p.id !== op.targetId),
       }));
       router.refresh();
       setActionMessage('تمت إزالة الطرف من الملف بنجاح.');
     } catch (err: unknown) {
+      setPendingAssocOp(op);
       setPartyActionError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
     }
   };
 
-  // Toggle Primary Contact
-  const handleTogglePrimary = async (partyLink: MatterPartySummaryDTO) => {
-    setPartyActionError(null);
-    const idempotencyKey = generateClientRequestId('tp');
+  const handleUnlinkParty = async (partyLink: MatterPartySummaryDTO) => {
+    if (!confirm(`هل أنت متأكد من إزالة الطرف "${partyLink.partyName}" من هذا الملف؟`)) {
+      return;
+    }
 
+    let op = pendingAssocOpRef.current;
+    if (!op || op.kind !== 'unlinkParty' || op.targetId !== partyLink.id) {
+      op = {
+        kind: 'unlinkParty',
+        key: generateClientRequestId('up'),
+        targetId: partyLink.id,
+        partyName: partyLink.partyName,
+        payload: {
+          id: partyLink.id,
+          matterId: matter.id,
+          expectedVersion: partyLink.version,
+        },
+        description: `إزالة الطرف "${partyLink.partyName}"`,
+      };
+      pendingAssocOpRef.current = op;
+    }
+    await executeUnlinkParty(op as Extract<AssociationOp, { kind: 'unlinkParty' }>);
+  };
+
+  // Execute Toggle Primary Contact (U1/U3 frozen recovery)
+  const executeTogglePrimary = async (op: Extract<AssociationOp, { kind: 'togglePrimary' }>) => {
+    setPartyActionError(null);
     try {
       const res = await updateMatterPartyAction({
-        id: partyLink.id,
-        matterId: matter.id,
-        expectedVersion: partyLink.version,
-        role: partyLink.role,
-        isPrimaryContact: !partyLink.isPrimaryContact,
-        billingEnabled: partyLink.billingEnabled,
-        notes: partyLink.notes,
-        idempotencyKey,
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setPartyActionError(res.error || 'تعذر تعديل جهة الاتصال الأساسية.');
+        if (isAuthRecoveryCode(res.code)) {
+          setAssocSessionExpired(true);
+          setPendingAssocOp(op);
+          setPartyActionError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setPendingAssocOp(op);
+          setPartyActionError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          pendingAssocOpRef.current = null;
+          setPendingAssocOp(null);
+          setPartyActionError(res.error || 'تعذر تعديل جهة الاتصال الأساسية.');
+        }
         return;
       }
 
-      // U8/S5: reconcile the confirmed DTO (including the independent billing
-      // setting) instead of assuming only the checkbox changed. The refreshed
-      // server aggregate then normalizes any cascade effects.
+      pendingAssocOpRef.current = null;
+      setPendingAssocOp(null);
+      setAssocSessionExpired(false);
       setMatter((prev) => ({
         ...prev,
-        parties: prev.parties?.map((p) => (p.id === partyLink.id ? res.data : p)),
+        parties: prev.parties?.map((p) => (p.id === op.targetId ? res.data : p)),
       }));
       router.refresh();
       setActionMessage('تم تحديث جهة الاتصال الأساسية بنجاح.');
     } catch (err: unknown) {
+      setPendingAssocOp(op);
       setPartyActionError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
     }
+  };
+
+  const handleTogglePrimary = async (partyLink: MatterPartySummaryDTO) => {
+    let op = pendingAssocOpRef.current;
+    if (!op || op.kind !== 'togglePrimary' || op.targetId !== partyLink.id) {
+      op = {
+        kind: 'togglePrimary',
+        key: generateClientRequestId('tp'),
+        targetId: partyLink.id,
+        payload: {
+          id: partyLink.id,
+          matterId: matter.id,
+          expectedVersion: partyLink.version,
+          role: partyLink.role,
+          isPrimaryContact: !partyLink.isPrimaryContact,
+          billingEnabled: partyLink.billingEnabled,
+          notes: partyLink.notes,
+        },
+        description: `تعديل جهة الاتصال الأساسية للطرف "${partyLink.partyName}"`,
+      };
+      pendingAssocOpRef.current = op;
+    }
+    await executeTogglePrimary(op as Extract<AssociationOp, { kind: 'togglePrimary' }>);
   };
 
   // Load POAs for linking
@@ -311,28 +498,46 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     setShowAddPoaModal(false);
   };
 
-  // Link POA
-  const handleLinkPoa = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedPoaId) return;
+  // Execute Link POA (U1/U3 frozen recovery)
+  const executeLinkPoa = async (op: Extract<AssociationOp, { kind: 'linkPoa' }>) => {
     setIsSubmittingPoa(true);
     setPoaActionError(null);
-
-    const idempotencyKey = generateClientRequestId('lpoa');
-
     try {
       const res = await linkMatterAuthorizationAction({
-        matterId: matter.id,
-        powerOfAttorneyId: selectedPoaId,
-        idempotencyKey,
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setPoaActionError(res.error || 'تعذر ربط التوكيل بالملف.');
+        if (isAuthRecoveryCode(res.code)) {
+          setAssocSessionExpired(true);
+          setPendingAssocOp(op);
+          setPoaActionError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setPendingAssocOp(op);
+          setPoaActionError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          pendingAssocOpRef.current = null;
+          setPendingAssocOp(null);
+          setPoaActionError(res.error || 'تعذر ربط التوكيل بالملف.');
+        }
         setIsSubmittingPoa(false);
         return;
       }
 
+      pendingAssocOpRef.current = null;
+      setPendingAssocOp(null);
+      setAssocSessionExpired(false);
       setShowAddPoaModal(false);
       poaLoadGenRef.current++;
       setSelectedPoaId('');
@@ -344,36 +549,114 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       }));
       setActionMessage('تم ربط التوكيل بالملف بنجاح.');
     } catch (err: unknown) {
+      setPendingAssocOp(op);
       setPoaActionError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
       setIsSubmittingPoa(false);
     }
   };
 
-  // Unlink POA
-  const handleUnlinkPoa = async (auth: MatterAuthorizationSummaryDTO) => {
-    if (!confirm('هل ترغب في إلغاء ربط هذا التوكيل من هذا الملف؟')) return;
-    const idempotencyKey = generateClientRequestId('upoa');
+  const handleLinkPoa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPoaId) return;
 
+    let op = pendingAssocOpRef.current;
+    if (!op || op.kind !== 'linkPoa') {
+      op = {
+        kind: 'linkPoa',
+        key: generateClientRequestId('lpoa'),
+        payload: {
+          matterId: matter.id,
+          powerOfAttorneyId: selectedPoaId,
+        },
+        description: 'ربط توكيل بالملف',
+      };
+      pendingAssocOpRef.current = op;
+    }
+    await executeLinkPoa(op as Extract<AssociationOp, { kind: 'linkPoa' }>);
+  };
+
+  // Execute Unlink POA (U1/U3 frozen recovery)
+  const executeUnlinkPoa = async (op: Extract<AssociationOp, { kind: 'unlinkPoa' }>) => {
     try {
       const res = await unlinkMatterAuthorizationAction({
-        id: auth.id,
-        matterId: matter.id,
-        idempotencyKey,
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setActionMessage(`تعذر إلغاء الربط: ${res.error}`);
+        if (isAuthRecoveryCode(res.code)) {
+          setAssocSessionExpired(true);
+          setPendingAssocOp(op);
+          setActionMessage('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setPendingAssocOp(op);
+          setActionMessage(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          pendingAssocOpRef.current = null;
+          setPendingAssocOp(null);
+          setActionMessage(`تعذر إلغاء الربط: ${res.error}`);
+        }
         return;
       }
 
+      pendingAssocOpRef.current = null;
+      setPendingAssocOp(null);
+      setAssocSessionExpired(false);
       setMatter((prev) => ({
         ...prev,
-        authorizations: prev.authorizations?.filter((a) => a.id !== auth.id),
+        authorizations: prev.authorizations?.filter((a) => a.id !== op.targetId),
       }));
       router.refresh();
       setActionMessage('تم إلغاء ربط التوكيل بنجاح.');
     } catch {
+      setPendingAssocOp(op);
       setActionMessage('حدث خطأ أثناء إلغاء الربط.');
+    }
+  };
+
+  const handleUnlinkPoa = async (auth: MatterAuthorizationSummaryDTO) => {
+    if (!confirm('هل ترغب في إلغاء ربط هذا التوكيل من هذا الملف؟')) return;
+
+    let op = pendingAssocOpRef.current;
+    if (!op || op.kind !== 'unlinkPoa' || op.targetId !== auth.id) {
+      op = {
+        kind: 'unlinkPoa',
+        key: generateClientRequestId('upoa'),
+        targetId: auth.id,
+        payload: {
+          id: auth.id,
+          matterId: matter.id,
+        },
+        description: 'إلغاء ربط توكيل',
+      };
+      pendingAssocOpRef.current = op;
+    }
+    await executeUnlinkPoa(op as Extract<AssociationOp, { kind: 'unlinkPoa' }>);
+  };
+
+  const handleRetryPendingAssoc = async () => {
+    const op = pendingAssocOpRef.current;
+    if (!op) return;
+    if (op.kind === 'linkParty') {
+      await executeLinkParty(op);
+    } else if (op.kind === 'unlinkParty') {
+      await executeUnlinkParty(op);
+    } else if (op.kind === 'togglePrimary') {
+      await executeTogglePrimary(op);
+    } else if (op.kind === 'linkPoa') {
+      await executeLinkPoa(op);
+    } else if (op.kind === 'unlinkPoa') {
+      await executeUnlinkPoa(op);
     }
   };
 
@@ -458,6 +741,69 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Session Recovery Banner for Association Mutations (U1/U3) */}
+      {assocSessionExpired && (
+        <div
+          role="alert"
+          data-testid="assoc-session-recovery-alert"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>🔒</span>
+            <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تعديل العلاقات</span>
+          </div>
+          <p className="leading-relaxed">
+            تم الحفاظ على العملية الأصلية ({pendingAssocOp?.description || 'العملية'}) مجمّدة بنفس المفتاح. سجّل الدخول في نافذة جديدة ثم اضغط على زر إعادة المحاولة لإتمام العملية دون تكرار.
+          </p>
+          <div className="flex items-center gap-3 pt-1">
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="assoc-session-login-link"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+            <button
+              type="button"
+              onClick={handleRetryPendingAssoc}
+              data-testid="assoc-session-retry-button"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+            >
+              إعادة محاولة العملية
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Frozen Association Operation Banner (U1) */}
+      {pendingAssocOp && !assocSessionExpired && (
+        <div
+          role="alert"
+          data-testid="assoc-operation-pending-banner"
+          className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>⏳</span>
+            <span>عملية ({pendingAssocOp.description}) معلّقة بانتظار نتيجة مؤكدة</span>
+          </div>
+          <p className="leading-relaxed">
+            أُبقيت العملية بنفس المفتاح الأصلي لمنع التكرار. أعد المحاولة للتأكد من النتيجة.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRetryPendingAssoc}
+              data-testid="assoc-operation-retry-button"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+            >
+              إعادة محاولة العملية الأصلية
+            </button>
+          </div>
         </div>
       )}
 

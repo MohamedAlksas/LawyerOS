@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,6 +15,10 @@ import {
   updateOfficeSettingsAction,
   createReferenceItemAction,
   updateReferenceItemAction,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getOfficeSettingsAction,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  listReferenceItemsAction,
 } from '@/modules/settings/reference-actions';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
@@ -23,6 +27,7 @@ interface ReferenceSettingsClientProps {
   initialCourts: ReferenceItemDTO[];
   initialPracticeAreas: ReferenceItemDTO[];
   initialStorageLocations: ReferenceItemDTO[];
+  initialLookupError?: boolean;
 }
 
 export function ReferenceSettingsClient({
@@ -30,6 +35,7 @@ export function ReferenceSettingsClient({
   initialCourts,
   initialPracticeAreas,
   initialStorageLocations,
+  initialLookupError,
 }: ReferenceSettingsClientProps) {
   const router = useRouter();
 
@@ -71,6 +77,12 @@ export function ReferenceSettingsClient({
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const itemPendingRef = useRef<{ key: string; payload: CreateReferenceItemInput } | null>(null);
 
+  // Toggle Item State & Recovery Ref
+  const togglePendingRef = useRef<{ item: ReferenceItemDTO; key: string } | null>(null);
+  const [togglePending, setTogglePending] = useState(false);
+  const [togglePendingItem, setTogglePendingItem] = useState<ReferenceItemDTO | null>(null);
+  const [toggleSessionExpired, setToggleSessionExpired] = useState(false);
+
   // Edit Item Modal State (C19/U9)
   const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(null);
   const [editItemName, setEditItemName] = useState('');
@@ -101,24 +113,43 @@ export function ReferenceSettingsClient({
     return () => window.removeEventListener('beforeunload', handler);
   }, [officeDirty, itemDraftDirty, isSavingOffice, isCreatingItem, isSavingEditItem]);
 
+  const handleCloseEditModal = useCallback(() => {
+    const isModalDirty =
+      editingItem &&
+      (editItemName !== editingItem.name ||
+        editItemCode !== (editingItem.code || '') ||
+        editItemNotes !== (editingItem.notes || '') ||
+        editItemIsActive !== editingItem.isActive);
+
+    if (
+      (isModalDirty || editItemPending) &&
+      !window.confirm('لديك تعديلات غير محفوظة على هذا العنصر أو عملية حفظ معلّقة. هل تريد الإغلاق وفقدانها؟')
+    ) {
+      return;
+    }
+    setEditingItem(null);
+    editPendingRef.current = null;
+    setEditItemPending(false);
+    setEditItemSessionExpired(false);
+  }, [editingItem, editItemName, editItemCode, editItemNotes, editItemIsActive, editItemPending]);
+
   // Modal Focus Trap, Escape key listener, and Opener focus restore (U9)
   useEffect(() => {
     if (!editingItem) return;
 
-    // Focus the first interactive element inside the modal
+    // Focus the first interactive input inside the modal (C23)
     const dialog = editDialogRef.current;
     if (dialog) {
-      const firstInput = dialog.querySelector<HTMLInputElement | HTMLButtonElement>('input:not([disabled]), button:not([disabled])');
+      const firstInput =
+        dialog.querySelector<HTMLInputElement>('input:not([disabled])') ||
+        dialog.querySelector<HTMLInputElement | HTMLButtonElement>('button:not([disabled])');
       firstInput?.focus();
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        setEditingItem(null);
-        editPendingRef.current = null;
-        setEditItemPending(false);
-        setEditItemSessionExpired(false);
+        handleCloseEditModal();
         return;
       }
 
@@ -145,7 +176,7 @@ export function ReferenceSettingsClient({
       window.removeEventListener('keydown', handleKeyDown);
       lastFocusedOpenerRef.current?.focus();
     };
-  }, [editingItem]);
+  }, [editingItem, handleCloseEditModal]);
 
   // Handle Office Settings Save (C09/U1: frozen key & payload across retries)
   const [officeIdempotencyKey, setOfficeIdempotencyKey] = useState(() => generateClientRequestId('off'));
@@ -217,6 +248,13 @@ export function ReferenceSettingsClient({
       setOfficeDirty(false);
       setOfficeSessionExpired(false);
       setOfficeSettings(res.data);
+      // Reconcile all editable form fields from the confirmed snapshot
+      setOfficeName(res.data.officeName);
+      setLawyerName(res.data.lawyerName || '');
+      setPhone(res.data.phone || '');
+      setEmail(res.data.email || '');
+      setAddress(res.data.address || '');
+      setTaxNumber(res.data.taxNumber || '');
       setOfficeMessage('تم حفظ بيانات المكتب بنجاح.');
       setIsSavingOffice(false);
       setOfficeIdempotencyKey(generateClientRequestId('off'));
@@ -279,10 +317,15 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setItemPending(true);
-          setItemError(res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.');
+          setItemError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
         } else {
           itemPendingRef.current = null;
           setItemPending(false);
@@ -299,12 +342,14 @@ export function ReferenceSettingsClient({
       setItemDraftDirty(false);
       setItemSessionExpired(false);
 
-      if (type === 'COURT') {
-        setCourts((prev) => [...prev, res.data]);
-      } else if (type === 'PRACTICE_AREA') {
-        setPracticeAreas((prev) => [...prev, res.data]);
-      } else if (type === 'STORAGE_LOCATION') {
-        setStorageLocations((prev) => [...prev, res.data]);
+      // Reconcile into the actual category of the acknowledged entity, eliminating cross-tab placement mismatch
+      const targetType = res.data.type || op.payload.type;
+      if (targetType === 'COURT') {
+        setCourts((prev) => [...prev.filter((i) => i.id !== res.data.id), res.data]);
+      } else if (targetType === 'PRACTICE_AREA') {
+        setPracticeAreas((prev) => [...prev.filter((i) => i.id !== res.data.id), res.data]);
+      } else if (targetType === 'STORAGE_LOCATION') {
+        setStorageLocations((prev) => [...prev.filter((i) => i.id !== res.data.id), res.data]);
       }
 
       setNewItemName('');
@@ -322,6 +367,10 @@ export function ReferenceSettingsClient({
   };
 
   const handleStartNewItemCreate = () => {
+    if (itemPending) {
+      setItemError('يلزم التحقق من نتيجة إضافة العنصر الأصلي أو إعادة المحاولة لتفادي تكرار الإضافة.');
+      return;
+    }
     itemPendingRef.current = null;
     setItemPending(false);
     setItemSessionExpired(false);
@@ -432,42 +481,86 @@ export function ReferenceSettingsClient({
     setEditItemError(null);
   };
 
-  // Handle Toggle Active/Inactive
+  const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (
+      (officeDirty || officePending || itemDraftDirty || itemPending || editItemPending || togglePending) &&
+      !window.confirm('لديك تعديلات غير محفوظة أو عمليات معلقة. هل تريد المغادرة وفقدانها؟')
+    ) {
+      event.preventDefault();
+    }
+  };
+
+  // Handle Toggle Active/Inactive (U1/U3: frozen key and recovery)
   const handleToggleActive = async (item: ReferenceItemDTO) => {
     setItemError(null);
     setItemSuccessMessage(null);
 
-    const idempotencyKey = generateClientRequestId('tog');
+    let op = togglePendingRef.current;
+    if (!op || op.item.id !== item.id) {
+      op = { item, key: generateClientRequestId('tog') };
+      togglePendingRef.current = op;
+    }
+    setTogglePendingItem(op.item);
 
     try {
       const res = await updateReferenceItemAction({
-        id: item.id,
-        type: item.type,
-        expectedVersion: item.version,
-        name: item.name,
-        code: item.code,
-        notes: item.notes,
-        isActive: !item.isActive,
-        idempotencyKey,
+        id: op.item.id,
+        type: op.item.type,
+        expectedVersion: op.item.version,
+        name: op.item.name,
+        code: op.item.code,
+        notes: op.item.notes,
+        isActive: !op.item.isActive,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setItemError(res.error || 'تعذر تعديل حالة العنصر.');
+        if (isAuthRecoveryCode(res.code)) {
+          setToggleSessionExpired(true);
+          setTogglePending(true);
+          setTogglePendingItem(op.item);
+          setItemError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت عملية تعديل الحالة مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+        } else if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          setTogglePending(true);
+          setTogglePendingItem(op.item);
+          setItemError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'عملية تعديل الحالة قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول عملية تعديل الحالة إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
+        } else {
+          togglePendingRef.current = null;
+          setTogglePending(false);
+          setTogglePendingItem(null);
+          setItemError(res.error || 'تعذر تعديل حالة العنصر.');
+        }
         return;
       }
+
+      togglePendingRef.current = null;
+      setTogglePending(false);
+      setTogglePendingItem(null);
+      setToggleSessionExpired(false);
 
       const updater = (prev: ReferenceItemDTO[]) =>
         prev.map((i) => (i.id === item.id ? res.data : i));
 
-      if (item.type === 'COURT') setCourts(updater);
-      else if (item.type === 'PRACTICE_AREA') setPracticeAreas(updater);
-      else if (item.type === 'STORAGE_LOCATION') setStorageLocations(updater);
+      if (res.data.type === 'COURT') setCourts(updater);
+      else if (res.data.type === 'PRACTICE_AREA') setPracticeAreas(updater);
+      else if (res.data.type === 'STORAGE_LOCATION') setStorageLocations(updater);
 
       setItemSuccessMessage(
         res.data.isActive ? 'تم تفعيل العنصر المرجعي بنجاح.' : 'تم تعطيل العنصر المرجعي (لن يتاح للاختيار الجديد).'
       );
       router.refresh();
     } catch (err: unknown) {
+      setTogglePending(true);
       setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء تعديل حالة العنصر.');
     }
   };
@@ -478,7 +571,7 @@ export function ReferenceSettingsClient({
       <div className="pb-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1">
-            <Link href="/" className="hover:text-[#14566B] hover:underline">
+            <Link href="/" onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
               الرئيسية
             </Link>
             <span aria-hidden="true" className="mx-1.5">/</span>
@@ -500,6 +593,29 @@ export function ReferenceSettingsClient({
           <span>الانتقال لإعدادات الأمان والجلسات</span>
         </Link>
       </div>
+
+      {/* Lookup read failure alert (U8) */}
+      {initialLookupError && (
+        <div
+          role="alert"
+          data-testid="lookup-read-error-banner"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>⚠️</span>
+            <span>تعذر تحميل بعض الجداول المرجعية بالكامل</span>
+          </div>
+          <p className="leading-relaxed">
+            حدث خطأ أثناء استرجاع البيانات المرجعية من الخادم. يمكنك إعادة تحميل الصفحة.
+          </p>
+          <Link
+            href="/settings/reference"
+            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+          >
+            إعادة تحميل الصفحة
+          </Link>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-[#D5DFE3]">
@@ -838,12 +954,13 @@ export function ReferenceSettingsClient({
                 <button
                   type="button"
                   onClick={() => {
-                    const type: ReferenceItemType =
-                      activeTab === 'courts'
-                        ? 'COURT'
-                        : activeTab === 'practice_areas'
-                        ? 'PRACTICE_AREA'
-                        : 'STORAGE_LOCATION';
+                    const type: ReferenceItemType = itemPendingRef.current
+                      ? itemPendingRef.current.payload.type
+                      : activeTab === 'courts'
+                      ? 'COURT'
+                      : activeTab === 'practice_areas'
+                      ? 'PRACTICE_AREA'
+                      : 'STORAGE_LOCATION';
                     handleCreateItem(type);
                   }}
                   data-testid="item-session-retry-button"
@@ -873,12 +990,13 @@ export function ReferenceSettingsClient({
                 <button
                   type="button"
                   onClick={() => {
-                    const type: ReferenceItemType =
-                      activeTab === 'courts'
-                        ? 'COURT'
-                        : activeTab === 'practice_areas'
-                        ? 'PRACTICE_AREA'
-                        : 'STORAGE_LOCATION';
+                    const type: ReferenceItemType = itemPendingRef.current
+                      ? itemPendingRef.current.payload.type
+                      : activeTab === 'courts'
+                      ? 'COURT'
+                      : activeTab === 'practice_areas'
+                      ? 'PRACTICE_AREA'
+                      : 'STORAGE_LOCATION';
                     handleCreateItem(type);
                   }}
                   data-testid="item-operation-retry-button"
@@ -893,6 +1011,75 @@ export function ReferenceSettingsClient({
                   className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
                 >
                   بدء إضافة جديدة
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Session Recovery Banner for Toggle (U1/U3) */}
+          {toggleSessionExpired && (
+            <div
+              role="alert"
+              data-testid="toggle-session-recovery-alert"
+              className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>🔒</span>
+                <span>انتهت صلاحية الجلسة أثناء تعديل حالة العنصر</span>
+              </div>
+              <p className="leading-relaxed">
+                أُبقيت عملية تعديل الحالة مجمّدة بنفس المفتاح. سجّل الدخول في نافذة جديدة ثم أعد المحاولة.
+              </p>
+              <div className="flex items-center gap-3 pt-1">
+                <a
+                  href="/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="toggle-session-login-link"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                >
+                  فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                </a>
+                {togglePendingItem && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (togglePendingItem) handleToggleActive(togglePendingItem);
+                    }}
+                    data-testid="toggle-session-retry-button"
+                    className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                  >
+                    إعادة محاولة تعديل الحالة
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Frozen Operation Banner for Toggle (U1) */}
+          {togglePending && !toggleSessionExpired && togglePendingItem && (
+            <div
+              role="alert"
+              data-testid="toggle-operation-pending-banner"
+              className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>⏳</span>
+                <span>عملية تعديل الحالة معلّقة بانتظار نتيجة مؤكدة</span>
+              </div>
+              <p className="leading-relaxed">
+                أُبقيت عملية تعديل حالة العنصر مجمّدة بنفس المفتاح الأصلي.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (togglePendingItem) handleToggleActive(togglePendingItem);
+                  }}
+                  data-testid="toggle-operation-retry-button"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  إعادة محاولة تعديل الحالة
                 </button>
               </div>
             </div>
@@ -1109,6 +1296,7 @@ export function ReferenceSettingsClient({
         >
           <div
             ref={editDialogRef}
+            data-testid="reference-item-modal"
             className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs"
             dir="rtl"
             lang="ar-EG"
@@ -1119,12 +1307,7 @@ export function ReferenceSettingsClient({
               </h2>
               <button
                 type="button"
-                onClick={() => {
-                  setEditingItem(null);
-                  editPendingRef.current = null;
-                  setEditItemPending(false);
-                  setEditItemSessionExpired(false);
-                }}
+                onClick={handleCloseEditModal}
                 aria-label="إغلاق نافذة تعديل العنصر المرجعي"
                 className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm min-h-[36px] min-w-[36px] flex items-center justify-center"
               >
@@ -1262,12 +1445,8 @@ export function ReferenceSettingsClient({
                 <div className="flex justify-end gap-2 pt-3 border-t border-[#E8EEF1]">
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditingItem(null);
-                      editPendingRef.current = null;
-                      setEditItemPending(false);
-                      setEditItemSessionExpired(false);
-                    }}
+                    onClick={handleCloseEditModal}
+                    data-testid="modal-cancel-button"
                     className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
                   >
                     إلغاء

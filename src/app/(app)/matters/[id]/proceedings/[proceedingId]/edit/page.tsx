@@ -101,7 +101,14 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
     );
   }
 
-  const courts = await listReferenceItems('COURT', true, actor).catch(() => []);
+  let courts: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let lookupError = false;
+
+  try {
+    courts = await listReferenceItems('COURT', true, actor);
+  } catch {
+    lookupError = true;
+  }
 
   return (
     <div className="py-2">
@@ -109,6 +116,7 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
         matter={matter}
         courts={courts.map((c) => ({ id: c.id, name: c.name, isActive: c.isActive }))}
         initialProceeding={proceeding}
+        lookupError={lookupError}
       />
     </div>
   );

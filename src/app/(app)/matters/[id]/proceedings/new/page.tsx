@@ -79,13 +79,21 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
     throw error;
   }
 
-  const courts = await listReferenceItems('COURT', false, actor).catch(() => []);
+  let courts: Awaited<ReturnType<typeof listReferenceItems>> = [];
+  let lookupError = false;
+
+  try {
+    courts = await listReferenceItems('COURT', false, actor);
+  } catch {
+    lookupError = true;
+  }
 
   return (
     <div className="py-2">
       <ProceedingForm
         matter={matter}
         courts={courts.map((c) => ({ id: c.id, name: c.name, isActive: c.isActive }))}
+        lookupError={lookupError}
       />
     </div>
   );

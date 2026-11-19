@@ -81,8 +81,8 @@ enum ReferenceItemType {
 
 ### 2.2 Matter State Transitions
 - `DRAFT -> ACTIVE`: Strictly requires at least one linked active `CLIENT` party.
-- `ACTIVE -> SUSPENDED` / `ACTIVE -> CLOSED`: Allowed with version check. Does NOT delete or alter proceedings.
-- `SUSPENDED -> ACTIVE`: Requires at least one linked active `CLIENT` party.
+- `ACTIVE -> ON_HOLD` / `ACTIVE -> CLOSED`: Allowed with version check. Does NOT delete or alter proceedings.
+- `ON_HOLD -> ACTIVE`: Requires at least one linked active `CLIENT` party.
 - `* -> ARCHIVED` / `* -> DELETED`: REJECTED in T06 (`UNSUPPORTED_TRANSITION`).
 
 ### 2.3 Proceeding Invariants
@@ -236,7 +236,7 @@ interface UpdateOfficeSettingsInput {
   email?: string | null;
   address?: string | null;
   taxNumber?: string | null;
-  expectedVersion?: number;
+  expectedVersion: number;
   idempotencyKey: string;
 }
 

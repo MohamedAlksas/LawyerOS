@@ -5,6 +5,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { normalizeArabicText } from '@/lib/normalization';
 import {
   openMatter,
+  updateMatter,
   linkMatterParty,
   updateMatterParty,
   unlinkMatterParty,
@@ -549,6 +550,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
     expect(() =>
       updateReferenceItemSchema.parse({
         id: crypto.randomUUID(),
+        type: 'COURT',
         expectedVersion: 1,
         name: '  \t \n ',
         idempotencyKey: 'test',
@@ -631,7 +633,10 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
   // =========================================================================
   // C08: Race-safe getOfficeSettings via upsert eliminates P2002 on concurrent first load
   // =========================================================================
-  it('C08: concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors', async () => {
+  it('C08: concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors on empty table', async () => {
+    // Delete singleton to guarantee testing first-load initialization from scratch
+    await prisma.$executeRaw`DELETE FROM "office_settings"`;
+
     // Run 5 simultaneous requests to getOfficeSettings
     const promises = Array.from({ length: 5 }, () => getOfficeSettings(actor));
     const results = await Promise.all(promises);
@@ -972,7 +977,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
   // =========================================================================
   // S6: findSimilarProceedings SQL filter preserves older matches past LIMIT 100
   // =========================================================================
-  it('S6: findSimilarProceedings finds matching proceeding even when 105 newer unrelated proceedings exist in same court', async () => {
+  it('S6: findSimilarProceedings finds matching proceeding even when 105 newer proceedings exist in same court with same numberText but different years', async () => {
     const court = await makeCourt(`S6 Court ${crypto.randomUUID().slice(0, 6)}`);
 
     const mTarget = await openMatter(actor, {
@@ -994,7 +999,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       idempotencyKey: `proc-s6-target-${crypto.randomUUID()}`,
     });
 
-    // 2. Insert 105 newer unrelated proceedings in the same court with a different numberText (e.g. 111/س)
+    // 2. Insert 105 newer proceedings in the SAME court with the SAME numberText (888/ب) but DIFFERENT years
     const mFiller = await openMatter(actor, {
       title: 'ملف القضايا المتعددة الحشو',
       kind: 'LITIGATION',
@@ -1008,8 +1013,8 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       courtId: court.id,
       instance: 'FIRST_INSTANCE' as const,
       registerType: 'مدني كلي',
-      numberText: `999/حشو-${i}`,
-      yearLabel: '2026',
+      numberText: '888/ب',
+      yearLabel: `${2025 + (i % 20)}`, // Different years (2025-2044), none equal to 2024
       status: 'ACTIVE' as const,
       version: 1,
       createdById: actor.id,
@@ -1027,10 +1032,163 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       yearLabel: '2024',
     });
 
-    // Assert that the older matching proceeding is returned as direct match!
+    // Assert that the older matching proceeding is returned as direct match despite 105 newer entries!
     expect(searchRes.hasDirectMatch).toBe(true);
     expect(searchRes.candidates.length).toBeGreaterThanOrEqual(1);
     expect(searchRes.candidates[0].id).toBe(olderMatching.id);
     expect(searchRes.candidates[0].similarityReason).toContain('تطابق تام');
+  });
+
+  // =========================================================================
+  // U6: Association pagination deterministic tie-breaker
+  // =========================================================================
+  it('U6: getPartyMatterAssociations has deterministic unique page slicing with tied timestamps', async () => {
+    const party = await makeParty('طرف فحص الصفحات المتزامنة');
+    const tiedDate = new Date('2026-11-19T10:00:00.000Z');
+
+    // Create 10 matters and matter parties with identical createdAt timestamps
+    const matterPartyIds: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const m = await openMatter(actor, {
+        title: `قضية تكرار التوقيت ${i}`,
+        kind: 'LITIGATION',
+        idempotencyKey: `m-tied-${i}-${crypto.randomUUID()}`,
+      });
+      createdMatterIds.push(m.matter.id);
+
+      const mpId = crypto.randomUUID();
+      await prisma.$executeRaw`
+        INSERT INTO "matter_party" ("id", "matterId", "partyId", "role", "isPrimaryContact", "billingEnabled", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+        VALUES (${mpId}, ${m.matter.id}, ${party.id}, 'CLIENT', false, false, 1, ${actor.id}, ${actor.id}, ${tiedDate}, ${tiedDate})
+      `;
+      matterPartyIds.push(mpId);
+    }
+
+    // Query page 1 (limit 5, offset 0) and page 2 (limit 5, offset 5)
+    const page1 = await getPartyMatterAssociations(actor, {
+      partyId: party.id,
+      limit: 5,
+      offset: 0,
+    });
+    const page2 = await getPartyMatterAssociations(actor, {
+      partyId: party.id,
+      limit: 5,
+      offset: 5,
+    });
+
+    expect(page1.associations).toHaveLength(5);
+    expect(page2.associations).toHaveLength(5);
+
+    const page1Ids = page1.associations.map((a) => a.matterPartyId);
+    const page2Ids = page2.associations.map((a) => a.matterPartyId);
+
+    // No overlap between adjacent pages
+    const overlap = page1Ids.filter((id) => page2Ids.includes(id));
+    expect(overlap).toHaveLength(0);
+
+    // Union covers all 10 associations uniquely
+    const combinedIds = new Set([...page1Ids, ...page2Ids]);
+    expect(combinedIds.size).toBe(10);
+  });
+
+  // =========================================================================
+  // S2/C10: Office replay adopts full snapshot after intervening write
+  // =========================================================================
+  it('S2/C10: office replay adopts full snapshot after intervening write', async () => {
+    const initial = await getOfficeSettings(actor);
+
+    // User A prepares update with keyA
+    const keyA = `office-replay-A-${crypto.randomUUID()}`;
+    const resA1 = await updateOfficeSettings(actor, {
+      officeName: 'مكتب المحامي أ الأصلي',
+      phone: '01011111111',
+      expectedVersion: initial.version,
+      idempotencyKey: keyA,
+    });
+    expect(resA1.officeName).toBe('مكتب المحامي أ الأصلي');
+
+    // User B performs intervening update with keyB
+    const keyB = `office-intervene-B-${crypto.randomUUID()}`;
+    const resB = await updateOfficeSettings(actor, {
+      officeName: 'مكتب المحامي ب المتدخل',
+      phone: '01022222222',
+      email: 'office-b@lawyer.test',
+      address: 'شارع التحرير، الدقي، الجيزة',
+      expectedVersion: resA1.version,
+      idempotencyKey: keyB,
+    });
+    expect(resB.officeName).toBe('مكتب المحامي ب المتدخل');
+    expect(resB.version).toBe(resA1.version + 1);
+
+    // User A replays original save with keyA
+    const replayA = await updateOfficeSettings(actor, {
+      officeName: 'مكتب المحامي أ الأصلي',
+      phone: '01011111111',
+      expectedVersion: initial.version,
+      idempotencyKey: keyA,
+    });
+
+    // Replay returns the complete current database snapshot!
+    expect(replayA.officeName).toBe('مكتب المحامي ب المتدخل');
+    expect(replayA.phone).toBe('01022222222');
+    expect(replayA.email).toBe('office-b@lawyer.test');
+    expect(replayA.address).toBe('شارع التحرير، الدقي، الجيزة');
+    expect(replayA.version).toBe(resB.version);
+    expect(replayA.operationVersion).toBe(resA1.version);
+  });
+
+  // =========================================================================
+  // P1/U1: Committed create with lost response, retry of original, subsequent update
+  // =========================================================================
+  it('P1/U1: committed create with lost response, retry of original, and intentional subsequent update creates exactly 1 row', async () => {
+    const keyCreate = `matter-lost-res-${crypto.randomUUID()}`;
+    const client = await makeParty('موكل اختبار الحفظ غير المؤكد');
+
+    // 1. Initial create commits
+    const createRes = await openMatter(actor, {
+      title: 'ملف قبل فقدان الاستجابة',
+      kind: 'LITIGATION',
+      initialClientId: client.id,
+      idempotencyKey: keyCreate,
+    });
+    createdMatterIds.push(createRes.matter.id);
+    expect(createRes.matter.id).toBeDefined();
+
+    // 2. Transport failure simulated: caller retries the original create operation with keyCreate
+    const retryRes = await openMatter(actor, {
+      title: 'ملف قبل فقدان الاستجابة',
+      kind: 'LITIGATION',
+      initialClientId: client.id,
+      idempotencyKey: keyCreate,
+    });
+
+    // Replay returns the exact same matter ID
+    expect(retryRes.matter.id).toBe(createRes.matter.id);
+
+    // Assert DB contains exactly ONE matter for this ID
+    const countMatters = await prisma.matter.count({
+      where: { id: createRes.matter.id },
+    });
+    expect(countMatters).toBe(1);
+
+    // 3. User edit intent applied as an intentional UPDATE to the resolved matter
+    const keyUpdate = `matter-subsequent-upd-${crypto.randomUUID()}`;
+    const updateRes = await updateMatter(actor, {
+      id: createRes.matter.id,
+      title: 'ملف بعد التعديل المقصود اللاحق',
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      expectedVersion: retryRes.matter.version,
+      idempotencyKey: keyUpdate,
+    });
+
+    expect(updateRes.matter.title).toBe('ملف بعد التعديل المقصود اللاحق');
+    expect(updateRes.matter.id).toBe(createRes.matter.id);
+
+    // Exactly 1 row exists in the database
+    const totalMattersForClient = await prisma.matterParty.count({
+      where: { partyId: client.id, role: 'CLIENT' },
+    });
+    expect(totalMattersForClient).toBe(1);
   });
 });

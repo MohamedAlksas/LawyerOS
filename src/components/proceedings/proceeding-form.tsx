@@ -7,6 +7,10 @@ import {
   addProceedingAction,
   updateProceedingAction,
   findSimilarProceedingsAction,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  linkProceedingPartyAction,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  unlinkProceedingPartyAction,
 } from '@/modules/matters/matter-actions';
 import {
   MatterDTO,
@@ -28,7 +32,7 @@ import {
 } from '../matters/matter-ui-types';
 
 interface PartyCapacityState {
-  legalCapacity: ProceedingLegalCapacity;
+  legalCapacity: ProceedingLegalCapacity | '';
   capacityText: string;
 }
 
@@ -42,12 +46,14 @@ interface ProceedingFormProps {
   matter: MatterDTO;
   courts: CourtOption[];
   initialProceeding?: ProceedingSummaryDTO;
+  lookupError?: boolean;
 }
 
 export function ProceedingForm({
   matter,
   courts,
   initialProceeding,
+  lookupError,
 }: ProceedingFormProps) {
   const router = useRouter();
   const isEdit = Boolean(initialProceeding);
@@ -81,8 +87,8 @@ export function ProceedingForm({
   });
 
   // Legal Capacities per matter party (storing both legalCapacity and capacityText).
-  // Only existing links carry a saved capacity; new candidates start unset so the
-  // capacity is an explicit choice rather than an inferred CLIENT/OPPONENT value.
+  // Only existing links carry a saved capacity; candidates start unselected ('')
+  // requiring an explicit capacity decision upon inclusion (P2/U2).
   const [partyCapacities, setPartyCapacities] = useState<Record<string, PartyCapacityState>>(() => {
     const initial: Record<string, PartyCapacityState> = {};
     const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
@@ -100,8 +106,8 @@ export function ProceedingForm({
             capacityText: existing.capacityText ?? '',
           }
         : {
-            legalCapacity: mp.role === 'CLIENT' ? 'PLAINTIFF' : mp.role === 'OPPONENT' ? 'DEFENDANT' : 'OTHER',
-            capacityText: mp.role === 'CLIENT' ? 'مدعي' : mp.role === 'OPPONENT' ? 'مدعى عليه' : '',
+            legalCapacity: '',
+            capacityText: '',
           };
     }
     return initial;
@@ -138,8 +144,8 @@ export function ProceedingForm({
         };
       } else {
         newCapacities[mp.id] = {
-          legalCapacity: mp.role === 'CLIENT' ? 'PLAINTIFF' : mp.role === 'OPPONENT' ? 'DEFENDANT' : 'OTHER',
-          capacityText: mp.role === 'CLIENT' ? 'مدعي' : mp.role === 'OPPONENT' ? 'مدعى عليه' : '',
+          legalCapacity: '',
+          capacityText: '',
         };
       }
     }
@@ -209,6 +215,7 @@ export function ProceedingForm({
   const [similarLookupError, setSimilarLookupError] = useState<string | null>(null);
   const [isLookingUpSimilar, setIsLookingUpSimilar] = useState(false);
   const [similarRetryNonce, setSimilarRetryNonce] = useState(0);
+  const [confirmedDistinctSave, setConfirmedDistinctSave] = useState(false);
   const similarGenRef = useRef(0);
 
   useEffect(() => {
@@ -216,6 +223,7 @@ export function ProceedingForm({
     const gen = ++similarGenRef.current;
 
     const timer = window.setTimeout(async () => {
+      setConfirmedDistinctSave(false);
       if (!courtId || !trimmedNumber) {
         if (gen !== similarGenRef.current) return;
         setSimilarCandidates([]);
@@ -276,36 +284,79 @@ export function ProceedingForm({
 
     let operation = pendingOperationRef.current;
     if (!operation) {
-      // U5: never silently downgrade an existing or explicitly requested non-draft state.
-      // An incomplete docket can only be saved after the user affirmatively
-      // chooses the draft outcome when editing an active/non-draft proceeding.
-      if (isDocketIncomplete && isEdit && initialProceeding?.status !== 'DRAFT' && !incompleteDraftAcknowledged) {
-        setGeneralError(
-          'بيانات القيد غير مكتملة (رقم الدعوى/السنة/نوع الجدول). اختر حفظ القيد كمسودة صراحةً، أو استكمل البيانات للحفظ بالحالة المطلوبة.'
-        );
-        setFieldErrors({ status: 'الحالة المطلوبة تتطلب استكمال بيانات القيد أو تأكيد الحفظ كمسودة.' });
-        setIsSaving(false);
-        return;
+      // U7: Resolve similarity lookup before creation decision so advisory cannot arrive after record creation
+      if (!isEdit && courtId && numberText.trim()) {
+        let currentCandidates = similarCandidates;
+        if (isLookingUpSimilar || (currentCandidates.length === 0 && !similarLookupError)) {
+          try {
+            setIsLookingUpSimilar(true);
+            const simRes = await findSimilarProceedingsAction({
+              courtId,
+              numberText: numberText.trim(),
+              yearLabel: yearLabel.trim() || null,
+              excludeProceedingId: initialProceeding?.id ?? null,
+              limit: 10,
+            });
+            if (simRes.success) {
+              currentCandidates = simRes.data.candidates;
+              setSimilarCandidates(currentCandidates);
+              setSimilarLookupError(null);
+            }
+          } catch {
+            // connection failure on similarity lookup
+          } finally {
+            setIsLookingUpSimilar(false);
+          }
+        }
+
+        if (currentCandidates.length > 0 && !confirmedDistinctSave) {
+          setGeneralError(
+            'عُثر على قيود قضائية مطابقة في نفس المحكمة. راجع القيود المطابقة أدناه للتأكد، أو اضغط "متابعة الحفظ كقيد منفصل" لتأكيد تسجيل قيد جديد.'
+          );
+          setIsSaving(false);
+          return;
+        }
       }
 
-      const finalStatus: ProceedingStatus = isDocketIncomplete
-        ? 'DRAFT'
-        : (!isEdit && status === 'DRAFT' ? 'ACTIVE' : status);
+      // U2: Require explicit legal capacity on all included candidate parties
+      const includedPartiesList = (matter.parties || []).filter((mp) => includedPartyIds.has(mp.id));
+      for (const mp of includedPartiesList) {
+        const capState = partyCapacities[mp.id];
+        if (!capState || !capState.legalCapacity) {
+          setGeneralError('يجب تحديد الصفة القانونية صراحةً لكل طرف تم ضمه إلى القيد القضائي.');
+          setFieldErrors((prev) => ({
+            ...prev,
+            [`capacity_${mp.id}`]: 'يرجى تحديد الصفة القانونية لهذا الطرف صراحةً.',
+          }));
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      // U5: never silently downgrade an existing or explicitly requested non-draft state,
+      // and never override an explicitly chosen DRAFT status to ACTIVE.
+      if (isDocketIncomplete && status !== 'DRAFT') {
+        if (!incompleteDraftAcknowledged) {
+          setGeneralError(
+            'بيانات القيد غير مكتملة (رقم الدعوى/السنة/نوع الجدول). اختر حفظ القيد كمسودة صراحةً، أو استكمل البيانات للحفظ بالحالة المطلوبة.'
+          );
+          setFieldErrors({ status: 'الحالة المطلوبة تتطلب استكمال بيانات القيد أو تأكيد الحفظ كمسودة.' });
+          setIsSaving(false);
+          return;
+        }
+      }
+
+      const finalStatus: ProceedingStatus = (isDocketIncomplete && incompleteDraftAcknowledged) ? 'DRAFT' : status;
 
       // Assemble party capacities ONLY for explicitly included parties (C12)
-      const assembledParties: ProceedingPartyInput[] = (matter.parties || [])
-        .filter((mp) => includedPartyIds.has(mp.id))
-        .map((mp) => {
-          const capState = partyCapacities[mp.id] || {
-            legalCapacity: 'OTHER' as ProceedingLegalCapacity,
-            capacityText: '',
-          };
-          return {
-            matterPartyId: mp.id,
-            legalCapacity: capState.legalCapacity,
-            capacityText: capState.capacityText.trim() || undefined,
-          };
-        });
+      const assembledParties: ProceedingPartyInput[] = includedPartiesList.map((mp) => {
+        const capState = partyCapacities[mp.id];
+        return {
+          matterPartyId: mp.id,
+          legalCapacity: (capState?.legalCapacity || 'OTHER') as ProceedingLegalCapacity,
+          capacityText: capState?.capacityText.trim() || undefined,
+        };
+      });
 
       if (isEdit && initialProceeding) {
         operation = {
@@ -375,12 +426,15 @@ export function ProceedingForm({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setOperationPending(true);
           setGeneralError(
-            res.error ||
-              'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية الأصلية مجمّدة؛ أعد المحاولة أو ابدأ تعديلاً جديداً بعد التحقق من النتيجة.'
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error ||
+                'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية الأصلية مجمّدة؛ أعد المحاولة أو ابدأ تعديلاً جديداً بعد التحقق من النتيجة.'
           );
         } else {
           pendingOperationRef.current = null;
@@ -409,6 +463,11 @@ export function ProceedingForm({
   };
 
   const handleStartNewEdit = () => {
+    // P1/U1: Block dropping an unconfirmed creation to prevent duplicate row creation
+    if (!isEdit && operationPending) {
+      setGeneralError('يلزم التحقق من نتيجة إنشاء السجل الأصلي أو إعادة المحاولة لتفادي تكرار الإنشاء قبل بدء عملية جديدة.');
+      return;
+    }
     pendingOperationRef.current = null;
     setOperationPending(false);
     setSessionExpired(false);
@@ -428,7 +487,7 @@ export function ProceedingForm({
   }, [isDirty, isSaving]);
 
   const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (isDirty && !window.confirm('لديك تغييرات غير محفوظة. هل تريد المغادرة وفقدانها؟')) {
+    if ((isDirty || operationPending) && !window.confirm('لديك تغييرات غير محفوظة أو عملية قيد الانتظار. هل تريد المغادرة وفقدانها؟')) {
       event.preventDefault();
     }
   };
@@ -438,11 +497,11 @@ export function ProceedingForm({
       {/* Header */}
       <div className="pb-4 border-b border-[#D5DFE3]">
         <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1">
-          <Link href="/matters" className="hover:text-[#14566B] hover:underline">
+          <Link href="/matters" onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
             ملفات القضايا
           </Link>
           <span aria-hidden="true" className="mx-1.5">/</span>
-          <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline">
+          <Link href={`/matters/${matter.id}`} onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
             {matter.title} ({matter.fileCode})
           </Link>
           <span aria-hidden="true" className="mx-1.5">/</span>
@@ -456,6 +515,29 @@ export function ProceedingForm({
           <bdi dir="ltr" className="font-mono">{matter.fileCode}</bdi>)
         </p>
       </div>
+
+      {/* Lookup read failure alert (U8) */}
+      {lookupError && (
+        <div
+          role="alert"
+          data-testid="lookup-read-error-banner"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>⚠️</span>
+            <span>تعذر تحميل قائمة المحاكم بالكامل</span>
+          </div>
+          <p className="leading-relaxed">
+            حدث خطأ أثناء استرجاع بيانات المحاكم من الخادم. يمكنك إعادة تحميل الصفحة.
+          </p>
+          <Link
+            href={isEdit && initialProceeding ? `/matters/${matter.id}/proceedings/${initialProceeding.id}/edit` : `/matters/${matter.id}/proceedings/new`}
+            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+          >
+            إعادة تحميل الصفحة
+          </Link>
+        </div>
+      )}
 
       {/* Concurrency Alert */}
       {concurrencyConflict && (
@@ -653,6 +735,22 @@ export function ProceedingForm({
               </li>
             ))}
           </ul>
+          <div className="pt-2 flex flex-wrap items-center gap-2">
+            {!confirmedDistinctSave ? (
+              <button
+                type="button"
+                onClick={() => setConfirmedDistinctSave(true)}
+                data-testid="confirm-distinct-save-button"
+                className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] transition-colors"
+              >
+                متابعة الحفظ كقيد منفصل (تأكيد التشابه)
+              </button>
+            ) : (
+              <span className="text-emerald-800 font-bold" data-testid="distinct-save-confirmed-message">
+                ✓ تم تأكيد الحفظ كقيد منفصل. يمكنك الآن الضغط على زر الحفظ أدناه.
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -995,12 +1093,18 @@ export function ProceedingForm({
                                 data-testid={`capacity-select-${mp.id}`}
                                 className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                               >
+                                <option value="">-- اختر الصفة القانونية صراحةً --</option>
                                 {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
                                   <option key={cap} value={cap}>
                                     {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
                                   </option>
                                 ))}
                               </select>
+                              {fieldErrors[`capacity_${mp.id}`] && (
+                                <p className="text-[11px] text-red-600 font-semibold mt-1">
+                                  {fieldErrors[`capacity_${mp.id}`]}
+                                </p>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-1.5 sm:w-1/2">
