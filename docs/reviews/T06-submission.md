@@ -133,8 +133,23 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
     - `tablet-768` (7 passed): Full 7 tests passed identically under 768px tablet adaptation.
     - `mobile-390` (7 passed): Full 7 tests passed identically under 390px mobile bottom-nav layout.
 
-### Hosted GitHub Actions Workflow Results:
-*(Will be verified and recorded on final pushed commit.)*
+### Hosted GitHub Actions Workflow Results (Commit `7a2a373e3a3fdaf0fe04898c0eb9f38f90d69cd8`):
+- **Pull Request #14 Workflows:**
+  - `CI` (Run ID: `44434211513`): **Completed SUCCESS** (8m 32s)
+    - Set up job, Initialize containers, Checkout code, Setup Node.js 26 LTS, Clean installation from lockfile: completed success
+    - Install Playwright Chromium browser: completed success
+    - Generate Prisma Client & Deploy Prisma database migrations: completed success
+    - Lint check: completed success (0 errors, 0 warnings)
+    - TypeScript strict typecheck: completed success (0 errors)
+    - Unit tests: completed success
+    - Production build: completed success (20 routes compiled)
+    - Integration tests: completed success (11/11 test files passed, 57/57 tests)
+    - Playwright E2E tests: completed success (21/21 tests passed across desktop-1440, tablet-768, mobile-390)
+  - `Planning package validation` (Run ID: `44434211494`): **Completed SUCCESS** (25s)
+- **Branch Push Workflows:**
+  - `CI` (Run ID: `44434202217`): **Completed SUCCESS** (9m 23s)
+    - All 14 build, migration, typecheck, lint, integration, and E2E steps completed success
+  - `Planning package validation` (Run ID: `44434202245`): **Completed SUCCESS** (29s)
 
 ---
 
