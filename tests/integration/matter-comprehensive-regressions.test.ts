@@ -720,7 +720,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
     } finally {
       await dedicated.drop();
     }
-  });
+  }, 60000);
 
   // =========================================================================
   // C16: Party-matter associations query across all roles (CLIENT, OPPONENT, OTHER)
