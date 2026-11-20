@@ -570,6 +570,54 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     });
   }
 
+  interface DbSnapshot {
+    matters: number;
+    proceedings: number;
+    matterParties: number;
+    matterAuthorizations: number;
+    courts: number;
+    idempotencyRecords: number;
+    auditEvents: number;
+  }
+
+  async function takeDbSnapshot(): Promise<DbSnapshot> {
+    const [m, pr, mp, ma, c, ir, ae] = await Promise.all([
+      dedicatedPool.query('SELECT count(*)::int FROM "matter"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "proceeding"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "matter_party"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "matter_authorization"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "court"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "idempotency_record"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "audit_event"'),
+    ]);
+    return {
+      matters: m.rows[0].count,
+      proceedings: pr.rows[0].count,
+      matterParties: mp.rows[0].count,
+      matterAuthorizations: ma.rows[0].count,
+      courts: c.rows[0].count,
+      idempotencyRecords: ir.rows[0].count,
+      auditEvents: ae.rows[0].count,
+    };
+  }
+
+  function assertUnchangedDbState(before: DbSnapshot, after: DbSnapshot) {
+    expect(after.matters).toBe(before.matters);
+    expect(after.proceedings).toBe(before.proceedings);
+    expect(after.matterParties).toBe(before.matterParties);
+    expect(after.matterAuthorizations).toBe(before.matterAuthorizations);
+    expect(after.courts).toBe(before.courts);
+    expect(after.idempotencyRecords).toBe(before.idempotencyRecords);
+    expect(after.auditEvents).toBe(before.auditEvents);
+  }
+
+  function assertNoPrivateDataInResponse(body: string) {
+    expect(body).not.toContain('01099998888');
+    expect(body).not.toContain('موكل نقل القضايا');
+    expect(body).not.toContain('ملف فحص النقل الشبكي للقضايا');
+    expect(body).not.toContain('123/توثيق');
+  }
+
   function getTargetActions(): Array<{ name: string; args: unknown[] }> {
     const candidates: Array<{ name: string; args: unknown[] }> = [
       // 1. Reads
@@ -726,9 +774,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   describe('1. Unauthenticated Transport (Missing Session Cookie)', () => {
     it('rejects unauthenticated HTTP requests across all target server actions', async () => {
       const actions = getTargetActions();
+      const before = await takeDbSnapshot();
 
       for (const item of actions) {
         const res = await postServerAction(item.name, item.args, { cookie: undefined });
+        assertNoPrivateDataInResponse(res.body);
         if (res.status === 200) {
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('UNAUTHENTICATED');
@@ -737,25 +787,15 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         }
       }
 
-      // Verify no denied writes, audit events, or idempotency keys were persisted
-      const unauthMatters = await dedicatedPool.query('SELECT count(*) FROM "matter" WHERE title LIKE $1', ['%غير مصرح%']);
-      expect(Number(unauthMatters.rows[0].count)).toBe(0);
-
-      const unauthIdemp = await dedicatedPool.query('SELECT count(*) FROM "idempotency_record" WHERE "key" LIKE $1', ['unauth-%']);
-      expect(Number(unauthIdemp.rows[0].count)).toBe(0);
-
-      const unauthAudit = await dedicatedPool.query(
-        'SELECT count(*) FROM "audit_event" WHERE "action" IN (\'CREATE_MATTER\', \'UPDATE_MATTER\', \'ADD_PROCEEDING\', \'UPDATE_PROCEEDING\', \'UPDATE_OFFICE_SETTINGS\', \'LINK_MATTER_PARTY\', \'UNLINK_MATTER_PARTY\', \'LINK_MATTER_AUTHORIZATION\', \'UNLINK_MATTER_AUTHORIZATION\')'
-      );
-      expect(Number(unauthAudit.rows[0].count)).toBe(0);
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
 
       // Verify privacy sentinels and protected page reads
       const protectedPages = ['/matters', '/settings/reference', `/matters/${existingMatterId}`];
       for (const p of protectedPages) {
         const pageRes = await makeRequest(serverPort, { path: p });
         expect([302, 303, 307, 308, 401, 403]).toContain(pageRes.status);
-        expect(pageRes.body).not.toContain('01099998888');
-        expect(pageRes.body).not.toContain('موكل نقل القضايا');
+        assertNoPrivateDataInResponse(pageRes.body);
       }
     });
   });
@@ -763,9 +803,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   describe('2. Expired Session Transport', () => {
     it('rejects expired session HTTP requests across all target server actions', async () => {
       const actions = getTargetActions();
+      const before = await takeDbSnapshot();
 
       for (const item of actions) {
         const res = await postServerAction(item.name, item.args, { cookie: expiredSessionCookie });
+        assertNoPrivateDataInResponse(res.body);
         if (res.status === 200) {
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('UNAUTHENTICATED');
@@ -773,15 +815,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect([401, 403]).toContain(res.status);
         }
       }
+
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
     });
   });
 
   describe('3. Genuinely Revoked Session Transport', () => {
     it('rejects revoked session across all target actions after rowCount === 1 deletion', async () => {
       const actions = getTargetActions();
+      const before = await takeDbSnapshot();
 
       for (const item of actions) {
         const res = await postServerAction(item.name, item.args, { cookie: revokedSessionCookie });
+        assertNoPrivateDataInResponse(res.body);
         if (res.status === 200) {
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('UNAUTHENTICATED');
@@ -789,15 +836,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect([401, 403]).toContain(res.status);
         }
       }
+
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
     });
   });
 
   describe('4. Unverified MFA Transport', () => {
     it('rejects unverified MFA sessions across all target actions', async () => {
       const actions = getTargetActions();
+      const before = await takeDbSnapshot();
 
       for (const item of actions) {
         const res = await postServerAction(item.name, item.args, { cookie: unverifiedMfaSessionCookie });
+        assertNoPrivateDataInResponse(res.body);
         if (res.status === 200) {
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('MFA_REQUIRED');
@@ -805,15 +857,20 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect([401, 403]).toContain(res.status);
         }
       }
+
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
     });
   });
 
   describe('5. MAINTAINER Role Denial (Least Privilege)', () => {
     it('strictly denies MAINTAINER access to matter, proceeding, POA, and reference settings actions', async () => {
       const confidentialActions = getTargetActions();
+      const before = await takeDbSnapshot();
 
       for (const item of confidentialActions) {
         const res = await postServerAction(item.name, item.args, { cookie: maintainerSessionCookie });
+        assertNoPrivateDataInResponse(res.body);
         if (res.status === 200) {
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('FORBIDDEN');
@@ -822,9 +879,8 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         }
       }
 
-      // Verify no maintainer writes or idempotency records were stored
-      const maintMatters = await dedicatedPool.query('SELECT count(*) FROM "matter" WHERE title LIKE $1', ['%غير مصرح%']);
-      expect(Number(maintMatters.rows[0].count)).toBe(0);
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
 
       // Verify protected page reads for MAINTAINER
       const maintPageRes = await makeRequest(serverPort, {
@@ -833,8 +889,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       });
       // Page either renders access-denied/empty state or redirects/forbids
       expect([200, 302, 303, 307, 308, 403]).toContain(maintPageRes.status);
-      expect(maintPageRes.body).not.toContain('01099998888');
-      expect(maintPageRes.body).not.toContain('موكل نقل القضايا');
+      assertNoPrivateDataInResponse(maintPageRes.body);
     });
   });
 
@@ -844,6 +899,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         'http://evil.attacker.local',
         'http://127.0.0.1:9999',
       ];
+      const before = await takeDbSnapshot();
 
       for (const badOrigin of untrustedOrigins) {
         const res = await postServerAction(
@@ -858,6 +914,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
             origin: badOrigin,
           }
         );
+        assertNoPrivateDataInResponse(res.body);
 
         if (res.status === 403) {
           expect(res.status).toBe(403);
@@ -870,15 +927,8 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         }
       }
 
-      // Assert no denied writes, idempotency records, or audit logs were created
-      const countRes = await dedicatedPool.query('SELECT count(*)::int FROM matter WHERE title = $1', ['محاولة من أصل غير موثوق']);
-      expect(countRes.rows[0].count).toBe(0);
-
-      const idempRes = await dedicatedPool.query('SELECT count(*)::int FROM idempotency_record WHERE "key" LIKE $1', ['bad-origin-%']);
-      expect(idempRes.rows[0].count).toBe(0);
-
-      const auditRes = await dedicatedPool.query('SELECT count(*)::int FROM audit_event WHERE action = $1', ['CREATE_MATTER']);
-      expect(auditRes.rows[0].count).toBe(0);
+      const after = await takeDbSnapshot();
+      assertUnchangedDbState(before, after);
     });
   });
 
@@ -925,7 +975,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('8. Verified Owner Success Transport', () => {
-    it('executes genuine target Server Actions successfully over HTTP with verified owner session', async () => {
+    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 15 actions', async () => {
       // 1. Create Reference Item (Court)
       const courtKey = `owner-http-court-${crypto.randomUUID()}`;
       const courtRes = await postServerAction('createReferenceItemAction', [{
@@ -938,7 +988,25 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(courtRes.body).toContain('"success":true');
       expect(courtRes.body).toContain('محكمة النقل الموثق');
 
-      // 2. Open Matter
+      const courtDb = await dedicatedPool.query('SELECT id, version FROM "court" WHERE name = $1', ['محكمة النقل الموثق']);
+      const createdCourtId = courtDb.rows[0].id;
+      const courtVersion = courtDb.rows[0].version;
+
+      // 2. Update Reference Item (Court)
+      const updateCourtKey = `owner-http-upd-court-${crypto.randomUUID()}`;
+      const updCourtRes = await postServerAction('updateReferenceItemAction', [{
+        type: 'COURT',
+        id: createdCourtId,
+        expectedVersion: courtVersion,
+        name: 'محكمة النقل الموثق المعدلة',
+        isActive: true,
+        idempotencyKey: updateCourtKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(updCourtRes.status).toBe(200);
+      expect(updCourtRes.body).toContain('"success":true');
+      expect(updCourtRes.body).toContain('محكمة النقل الموثق المعدلة');
+
+      // 3. Open Matter
       const matterKey = `owner-http-open-${crypto.randomUUID()}`;
       const openRes = await postServerAction('openMatterAction', [{
         title: 'قضية النقل الشبكي الناجحة',
@@ -949,7 +1017,24 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(openRes.body).toContain('"success":true');
       expect(openRes.body).toContain('قضية النقل الشبكي الناجحة');
 
-      // 3. Update Office Settings
+      const matterDb = await dedicatedPool.query('SELECT id, version FROM "matter" WHERE title = $1', ['قضية النقل الشبكي الناجحة']);
+      const createdMatterId = matterDb.rows[0].id;
+
+      // 4. Update Matter
+      const updateMatterKey = `owner-http-upd-m-${crypto.randomUUID()}`;
+      const updMatterRes = await postServerAction('updateMatterAction', [{
+        id: createdMatterId,
+        expectedVersion: 1,
+        title: 'قضية النقل الشبكي المعدلة',
+        kind: 'LITIGATION',
+        status: 'DRAFT',
+        idempotencyKey: updateMatterKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(updMatterRes.status).toBe(200);
+      expect(updMatterRes.body).toContain('"success":true');
+      expect(updMatterRes.body).toContain('قضية النقل الشبكي المعدلة');
+
+      // 5. Update Office Settings
       const setKey = `owner-http-set-${crypto.randomUUID()}`;
       const setRes = await postServerAction('updateOfficeSettingsAction', [{
         officeName: 'مكتب المحاماة الرئيسي المتكامل',
@@ -962,11 +1047,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(setRes.body).toContain('"success":true');
       expect(setRes.body).toContain('مكتب المحاماة الرئيسي المتكامل');
 
-      // 4. Add Proceeding (Court Proceeding write)
+      // 6. Add Proceeding
       const procKey = `owner-http-proc-${crypto.randomUUID()}`;
       const procRes = await postServerAction('addProceedingAction', [{
-        matterId: existingMatterId,
-        courtId: existingCourtId,
+        matterId: createdMatterId,
+        courtId: createdCourtId,
         instance: 'FIRST_INSTANCE',
         numberText: '888',
         yearLabel: '2026',
@@ -978,29 +1063,120 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(procRes.body).toContain('"success":true');
       expect(procRes.body).toContain('888');
 
-      // 5. Query similarity action
+      const procDb = await dedicatedPool.query('SELECT id, version FROM "proceeding" WHERE "matterId" = $1 AND "numberText" = $2', [createdMatterId, '888']);
+      const createdProcId = procDb.rows[0].id;
+
+      // 7. Update Proceeding
+      const updProcKey = `owner-http-upd-proc-${crypto.randomUUID()}`;
+      const updProcRes = await postServerAction('updateProceedingAction', [{
+        id: createdProcId,
+        matterId: createdMatterId,
+        expectedVersion: 1,
+        courtId: createdCourtId,
+        instance: 'FIRST_INSTANCE',
+        numberText: '888-معدل',
+        yearLabel: '2026',
+        registerType: 'مدني كلي',
+        status: 'ACTIVE',
+        idempotencyKey: updProcKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(updProcRes.status).toBe(200);
+      expect(updProcRes.body).toContain('"success":true');
+      expect(updProcRes.body).toContain('888-معدل');
+
+      // 8. Query similarity action
       const simRes = await postServerAction('findSimilarProceedingsAction', [{
-        courtId: existingCourtId,
-        numberText: '888',
+        courtId: createdCourtId,
+        numberText: '888-معدل',
         yearLabel: '2026',
       }], { cookie: verifiedSessionCookie });
       expect(simRes.status).toBe(200);
       expect(simRes.body).toContain('"success":true');
 
-      // 6. Query party-matter associations action
+      // 9. Link Matter Party
+      const linkPartyKey = `owner-http-link-p-${crypto.randomUUID()}`;
+      const linkPartyRes = await postServerAction('linkMatterPartyAction', [{
+        matterId: createdMatterId,
+        partyId: existingPartyId,
+        role: 'CLIENT',
+        idempotencyKey: linkPartyKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(linkPartyRes.status).toBe(200);
+      expect(linkPartyRes.body).toContain('"success":true');
+
+      const mpDb = await dedicatedPool.query('SELECT id, version FROM "matter_party" WHERE "matterId" = $1 AND "partyId" = $2', [createdMatterId, existingPartyId]);
+      const createdMpId = mpDb.rows[0].id;
+
+      // 10. Link Matter Authorization (POA - owner must be linked as CLIENT)
+      const linkPoaKey = `owner-http-link-poa-${crypto.randomUUID()}`;
+      const linkPoaRes = await postServerAction('linkMatterAuthorizationAction', [{
+        matterId: createdMatterId,
+        powerOfAttorneyId: existingPoaId,
+        idempotencyKey: linkPoaKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(linkPoaRes.status).toBe(200);
+      expect(linkPoaRes.body).toContain('"success":true');
+
+      const authDb = await dedicatedPool.query('SELECT id FROM "matter_authorization" WHERE "matterId" = $1 AND "powerOfAttorneyId" = $2', [createdMatterId, existingPoaId]);
+      const createdAuthId = authDb.rows[0].id;
+
+      // 11. Unlink Matter Authorization (POA)
+      const unlinkPoaKey = `owner-http-unlink-poa-${crypto.randomUUID()}`;
+      const unlinkPoaRes = await postServerAction('unlinkMatterAuthorizationAction', [{
+        id: createdAuthId,
+        matterId: createdMatterId,
+        idempotencyKey: unlinkPoaKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(unlinkPoaRes.status).toBe(200);
+      expect(unlinkPoaRes.body).toContain('"success":true');
+
+      // 12. Update Matter Party
+      const updPartyKey = `owner-http-upd-p-${crypto.randomUUID()}`;
+      const updPartyRes = await postServerAction('updateMatterPartyAction', [{
+        id: createdMpId,
+        matterId: createdMatterId,
+        expectedVersion: 1,
+        role: 'CLIENT',
+        notes: 'ملاحظة محدثة للموكل عبر النقل الشبكي',
+        idempotencyKey: updPartyKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(updPartyRes.status).toBe(200);
+      expect(updPartyRes.body).toContain('"success":true');
+
+      // 13. Unlink Matter Party
+      const unlinkPartyKey = `owner-http-unlink-p-${crypto.randomUUID()}`;
+      const unlinkPartyRes = await postServerAction('unlinkMatterPartyAction', [{
+        id: createdMpId,
+        matterId: createdMatterId,
+        expectedVersion: 2,
+        idempotencyKey: unlinkPartyKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(unlinkPartyRes.status).toBe(200);
+      expect(unlinkPartyRes.body).toContain('"success":true');
+
+      // 14. Query party-matter associations action
       const assocRes = await postServerAction('getPartyMatterAssociationsAction', [{
         partyId: existingPartyId,
       }], { cookie: verifiedSessionCookie });
       expect(assocRes.status).toBe(200);
       expect(assocRes.body).toContain('"success":true');
 
-      // 7. Read protected page with verified owner session
+      // 15. Search matters action
+      const searchRes = await postServerAction('searchMattersAction', [{
+        query: 'قضية النقل',
+        limit: 10,
+      }], { cookie: verifiedSessionCookie });
+      expect(searchRes.status).toBe(200);
+      expect(searchRes.body).toContain('"success":true');
+      expect(searchRes.body).toContain('قضية النقل الشبكي');
+
+      // 16. Read protected page with verified owner session
       const ownerPageRes = await makeRequest(serverPort, {
         path: '/matters',
         headers: { Cookie: verifiedSessionCookie },
       });
       expect(ownerPageRes.status).toBe(200);
-      expect(ownerPageRes.body).toContain('قضية النقل الشبكي الناجحة');
+      expect(ownerPageRes.body).toContain('قضية النقل الشبكي');
     });
   });
 });

@@ -218,7 +218,9 @@ export function ProceedingForm({
   const [candidateSnapshotKey, setCandidateSnapshotKey] = useState<string | null>(null);
   const [confirmedSnapshotKey, setConfirmedSnapshotKey] = useState<string | null>(null);
   const isConfirmedForCurrentSnapshot =
-    confirmedSnapshotKey !== null && confirmedSnapshotKey === currentSnapshotKey;
+    confirmedSnapshotKey !== null &&
+    confirmedSnapshotKey === currentSnapshotKey &&
+    candidateSnapshotKey === currentSnapshotKey;
 
   const similarGenRef = useRef(0);
 
@@ -723,7 +725,7 @@ export function ProceedingForm({
         </p>
       )}
 
-      {!isLookingUpSimilar && similarCandidates.length > 0 && (
+      {!isLookingUpSimilar && candidateSnapshotKey === currentSnapshotKey && similarCandidates.length > 0 && (
         <div
           role="status"
           aria-live="polite"
@@ -759,9 +761,14 @@ export function ProceedingForm({
             {!isConfirmedForCurrentSnapshot ? (
               <button
                 type="button"
-                onClick={() => setConfirmedSnapshotKey(currentSnapshotKey)}
+                onClick={() => {
+                  if (candidateSnapshotKey === currentSnapshotKey) {
+                    setConfirmedSnapshotKey(currentSnapshotKey);
+                  }
+                }}
+                disabled={candidateSnapshotKey !== currentSnapshotKey}
                 data-testid="confirm-distinct-save-button"
-                className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] transition-colors"
+                className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] transition-colors disabled:opacity-50"
               >
                 متابعة الحفظ كقيد منفصل (تأكيد التشابه)
               </button>
@@ -800,6 +807,8 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setCourtId(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setCandidateSnapshotKey(null);
+                  setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);
                 }}
                 data-testid="proceeding-court-select"
@@ -954,6 +963,8 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setNumberText(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setCandidateSnapshotKey(null);
+                  setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);
                 }}
                 placeholder="مثال: 1234 أو 0045/ب"
@@ -977,6 +988,8 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setYearLabel(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setCandidateSnapshotKey(null);
+                  setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);
                 }}
                 placeholder="مثال: 2026 أو 1447هـ"

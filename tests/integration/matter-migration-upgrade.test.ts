@@ -1,4 +1,5 @@
 ﻿import { describe, it, expect, beforeAll } from 'vitest';
+import { Client, Pool } from 'pg';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -826,6 +827,29 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
           clientPre.release();
         }
 
+        // Configure disposable baseline database default timezone to $tz
+        const dbName = new URL(dedicated.url).pathname.replace('/', '');
+        const clientAdmin = await dedicated.pool.connect();
+        try {
+          await clientAdmin.query(`ALTER DATABASE "${dbName}" SET timezone TO '${tz}';`);
+        } finally {
+          clientAdmin.release();
+        }
+
+        // Close old pool connections so new connections adopt the altered database timezone default
+        await dedicated.pool.end();
+        dedicated.pool = new Pool({ connectionString: dedicated.url });
+
+        // Verify effective session timezone setting on a fresh connection with same db and role as CLI
+        const verifyClient = new Client({ connectionString: dedicated.url });
+        await verifyClient.connect();
+        try {
+          const tzCheck = await verifyClient.query(`SHOW timezone;`);
+          expect(tzCheck.rows[0].TimeZone.toLowerCase()).toBe(tz.toLowerCase());
+        } finally {
+          await verifyClient.end();
+        }
+
         // 2. Run the migration CLI under the explicit timezone permutation ($tz)
         const upgradeRes = runPrismaMigrateDeploy(dedicated.url, tz);
         expect(upgradeRes.status).toBe(0);
@@ -847,11 +871,43 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
             FROM "power_of_attorney" WHERE id = 'tz-test-poa'
           `);
           expect(poaRes.rows[0].issue_date).toBe('2026-05-10');
+
+          // 4. Assert preservation for newly created post-migration temporal fixtures (E2)
+          await clientAfter.query(`
+            INSERT INTO "court" ("id", "name", "isActive", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('tz-new-court', 'محكمة الترقية الجديدة', true, 1, 'tz-test-user', 'tz-test-user', now(), now());
+          `);
+
+          await clientAfter.query(`
+            INSERT INTO "matter" ("id", "fileCode", "title", "titleNormalized", "kind", "status", "openingDate", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('tz-new-matter', '2026/TZ-01', 'ملف زمني جديد', 'ملف زمني جديد', 'LITIGATION', 'ACTIVE', '2026-11-20'::date, 1, 'tz-test-user', 'tz-test-user', '2026-11-20T12:00:00Z'::timestamptz, '2026-11-20T12:00:00Z'::timestamptz);
+          `);
+
+          await clientAfter.query(`
+            INSERT INTO "proceeding" ("id", "matterId", "courtId", "instance", "numberText", "yearLabel", "filingDate", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('tz-new-proc', 'tz-new-matter', 'tz-new-court', 'FIRST_INSTANCE', '9988', '2026', '2026-06-15'::date, 'ACTIVE', 1, 'tz-test-user', 'tz-test-user', '2026-11-20T12:00:00Z'::timestamptz, '2026-11-20T12:00:00Z'::timestamptz);
+          `);
+
+          const matterRes = await clientAfter.query(`
+            SELECT 
+              to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
+              to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_utc
+            FROM "matter" WHERE id = 'tz-new-matter'
+          `);
+          expect(matterRes.rows[0].opening_date).toBe('2026-11-20');
+          expect(matterRes.rows[0].created_utc).toBe('2026-11-20T12:00:00Z');
+
+          const procRes = await clientAfter.query(`
+            SELECT to_char("filingDate", 'YYYY-MM-DD') AS filing_date
+            FROM "proceeding" WHERE id = 'tz-new-proc'
+          `);
+          expect(procRes.rows[0].filing_date).toBe('2026-06-15');
         } finally {
           clientAfter.release();
         }
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
+        await dedicated.pool.end().catch(() => {});
         await dedicated.drop();
       }
     },

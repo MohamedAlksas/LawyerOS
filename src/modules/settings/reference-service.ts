@@ -273,7 +273,7 @@ export async function updateOfficeSettings(
         const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
         return { ...dto, operationVersion: opVersion };
       }
-      return updateOfficeSettings(actor, rawInput);
+      return await updateOfficeSettings(actor, rawInput, options);
     }
     throw err;
   }

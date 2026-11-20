@@ -87,7 +87,30 @@ export function ReferenceSettingsClient({
     setCourts(initialCourts);
     setPracticeAreas(initialPracticeAreas);
     setStorageLocations(initialStorageLocations);
-    setOfficeSettings(initialOfficeSettings);
+
+    // U8/C10: Reconcile editable office fields and version as ONE single baseline.
+    // If the form is clean, refresh everything from incoming props.
+    // If the form is dirty or pending, KEEP the original baseline and version so concurrent edits conflict cleanly.
+    const isFormClean =
+      !officeDirty &&
+      !officePending &&
+      !isSavingOffice &&
+      officeName === prevProps.officeSettings.officeName &&
+      lawyerName === (prevProps.officeSettings.lawyerName || '') &&
+      phone === (prevProps.officeSettings.phone || '') &&
+      email === (prevProps.officeSettings.email || '') &&
+      address === (prevProps.officeSettings.address || '') &&
+      taxNumber === (prevProps.officeSettings.taxNumber || '');
+
+    if (isFormClean) {
+      setOfficeSettings(initialOfficeSettings);
+      setOfficeName(initialOfficeSettings.officeName);
+      setLawyerName(initialOfficeSettings.lawyerName || '');
+      setPhone(initialOfficeSettings.phone || '');
+      setEmail(initialOfficeSettings.email || '');
+      setAddress(initialOfficeSettings.address || '');
+      setTaxNumber(initialOfficeSettings.taxNumber || '');
+    }
   }
 
   // New Reference Item Input State
@@ -123,6 +146,7 @@ export function ReferenceSettingsClient({
   const [editItemSessionExpired, setEditItemSessionExpired] = useState(false);
   const editPendingRef = useRef<{ key: string; payload: UpdateReferenceItemInput } | null>(null);
   const editDialogRef = useRef<HTMLDivElement>(null);
+  const editNameInputRef = useRef<HTMLInputElement>(null);
   const lastFocusedOpenerRef = useRef<HTMLElement | null>(null);
   const prevEditingItemIdRef = useRef<string | null>(null);
 
@@ -210,13 +234,7 @@ export function ReferenceSettingsClient({
   // U9: Focus first interactive input on open; restore focus to opener ONLY on close
   useEffect(() => {
     if (editingItemId && !prevEditingItemIdRef.current) {
-      const dialog = editDialogRef.current;
-      if (dialog) {
-        const firstInput =
-          dialog.querySelector<HTMLInputElement>('input:not([disabled])') ||
-          dialog.querySelector<HTMLInputElement | HTMLButtonElement>('button:not([disabled])');
-        firstInput?.focus();
-      }
+      editNameInputRef.current?.focus();
     } else if (!editingItemId && prevEditingItemIdRef.current) {
       lastFocusedOpenerRef.current?.focus();
     }
@@ -299,10 +317,10 @@ export function ReferenceSettingsClient({
             'انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.'
           );
         } else if (res.code === 'CONCURRENCY_CONFLICT') {
-          officePendingRef.current = null;
-          setOfficePending(false);
-          setOfficeIdempotencyKey(generateClientRequestId('off'));
-          setOfficeError('تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم آخر. يرجى تحديث الصفحة.');
+          setOfficePending(true);
+          setOfficeError(
+            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. أُبقيت العملية مجمّدة؛ يمكنك مراجعة البيانات وتحديثها لأحدث نسخة من الخادم أو بدء تعديل جديد.'
+          );
         } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
@@ -361,6 +379,22 @@ export function ReferenceSettingsClient({
     setOfficeError(null);
     setOfficeIdempotencyKey(generateClientRequestId('off'));
     setOfficeDirty(true);
+  };
+
+  const handleReconcileOfficeWithServer = () => {
+    officePendingRef.current = null;
+    setOfficePending(false);
+    setOfficeSessionExpired(false);
+    setOfficeError(null);
+    setOfficeDirty(false);
+    setOfficeSettings(initialOfficeSettings);
+    setOfficeName(initialOfficeSettings.officeName);
+    setLawyerName(initialOfficeSettings.lawyerName || '');
+    setPhone(initialOfficeSettings.phone || '');
+    setEmail(initialOfficeSettings.email || '');
+    setAddress(initialOfficeSettings.address || '');
+    setTaxNumber(initialOfficeSettings.taxNumber || '');
+    setOfficeIdempotencyKey(generateClientRequestId('off'));
   };
 
   // Handle Create Reference Item (C09/U1: frozen key on transport retry)
@@ -859,11 +893,19 @@ export function ReferenceSettingsClient({
                 >
                   بدء تعديل جديد
                 </button>
+                <button
+                  type="button"
+                  onClick={handleReconcileOfficeWithServer}
+                  data-testid="office-reconcile-server-button"
+                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[36px]"
+                >
+                  استعراض وتحديث بأحدث بيانات من الخادم
+                </button>
               </div>
             </div>
           )}
 
-          {officeError && !officeSessionExpired && !officePending && (
+          {officeError && !officeSessionExpired && (
             <div
               role="alert"
               data-testid="office-error-banner"
@@ -1493,6 +1535,8 @@ export function ReferenceSettingsClient({
                     الاسم <span className="text-red-600">*</span>
                   </label>
                   <input
+                    ref={editNameInputRef}
+                    autoFocus
                     id="edit-reference-name-input"
                     type="text"
                     required

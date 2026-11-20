@@ -37,6 +37,8 @@ import {
   updateReferenceItemSchema,
   updateOfficeSettingsSchema,
   ConcurrencyConflictError as SettingsConcurrencyConflictError,
+  ReferenceValidationError,
+  OfficeSettingsDTO,
 } from '@/modules/settings/reference-types';
 import {
   linkProceedingPartySchema,
@@ -543,7 +545,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
   // =========================================================================
   // C06: Strict calendar date range & whitespace rejection on reference schemas
   // =========================================================================
-  it('C06: rejects whitespace-only reference names and validates strict calendar date range (1000-9999)', () => {
+  it('C06: rejects whitespace-only reference names and validates strict calendar date range (1000-9999)', async () => {
     // 1. Whitespace rejection on schemas
     expect(() =>
       createReferenceItemSchema.parse({
@@ -559,6 +561,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         type: 'COURT',
         expectedVersion: 1,
         name: '  \t \n ',
+        isActive: true,
         idempotencyKey: 'test',
       })
     ).toThrow();
@@ -570,6 +573,41 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         idempotencyKey: 'test',
       })
     ).toThrow();
+
+    // 1b. Service-level complete otherwise-valid reference update rejects with ReferenceValidationError
+    const court = await createReferenceItem(actor, {
+      type: 'COURT',
+      name: `محكمة فحص المسافات ${crypto.randomUUID().slice(0, 8)}`,
+      idempotencyKey: `c06-court-${crypto.randomUUID()}`,
+    });
+    createdCourtIds.push(court.id);
+
+    await expect(
+      updateReferenceItem(actor, {
+        id: court.id,
+        type: 'COURT',
+        expectedVersion: court.version,
+        name: '   \t \n   ',
+        isActive: true,
+        idempotencyKey: `c06-upd-ws-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(ReferenceValidationError);
+
+    try {
+      await updateReferenceItem(actor, {
+        id: court.id,
+        type: 'COURT',
+        expectedVersion: court.version,
+        name: '   \t \n   ',
+        isActive: true,
+        idempotencyKey: `c06-upd-ws2-${crypto.randomUUID()}`,
+      });
+      expect.unreachable('Should have thrown ReferenceValidationError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ReferenceValidationError);
+      expect((err as ReferenceValidationError).message).toBe('اسم العنصر المرجعي مطلوب');
+      expect((err as ReferenceValidationError).fieldErrors?.name).toBe('اسم العنصر المرجعي مطلوب');
+    }
 
     // 2. Strict calendar dates
     expect(validateStrictCalendarDate('2026-02-28')).toBe(true);
@@ -664,29 +702,14 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         const initialCount = await dedicatedPrisma.officeSettings.count();
         expect(initialCount).toBe(0);
 
-        // 2. Run 5 simultaneous requests to getOfficeSettings on empty table
-        const promises = Array.from({ length: 5 }, () =>
-          getOfficeSettings(actor, { prisma: dedicatedPrisma })
-        );
-        const results = await Promise.all(promises);
-
-        expect(results).toHaveLength(5);
-        for (const res of results) {
-          expect(res.id).toBeDefined();
-          expect(res.officeName).toBeDefined();
-        }
-        // All 5 must have resolved the exact same singleton record
-        const uniqueIds = new Set(results.map((r) => r.id));
-        expect(uniqueIds.size).toBe(1);
-
-        // 3. First-update race on that singleton: run 2 concurrent updateOfficeSettings calls
-        const singletonId = results[0].id;
+        // 2. Start first-writer race directly from zero rows (C08 / Codex requirement):
+        // Run 2 concurrent updateOfficeSettings calls against 0 rows with expectedVersion: 1
         const p1 = updateOfficeSettings(
           actor,
           {
             officeName: 'مكتب المحاماة الأول المتسابق',
             expectedVersion: 1,
-            idempotencyKey: `c08-upd1-${crypto.randomUUID()}`,
+            idempotencyKey: `c08-zero-upd1-${crypto.randomUUID()}`,
           },
           { prisma: dedicatedPrisma }
         );
@@ -696,7 +719,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
           {
             officeName: 'مكتب المحاماة الثاني المتسابق',
             expectedVersion: 1,
-            idempotencyKey: `c08-upd2-${crypto.randomUUID()}`,
+            idempotencyKey: `c08-zero-upd2-${crypto.randomUUID()}`,
           },
           { prisma: dedicatedPrisma }
         );
@@ -708,12 +731,66 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         expect(rejected).toHaveLength(1);
         expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(SettingsConcurrencyConflictError);
 
-        // Singleton remains intact with incremented version 2
-        const finalSettings = await dedicatedPrisma.officeSettings.findUnique({
-          where: { id: singletonId },
+        // Monotonic version 1 -> 2
+        const winningResult = (fulfilled[0] as PromiseFulfilledResult<OfficeSettingsDTO>).value;
+        expect(winningResult.version).toBe(2);
+
+        // Exact database count & audit log count: exactly 1 office row, exactly 1 UPDATE_OFFICE_SETTINGS audit
+        const finalOfficeCount = await dedicatedPrisma.officeSettings.count();
+        expect(finalOfficeCount).toBe(1);
+
+        const officeRow = await dedicatedPrisma.officeSettings.findUnique({
+          where: { id: winningResult.id },
         });
-        expect(finalSettings).not.toBeNull();
-        expect(finalSettings?.version).toBe(2);
+        expect(officeRow).not.toBeNull();
+        expect(officeRow?.version).toBe(2);
+
+        const auditCount = await dedicatedPrisma.auditEvent.count({
+          where: {
+            entityType: 'OfficeSettings',
+            action: 'UPDATE_OFFICE_SETTINGS',
+          },
+        });
+        expect(auditCount).toBe(1);
+
+        // 3. Concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors
+        const getPromises = Array.from({ length: 5 }, () =>
+          getOfficeSettings(actor, { prisma: dedicatedPrisma })
+        );
+        const getResults = await Promise.all(getPromises);
+        expect(getResults).toHaveLength(5);
+        for (const res of getResults) {
+          expect(res.id).toBe(winningResult.id);
+          expect(res.version).toBe(2);
+        }
+
+        // 4. Test concurrent same-key retry with injected client in options:
+        // When two concurrent callers submit the same idempotency key, one claims it and the other
+        // enters the catch block (line 276) retrying with { prisma: dedicatedPrisma }.
+        const sharedKey = `c08-same-key-${crypto.randomUUID()}`;
+        const inputSameKey = {
+          officeName: 'مكتب المحاماة الموحد بمفتاح متطابق',
+          expectedVersion: 2,
+          idempotencyKey: sharedKey,
+        };
+
+        const [r1, r2] = await Promise.all([
+          updateOfficeSettings(actor, inputSameKey, { prisma: dedicatedPrisma }),
+          updateOfficeSettings(actor, inputSameKey, { prisma: dedicatedPrisma }),
+        ]);
+
+        expect(r1.officeName).toBe('مكتب المحاماة الموحد بمفتاح متطابق');
+        expect(r2.officeName).toBe('مكتب المحاماة الموحد بمفتاح متطابق');
+        expect(r1.version).toBe(3);
+        expect(r2.version).toBe(3);
+
+        const auditCountAfterRetry = await dedicatedPrisma.auditEvent.count({
+          where: {
+            entityType: 'OfficeSettings',
+            action: 'UPDATE_OFFICE_SETTINGS',
+          },
+        });
+        expect(auditCountAfterRetry).toBe(2); // Exactly 1 new audit event for version 3 despite 2 calls
       } finally {
         await dedicatedPrisma.$disconnect();
       }

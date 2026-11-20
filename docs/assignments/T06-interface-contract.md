@@ -195,6 +195,7 @@ interface AddProceedingInput {
   filingDate?: string | null;     // YYYY-MM-DD
   claimAmount?: string | null;    // stored as text / decimal representation
   status?: ProceedingStatus;
+  parties?: ProceedingPartyInput[]; // atomic bundled proceeding parties
   idempotencyKey: string;
 }
 
@@ -212,17 +213,34 @@ interface UpdateProceedingInput {
   filingDate?: string | null;
   claimAmount?: string | null;
   status: ProceedingStatus;
+  parties?: ProceedingPartyInput[]; // atomic bundled proceeding party reconciliation
   idempotencyKey: string;
 }
 ```
 
-#### `linkProceedingParty` & `updateProceedingParty`
+#### `linkProceedingParty` & `unlinkProceedingParty`
 ```typescript
+interface ProceedingPartyInput {
+  matterPartyId: string;
+  capacityText?: string;
+  legalCapacity?: ProceedingLegalCapacity | null;
+  notes?: string | null;
+}
+
 interface LinkProceedingPartyInput {
   proceedingId: string;
   matterPartyId: string;
-  legalCapacity: ProceedingLegalCapacity;
+  expectedVersion: number;
+  capacityText?: string;
+  legalCapacity?: ProceedingLegalCapacity | null;
   notes?: string | null;
+  idempotencyKey: string;
+}
+
+interface UnlinkProceedingPartyInput {
+  id: string;
+  proceedingId: string;
+  expectedVersion: number;
   idempotencyKey: string;
 }
 ```

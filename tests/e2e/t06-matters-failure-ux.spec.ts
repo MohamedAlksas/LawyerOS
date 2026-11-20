@@ -584,11 +584,25 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await expect(notesInput).toBeFocused();
     await expect(nameInput).not.toBeFocused();
 
+    // Tab cycling trap: Tab through remaining elements wraps back to first element
+    await page.keyboard.press('Tab'); // active checkbox
+    await page.keyboard.press('Tab'); // cancel button
+    const cancelBtn = modal.getByRole('button', { name: 'إلغاء' });
+    await expect(cancelBtn).toBeFocused();
+    await page.keyboard.press('Tab'); // save button
+    const saveBtn = modal.getByRole('button', { name: 'حفظ التعديلات' });
+    await expect(saveBtn).toBeFocused();
+    await page.keyboard.press('Tab'); // wraps around to header close button
+    await page.keyboard.press('Tab'); // moves to first form input (name input)
+    await expect(nameInput).toBeFocused();
+
     // Close via cancel button (confirm discard of unsaved changes)
     page.once('dialog', (d) => d.accept());
-    const cancelBtn = modal.getByRole('button', { name: 'إلغاء' });
     await cancelBtn.click();
     await expect(modal).toBeHidden();
+
+    // Focus restoration: closing the modal restores focus to the triggering edit button
+    await expect(editBtn).toBeFocused();
   });
 
   test('blocks competing association operations while an operation is in flight and settles on retry (U1/U3) @matters', async ({
@@ -712,6 +726,22 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await expect(toggleBtnA).toBeEnabled();
     await expect(unlinkBtnA).toBeEnabled();
     await expect(addPartyBtn).toBeEnabled();
+
+    // Verify exact persisted effects in DB (E1 / Codex requirement)
+    const checkPartyB = await prisma.matterParty.findUnique({ where: { id: mpB.id } });
+    expect(checkPartyB).toBeNull();
+
+    const checkPartyA = await prisma.matterParty.findUnique({ where: { id: mpA.id } });
+    expect(checkPartyA).not.toBeNull();
+    expect(checkPartyA?.isPrimaryContact).toBe(true);
+
+    const auditUnlinkB = await prisma.auditEvent.count({
+      where: {
+        entityId: mpB.id,
+        action: 'UNLINK_MATTER_PARTY',
+      },
+    });
+    expect(auditUnlinkB).toBe(1);
   });
 
   test('invalidates proceeding similarity confirmation immediately on docket change (U7) @matters', async ({
@@ -745,13 +775,27 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     });
     createdMatterIds.push(matter1.id);
 
-    // Create existing proceeding on matter 1
-    const existingProc = await prisma.proceeding.create({
+    // Create existing proceeding A on matter 1
+    const existingProcA = await prisma.proceeding.create({
       data: {
         matterId: matter1.id,
         courtId: court.id,
         instance: 'FIRST_INSTANCE',
         numberText: '7788',
+        yearLabel: '2026',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+
+    // Create existing proceeding B on matter 1
+    const existingProcB = await prisma.proceeding.create({
+      data: {
+        matterId: matter1.id,
+        courtId: court.id,
+        instance: 'FIRST_INSTANCE',
+        numberText: '7789',
         yearLabel: '2026',
         status: 'ACTIVE',
         createdById: owner.id,
@@ -776,41 +820,53 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.goto(`/matters/${matter2.id}/proceedings/new`);
     await expect(page).toHaveURL(new RegExp(`/matters/${matter2.id}/proceedings/new$`));
 
-    // Fill court, year, number matching existing proceeding
+    // Fill court, year, number matching existing proceeding A
     await page.getByTestId('proceeding-court-select').selectOption(court.id);
     await page.getByTestId('proceeding-year-input').fill('2026');
     await page.getByTestId('proceeding-number-input').fill('7788');
 
-    // Wait for similarity warning banner
+    // Wait for similarity warning banner showing candidate A
     const similarityBanner = page.getByTestId('similarity-warning-banner');
     await expect(similarityBanner).toBeVisible();
-    await expect(page.getByTestId(`similarity-candidate-${existingProc.id}`)).toBeVisible();
+    await expect(page.getByTestId(`similarity-candidate-${existingProcA.id}`)).toBeVisible();
 
-    // Click confirm distinct save
+    // Click confirm distinct save for candidate A
     const confirmBtn = page.getByTestId('confirm-distinct-save-button');
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
-    // Verify confirmation message appears
+    // Verify confirmation message appears for candidate A
     const confirmedMsg = page.getByTestId('distinct-save-confirmed-message');
     await expect(confirmedMsg).toBeVisible();
 
-    // Now edit the number input to change docket identity from 7788 to 7789
+    // Now edit the number input to change docket identity from 7788 to 7789 (U7)
     await page.getByTestId('proceeding-number-input').fill('7789');
 
-    // Verify confirmation message is IMMEDIATELY invalidated and removed from UI
+    // On docket change:
+    // 1. A's confirmation message must be immediately invalidated
+    // 2. A's candidate must NOT remain visible for 7789
+    // 3. Confirm button must NOT carry over A's confirmation
     await expect(confirmedMsg).toBeHidden();
+    await expect(page.getByTestId(`similarity-candidate-${existingProcA.id}`)).toBeHidden();
 
-    // Return to 7788 so candidate reappears
-    await page.getByTestId('proceeding-number-input').fill('7788');
-    await expect(similarityBanner).toBeVisible();
+    // Wait for B's candidate to load
+    await expect(page.getByTestId(`similarity-candidate-${existingProcB.id}`)).toBeVisible();
 
-    // Without clicking confirm again, attempt to submit
+    // Without clicking confirm for B, attempt to submit -> must be blocked
     await page.getByTestId('proceeding-submit-button').click();
-
-    // Verify submission is blocked with warning error message requiring confirmation
     await expect(page.getByTestId('proceeding-error-banner')).toBeVisible();
     await expect(page.getByTestId('proceeding-error-banner')).toContainText('عُثر على قيود قضائية مطابقة في نفس المحكمة');
+
+    // Now confirm candidate B
+    await expect(confirmBtn).toBeVisible();
+    await confirmBtn.click();
+    await expect(confirmedMsg).toBeVisible();
+
+    // Submit now succeeds and navigates to matter detail page
+    await page.getByTestId('proceeding-submit-button').click();
+    await page.waitForURL(new RegExp(`/matters/${matter2.id}$`));
+    await page.getByTestId('tab-proceedings').click();
+    await expect(page.getByText('7789')).toBeVisible();
   });
 
   test('requires explicit draft acknowledgment when editing an initially draft proceeding with incomplete docket (U5) @matters', async ({
@@ -881,6 +937,211 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.waitForURL(new RegExp(`/matters/${matter.id}$`));
     await page.getByTestId('tab-proceedings').click();
     await expect(page.getByTestId('proceeding-draft-badge')).toBeVisible();
+  });
+
+  test('reference refresh preserves dirty office form version and triggers concurrency conflict on concurrent edit (U8/C10) @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+
+    // 1. Navigate to reference settings
+    await page.goto('/settings/reference');
+    await expect(page).toHaveURL(/\/settings\/reference/);
+
+    const officeNameInput = page.getByTestId('office-name-input');
+    await expect(officeNameInput).toBeVisible();
+
+    // 2. Tab 1 edits office name (form becomes dirty)
+    await officeNameInput.fill('مكتب المحاماة المحلي المعدل');
+
+    // 3. Simulating Tab 2 / concurrent user: update office phone & address directly in DB, bumping version 1 -> 2
+    const currentOffice = await prisma.officeSettings.findFirstOrThrow();
+    await prisma.officeSettings.update({
+      where: { id: currentOffice.id },
+      data: {
+        phone: '01012345678',
+        address: 'الدقي - الجيزة',
+        version: currentOffice.version + 1,
+        updatedById: owner.id,
+      },
+    });
+
+    // 4. Tab 1 creates a reference item (triggers page refresh of initialOfficeSettings props)
+    await page.getByTestId('tab-courts').click();
+    const courtName = `محكمة تنشيط الخادم ${Date.now()}`;
+    await page.getByTestId('reference-item-name-input').fill(courtName);
+    await page.getByTestId('add-reference-item-button').click();
+
+    // Wait for court creation to succeed
+    await expect(page.getByTestId('reference-item-name-input')).toHaveValue('');
+
+    // Switch back to office tab
+    await page.getByTestId('tab-office-profile').click();
+
+    // Verify Tab 1 form is STILL dirty with local edits and was NOT overwritten by silent refresh
+    await expect(officeNameInput).toHaveValue('مكتب المحاماة المحلي المعدل');
+
+    // 5. Tab 1 attempts to save office settings -> must encounter CONCURRENCY_CONFLICT
+    await page.getByTestId('save-office-button').click();
+
+    const conflictError = page.getByTestId('office-error-banner');
+    await expect(conflictError).toBeVisible();
+    await expect(conflictError).toContainText('تعارض في التعديل المتزامن');
+
+    // Verify Tab 2's values survived in DB! (Not silently overwritten!)
+    const reloadedDb = await prisma.officeSettings.findUniqueOrThrow({ where: { id: currentOffice.id } });
+    expect(reloadedDb.phone).toBe('01012345678');
+    expect(reloadedDb.address).toBe('الدقي - الجيزة');
+
+    // 6. User clicks deliberate reconciliation button
+    const reconcileBtn = page.getByTestId('office-reconcile-server-button');
+    await expect(reconcileBtn).toBeVisible();
+    await reconcileBtn.click();
+
+    // Verify form adopts Tab 2's latest values from the server
+    await expect(page.getByTestId('office-phone-input')).toHaveValue('01012345678');
+    await expect(page.getByTestId('office-address-input')).toHaveValue('الدقي - الجيزة');
+  });
+
+  test('recovers from committed proceeding creation with lost response using original idempotency key without duplicate creation (E1) @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+
+    const court = await prisma.court.create({
+      data: {
+        name: `محكمة الفقدان للقيد ${Date.now()}`,
+        code: `CRT-LOS-${Date.now().toString().slice(-4)}`,
+        isActive: true,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdCourtIds.push(court.id);
+
+    const matter = await prisma.matter.create({
+      data: {
+        fileCode: `2026/LP-${Date.now().toString().slice(-4)}`,
+        title: 'قضية لفحص فقدان استجابة القيد',
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdMatterIds.push(matter.id);
+
+    await page.goto(`/matters/${matter.id}/proceedings/new`);
+    await expect(page).toHaveURL(new RegExp(`/matters/${matter.id}/proceedings/new$`));
+
+    const uniqueNumber = `${Date.now().toString().slice(-4)}/ف`;
+    await page.getByTestId('proceeding-court-select').selectOption(court.id);
+    await page.getByTestId('proceeding-year-input').fill('2026');
+    await page.getByTestId('proceeding-number-input').fill(uniqueNumber);
+
+    // Wait for debounced similarity check to finish so route interception only catches form submission
+    await page.waitForTimeout(500);
+
+    let interceptedOnce = false;
+    await page.route(`**/matters/${matter.id}/proceedings**`, async (route) => {
+      const postData = route.request().postData() || '';
+      if (route.request().method() === 'POST' && postData.includes('FIRST_INSTANCE') && !interceptedOnce) {
+        interceptedOnce = true;
+        await page.request.fetch(route.request());
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.getByTestId('proceeding-submit-button').click();
+
+    const pendingBanner = page.getByTestId('operation-pending-banner');
+    await expect(pendingBanner).toBeVisible();
+
+    await page.unroute(`**/matters/${matter.id}/proceedings**`);
+
+    const retryBtn = page.getByTestId('operation-retry-button');
+    await expect(retryBtn).toBeVisible();
+    await retryBtn.click();
+
+    await page.waitForURL(new RegExp(`/matters/${matter.id}$`));
+
+    const matchingProcs = await prisma.proceeding.findMany({
+      where: { matterId: matter.id, numberText: uniqueNumber },
+    });
+    expect(matchingProcs).toHaveLength(1);
+
+    const auditEvents = await prisma.auditEvent.findMany({
+      where: {
+        entityType: 'Proceeding',
+        entityId: matchingProcs[0].id,
+        action: 'ADD_PROCEEDING',
+      },
+    });
+    expect(auditEvents).toHaveLength(1);
+  });
+
+  test('recovers from committed reference item toggle with lost response using frozen idempotency key (E1) @matters', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+
+    const court = await prisma.court.create({
+      data: {
+        name: `محكمة لتعطيل الفقدان ${Date.now()}`,
+        code: `CRT-TGL-${Date.now().toString().slice(-4)}`,
+        isActive: true,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdCourtIds.push(court.id);
+
+    await page.goto('/settings/reference');
+    await page.getByTestId('tab-courts').click();
+
+    const toggleBtn = page.getByTestId(`toggle-active-${court.id}`);
+    await expect(toggleBtn).toBeVisible();
+
+    let interceptedOnce = false;
+    await page.route('**/settings/reference**', async (route) => {
+      if (route.request().method() === 'POST' && !interceptedOnce) {
+        interceptedOnce = true;
+        await page.request.fetch(route.request());
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+
+    await toggleBtn.click();
+
+    const togglePendingBanner = page.getByTestId('toggle-operation-pending-banner');
+    await expect(togglePendingBanner).toBeVisible();
+
+    await page.unroute('**/settings/reference**');
+
+    const retryToggleBtn = page.getByTestId('toggle-operation-retry-button');
+    await expect(retryToggleBtn).toBeVisible();
+    await retryToggleBtn.click();
+
+    await expect(togglePendingBanner).toBeHidden();
+
+    const reloadedCourt = await prisma.court.findUniqueOrThrow({ where: { id: court.id } });
+    expect(reloadedCourt.isActive).toBe(false);
+
+    const auditCount = await prisma.auditEvent.count({
+      where: {
+        entityType: 'COURT',
+        entityId: court.id,
+        action: 'UPDATE_COURT',
+      },
+    });
+    expect(auditCount).toBe(1);
   });
 });
 
