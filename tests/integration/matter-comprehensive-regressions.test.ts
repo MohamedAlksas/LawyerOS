@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 import * as requireActorModule from '@/modules/identity/require-actor';
+import * as idempotencyModule from '@/lib/idempotency';
 import { getPrismaClient } from '@/lib/auth';
 import { normalizeArabicText } from '@/lib/normalization';
 import {
@@ -753,44 +754,98 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         });
         expect(auditCount).toBe(1);
 
-        // 3. Concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors
+        // 3. Force the resolved-claim-missing branch (reference-service.ts:276):
+        // Pre-create an in-flight PROCESSING idempotency record to trigger isIdempotencyUniqueConflict.
+        // Mock resolveConcurrentIdempotency to simulate concurrent worker rollback and return null.
+        // Assert that updateOfficeSettings recursively retries and stays strictly on dedicatedPrisma.
+        const fallbackKey = `c08-fallback-${crypto.randomUUID()}`;
+        const currentOffice = await getOfficeSettings(actor, { prisma: dedicatedPrisma });
+        const fallbackPayload = {
+          officeName: 'مكتب المحاماة المحدث عبر مسار الاسترجاع التكراري',
+          expectedVersion: currentOffice.version,
+          idempotencyKey: fallbackKey,
+        };
+        const payloadHash = idempotencyModule.computePayloadHash(fallbackPayload);
+
+        const createdRecord = await dedicatedPrisma.idempotencyRecord.create({
+          data: {
+            key: fallbackKey,
+            actorId: actor.id,
+            commandType: 'updateOfficeSettings',
+            payloadHash,
+            status: 'IN_PROGRESS',
+          },
+        });
+
+        const spyResolve = vi.spyOn(idempotencyModule, 'resolveConcurrentIdempotency').mockImplementationOnce(async () => {
+          // Simulate concurrent worker transaction rolling back and deleting its claim
+          await dedicatedPrisma.idempotencyRecord.delete({ where: { id: createdRecord.id } });
+          return null; // Forces line 276 recursive fallback branch!
+        });
+
+        const fallbackRes = await updateOfficeSettings(
+          actor,
+          fallbackPayload,
+          { prisma: dedicatedPrisma }
+        );
+
+        expect(fallbackRes.officeName).toBe('مكتب المحاماة المحدث عبر مسار الاسترجاع التكراري');
+        expect(fallbackRes.version).toBe(currentOffice.version + 1);
+
+        // Verify the write committed strictly to dedicatedPrisma:
+        const verifiedDbRow = await dedicatedPrisma.officeSettings.findUniqueOrThrow({
+          where: { id: currentOffice.id },
+        });
+        expect(verifiedDbRow.officeName).toBe('مكتب المحاماة المحدث عبر مسار الاسترجاع التكراري');
+        expect(verifiedDbRow.version).toBe(currentOffice.version + 1);
+
+        spyResolve.mockRestore();
+      } finally {
+        await dedicatedPrisma.$disconnect();
+      }
+    } finally {
+      await dedicated.drop();
+    }
+  }, 60000);
+
+  it('C08b: cold concurrent reads directly from zero rows resolve cleanly without P2002 errors', async () => {
+    const actor = createSyntheticActor();
+    const dedicated = await createDedicatedTestDatabase('c08_cold_reads_test');
+    try {
+      const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
+      const migRes = spawnSync(process.execPath, [prismaJs, 'migrate', 'deploy'], {
+        env: {
+          ...process.env,
+          DATABASE_URL: dedicated.url,
+          NODE_ENV: 'test',
+        },
+        encoding: 'utf-8',
+      });
+      if (migRes.status !== 0) {
+        throw new Error(`Prisma migrate deploy failed: ${migRes.stderr}`);
+      }
+
+      const dedicatedPrisma = new PrismaClient({
+        adapter: new PrismaPg(dedicated.pool),
+      });
+      try {
+        const initialCount = await dedicatedPrisma.officeSettings.count();
+        expect(initialCount).toBe(0);
+
+        // 5 concurrent cold getOfficeSettings calls against 0 rows
         const getPromises = Array.from({ length: 5 }, () =>
           getOfficeSettings(actor, { prisma: dedicatedPrisma })
         );
         const getResults = await Promise.all(getPromises);
         expect(getResults).toHaveLength(5);
         for (const res of getResults) {
-          expect(res.id).toBe(winningResult.id);
-          expect(res.version).toBe(2);
+          expect(res.officeName).toBe('مكتب المحاماة');
+          expect(res.version).toBe(1);
         }
 
-        // 4. Test concurrent same-key retry with injected client in options:
-        // When two concurrent callers submit the same idempotency key, one claims it and the other
-        // enters the catch block (line 276) retrying with { prisma: dedicatedPrisma }.
-        const sharedKey = `c08-same-key-${crypto.randomUUID()}`;
-        const inputSameKey = {
-          officeName: 'مكتب المحاماة الموحد بمفتاح متطابق',
-          expectedVersion: 2,
-          idempotencyKey: sharedKey,
-        };
-
-        const [r1, r2] = await Promise.all([
-          updateOfficeSettings(actor, inputSameKey, { prisma: dedicatedPrisma }),
-          updateOfficeSettings(actor, inputSameKey, { prisma: dedicatedPrisma }),
-        ]);
-
-        expect(r1.officeName).toBe('مكتب المحاماة الموحد بمفتاح متطابق');
-        expect(r2.officeName).toBe('مكتب المحاماة الموحد بمفتاح متطابق');
-        expect(r1.version).toBe(3);
-        expect(r2.version).toBe(3);
-
-        const auditCountAfterRetry = await dedicatedPrisma.auditEvent.count({
-          where: {
-            entityType: 'OfficeSettings',
-            action: 'UPDATE_OFFICE_SETTINGS',
-          },
-        });
-        expect(auditCountAfterRetry).toBe(2); // Exactly 1 new audit event for version 3 despite 2 calls
+        // Exactly 1 singleton created in DB
+        const finalCount = await dedicatedPrisma.officeSettings.count();
+        expect(finalCount).toBe(1);
       } finally {
         await dedicatedPrisma.$disconnect();
       }

@@ -570,34 +570,137 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     });
   }
 
+  interface RowSnapshot {
+    id: string;
+    version: number;
+    updatedAt: string;
+    fields: string;
+  }
+
   interface DbSnapshot {
     matters: number;
     proceedings: number;
     matterParties: number;
     matterAuthorizations: number;
+    proceedingParties: number;
+    officeSettings: number;
     courts: number;
     idempotencyRecords: number;
     auditEvents: number;
+    matterRow?: RowSnapshot | null;
+    proceedingRow?: RowSnapshot | null;
+    matterPartyRow?: RowSnapshot | null;
+    matterAuthRow?: RowSnapshot | null;
+    officeSettingsRow?: RowSnapshot | null;
+    courtRow?: RowSnapshot | null;
   }
 
   async function takeDbSnapshot(): Promise<DbSnapshot> {
-    const [m, pr, mp, ma, c, ir, ae] = await Promise.all([
+    const [m, pr, mp, ma, pp, os, c, ir, ae] = await Promise.all([
       dedicatedPool.query('SELECT count(*)::int FROM "matter"'),
       dedicatedPool.query('SELECT count(*)::int FROM "proceeding"'),
       dedicatedPool.query('SELECT count(*)::int FROM "matter_party"'),
       dedicatedPool.query('SELECT count(*)::int FROM "matter_authorization"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "proceeding_party"'),
+      dedicatedPool.query('SELECT count(*)::int FROM "office_settings"'),
       dedicatedPool.query('SELECT count(*)::int FROM "court"'),
       dedicatedPool.query('SELECT count(*)::int FROM "idempotency_record"'),
       dedicatedPool.query('SELECT count(*)::int FROM "audit_event"'),
     ]);
+
+    let matterRow: RowSnapshot | null = null;
+    let proceedingRow: RowSnapshot | null = null;
+    let matterPartyRow: RowSnapshot | null = null;
+    let matterAuthRow: RowSnapshot | null = null;
+    let officeSettingsRow: RowSnapshot | null = null;
+    let courtRow: RowSnapshot | null = null;
+
+    if (existingMatterId) {
+      const r = await dedicatedPool.query('SELECT id, version, "updatedAt", title, status FROM "matter" WHERE id = $1', [existingMatterId]);
+      if (r.rows[0]) {
+        matterRow = {
+          id: r.rows[0].id,
+          version: r.rows[0].version,
+          updatedAt: r.rows[0].updatedAt?.toISOString?.() ?? String(r.rows[0].updatedAt),
+          fields: JSON.stringify({ title: r.rows[0].title, status: r.rows[0].status }),
+        };
+      }
+    }
+
+    if (existingProcId) {
+      const r = await dedicatedPool.query('SELECT id, version, "updatedAt", status FROM "proceeding" WHERE id = $1', [existingProcId]);
+      if (r.rows[0]) {
+        proceedingRow = {
+          id: r.rows[0].id,
+          version: r.rows[0].version,
+          updatedAt: r.rows[0].updatedAt?.toISOString?.() ?? String(r.rows[0].updatedAt),
+          fields: JSON.stringify({ status: r.rows[0].status }),
+        };
+      }
+    }
+
+    if (existingMatterPartyId) {
+      const r = await dedicatedPool.query('SELECT id, version, "updatedAt", role FROM "matter_party" WHERE id = $1', [existingMatterPartyId]);
+      if (r.rows[0]) {
+        matterPartyRow = {
+          id: r.rows[0].id,
+          version: r.rows[0].version,
+          updatedAt: r.rows[0].updatedAt?.toISOString?.() ?? String(r.rows[0].updatedAt),
+          fields: JSON.stringify({ role: r.rows[0].role }),
+        };
+      }
+    }
+
+    if (existingAuthId) {
+      const r = await dedicatedPool.query('SELECT id, "createdAt" FROM "matter_authorization" WHERE id = $1', [existingAuthId]);
+      if (r.rows[0]) {
+        matterAuthRow = {
+          id: r.rows[0].id,
+          version: 1,
+          updatedAt: r.rows[0].createdAt?.toISOString?.() ?? String(r.rows[0].createdAt),
+          fields: '',
+        };
+      }
+    }
+
+    const osRes = await dedicatedPool.query('SELECT id, version, "updatedAt", "officeName" FROM "office_settings" LIMIT 1');
+    if (osRes.rows[0]) {
+      officeSettingsRow = {
+        id: osRes.rows[0].id,
+        version: osRes.rows[0].version,
+        updatedAt: osRes.rows[0].updatedAt?.toISOString?.() ?? String(osRes.rows[0].updatedAt),
+        fields: JSON.stringify({ officeName: osRes.rows[0].officeName }),
+      };
+    }
+
+    if (existingCourtId) {
+      const r = await dedicatedPool.query('SELECT id, version, "updatedAt", name, "isActive" FROM "court" WHERE id = $1', [existingCourtId]);
+      if (r.rows[0]) {
+        courtRow = {
+          id: r.rows[0].id,
+          version: r.rows[0].version,
+          updatedAt: r.rows[0].updatedAt?.toISOString?.() ?? String(r.rows[0].updatedAt),
+          fields: JSON.stringify({ name: r.rows[0].name, isActive: r.rows[0].isActive }),
+        };
+      }
+    }
+
     return {
       matters: m.rows[0].count,
       proceedings: pr.rows[0].count,
       matterParties: mp.rows[0].count,
       matterAuthorizations: ma.rows[0].count,
+      proceedingParties: pp.rows[0].count,
+      officeSettings: os.rows[0].count,
       courts: c.rows[0].count,
       idempotencyRecords: ir.rows[0].count,
       auditEvents: ae.rows[0].count,
+      matterRow,
+      proceedingRow,
+      matterPartyRow,
+      matterAuthRow,
+      officeSettingsRow,
+      courtRow,
     };
   }
 
@@ -606,9 +709,18 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     expect(after.proceedings).toBe(before.proceedings);
     expect(after.matterParties).toBe(before.matterParties);
     expect(after.matterAuthorizations).toBe(before.matterAuthorizations);
+    expect(after.proceedingParties).toBe(before.proceedingParties);
+    expect(after.officeSettings).toBe(before.officeSettings);
     expect(after.courts).toBe(before.courts);
     expect(after.idempotencyRecords).toBe(before.idempotencyRecords);
     expect(after.auditEvents).toBe(before.auditEvents);
+
+    expect(after.matterRow).toEqual(before.matterRow);
+    expect(after.proceedingRow).toEqual(before.proceedingRow);
+    expect(after.matterPartyRow).toEqual(before.matterPartyRow);
+    expect(after.matterAuthRow).toEqual(before.matterAuthRow);
+    expect(after.officeSettingsRow).toEqual(before.officeSettingsRow);
+    expect(after.courtRow).toEqual(before.courtRow);
   }
 
   function assertNoPrivateDataInResponse(body: string) {
@@ -713,7 +825,6 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         args: [{
           id: existingAuthId,
           matterId: existingMatterId,
-          expectedVersion: 1,
           idempotencyKey: `unauth-unma-${crypto.randomUUID()}`,
         }],
       },
@@ -733,6 +844,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           id: existingCourtId,
           name: 'محكمة معدلة غير مصرحة',
           expectedVersion: 1,
+          isActive: true,
           idempotencyKey: `unauth-uref-${crypto.randomUUID()}`,
         }],
       },
@@ -922,8 +1034,17 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('FORBIDDEN');
         } else {
-          // Next.js framework Server Action CSRF protection surfaces mismatched Origin as 500 or 400
+          // Next.js framework Server Action CSRF protection surfaces mismatched Origin as 500 (with Flight error digest) or 403/400
           expect([400, 403, 500]).toContain(res.status);
+          const isConfirmedRejection =
+            res.status === 403 ||
+            res.status === 400 ||
+            (res.status === 500 && (res.body.includes('digest') || res.body.includes('E{'))) ||
+            res.body.includes('Invalid Server Action request') ||
+            res.body.includes('CSRF') ||
+            res.body.includes('FORBIDDEN') ||
+            res.body.includes('Failed to find Server Action');
+          expect(isConfirmedRejection).toBe(true);
         }
       }
 

@@ -224,6 +224,7 @@ interface ProceedingPartyInput {
   matterPartyId: string;
   capacityText?: string;
   legalCapacity?: ProceedingLegalCapacity | null;
+  // Invariant: At least one of capacityText or legalCapacity is strictly required for proceeding party input.
   notes?: string | null;
 }
 
@@ -233,6 +234,7 @@ interface LinkProceedingPartyInput {
   expectedVersion: number;
   capacityText?: string;
   legalCapacity?: ProceedingLegalCapacity | null;
+  // Invariant: At least one of capacityText or legalCapacity is strictly required.
   notes?: string | null;
   idempotencyKey: string;
 }

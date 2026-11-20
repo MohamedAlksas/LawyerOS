@@ -19,6 +19,9 @@ export class IdempotencyConcurrentConflictError extends Error {
  * Checks whether an error is a Prisma unique constraint violation (P2002) on IdempotencyRecord.
  */
 export function isIdempotencyUniqueConflict(error: unknown): boolean {
+  if (error instanceof IdempotencyConcurrentConflictError) {
+    return true;
+  }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     const meta = error.meta as { target?: string[] | string; modelName?: string } | undefined;
     if (meta?.modelName === 'IdempotencyRecord') {

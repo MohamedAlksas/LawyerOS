@@ -392,6 +392,193 @@ describe('T06 Concurrency Races & DB Boundary Verification (E1)', () => {
     }
   });
 
+  it('Race 2b: Barrier-driven competing client demotion on ACTIVE matter: two concurrent demotions cannot leave matter clientless', async () => {
+    const party1 = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'موكل سباق تخفيض 1',
+      idempotencyKey: `p-demote-race-1-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(party1.party.id);
+
+    const party2 = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'موكل سباق تخفيض 2',
+      idempotencyKey: `p-demote-race-2-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(party2.party.id);
+
+    const matter = await openMatter(actor, {
+      title: 'ملف سباق تخفيض آخر موكل',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-demote-race-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(matter.matter.id);
+
+    const mp1 = await linkMatterParty(actor, {
+      matterId: matter.matter.id,
+      partyId: party1.party.id,
+      role: 'CLIENT',
+      idempotencyKey: `link-mp1-demote-${crypto.randomUUID()}`,
+    });
+
+    const mp2 = await linkMatterParty(actor, {
+      matterId: matter.matter.id,
+      partyId: party2.party.id,
+      role: 'CLIENT',
+      idempotencyKey: `link-mp2-demote-${crypto.randomUUID()}`,
+    });
+
+    // Activate matter
+    const reloadedM = await prisma.matter.findUniqueOrThrow({ where: { id: matter.matter.id } });
+    await updateMatter(actor, {
+      id: matter.matter.id,
+      expectedVersion: reloadedM.version,
+      title: reloadedM.title,
+      kind: reloadedM.kind as MatterKind,
+      status: 'ACTIVE',
+      idempotencyKey: `act-demote-${crypto.randomUUID()}`,
+    });
+
+    const key1 = `race-demote1-${crypto.randomUUID()}`;
+    const key2 = `race-demote2-${crypto.randomUUID()}`;
+    const barrier = createDatabaseBoundaryBarrier([key1, key2]);
+
+    try {
+      const worker1 = async () =>
+        updateMatterParty(actor, {
+          id: mp1.id,
+          matterId: matter.matter.id,
+          expectedVersion: mp1.version,
+          role: 'OPPONENT',
+          idempotencyKey: key1,
+        });
+
+      const worker2 = async () =>
+        updateMatterParty(actor, {
+          id: mp2.id,
+          matterId: matter.matter.id,
+          expectedVersion: mp2.version,
+          role: 'OPPONENT',
+          idempotencyKey: key2,
+        });
+
+      const results = await Promise.allSettled([worker1(), worker2()]);
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      // Exactly 1 can be demoted; the other must be rejected to prevent clientless ACTIVE matter
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      const rejError = (rejected[0] as PromiseRejectedResult).reason;
+      expect(
+        rejError instanceof LastClientRequiredError ||
+        rejError instanceof ConcurrencyConflictError
+      ).toBe(true);
+
+      // Verify DB integrity: ACTIVE matter retains at least 1 CLIENT
+      const reloaded = await getMatter(matter.matter.id, actor);
+      const remainingClients = reloaded.parties?.filter((p) => p.role === 'CLIENT') ?? [];
+      expect(remainingClients.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      barrier.restore();
+    }
+  });
+
+  it('Race 2c: Barrier-driven mixed client removal vs demotion on ACTIVE matter: competing removal and demotion cannot leave matter clientless', async () => {
+    const party1 = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'موكل سباق مختلط 1',
+      idempotencyKey: `p-mixed-race-1-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(party1.party.id);
+
+    const party2 = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'موكل سباق مختلط 2',
+      idempotencyKey: `p-mixed-race-2-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(party2.party.id);
+
+    const matter = await openMatter(actor, {
+      title: 'ملف سباق إزالة وتخفيض مختلط',
+      kind: 'LITIGATION',
+      idempotencyKey: `m-mixed-race-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(matter.matter.id);
+
+    const mp1 = await linkMatterParty(actor, {
+      matterId: matter.matter.id,
+      partyId: party1.party.id,
+      role: 'CLIENT',
+      idempotencyKey: `link-mp1-mixed-${crypto.randomUUID()}`,
+    });
+
+    const mp2 = await linkMatterParty(actor, {
+      matterId: matter.matter.id,
+      partyId: party2.party.id,
+      role: 'CLIENT',
+      idempotencyKey: `link-mp2-mixed-${crypto.randomUUID()}`,
+    });
+
+    // Activate matter
+    const reloadedM = await prisma.matter.findUniqueOrThrow({ where: { id: matter.matter.id } });
+    await updateMatter(actor, {
+      id: matter.matter.id,
+      expectedVersion: reloadedM.version,
+      title: reloadedM.title,
+      kind: reloadedM.kind as MatterKind,
+      status: 'ACTIVE',
+      idempotencyKey: `act-mixed-${crypto.randomUUID()}`,
+    });
+
+    const key1 = `race-mixed-unlink-${crypto.randomUUID()}`;
+    const key2 = `race-mixed-demote-${crypto.randomUUID()}`;
+    const barrier = createDatabaseBoundaryBarrier([key1, key2]);
+
+    try {
+      // Worker 1 tries to unlink party 1
+      const worker1 = async () =>
+        unlinkMatterParty(actor, {
+          id: mp1.id,
+          matterId: matter.matter.id,
+          expectedVersion: mp1.version,
+          idempotencyKey: key1,
+        });
+
+      // Worker 2 tries to demote party 2 to OPPONENT
+      const worker2 = async () =>
+        updateMatterParty(actor, {
+          id: mp2.id,
+          matterId: matter.matter.id,
+          expectedVersion: mp2.version,
+          role: 'OPPONENT',
+          idempotencyKey: key2,
+        });
+
+      const results = await Promise.allSettled([worker1(), worker2()]);
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      // Exactly 1 operation can succeed; the other must be rejected
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+
+      const rejError = (rejected[0] as PromiseRejectedResult).reason;
+      expect(
+        rejError instanceof LastClientRequiredError ||
+        rejError instanceof ConcurrencyConflictError
+      ).toBe(true);
+
+      // Verify DB integrity: ACTIVE matter retains at least 1 CLIENT
+      const reloaded = await getMatter(matter.matter.id, actor);
+      const remainingClients = reloaded.parties?.filter((p) => p.role === 'CLIENT') ?? [];
+      expect(remainingClients.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      barrier.restore();
+    }
+  });
+
   // =========================================================================
   // Race 3: Simultaneous primary-contact changes
   // =========================================================================

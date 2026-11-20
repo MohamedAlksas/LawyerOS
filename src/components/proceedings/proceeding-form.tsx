@@ -217,10 +217,15 @@ export function ProceedingForm({
   const currentSnapshotKey = `${courtId}:${numberText.trim()}:${yearLabel.trim()}`;
   const [candidateSnapshotKey, setCandidateSnapshotKey] = useState<string | null>(null);
   const [confirmedSnapshotKey, setConfirmedSnapshotKey] = useState<string | null>(null);
+  const [confirmedCandidateSetKey, setConfirmedCandidateSetKey] = useState<string | null>(null);
+
+  const currentCandidateSetKey = similarCandidates.map((c) => c.id).sort().join(',');
   const isConfirmedForCurrentSnapshot =
     confirmedSnapshotKey !== null &&
     confirmedSnapshotKey === currentSnapshotKey &&
-    candidateSnapshotKey === currentSnapshotKey;
+    candidateSnapshotKey === currentSnapshotKey &&
+    confirmedCandidateSetKey !== null &&
+    confirmedCandidateSetKey === currentCandidateSetKey;
 
   const similarGenRef = useRef(0);
 
@@ -299,6 +304,7 @@ export function ProceedingForm({
 
         // If lookup for this exact snapshot was never performed or is in-flight:
         if (candidateSnapshotKey !== snapshotKey || isLookingUpSimilar) {
+          const submitGen = ++similarGenRef.current;
           try {
             setIsLookingUpSimilar(true);
             const simRes = await findSimilarProceedingsAction({
@@ -308,6 +314,7 @@ export function ProceedingForm({
               excludeProceedingId: initialProceeding?.id ?? null,
               limit: 10,
             });
+            if (submitGen !== similarGenRef.current) return;
             if (simRes.success) {
               currentCandidates = simRes.data.candidates;
               setSimilarCandidates(currentCandidates);
@@ -321,17 +328,27 @@ export function ProceedingForm({
               return;
             }
           } catch {
-            const netErr = 'حدث خطأ في الاتصال أثناء فحص تشابه القيود القضائية.';
-            setSimilarLookupError(netErr);
-            setGeneralError(netErr);
+            if (submitGen === similarGenRef.current) {
+              const netErr = 'حدث خطأ في الاتصال أثناء فحص تشابه القيود القضائية.';
+              setSimilarLookupError(netErr);
+              setGeneralError(netErr);
+            }
             setIsSaving(false);
             return;
           } finally {
-            setIsLookingUpSimilar(false);
+            if (submitGen === similarGenRef.current) {
+              setIsLookingUpSimilar(false);
+            }
           }
         }
 
-        if (currentCandidates.length > 0 && confirmedSnapshotKey !== snapshotKey) {
+        const displayedCandidatesKey = currentCandidates.map((c) => c.id).sort().join(',');
+        const isCurrentlyConfirmed =
+          confirmedSnapshotKey === snapshotKey &&
+          candidateSnapshotKey === snapshotKey &&
+          confirmedCandidateSetKey === displayedCandidatesKey;
+
+        if (currentCandidates.length > 0 && !isCurrentlyConfirmed) {
           setGeneralError(
             'عُثر على قيود قضائية مطابقة في نفس المحكمة. راجع القيود المطابقة أدناه للتأكد، أو اضغط "متابعة الحفظ كقيد منفصل" لتأكيد تسجيل قيد جديد.'
           );
@@ -764,6 +781,7 @@ export function ProceedingForm({
                 onClick={() => {
                   if (candidateSnapshotKey === currentSnapshotKey) {
                     setConfirmedSnapshotKey(currentSnapshotKey);
+                    setConfirmedCandidateSetKey(currentCandidateSetKey);
                   }
                 }}
                 disabled={candidateSnapshotKey !== currentSnapshotKey}
@@ -807,6 +825,7 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setCourtId(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setConfirmedCandidateSetKey(null);
                   setCandidateSnapshotKey(null);
                   setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);
@@ -963,6 +982,7 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setNumberText(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setConfirmedCandidateSetKey(null);
                   setCandidateSnapshotKey(null);
                   setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);
@@ -988,6 +1008,7 @@ export function ProceedingForm({
                 onChange={(e) => {
                   setYearLabel(e.target.value);
                   setConfirmedSnapshotKey(null);
+                  setConfirmedCandidateSetKey(null);
                   setCandidateSnapshotKey(null);
                   setSimilarCandidates([]);
                   setIncompleteDraftAcknowledged(false);

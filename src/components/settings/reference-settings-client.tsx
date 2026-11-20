@@ -15,7 +15,6 @@ import {
   updateOfficeSettingsAction,
   createReferenceItemAction,
   updateReferenceItemAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   getOfficeSettingsAction,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   listReferenceItemsAction,
@@ -54,6 +53,10 @@ export function ReferenceSettingsClient({
   const [officeMessage, setOfficeMessage] = useState<string | null>(null);
   const [officeError, setOfficeError] = useState<string | null>(null);
   const [officePending, setOfficePending] = useState(false);
+  const [officeConflictPending, setOfficeConflictPending] = useState(false);
+  const [reconcilePreview, setReconcilePreview] = useState<OfficeSettingsDTO | null>(null);
+  const [isReconcilingOffice, setIsReconcilingOffice] = useState(false);
+  const officeSaveRequestIdRef = useRef(0);
   const [officeSessionExpired, setOfficeSessionExpired] = useState(false);
   const [officeDirty, setOfficeDirty] = useState(false);
   const [officeFieldErrors, setOfficeFieldErrors] = useState<Record<string, string>>({});
@@ -94,7 +97,9 @@ export function ReferenceSettingsClient({
     const isFormClean =
       !officeDirty &&
       !officePending &&
+      !officeConflictPending &&
       !isSavingOffice &&
+      !isReconcilingOffice &&
       officeName === prevProps.officeSettings.officeName &&
       lawyerName === (prevProps.officeSettings.lawyerName || '') &&
       phone === (prevProps.officeSettings.phone || '') &&
@@ -282,11 +287,16 @@ export function ReferenceSettingsClient({
 
   const handleSaveOffice = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingOffice || isReconcilingOffice) return;
+
+    const requestId = ++officeSaveRequestIdRef.current;
     setIsSavingOffice(true);
     setOfficeMessage(null);
     setOfficeError(null);
     setOfficeFieldErrors({});
     setOfficeSessionExpired(false);
+    setOfficeConflictPending(false);
+    setReconcilePreview(null);
 
     let op = officePendingRef.current;
     if (!op) {
@@ -309,6 +319,8 @@ export function ReferenceSettingsClient({
     try {
       const res = await updateOfficeSettingsAction(op.payload);
 
+      if (requestId !== officeSaveRequestIdRef.current) return;
+
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
           setOfficeSessionExpired(true);
@@ -317,9 +329,11 @@ export function ReferenceSettingsClient({
             'انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.'
           );
         } else if (res.code === 'CONCURRENCY_CONFLICT') {
-          setOfficePending(true);
+          officePendingRef.current = null;
+          setOfficePending(false);
+          setOfficeConflictPending(true);
           setOfficeError(
-            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. أُبقيت العملية مجمّدة؛ يمكنك مراجعة البيانات وتحديثها لأحدث نسخة من الخادم أو بدء تعديل جديد.'
+            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك محفوظة؛ يمكنك استعراض وتحديث بأحدث بيانات من الخادم واعتمادها أو بدء تعديل جديد.'
           );
         } else if (
           !res.code ||
@@ -329,6 +343,7 @@ export function ReferenceSettingsClient({
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setOfficePending(true);
+          setOfficeConflictPending(false);
           setOfficeError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
@@ -337,6 +352,7 @@ export function ReferenceSettingsClient({
         } else {
           officePendingRef.current = null;
           setOfficePending(false);
+          setOfficeConflictPending(false);
           setOfficeIdempotencyKey(generateClientRequestId('off'));
           setOfficeError(res.error || 'تعذر حفظ بيانات المكتب.');
           if (res.fieldErrors) setOfficeFieldErrors(res.fieldErrors);
@@ -347,8 +363,10 @@ export function ReferenceSettingsClient({
 
       officePendingRef.current = null;
       setOfficePending(false);
+      setOfficeConflictPending(false);
       setOfficeDirty(false);
       setOfficeSessionExpired(false);
+      setReconcilePreview(null);
       setOfficeSettings(res.data);
       // Reconcile all editable form fields from the confirmed snapshot
       setOfficeName(res.data.officeName);
@@ -362,7 +380,9 @@ export function ReferenceSettingsClient({
       setOfficeIdempotencyKey(generateClientRequestId('off'));
       router.refresh();
     } catch (err: unknown) {
+      if (requestId !== officeSaveRequestIdRef.current) return;
       setOfficePending(true);
+      setOfficeConflictPending(false);
       setOfficeError(
         err instanceof Error
           ? err.message
@@ -373,28 +393,61 @@ export function ReferenceSettingsClient({
   };
 
   const handleStartNewOfficeEdit = () => {
+    if (isSavingOffice || isReconcilingOffice) return;
+    ++officeSaveRequestIdRef.current;
     officePendingRef.current = null;
     setOfficePending(false);
+    setOfficeConflictPending(false);
     setOfficeSessionExpired(false);
     setOfficeError(null);
+    setReconcilePreview(null);
     setOfficeIdempotencyKey(generateClientRequestId('off'));
     setOfficeDirty(true);
   };
 
-  const handleReconcileOfficeWithServer = () => {
-    officePendingRef.current = null;
+  const handleFetchOfficeForReconcile = async () => {
+    if (isSavingOffice || isReconcilingOffice) return;
+    setIsReconcilingOffice(true);
+    setOfficeError(null);
+    try {
+      const res = await getOfficeSettingsAction();
+      if (!res.success) {
+        setOfficeError(res.error || 'تعذر جلب أحدث بيانات المكتب من الخادم. تم الاحتفاظ بمسودتك.');
+        return;
+      }
+      setReconcilePreview(res.data);
+    } catch (err: unknown) {
+      setOfficeError(
+        err instanceof Error
+          ? err.message
+          : 'تعذر الاتصال بالخادم لجلب أحدث البيانات. تم الاحتفاظ بمسودتك.'
+      );
+    } finally {
+      setIsReconcilingOffice(false);
+    }
+  };
+
+  const handleConfirmReconcile = () => {
+    if (!reconcilePreview) return;
+    const latest = reconcilePreview;
+    setOfficeSettings(latest);
+    setOfficeName(latest.officeName);
+    setLawyerName(latest.lawyerName || '');
+    setPhone(latest.phone || '');
+    setEmail(latest.email || '');
+    setAddress(latest.address || '');
+    setTaxNumber(latest.taxNumber || '');
+
+    setReconcilePreview(null);
+    setOfficeConflictPending(false);
     setOfficePending(false);
+    officePendingRef.current = null;
+    setOfficeDirty(false);
     setOfficeSessionExpired(false);
     setOfficeError(null);
-    setOfficeDirty(false);
-    setOfficeSettings(initialOfficeSettings);
-    setOfficeName(initialOfficeSettings.officeName);
-    setLawyerName(initialOfficeSettings.lawyerName || '');
-    setPhone(initialOfficeSettings.phone || '');
-    setEmail(initialOfficeSettings.email || '');
-    setAddress(initialOfficeSettings.address || '');
-    setTaxNumber(initialOfficeSettings.taxNumber || '');
     setOfficeIdempotencyKey(generateClientRequestId('off'));
+    setOfficeMessage('تم تحديث البيانات بأحدث نسخة من الخادم بنجاح.');
+    router.refresh();
   };
 
   // Handle Create Reference Item (C09/U1: frozen key on transport retry)
@@ -862,8 +915,77 @@ export function ReferenceSettingsClient({
             </div>
           )}
 
-          {/* Frozen Operation Banner (U1) */}
-          {officePending && (
+          {/* Confirmed Concurrency Conflict Banner (P2 Spec: explicit server reconciliation) */}
+          {officeConflictPending && (
+            <div
+              role="alert"
+              data-testid="office-conflict-banner"
+              className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-3 text-xs"
+            >
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <span>⚠️</span>
+                <span>تعارض في التعديل المتزامن: بيانات أحدث موجودة على الخادم</span>
+              </div>
+              <p className="leading-relaxed">
+                تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك المحلية محفوظة؛ يمكنك استعراض بيانات الخادم واعتمادها أو بدء تعديل جديد.
+              </p>
+              {reconcilePreview ? (
+                <div data-testid="office-reconcile-preview" className="p-3 bg-white border border-amber-200 rounded-[6px] space-y-2">
+                  <div className="font-semibold text-amber-900">البيانات الحالية على الخادم (النسخة {reconcilePreview.version}):</div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-700">
+                    <div><span className="font-medium">الاسم:</span> {reconcilePreview.officeName}</div>
+                    <div><span className="font-medium">الهاتف:</span> {reconcilePreview.phone || '—'}</div>
+                    <div><span className="font-medium">العنوان:</span> {reconcilePreview.address || '—'}</div>
+                    <div><span className="font-medium">المحامي:</span> {reconcilePreview.lawyerName || '—'}</div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      data-testid="office-reconcile-confirm-button"
+                      onClick={handleConfirmReconcile}
+                      disabled={isSavingOffice || isReconcilingOffice}
+                      className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] min-h-[36px]"
+                    >
+                      تأكيد اعتماد بيانات الخادم
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="office-reconcile-cancel-button"
+                      onClick={() => setReconcilePreview(null)}
+                      disabled={isSavingOffice || isReconcilingOffice}
+                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-[6px] min-h-[36px]"
+                    >
+                      إلغاء والاحتفاظ بالمسودة
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleFetchOfficeForReconcile}
+                    disabled={isSavingOffice || isReconcilingOffice}
+                    data-testid="office-reconcile-server-button"
+                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
+                  >
+                    {isReconcilingOffice ? 'جارٍ جلب بيانات الخادم...' : 'استعراض وتحديث بأحدث بيانات من الخادم'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStartNewOfficeEdit}
+                    disabled={isSavingOffice || isReconcilingOffice}
+                    data-testid="office-operation-start-new-button"
+                    className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
+                  >
+                    بدء تعديل جديد
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Frozen Operation Banner for Uncertain Transport Outcomes (U1/Standards P2) */}
+          {officePending && !officeConflictPending && (
             <div
               role="alert"
               data-testid="office-operation-pending-banner"
@@ -880,26 +1002,20 @@ export function ReferenceSettingsClient({
                 <button
                   type="submit"
                   form="office-settings-form"
+                  disabled={isSavingOffice || isReconcilingOffice}
                   data-testid="office-operation-retry-button"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] disabled:opacity-50 text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
                 >
-                  إعادة محاولة العملية الأصلية
+                  {isSavingOffice ? 'جارٍ إعادة المحاولة...' : 'إعادة محاولة العملية الأصلية'}
                 </button>
                 <button
                   type="button"
                   onClick={handleStartNewOfficeEdit}
+                  disabled={isSavingOffice || isReconcilingOffice}
                   data-testid="office-operation-start-new-button"
-                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
                 >
                   بدء تعديل جديد
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReconcileOfficeWithServer}
-                  data-testid="office-reconcile-server-button"
-                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[36px]"
-                >
-                  استعراض وتحديث بأحدث بيانات من الخادم
                 </button>
               </div>
             </div>
@@ -1047,7 +1163,7 @@ export function ReferenceSettingsClient({
               <div className="flex justify-end pt-2">
                 <button
                   type="submit"
-                  disabled={isSavingOffice || officePending}
+                  disabled={isSavingOffice || isReconcilingOffice || officePending || officeConflictPending}
                   data-testid="save-office-button"
                   className="px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-sm rounded-[6px] min-h-[44px] shadow-xs"
                 >
