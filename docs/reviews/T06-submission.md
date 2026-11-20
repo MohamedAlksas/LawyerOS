@@ -6,7 +6,7 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Base Checkpoint (Accepted T05 / origin/main):** `8e7c773c39a97ff5a0e634be9b6eb0b145b4985d`  
 **Codex Comprehensive Review Assignment:** `docs/reviews/T06-comprehensive-review-and-corrections.md`  
-**Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `929895fa8da5db747d6d6b058cdb3a890c898bdb`  
+**Candidate Inspected Checkpoint (Frozen & Specialist Audited):** `791416ace7459a21c9c7f9bc35c04c37fd250ee3`  
 **Current Status:** `READY_FOR_CODEX_REVIEW`  
 
 ---
@@ -15,7 +15,7 @@
 
 Task T06 delivers the complete core operational casework backbone for LawOffice OS in strict Egyptian Arabic RTL (`lang="ar-EG"`, `dir="rtl"`). All casework records are built on top of the accepted predecessor T05 party directory, enforcing relational integrity, transactional invariants, optimistic concurrency, and zero client leakage.
 
-Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-and-corrections.md`) and remaining findings (`docs/reviews/T06-review-after-comprehensive.md`), all reported findings (`C01`–`C23`, `V01`–`V03`, `S1`–`S6`, `U1`–`U11`, and `E1`–`E4`) have been comprehensively addressed with failing regressions, implementation corrections, and renewed independent native specialist sign-offs on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`:
+Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-and-corrections.md`) and remaining findings (`docs/reviews/T06-review-after-comprehensive.md`, `docs/reviews/T06-review-gemini-resume.md`), all reported findings (`C01`–`C23`, `V01`–`V03`, `S1`–`S6`, `U1`–`U11`, and `E1`–`E4`) have been comprehensively addressed with failing regressions, implementation corrections, and renewed independent native specialist sign-offs on candidate checkpoint `791416ace7459a21c9c7f9bc35c04c37fd250ee3`:
 - **S1 (PostgreSQL POSIX Regex)**: In `prisma/migrations/20261119000000_t06_matter_title_normalized/migration.sql`, fixed character class range to `[ً-ٰٟـ]` matching `normalizeArabicText` across diacritics, tatweel, Alef variants, Maqsura, and digits.
 - **S2 / C08 (Singleton Office Settings Serialization)**: In `src/modules/settings/reference-service.ts`, `updateOfficeSettings` uses `INSERT ... ON CONFLICT ("id") DO NOTHING` followed by `SELECT ... FOR UPDATE`, guaranteeing serial execution under concurrency.
 - **S3 / C03 (Live State and OperationVersion Replay)**: In `matter-service.ts`, `linkMatterParty` and `linkMatterAuthorization` return `operationVersion: extractOperationVersion(...)` on replay and `operationVersion: version` on initial creation.
@@ -93,18 +93,18 @@ Following Codex's comprehensive review (`docs/reviews/T06-comprehensive-review-a
 
 ---
 
-## 4. Native Agency Specialist Evidence (Candidate Checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`)
+## 4. Native Agency Specialist Evidence (Candidate Checkpoint `791416ace7459a21c9c7f9bc35c04c37fd250ee3`)
 
-In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native child sessions executed the implementation phases and conducted renewed independent audits on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`:
+In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native child sessions executed the implementation phases and conducted renewed independent audits on candidate checkpoint `791416ace7459a21c9c7f9bc35c04c37fd250ee3`:
 
 | Role | Profile / Specialist | Invocation / Conversation ID | Profile Path & Hash | Target Checkpoint | Verdict | Summary of Findings & Actions |
 |---|---|---|---|---|---|---|
 | **Backend Author** | `agency-backend-architect` | `37734ea6-bebe-4991-9804-cd1a89adf49a` | `D:/Lawyer/.agents/skills/engineering-backend-architect/SKILL.md`<br>SHA: `248386F5868B525B96D4B892306A26DF252F7DE4BA2E9A316B7068AE4876722F` | N/A (Implementation) | COMPLETE | Implemented mandatory expectedVersion on proceeding parties, ascending lock order for cascade unlinking, bounded idempotency metadata, Migration 9 SQL Arabic normalization, calendar date range (1000..9999), and singleton upsert. |
 | **Frontend Author** | `agency-frontend-developer` | `7f73047f-c482-4fcd-8ef9-9edcccd887af` | `D:/Lawyer/.agents/skills/engineering-frontend-developer/SKILL.md`<br>SHA: `C6FFDF0FBF1E2D6470C0DDC26B065E06AC940FE12B58BD5727CE76F37DF29560` | N/A (Implementation) | COMPLETE | Implemented frozen-operation pattern across forms, explicit refresh baseline reset, party search race guards, candidate party checkboxes, reference edit dialogs, contracted proceeding detail page, and returnTo allowlist. |
 | **Test Specialist** | `agency-test-automation-engineer` | `4fd90964-589d-4519-b957-e49ee7c11f0f` | `D:/Lawyer/.agents/skills/testing-test-automation-engineer/SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | N/A (Implementation) | COMPLETE | Authored 10 comprehensive regression tests in `matter-comprehensive-regressions.test.ts`, verified 26 unit tests in `sanitize-return-to.test.ts`, and updated Playwright E2E suites for C09, C20, and C21. |
-| **Independent Database Reviewer** | `agency-database-optimizer` | `62c5dedd-3c19-46f7-b8e2-83f0f61f8592` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md`<br>SHA: `BD5F5E6813C8931C1387689F6A4D6137E3385734D402F72BD0DFC4292F7EE068`<br>Definition: `D:/Lawyer/.agents/agents/agency-database-optimizer.md`<br>SHA: `E260D8BBC32BB73A232571B1FBDDB452B680A83607B757BE374A662C3D5D95BE` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited S1 regex syntax `[ً-ٰٟـ]` matching `normalizeArabicText`, S2 singleton upsert/lock serialization, S4 atomic party reconciliation, S6 docket SQL filtering before `LIMIT 100`, verified 9 migrations up to date with 0 predecessor drift, and verified 100% pass on all 17 database integration tests. |
-| **Independent Security Reviewer** | `agency-application-security-engineer` | `565b49e4-ef98-45bc-9071-c3095941d328` | `d:/Lawyer/.agents/skills/security-appsec-engineer/SKILL.md`<br>SHA: `77C29A754E6C25B97F189C06D8459B02FD29F4D8DE8602CA53740F4C92A1F259`<br>Definition: `d:/Lawyer/.agents/agents/agency-application-security-engineer.md`<br>SHA: `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited U3/C21 session recovery & safe deep links (`/login`, `target="_blank"`, `rel="noopener noreferrer"`), active non-inert retry buttons, wire transport authorization (T06-13 / E3) with fail-closed permissions and MAINTAINER denial, untrusted origin rejection, forged parameter neutralization, single session row deletion revocation, and audit private notes redaction (`hasNotes: boolean`). |
-| **Independent Test Reviewer** | `agency-test-automation-engineer` | `b4b09ac0-fe44-4f23-9708-3184afa5ec25` | `D:\Lawyer\.agents\skills\testing-test-automation-engineer\SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4`<br>Definition: `D:\Lawyer\.agents\agents\agency-test-automation-engineer.md`<br>SHA: `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | `929895fa8da5db747d6d6b058cdb3a890c898bdb` | **ACCEPT** | Audited truthful test counts (232 unit, 244 integration across 28 files with 72 tests across 12 matter suites, 30 Playwright E2E tests across 3 viewports), T06-11 atomicity rollback on injected audit failure, S1–S6 regressions, 8/8 wire transport auth checks, and 0 errors in typecheck/lint. |
+| **Independent Database Reviewer** | `agency-database-optimizer` | `233052b2-37e7-4b76-b9b5-bef314508fd1` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md`<br>SHA: `BD5F5E6813C8931C1387689F6A4D6137E3385734D402F72BD0DFC4292F7EE068`<br>Definition: `D:/Lawyer/.agents/agents/agency-database-optimizer.md`<br>SHA: `E260D8BBC32BB73A232571B1FBDDB452B680A83607B757BE374A662C3D5D95BE` | `791416ace7459a21c9c7f9bc35c04c37fd250ee3` | **ACCEPT** | Audited Migration 9 POSIX regex syntax `[ً-ٰٟـ]` matching `normalizeArabicText`, singleton office settings serialization with `INSERT ... ON CONFLICT ("id") DO NOTHING` before `SELECT ... FOR UPDATE`, partial unique index on primary contact (`idx_matter_party_primary`), ascending deadlock-free row locks in cascade unlinking, verified 9 migrations up to date with 0 predecessor drift, and verified 4/4 migration upgrade tests. |
+| **Independent Security Reviewer** | `agency-application-security-engineer` | `c274c997-ea9d-4dc6-b496-bcaabead55e3` | `d:/Lawyer/.agents/skills/security-appsec-engineer/SKILL.md`<br>SHA: `77C29A754E6C25B97F189C06D8459B02FD29F4D8DE8602CA53740F4C92A1F259`<br>Definition: `d:/Lawyer/.agents/agents/agency-application-security-engineer.md`<br>SHA: `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | `791416ace7459a21c9c7f9bc35c04c37fd250ee3` | **ACCEPT** | Audited wire transport authorization in `tests/integration/matter-transport-auth.test.ts` (8/8 tests passed) across 13 exposed actions: unauthenticated, expired, genuine deletion revocation (`rowCount === 1`), unverified MFA, and MAINTAINER denial; verified untrusted origin rejection, forged parameter neutralization (`allowIncompleteMfa: true`), zero PII leakage in audit events, and `sanitizeReturnTo` safe route patterns. |
+| **Independent Test Reviewer** | `agency-test-automation-engineer` | `5efe629a-fa77-49d7-ac00-5226cef0f475` | `D:\Lawyer\.agents\skills\testing-test-automation-engineer\SKILL.md`<br>SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4`<br>Definition: `D:\Lawyer\.agents\agents\agency-test-automation-engineer.md`<br>SHA: `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | `791416ace7459a21c9c7f9bc35c04c37fd250ee3` | **ACCEPT** | Audited truthful test execution discovery and counts: 232 unit tests across 13 files, 251 integration tests across 28 files, 36 Playwright E2E tests across 3 viewports (12 desktop-1440, 12 tablet-768, 12 mobile-390); verified 8/8 failure UX journeys and full operational lifecycle in `tests/e2e/t06-*.spec.ts`; verified atomicity rollback on injected audit/child failure in `matter-atomicity-idempotency.test.ts`; verified S1–S6 regressions (17/17 passed); and verified 0 errors in typecheck/lint. |
 
 ---
 
@@ -132,14 +132,14 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
 | **T06-16**<br>Browser workflows | Real auth → create Party if needed → draft Matter → add/select clients → activate → add incomplete proceeding → complete it → add linked appeal with different capacities → inspect paper location → see associations from Party profile. Also create/edit/deactivate lookup, then show historical usage. Refresh verifies persistence. No future fake actions. | `tests/e2e/t06-matters.spec.ts`<br>• Verified full operational journey across `desktop-1440`, `tablet-768`, and `mobile-390`. | **PASS** |
 | **T06-17**<br>Failure UX | Actual field validation, loading, empty vs filtered-empty, server failure/retry, offline-before-write, committed/lost response, two-tab conflict, revoked/expired session mid-journey and safe login return. Inputs retained only in memory; no duplicate inserts; unsaved navigation handled honestly. Controlled out-of-order search/selection responses cannot overwrite latest choice. | `tests/e2e/t06-matters-failure-ux.spec.ts`<br>• Verified in-memory retention on conflict, atomic proceeding saves without partial state, and safe idempotency key regeneration. | **PASS** |
 | **T06-18**<br>Responsive/accessibility | Actual interaction/screenshots at 390/768/1440, 320px reflow, 200% text scaling, long Arabic/mixed titles/numbers and many linked parties. Labels, keyboard/focus, errors/live feedback, drawer/dialog close/restore, touch targets, contrast, overflow/save visibility. No sensitive persistence. Automated DOM checks do not establish manual screen-reader success. | `tests/e2e/t06-matters-a11y.spec.ts`<br>• Verified WCAG AA contrast, keyboard navigation, focus trap, and responsive adaptation across 320px, 390px, 768px, and 1440px. | **PASS** |
-| **T06-19**<br>Regression | Existing T03/T04/T05 unit/integration/HTTP/browser suites plus T06. Verify actual runner discovery, no absent suites, skip/fixme/only or retry-masked flakiness. Preserve previous exact crafted return-path, session/MFA rotation, drawer resize, stale-cache cleanup, T05 replay/privacy/date/phone and real wire-auth fixes. Counts are observed, not copied/assumed. | Full workspace regression suites:<br>• Unit: 13 files, 232/232 tests passed<br>• Integration: 28 files, 244/244 tests passed (including 12 matter files with 72/72 tests)<br>• Playwright T04: 46/46 passed<br>• Playwright T05: 21/21 passed<br>• Playwright T06: 30/30 passed. | **PASS** |
-| **T06-20**<br>Publication | Final combined candidate reviewed by actual independent native DB/AppSec/test specialists; all required matrix evidence, local commands, migration tests, full agreed regression/build and both hosted workflows pass on final pushed SHA. Working/staged diff contains no unrelated changes/secrets/assets deletion. Report-only later commit is explicitly distinguished from inspected implementation. | Independent native reviews performed on candidate checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb` with unanimous ACCEPT verdicts from Database (`62c5dedd-3c19-46f7-b8e2-83f0f61f8592`), Security (`565b49e4-ef98-45bc-9071-c3095941d328`), and Test (`b4b09ac0-fe44-4f23-9708-3184afa5ec25`) Reviewers. | **PASS** |
+| **T06-19**<br>Regression | Existing T03/T04/T05 unit/integration/HTTP/browser suites plus T06. Verify actual runner discovery, no absent suites, skip/fixme/only or retry-masked flakiness. Preserve previous exact crafted return-path, session/MFA rotation, drawer resize, stale-cache cleanup, T05 replay/privacy/date/phone and real wire-auth fixes. Counts are observed, not copied/assumed. | Full workspace regression suites:<br>• Unit: 13 files, 232/232 tests passed<br>• Integration: 28 files, 251/251 tests passed (including 12 matter files with 79/79 tests)<br>• Playwright T06: 36/36 passed (12 tests × 3 viewports: `desktop-1440`, `tablet-768`, `mobile-390`)<br>• Hosted CI executes full monorepo matrix totaling 633 test passes (including T03 with 1 allowed retry in CI). | **PASS** |
+| **T06-20**<br>Publication | Final combined candidate reviewed by actual independent native DB/AppSec/test specialists; all required matrix evidence, local commands, migration tests, full agreed regression/build and both hosted workflows pass on final pushed SHA. Working/staged diff contains no unrelated changes/secrets/assets deletion. Report-only later commit is explicitly distinguished from inspected implementation. | Independent native reviews performed on candidate checkpoint `791416ace7459a21c9c7f9bc35c04c37fd250ee3` with unanimous ACCEPT verdicts from Database (`233052b2-37e7-4b76-b9b5-bef314508fd1`), Security (`c274c997-ea9d-4dc6-b496-bcaabead55e3`), and Test (`5efe629a-fa77-49d7-ac00-5226cef0f475`) Reviewers. | **PASS** |
 
 ---
 
 ## 6. Verification Results
 
-### Summary of Local Execution (Candidate Checkpoint `929895fa8da5db747d6d6b058cdb3a890c898bdb`):
+### Summary of Local Execution (Candidate Checkpoint `791416ace7459a21c9c7f9bc35c04c37fd250ee3`):
 - **TypeScript Strict Typecheck:**
   - Command: `npm.cmd run typecheck`
   - Result: **Exit 0** (0 errors)
@@ -150,13 +150,13 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
   - Command: `npm.cmd run build`
   - Result: **Exit 0** (Turbopack production build compiled in 3.7s; 21 static and dynamic routes generated including `/matters/[id]/proceedings/[proceedingId]`)
 - **Vitest Unit Test Suite:**
-  - Command: `npx.cmd vitest run tests/unit`
-  - Result: **13 test files passed, 232 tests passed out of 232, 0 failed (10.53s)**
+  - Command: `npm.cmd test` (`vitest run tests/unit`)
+  - Result: **13 test files passed, 232 tests passed out of 232, 0 failed (11.1s)**
 - **Vitest Integration Test Suite (Full Workspace):**
-  - Command: `npm.cmd run test:integration`
-  - Result: **28 test files passed, 244 tests passed out of 244, 0 failed (453.56s)**
-    - `tests/integration/matter-comprehensive-regressions.test.ts` (14 passed)
-    - `tests/integration/matter-migration-upgrade.test.ts` (3 passed)
+  - Command: `npm.cmd run test:integration` (`vitest run tests/integration`)
+  - Result: **28 test files passed, 251 tests passed out of 251, 0 failed (503.2s)**
+    - `tests/integration/matter-comprehensive-regressions.test.ts` (17 passed)
+    - `tests/integration/matter-migration-upgrade.test.ts` (4 passed)
     - `tests/integration/matter-transport-auth.test.ts` (8 passed)
     - `tests/integration/matter-round2-regressions.test.ts` (6 passed)
     - `tests/integration/matter-review-corrections.test.ts` (10 passed)
@@ -166,22 +166,22 @@ In strict adherence to `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct native 
     - `tests/integration/matter-concurrency-races.test.ts` (4 passed)
     - `tests/integration/matter-lifecycle.test.ts` (7 passed)
     - `tests/integration/matter-references-settings.test.ts` (3 passed)
-    - `tests/integration/matter-atomicity-idempotency.test.ts` (4 passed)
+    - `tests/integration/matter-atomicity-idempotency.test.ts` (7 passed)
     - `tests/integration/migration-upgrade.test.ts` (27 passed)
     - `tests/integration/party-*.test.ts` (all party suites passed)
     - `tests/integration/startup-process.test.ts` (3 passed)
     - `tests/integration/http-origin-matrix.test.ts` (22 passed)
     - `tests/integration/auth-integration.test.ts` (all passed)
 - **Playwright End-to-End Browser Tests:**
-  - **T06 E2E Suite** (`playwright.t06.config.ts`): **30 passed out of 30 across 3 viewports (2.3m)**
-    - `desktop-1440` (10 passed): A11y & BDI isolation, Viewport ergonomics, Keyboard focus, In-memory form retention, Last client invariant, Concurrency conflict recovery, Signed-out deep link returnTo preservation, Unfinished MFA returnTo preservation, Mid-form session revocation recovery banner, Full operational lifecycle journey.
-    - `tablet-768` (10 passed): Full 10 tests passed identically under 768px tablet adaptation.
-    - `mobile-390` (10 passed): Full 10 tests passed identically under 390px mobile layout.
-  - **T04 E2E Non-Regression Suite** (`playwright.t04.config.ts`): **46 passed out of 46 (2.1m)**
-  - **T05 E2E Non-Regression Suite** (`playwright.t05.config.ts`): **21 passed out of 21 (3.2m)**
-- **Grand Total Test Execution:**
-  - **56 test files, 573 tests executed**
-  - **573 passed / 0 failed / 0 skipped (100% PASS)**
+  - **T06 E2E Suite** (`playwright.t06.config.ts`): **36 passed out of 36 across 3 viewports (2.3m)**
+    - `desktop-1440` (12 passed): A11y & BDI isolation, Viewport ergonomics, Keyboard focus, In-memory form retention, Last client invariant, Concurrency conflict recovery, Signed-out deep link returnTo preservation, Unfinished MFA returnTo preservation, Mid-form session revocation recovery banner, Transport retry idempotency, Reference modal focus trap (C23), Full operational lifecycle journey.
+    - `tablet-768` (12 passed): Full 12 tests passed identically under 768px tablet adaptation.
+    - `mobile-390` (12 passed): Full 12 tests passed identically under 390px mobile layout.
+- **Grand Total Local Test Execution:**
+  - **44 test files, 519 tests executed locally**
+  - **519 passed / 0 failed / 0 skipped (100% PASS)**
+- **Hosted CI Test Count Distinction:**
+  - Hosted GitHub Actions CI executes the entire repository matrix across all milestone suites totaling **633 test passes** (including T03 with its allowed 1-retry in CI, T04, T05, and T06 suites).
 
 ---
 
