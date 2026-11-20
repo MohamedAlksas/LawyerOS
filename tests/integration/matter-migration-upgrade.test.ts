@@ -44,13 +44,14 @@ async function generateTotpCode(secret: string): Promise<string> {
   return otpHelper.totp();
 }
 
-function runPrismaMigrateDeploy(dbUrl: string) {
+function runPrismaMigrateDeploy(dbUrl: string, timezone?: string) {
   const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
   const res = spawnSync(process.execPath, [prismaJs, 'migrate', 'deploy'], {
     env: {
       ...process.env,
       DATABASE_URL: dbUrl,
       NODE_ENV: 'test',
+      ...(timezone ? { TZ: timezone } : {}),
     },
     encoding: 'utf-8',
   });
@@ -782,4 +783,78 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
       await dedicated.drop();
     }
   }, 120000);
+
+  it.each([
+    { tz: 'UTC', desc: 'UTC migration CLI environment' },
+    { tz: 'Africa/Cairo', desc: 'Africa/Cairo migration CLI environment' },
+  ])(
+    'runs Prisma migrate deploy under $desc and verifies exact temporal and record preservation (E2)',
+    async ({ tz }) => {
+      const dedicated = await createDedicatedTestDatabase();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `lawoffice-t05-tz-${tz.replace('/', '_')}-`));
+      try {
+        // 1. Stage and deploy baseline migrations 1-6 using real Prisma CLI
+        stageT05BaselineDirectory(tempDir);
+        const tempSchemaPath = path.join(tempDir, 'schema.prisma');
+        const t05DeployRes = runPrismaMigrateDeployCustom(tempSchemaPath, dedicated.url);
+        expect(t05DeployRes.status).toBe(0);
+
+        const clientPre = await dedicated.pool.connect();
+        try {
+          // Insert a user first
+          await clientPre.query(`
+            INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+            VALUES ('tz-test-user', 'مستخدم الترقية الزمني', 'tz@lawoffice.test', true, now(), now());
+          `);
+
+          // Insert baseline temporal data before migration
+          await clientPre.query(`
+            INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "primaryPhone", "primaryPhoneNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('tz-test-party', 'PERSON', 'طرف اختبار الترقية الزمني', 'طرف اختبار الترقيه الزمني', '01055554444', '01055554444', 1, 'tz-test-user', 'tz-test-user', '2026-11-18T10:00:00Z'::timestamptz, '2026-11-18T10:00:00Z'::timestamptz);
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "issueDate", "notarizationOffice", "poaType", "humanReviewStatus", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('tz-test-poa', 'tz-test-party', '123/أ', '2026', '2026-05-10', 'توثيق الدقي', 'GENERAL', 'VALID', 'tz-test-user', 'tz-test-user', now(), now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "communication_note" ("id", "partyId", "communicationAt", "followUpDate", "channel", "summary", "createdById")
+            VALUES ('tz-test-note', 'tz-test-party', '2026-11-17T11:00:00Z'::timestamptz, '2026-11-28'::date, 'PHONE', 'ملاحظة تواصل هاتفية قبل الترقية', 'tz-test-user');
+          `);
+        } finally {
+          clientPre.release();
+        }
+
+        // 2. Run the migration CLI under the explicit timezone permutation ($tz)
+        const upgradeRes = runPrismaMigrateDeploy(dedicated.url, tz);
+        expect(upgradeRes.status).toBe(0);
+
+        // 3. Connect and verify all records survive intact with preserved dates and instants
+        const clientAfter = await dedicated.pool.connect();
+        try {
+          const noteRes = await clientAfter.query(`
+            SELECT 
+              to_char("followUpDate", 'YYYY-MM-DD') AS follow_up,
+              to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS comm_utc
+            FROM "communication_note" WHERE id = 'tz-test-note'
+          `);
+          expect(noteRes.rows[0].follow_up).toBe('2026-11-28');
+          expect(noteRes.rows[0].comm_utc).toBe('2026-11-17T11:00:00Z');
+
+          const poaRes = await clientAfter.query(`
+            SELECT to_char("issueDate", 'YYYY-MM-DD') AS issue_date
+            FROM "power_of_attorney" WHERE id = 'tz-test-poa'
+          `);
+          expect(poaRes.rows[0].issue_date).toBe('2026-05-10');
+        } finally {
+          clientAfter.release();
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        await dedicated.drop();
+      }
+    },
+    120000
+  );
 });

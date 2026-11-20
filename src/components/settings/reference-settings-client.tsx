@@ -64,6 +64,32 @@ export function ReferenceSettingsClient({
   const [practiceAreas, setPracticeAreas] = useState<ReferenceItemDTO[]>(initialPracticeAreas);
   const [storageLocations, setStorageLocations] = useState<ReferenceItemDTO[]>(initialStorageLocations);
 
+  // Reconcile props on external updates / retry reload (U8)
+  const [prevProps, setPrevProps] = useState({
+    courts: initialCourts,
+    practiceAreas: initialPracticeAreas,
+    storageLocations: initialStorageLocations,
+    officeSettings: initialOfficeSettings,
+  });
+
+  if (
+    prevProps.courts !== initialCourts ||
+    prevProps.practiceAreas !== initialPracticeAreas ||
+    prevProps.storageLocations !== initialStorageLocations ||
+    prevProps.officeSettings !== initialOfficeSettings
+  ) {
+    setPrevProps({
+      courts: initialCourts,
+      practiceAreas: initialPracticeAreas,
+      storageLocations: initialStorageLocations,
+      officeSettings: initialOfficeSettings,
+    });
+    setCourts(initialCourts);
+    setPracticeAreas(initialPracticeAreas);
+    setStorageLocations(initialStorageLocations);
+    setOfficeSettings(initialOfficeSettings);
+  }
+
   // New Reference Item Input State
   const [newItemName, setNewItemName] = useState('');
   const [newItemCode, setNewItemCode] = useState('');
@@ -77,11 +103,12 @@ export function ReferenceSettingsClient({
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const itemPendingRef = useRef<{ key: string; payload: CreateReferenceItemInput } | null>(null);
 
-  // Toggle Item State & Recovery Ref
+  // Toggle Item State & Recovery Ref (P1 / U1 / U3)
   const togglePendingRef = useRef<{ item: ReferenceItemDTO; key: string } | null>(null);
   const [togglePending, setTogglePending] = useState(false);
   const [togglePendingItem, setTogglePendingItem] = useState<ReferenceItemDTO | null>(null);
   const [toggleSessionExpired, setToggleSessionExpired] = useState(false);
+  const [isTogglingActive, setIsTogglingActive] = useState(false);
 
   // Edit Item Modal State (C19/U9)
   const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(null);
@@ -97,32 +124,77 @@ export function ReferenceSettingsClient({
   const editPendingRef = useRef<{ key: string; payload: UpdateReferenceItemInput } | null>(null);
   const editDialogRef = useRef<HTMLDivElement>(null);
   const lastFocusedOpenerRef = useRef<HTMLElement | null>(null);
+  const prevEditingItemIdRef = useRef<string | null>(null);
+
+  // Modal State Ref for stable callbacks without effect re-runs (U9)
+  const editModalStateRef = useRef({
+    editingItem,
+    editItemName,
+    editItemCode,
+    editItemNotes,
+    editItemIsActive,
+    editItemPending,
+  });
+  useEffect(() => {
+    editModalStateRef.current = {
+      editingItem,
+      editItemName,
+      editItemCode,
+      editItemNotes,
+      editItemIsActive,
+      editItemPending,
+    };
+  });
 
   // Filter for Reference Items
   const [filterActiveOnly, setFilterActiveOnly] = useState(false);
 
-  // Dirty navigation guard (U10)
+  const isModalDirty =
+    editingItem !== null &&
+    (editItemName !== editingItem.name ||
+      editItemCode !== (editingItem.code || '') ||
+      editItemNotes !== (editingItem.notes || '') ||
+      editItemIsActive !== editingItem.isActive);
+
+  const isAnyDirtyOrPending =
+    officeDirty ||
+    itemDraftDirty ||
+    isModalDirty ||
+    officePending ||
+    itemPending ||
+    editItemPending ||
+    togglePending;
+
+  // Dirty navigation guard (U10: covers office, new item draft, modal edits, and in-flight/pending operations)
   useEffect(() => {
-    const isAnyDirty = officeDirty || itemDraftDirty;
-    if (!isAnyDirty || isSavingOffice || isCreatingItem || isSavingEditItem) return;
+    if (!isAnyDirtyOrPending || isSavingOffice || isCreatingItem || isSavingEditItem) return;
     const handler = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [officeDirty, itemDraftDirty, isSavingOffice, isCreatingItem, isSavingEditItem]);
+  }, [isAnyDirtyOrPending, isSavingOffice, isCreatingItem, isSavingEditItem]);
 
   const handleCloseEditModal = useCallback(() => {
-    const isModalDirty =
-      editingItem &&
-      (editItemName !== editingItem.name ||
-        editItemCode !== (editingItem.code || '') ||
-        editItemNotes !== (editingItem.notes || '') ||
-        editItemIsActive !== editingItem.isActive);
+    const {
+      editingItem: item,
+      editItemName: name,
+      editItemCode: code,
+      editItemNotes: notes,
+      editItemIsActive: active,
+      editItemPending: pending,
+    } = editModalStateRef.current;
+
+    const modalDirty =
+      item &&
+      (name !== item.name ||
+        code !== (item.code || '') ||
+        notes !== (item.notes || '') ||
+        active !== item.isActive);
 
     if (
-      (isModalDirty || editItemPending) &&
+      (modalDirty || pending) &&
       !window.confirm('لديك تعديلات غير محفوظة على هذا العنصر أو عملية حفظ معلّقة. هل تريد الإغلاق وفقدانها؟')
     ) {
       return;
@@ -131,22 +203,32 @@ export function ReferenceSettingsClient({
     editPendingRef.current = null;
     setEditItemPending(false);
     setEditItemSessionExpired(false);
-  }, [editingItem, editItemName, editItemCode, editItemNotes, editItemIsActive, editItemPending]);
+  }, []);
 
-  // Modal Focus Trap, Escape key listener, and Opener focus restore (U9)
+  const editingItemId = editingItem?.id ?? null;
+
+  // U9: Focus first interactive input on open; restore focus to opener ONLY on close
   useEffect(() => {
-    if (!editingItem) return;
-
-    // Focus the first interactive input inside the modal (C23)
-    const dialog = editDialogRef.current;
-    if (dialog) {
-      const firstInput =
-        dialog.querySelector<HTMLInputElement>('input:not([disabled])') ||
-        dialog.querySelector<HTMLInputElement | HTMLButtonElement>('button:not([disabled])');
-      firstInput?.focus();
+    if (editingItemId && !prevEditingItemIdRef.current) {
+      const dialog = editDialogRef.current;
+      if (dialog) {
+        const firstInput =
+          dialog.querySelector<HTMLInputElement>('input:not([disabled])') ||
+          dialog.querySelector<HTMLInputElement | HTMLButtonElement>('button:not([disabled])');
+        firstInput?.focus();
+      }
+    } else if (!editingItemId && prevEditingItemIdRef.current) {
+      lastFocusedOpenerRef.current?.focus();
     }
+    prevEditingItemIdRef.current = editingItemId;
+  }, [editingItemId]);
+
+  // Modal Focus Trap and Escape key listener (U9: stable callback and isolated from field typing)
+  useEffect(() => {
+    if (!editingItemId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const dialog = editDialogRef.current;
       if (e.key === 'Escape') {
         e.preventDefault();
         handleCloseEditModal();
@@ -174,9 +256,8 @@ export function ReferenceSettingsClient({
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      lastFocusedOpenerRef.current?.focus();
     };
-  }, [editingItem, handleCloseEditModal]);
+  }, [editingItemId, handleCloseEditModal]);
 
   // Handle Office Settings Save (C09/U1: frozen key & payload across retries)
   const [officeIdempotencyKey, setOfficeIdempotencyKey] = useState(() => generateClientRequestId('off'));
@@ -226,11 +307,14 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setOfficePending(true);
           setOfficeError(
-            res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح أو ابدأ تعديلاً جديداً.'
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح أو ابدأ تعديلاً جديداً.'
           );
         } else {
           officePendingRef.current = null;
@@ -438,10 +522,15 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setEditItemPending(true);
-          setEditItemError(res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.');
+          setEditItemError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
+          );
         } else {
           editPendingRef.current = null;
           setEditItemPending(false);
@@ -483,7 +572,7 @@ export function ReferenceSettingsClient({
 
   const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (
-      (officeDirty || officePending || itemDraftDirty || itemPending || editItemPending || togglePending) &&
+      isAnyDirtyOrPending &&
       !window.confirm('لديك تعديلات غير محفوظة أو عمليات معلقة. هل تريد المغادرة وفقدانها؟')
     ) {
       event.preventDefault();
@@ -492,6 +581,13 @@ export function ReferenceSettingsClient({
 
   // Handle Toggle Active/Inactive (U1/U3: frozen key and recovery)
   const handleToggleActive = async (item: ReferenceItemDTO) => {
+    if (isTogglingActive) return;
+
+    if (togglePendingRef.current && togglePendingRef.current.item.id !== item.id) {
+      setItemError('توجد عملية تعديل حالة معلّقة لعنصر آخر. يرجى حسم العملية العالقة أولاً.');
+      return;
+    }
+
     setItemError(null);
     setItemSuccessMessage(null);
 
@@ -502,6 +598,7 @@ export function ReferenceSettingsClient({
     }
     setTogglePendingItem(op.item);
 
+    setIsTogglingActive(true);
     try {
       const res = await updateReferenceItemAction({
         id: op.item.id,
@@ -535,18 +632,22 @@ export function ReferenceSettingsClient({
               : res.error || 'لم يتأكد وصول عملية تعديل الحالة إلى الخادم. أُبقيت العملية مجمّدة.'
           );
         } else {
-          togglePendingRef.current = null;
-          setTogglePending(false);
-          setTogglePendingItem(null);
+          if (togglePendingRef.current?.key === op.key) {
+            togglePendingRef.current = null;
+            setTogglePending(false);
+            setTogglePendingItem(null);
+          }
           setItemError(res.error || 'تعذر تعديل حالة العنصر.');
         }
         return;
       }
 
-      togglePendingRef.current = null;
-      setTogglePending(false);
-      setTogglePendingItem(null);
-      setToggleSessionExpired(false);
+      if (togglePendingRef.current?.key === op.key) {
+        togglePendingRef.current = null;
+        setTogglePending(false);
+        setTogglePendingItem(null);
+        setToggleSessionExpired(false);
+      }
 
       const updater = (prev: ReferenceItemDTO[]) =>
         prev.map((i) => (i.id === item.id ? res.data : i));
@@ -562,6 +663,8 @@ export function ReferenceSettingsClient({
     } catch (err: unknown) {
       setTogglePending(true);
       setItemError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء تعديل حالة العنصر.');
+    } finally {
+      setIsTogglingActive(false);
     }
   };
 
@@ -587,6 +690,7 @@ export function ReferenceSettingsClient({
 
         <Link
           href="/settings/security"
+          onClick={handleCancelNavigation}
           className="text-xs font-semibold text-[#14566B] hover:underline flex items-center gap-1"
         >
           <span>🛡️</span>
@@ -1260,7 +1364,10 @@ export function ReferenceSettingsClient({
                           type="button"
                           data-testid={`edit-reference-item-${item.id}`}
                           onClick={(e) => handleOpenEditModal(item, e.currentTarget)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors"
+                          disabled={isTogglingActive || togglePending}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors ${
+                            isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
                         >
                           تعديل
                         </button>
@@ -1268,7 +1375,10 @@ export function ReferenceSettingsClient({
                           type="button"
                           data-testid={`toggle-active-${item.id}`}
                           onClick={() => handleToggleActive(item)}
+                          disabled={isTogglingActive || togglePending}
                           className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border min-h-[36px] transition-colors ${
+                            isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed ' : ''
+                          }${
                             item.isActive
                               ? 'text-red-700 bg-red-50 hover:bg-red-100 border-red-200'
                               : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'

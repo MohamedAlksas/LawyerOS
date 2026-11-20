@@ -120,15 +120,19 @@ async function getOfficeSettingsInternal(
   }
 }
 
-export async function getOfficeSettings(actor?: Actor): Promise<OfficeSettingsDTO> {
+export async function getOfficeSettings(
+  actor?: Actor,
+  options?: { prisma?: PrismaClient }
+): Promise<OfficeSettingsDTO> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
-  const prisma = getPrismaClient();
+  const prisma = options?.prisma || getPrismaClient();
   return await getOfficeSettingsInternal(prisma);
 }
 
 export async function updateOfficeSettings(
   actor: Actor,
-  rawInput: UpdateOfficeSettingsInput
+  rawInput: UpdateOfficeSettingsInput,
+  options?: { prisma?: PrismaClient }
 ): Promise<OfficeSettingsDTO> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -143,7 +147,7 @@ export async function updateOfficeSettings(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options?.prisma || getPrismaClient();
 
   try {
     return await prisma.$transaction(async (tx) => {

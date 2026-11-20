@@ -744,7 +744,9 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       const unauthIdemp = await dedicatedPool.query('SELECT count(*) FROM "idempotency_record" WHERE "key" LIKE $1', ['unauth-%']);
       expect(Number(unauthIdemp.rows[0].count)).toBe(0);
 
-      const unauthAudit = await dedicatedPool.query('SELECT count(*) FROM "audit_event" WHERE "action" IN (\'OPEN_MATTER\', \'UPDATE_MATTER\', \'ADD_PROCEEDING\', \'UPDATE_OFFICE_SETTINGS\')');
+      const unauthAudit = await dedicatedPool.query(
+        'SELECT count(*) FROM "audit_event" WHERE "action" IN (\'CREATE_MATTER\', \'UPDATE_MATTER\', \'ADD_PROCEEDING\', \'UPDATE_PROCEEDING\', \'UPDATE_OFFICE_SETTINGS\', \'LINK_MATTER_PARTY\', \'UNLINK_MATTER_PARTY\', \'LINK_MATTER_AUTHORIZATION\', \'UNLINK_MATTER_AUTHORIZATION\')'
+      );
       expect(Number(unauthAudit.rows[0].count)).toBe(0);
 
       // Verify privacy sentinels and protected page reads
@@ -875,7 +877,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       const idempRes = await dedicatedPool.query('SELECT count(*)::int FROM idempotency_record WHERE "key" LIKE $1', ['bad-origin-%']);
       expect(idempRes.rows[0].count).toBe(0);
 
-      const auditRes = await dedicatedPool.query('SELECT count(*)::int FROM audit_event WHERE action = $1', ['OPEN_MATTER']);
+      const auditRes = await dedicatedPool.query('SELECT count(*)::int FROM audit_event WHERE action = $1', ['CREATE_MATTER']);
       expect(auditRes.rows[0].count).toBe(0);
     });
   });
@@ -960,7 +962,39 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(setRes.body).toContain('"success":true');
       expect(setRes.body).toContain('مكتب المحاماة الرئيسي المتكامل');
 
-      // 4. Read protected page with verified owner session
+      // 4. Add Proceeding (Court Proceeding write)
+      const procKey = `owner-http-proc-${crypto.randomUUID()}`;
+      const procRes = await postServerAction('addProceedingAction', [{
+        matterId: existingMatterId,
+        courtId: existingCourtId,
+        instance: 'FIRST_INSTANCE',
+        numberText: '888',
+        yearLabel: '2026',
+        registerType: 'مدني كلي',
+        status: 'ACTIVE',
+        idempotencyKey: procKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(procRes.status).toBe(200);
+      expect(procRes.body).toContain('"success":true');
+      expect(procRes.body).toContain('888');
+
+      // 5. Query similarity action
+      const simRes = await postServerAction('findSimilarProceedingsAction', [{
+        courtId: existingCourtId,
+        numberText: '888',
+        yearLabel: '2026',
+      }], { cookie: verifiedSessionCookie });
+      expect(simRes.status).toBe(200);
+      expect(simRes.body).toContain('"success":true');
+
+      // 6. Query party-matter associations action
+      const assocRes = await postServerAction('getPartyMatterAssociationsAction', [{
+        partyId: existingPartyId,
+      }], { cookie: verifiedSessionCookie });
+      expect(assocRes.status).toBe(200);
+      expect(assocRes.body).toContain('"success":true');
+
+      // 7. Read protected page with verified owner session
       const ownerPageRes = await makeRequest(serverPort, {
         path: '/matters',
         headers: { Cookie: verifiedSessionCookie },

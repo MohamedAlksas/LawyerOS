@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import crypto from 'crypto';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { createDedicatedTestDatabase } from '../helpers/test-db';
 import * as requireActorModule from '@/modules/identity/require-actor';
 import { getPrismaClient } from '@/lib/auth';
 import { normalizeArabicText } from '@/lib/normalization';
@@ -31,6 +36,7 @@ import {
   createReferenceItemSchema,
   updateReferenceItemSchema,
   updateOfficeSettingsSchema,
+  ConcurrencyConflictError as SettingsConcurrencyConflictError,
 } from '@/modules/settings/reference-types';
 import {
   linkProceedingPartySchema,
@@ -632,23 +638,88 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
 
   // =========================================================================
   // C08: Race-safe getOfficeSettings via upsert eliminates P2002 on concurrent first load
+  // and preserves singleton integrity under first-update races on dedicated database
   // =========================================================================
-  it('C08: concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors on empty table', async () => {
-    // Delete singleton to guarantee testing first-load initialization from scratch
-    await prisma.$executeRaw`DELETE FROM "office_settings"`;
+  it('C08: concurrent initial getOfficeSettings calls all resolve cleanly without P2002 errors on dedicated empty table', async () => {
+    const dedicated = await createDedicatedTestDatabase();
+    try {
+      const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
+      const migRes = spawnSync(process.execPath, [prismaJs, 'migrate', 'deploy'], {
+        env: {
+          ...process.env,
+          DATABASE_URL: dedicated.url,
+          NODE_ENV: 'test',
+        },
+        encoding: 'utf-8',
+      });
+      if (migRes.status !== 0) {
+        throw new Error(`Prisma migrate deploy failed: ${migRes.stderr}`);
+      }
 
-    // Run 5 simultaneous requests to getOfficeSettings
-    const promises = Array.from({ length: 5 }, () => getOfficeSettings(actor));
-    const results = await Promise.all(promises);
+      const adapter = new PrismaPg(dedicated.pool);
+      const dedicatedPrisma = new PrismaClient({ adapter });
 
-    expect(results).toHaveLength(5);
-    for (const res of results) {
-      expect(res.id).toBeDefined();
-      expect(res.officeName).toBeDefined();
+      try {
+        // 1. Verify office_settings is empty initially (no singleton pre-created)
+        const initialCount = await dedicatedPrisma.officeSettings.count();
+        expect(initialCount).toBe(0);
+
+        // 2. Run 5 simultaneous requests to getOfficeSettings on empty table
+        const promises = Array.from({ length: 5 }, () =>
+          getOfficeSettings(actor, { prisma: dedicatedPrisma })
+        );
+        const results = await Promise.all(promises);
+
+        expect(results).toHaveLength(5);
+        for (const res of results) {
+          expect(res.id).toBeDefined();
+          expect(res.officeName).toBeDefined();
+        }
+        // All 5 must have resolved the exact same singleton record
+        const uniqueIds = new Set(results.map((r) => r.id));
+        expect(uniqueIds.size).toBe(1);
+
+        // 3. First-update race on that singleton: run 2 concurrent updateOfficeSettings calls
+        const singletonId = results[0].id;
+        const p1 = updateOfficeSettings(
+          actor,
+          {
+            officeName: 'مكتب المحاماة الأول المتسابق',
+            expectedVersion: 1,
+            idempotencyKey: `c08-upd1-${crypto.randomUUID()}`,
+          },
+          { prisma: dedicatedPrisma }
+        );
+
+        const p2 = updateOfficeSettings(
+          actor,
+          {
+            officeName: 'مكتب المحاماة الثاني المتسابق',
+            expectedVersion: 1,
+            idempotencyKey: `c08-upd2-${crypto.randomUUID()}`,
+          },
+          { prisma: dedicatedPrisma }
+        );
+
+        const settled = await Promise.allSettled([p1, p2]);
+        const fulfilled = settled.filter((s) => s.status === 'fulfilled');
+        const rejected = settled.filter((s) => s.status === 'rejected');
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(SettingsConcurrencyConflictError);
+
+        // Singleton remains intact with incremented version 2
+        const finalSettings = await dedicatedPrisma.officeSettings.findUnique({
+          where: { id: singletonId },
+        });
+        expect(finalSettings).not.toBeNull();
+        expect(finalSettings?.version).toBe(2);
+      } finally {
+        await dedicatedPrisma.$disconnect();
+      }
+    } finally {
+      await dedicated.drop();
     }
-    // All 5 must have resolved the same singleton record
-    const uniqueIds = new Set(results.map((r) => r.id));
-    expect(uniqueIds.size).toBe(1);
   });
 
   // =========================================================================

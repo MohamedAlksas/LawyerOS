@@ -160,9 +160,7 @@ export function ProceedingForm({
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
-  const [incompleteDraftAcknowledged, setIncompleteDraftAcknowledged] = useState(
-    initialProceeding?.status === 'DRAFT'
-  );
+  const [incompleteDraftAcknowledged, setIncompleteDraftAcknowledged] = useState(false);
 
   // In-memory Idempotency Key plus the frozen semantic payload for the original
   // operation. A retry after an uncertain outcome must reuse both.
@@ -209,24 +207,31 @@ export function ProceedingForm({
 
   // Similarity preflight: call the authorized normalized lookup against the
   // server (all matters in the same court, not just the loaded Matter's stale
-  // local list). Requests are generation-guarded so late responses cannot
-  // replace results for a newer docket identity.
+  // local list). Requests are generation-guarded and snapshot-keyed so confirmation
+  // is strictly bound to the exact court/number/year combination.
   const [similarCandidates, setSimilarCandidates] = useState<SimilarProceedingCandidateDTO[]>([]);
   const [similarLookupError, setSimilarLookupError] = useState<string | null>(null);
   const [isLookingUpSimilar, setIsLookingUpSimilar] = useState(false);
   const [similarRetryNonce, setSimilarRetryNonce] = useState(0);
-  const [confirmedDistinctSave, setConfirmedDistinctSave] = useState(false);
+
+  const currentSnapshotKey = `${courtId}:${numberText.trim()}:${yearLabel.trim()}`;
+  const [candidateSnapshotKey, setCandidateSnapshotKey] = useState<string | null>(null);
+  const [confirmedSnapshotKey, setConfirmedSnapshotKey] = useState<string | null>(null);
+  const isConfirmedForCurrentSnapshot =
+    confirmedSnapshotKey !== null && confirmedSnapshotKey === currentSnapshotKey;
+
   const similarGenRef = useRef(0);
 
   useEffect(() => {
     const trimmedNumber = numberText.trim();
     const gen = ++similarGenRef.current;
+    const targetSnapshot = `${courtId}:${trimmedNumber}:${yearLabel.trim()}`;
 
     const timer = window.setTimeout(async () => {
-      setConfirmedDistinctSave(false);
       if (!courtId || !trimmedNumber) {
         if (gen !== similarGenRef.current) return;
         setSimilarCandidates([]);
+        setCandidateSnapshotKey(targetSnapshot);
         setSimilarLookupError(null);
         setIsLookingUpSimilar(false);
         return;
@@ -244,6 +249,7 @@ export function ProceedingForm({
         if (gen !== similarGenRef.current) return;
         if (res.success) {
           setSimilarCandidates(res.data.candidates);
+          setCandidateSnapshotKey(targetSnapshot);
           setSimilarLookupError(null);
         } else {
           setSimilarLookupError(res.error || 'تعذر تنفيذ فحص التشابه.');
@@ -286,8 +292,11 @@ export function ProceedingForm({
     if (!operation) {
       // U7: Resolve similarity lookup before creation decision so advisory cannot arrive after record creation
       if (!isEdit && courtId && numberText.trim()) {
+        const snapshotKey = `${courtId}:${numberText.trim()}:${yearLabel.trim()}`;
         let currentCandidates = similarCandidates;
-        if (isLookingUpSimilar || (currentCandidates.length === 0 && !similarLookupError)) {
+
+        // If lookup for this exact snapshot was never performed or is in-flight:
+        if (candidateSnapshotKey !== snapshotKey || isLookingUpSimilar) {
           try {
             setIsLookingUpSimilar(true);
             const simRes = await findSimilarProceedingsAction({
@@ -300,16 +309,27 @@ export function ProceedingForm({
             if (simRes.success) {
               currentCandidates = simRes.data.candidates;
               setSimilarCandidates(currentCandidates);
+              setCandidateSnapshotKey(snapshotKey);
               setSimilarLookupError(null);
+            } else {
+              const errMsg = simRes.error || 'تعذر تنفيذ فحص التشابه.';
+              setSimilarLookupError(errMsg);
+              setGeneralError(errMsg);
+              setIsSaving(false);
+              return;
             }
           } catch {
-            // connection failure on similarity lookup
+            const netErr = 'حدث خطأ في الاتصال أثناء فحص تشابه القيود القضائية.';
+            setSimilarLookupError(netErr);
+            setGeneralError(netErr);
+            setIsSaving(false);
+            return;
           } finally {
             setIsLookingUpSimilar(false);
           }
         }
 
-        if (currentCandidates.length > 0 && !confirmedDistinctSave) {
+        if (currentCandidates.length > 0 && confirmedSnapshotKey !== snapshotKey) {
           setGeneralError(
             'عُثر على قيود قضائية مطابقة في نفس المحكمة. راجع القيود المطابقة أدناه للتأكد، أو اضغط "متابعة الحفظ كقيد منفصل" لتأكيد تسجيل قيد جديد.'
           );
@@ -736,10 +756,10 @@ export function ProceedingForm({
             ))}
           </ul>
           <div className="pt-2 flex flex-wrap items-center gap-2">
-            {!confirmedDistinctSave ? (
+            {!isConfirmedForCurrentSnapshot ? (
               <button
                 type="button"
-                onClick={() => setConfirmedDistinctSave(true)}
+                onClick={() => setConfirmedSnapshotKey(currentSnapshotKey)}
                 data-testid="confirm-distinct-save-button"
                 className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] transition-colors"
               >
@@ -777,7 +797,11 @@ export function ProceedingForm({
                 id={`${formId}-court`}
                 required
                 value={courtId}
-                onChange={(e) => setCourtId(e.target.value)}
+                onChange={(e) => {
+                  setCourtId(e.target.value);
+                  setConfirmedSnapshotKey(null);
+                  setIncompleteDraftAcknowledged(false);
+                }}
                 data-testid="proceeding-court-select"
                 {...fieldErrorProps('courtId')}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
@@ -858,36 +882,42 @@ export function ProceedingForm({
             <h2 className="text-base font-bold text-[#172A35]">
               بيانات القيد ورقم الدعوى
             </h2>
-            {isDocketIncomplete ? (
-              <span
-                data-testid="incomplete-docket-badge"
-                className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-300 self-start sm:self-auto"
-              >
-                الرقم غير مستكمل (مسودة قيد)
-              </span>
-            ) : (
-              <div className="flex items-center gap-2">
-                <label htmlFor={`${formId}-status`} className="text-xs font-bold text-[#172A35]">
-                  حالة القيد:
-                </label>
-                <select
-                  id={`${formId}-status`}
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ProceedingStatus)}
-                  data-testid="proceeding-status-select"
-                  className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[36px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              {isDocketIncomplete && (
+                <span
+                  data-testid="incomplete-docket-badge"
+                  className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded border border-amber-300 self-start sm:self-auto"
                 >
-                  <option value="ACTIVE">قيد نشط بالمحكمة</option>
-                  <option value="AWAITING_JUDGMENT">حجز للحكم</option>
-                  <option value="DECIDED">محكوم فيه</option>
-                  <option value="CLOSED">منتهي ومغلق</option>
-                  <option value="DRAFT">مسودة قيد</option>
-                </select>
-              </div>
-            )}
+                  الرقم غير مستكمل (مسودة قيد)
+                </span>
+              )}
+              {isEdit && (
+                <div className="flex items-center gap-2">
+                  <label htmlFor={`${formId}-status`} className="text-xs font-bold text-[#172A35]">
+                    حالة القيد:
+                  </label>
+                  <select
+                    id={`${formId}-status`}
+                    value={status}
+                    onChange={(e) => {
+                      setStatus(e.target.value as ProceedingStatus);
+                      setIncompleteDraftAcknowledged(false);
+                    }}
+                    data-testid="proceeding-status-select"
+                    className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[36px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                  >
+                    <option value="ACTIVE">قيد نشط بالمحكمة</option>
+                    <option value="AWAITING_JUDGMENT">حجز للحكم</option>
+                    <option value="DECIDED">محكوم فيه</option>
+                    <option value="CLOSED">منتهي ومغلق</option>
+                    <option value="DRAFT">مسودة قيد</option>
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
 
-          {isDocketIncomplete && isEdit && initialProceeding?.status !== 'DRAFT' && (
+          {isDocketIncomplete && isEdit && status !== 'DRAFT' && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] space-y-1">
               <label
                 htmlFor={`${formId}-incompleteAck`}
@@ -921,7 +951,11 @@ export function ProceedingForm({
                 id={`${formId}-numberText`}
                 type="text"
                 value={numberText}
-                onChange={(e) => setNumberText(e.target.value)}
+                onChange={(e) => {
+                  setNumberText(e.target.value);
+                  setConfirmedSnapshotKey(null);
+                  setIncompleteDraftAcknowledged(false);
+                }}
                 placeholder="مثال: 1234 أو 0045/ب"
                 data-testid="proceeding-number-input"
                 {...fieldErrorProps('numberText')}
@@ -940,7 +974,11 @@ export function ProceedingForm({
                 id={`${formId}-yearLabel`}
                 type="text"
                 value={yearLabel}
-                onChange={(e) => setYearLabel(e.target.value)}
+                onChange={(e) => {
+                  setYearLabel(e.target.value);
+                  setConfirmedSnapshotKey(null);
+                  setIncompleteDraftAcknowledged(false);
+                }}
                 placeholder="مثال: 2026 أو 1447هـ"
                 data-testid="proceeding-year-input"
                 {...fieldErrorProps('yearLabel')}
@@ -958,7 +996,10 @@ export function ProceedingForm({
                 id={`${formId}-registerType`}
                 type="text"
                 value={registerType}
-                onChange={(e) => setRegisterType(e.target.value)}
+                onChange={(e) => {
+                  setRegisterType(e.target.value);
+                  setIncompleteDraftAcknowledged(false);
+                }}
                 placeholder="مثال: مدني كلي، جنح، عمالي"
                 data-testid="proceeding-register-type-input"
                 {...fieldErrorProps('registerType')}
