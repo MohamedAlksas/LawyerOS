@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
 
@@ -14,6 +14,7 @@ interface TabletDrawerProps {
 export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const canLeavePage = useCanLeavePage();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -103,7 +104,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   if (!isOpen) return null;
 
   const handleLogout = async () => {
-    if (isLoggingOut) return;
+    if (isLoggingOut || !canLeavePage()) return;
     if (!window.confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
       return;
     }
@@ -126,8 +127,10 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   };
 
   const isHomeActive = pathname === '/';
+  const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
+  const isReferenceActive = pathname === '/settings/reference';
 
   return (
     <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
@@ -180,7 +183,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/"
               data-testid="nav-link-home"
               aria-current={isHomeActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isHomeActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -192,10 +195,25 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             </Link>
 
             <Link
+              href="/matters"
+              data-testid="nav-link-matters"
+              aria-current={isMattersActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isMattersActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">📁</span>
+              <span>ملفات القضايا</span>
+            </Link>
+
+            <Link
               href="/parties"
               data-testid="nav-link-parties"
               aria-current={isPartiesActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isPartiesActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -210,7 +228,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/settings/security"
               data-testid="nav-link-security"
               aria-current={isSecurityActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isSecurityActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -221,22 +239,27 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               <span>إعدادات الأمان</span>
             </Link>
 
+            <Link
+              href="/settings/reference"
+              data-testid="nav-link-reference"
+              aria-current={isReferenceActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isReferenceActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">⚙️</span>
+              <span>إعدادات المراجع</span>
+            </Link>
+
             {/* Future Modules */}
             <div className="pt-4 mt-2 border-t border-[#D5DFE3]">
               <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-2">
                 الوحدات القادمة
               </span>
               <div className="space-y-1">
-                <div
-                  aria-disabled="true"
-                  className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"
-                >
-                  <div className="flex items-center gap-2">
-                    <span aria-hidden="true">📁</span>
-                    <span>ملفات القضايا</span>
-                  </div>
-                  <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
-                </div>
 
                 <div
                   aria-disabled="true"

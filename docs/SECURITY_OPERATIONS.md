@@ -63,6 +63,8 @@ Approved originals and versions are immutable, each with a `checksum`. Downloads
 
 Record file creation, modification, and archival; hearing results; financial postings and reversals; data downloads and exports; permission changes; and sensitive authentication attempts. Audit records contain the actor, time, action identifier, reason, and necessary field changes, without passwords, tokens, or complete document text. Application users cannot edit this log; that does not make it immune to a database administrator. If stronger tamper detection is needed later, add an independent logging destination with separate permissions.
 
+Party writes use a versioned HMAC for new idempotency records, scoped to the actor, command and retry key. Configure a stable `PARTY_IDEMPOTENCY_SECRET` before the first keyed write and retain it with backups. Installations without a dedicated key use `BETTER_AUTH_SECRET` for compatibility. Before rotating the signing secret on those installations, configure the previous signing secret as the dedicated key so retained claims remain verifiable. A successful replay of a legacy Party claim upgrades its digest. The identity metadata correction preserves ciphertext and audit event identity and timestamps while dropping historical unsafe display suffixes and free-text reveal reasons from the active database. Backup retention follows the existing recovery policy.
+
 Encryption in transit is mandatory. Document disk/provider encryption according to the environment, recognizing that a running server needs to decrypt data. Encrypt backups with a separate key. Disk encryption alone is neither a backup nor protection against deletion by the owner or compromise of the application account.
 
 ## 5. Backup policy

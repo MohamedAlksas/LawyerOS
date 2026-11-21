@@ -181,7 +181,7 @@ export async function provisionOwner(input: ProvisionOwnerInput): Promise<Provis
       });
 
       if (!isPasswordValid) {
-        const currentCount = Number(twoFactorRecord.failedVerificationCount) || 0;
+        const currentCount = twoFactorRecord.lockedUntil ? 0 : twoFactorRecord.failedVerificationCount;
         const newCount = currentCount + 1;
         const shouldLock = newCount >= MAX_FAILED_ATTEMPTS;
         const lockUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
@@ -465,7 +465,7 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
 
     const isValid = await verifier.verify(code);
     if (!isValid) {
-      const currentCount = Number(tfRecord.failedVerificationCount) || 0;
+      const currentCount = tfRecord.lockedUntil ? 0 : tfRecord.failedVerificationCount;
       const newCount = currentCount + 1;
       const shouldLock = newCount >= MAX_FAILED_ATTEMPTS;
       const lockUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;

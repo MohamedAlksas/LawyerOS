@@ -190,7 +190,9 @@ function VerifyForm() {
         <div className="mt-6 text-center">
           <button
             type="button"
-            onClick={() => router.push('/login')}
+            onClick={() =>
+              router.push(returnTo !== '/' ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login')
+            }
             className="text-xs text-[#14566B] hover:underline"
           >
             العودة إلى شاشة تسجيل الدخول

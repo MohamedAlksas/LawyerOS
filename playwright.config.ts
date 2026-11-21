@@ -20,7 +20,7 @@ const env = validateTestEnvironment();
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: ['**/t04-*.spec.ts', '**/t05-*.spec.ts'],
+  testIgnore: ['**/t04-*.spec.ts', '**/t05-*.spec.ts', '**/t06-*.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

@@ -1,11 +1,13 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
+import { getEnv } from '@/lib/env';
 import { Actor } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import {
   encryptPartyIdentity,
   decryptPartyIdentity,
+  getIdentityMaskSuffix,
 } from '@/lib/crypto/party-identity';
 import { recordAuditEvent } from '@/lib/audit';
 import {
@@ -72,7 +74,7 @@ function mapPartySummary(
     identityMask: primaryIdentity
       ? {
           identificationType: primaryIdentity.identificationType,
-          lastFour: primaryIdentity.lastFour,
+          lastFour: getIdentityMaskSuffix(primaryIdentity),
         }
       : null,
   };
@@ -287,6 +289,7 @@ export async function saveParty(
           commandType: 'saveParty',
           key: input.idempotencyKey,
           payload: input,
+          privateHashSecret: getEnv().PARTY_IDEMPOTENCY_SECRET ?? getEnv().BETTER_AUTH_SECRET,
         });
 
         if (claim.isReplay) {
@@ -408,7 +411,6 @@ export async function saveParty(
               ? {
                   identity: {
                     identificationType: input.identity.identificationType,
-                    lastFour: input.identity.number.slice(-4),
                   },
                 }
               : {}),
@@ -481,7 +483,6 @@ export async function saveParty(
               ? {
                   identity: {
                     identificationType: input.identity.identificationType,
-                    lastFour: input.identity.number.slice(-4),
                   },
                 }
               : {}),
@@ -520,6 +521,7 @@ export async function saveParty(
           commandType: 'saveParty',
           key: input.idempotencyKey,
           payload: input,
+          privateHashSecret: getEnv().PARTY_IDEMPOTENCY_SECRET ?? getEnv().BETTER_AUTH_SECRET,
         });
         if (!concurrent) {
           // Winner transaction aborted/rolled back, retry cleanly
@@ -641,7 +643,7 @@ export async function getClientProfile(
     identityMask: primaryIdentity
       ? {
           identificationType: primaryIdentity.identificationType,
-          lastFour: primaryIdentity.lastFour,
+          lastFour: getIdentityMaskSuffix(primaryIdentity),
         }
       : null,
     communicationNotes: party.communicationNotes.map((note) => ({
@@ -810,6 +812,10 @@ export async function savePowerOfAttorney(
           commandType: 'savePowerOfAttorney',
           key: input.idempotencyKey,
           payload: input,
+          digestVersion: 'poa-v2',
+          legacyPayload: input.id && input.humanReviewStatus === undefined
+            ? { ...input, humanReviewStatus: 'UNREVIEWED' }
+            : undefined,
         });
 
         if (claim.isReplay) {
@@ -855,8 +861,12 @@ export async function savePowerOfAttorney(
               poaType: input.poaType,
               issueDate: input.issueDate ? new Date(input.issueDate) : null,
               humanReviewStatus: input.humanReviewStatus ?? existing.humanReviewStatus,
-              humanReviewedAt: isStatusChanged ? new Date() : existing.humanReviewedAt,
-              humanReviewedById: isStatusChanged ? actor.id : existing.humanReviewedById,
+              humanReviewedAt: isStatusChanged
+                ? input.humanReviewStatus === 'UNREVIEWED' ? null : new Date()
+                : existing.humanReviewedAt,
+              humanReviewedById: isStatusChanged
+                ? input.humanReviewStatus === 'UNREVIEWED' ? null : actor.id
+                : existing.humanReviewedById,
               notes: input.notes,
               version: { increment: 1 },
               updatedById: actor.id,
@@ -972,6 +982,10 @@ export async function savePowerOfAttorney(
           commandType: 'savePowerOfAttorney',
           key: input.idempotencyKey,
           payload: input,
+          digestVersion: 'poa-v2',
+          legacyPayload: input.id && input.humanReviewStatus === undefined
+            ? { ...input, humanReviewStatus: 'UNREVIEWED' }
+            : undefined,
         });
         if (!concurrent) {
           continue;
@@ -1030,9 +1044,10 @@ export async function revealPartyIdentity(
       changedFields: {
         partyId: party.id,
         identificationType: identity.identificationType,
-        lastFour: identity.lastFour,
       },
-      reason: reason ?? 'Authoritative identity view',
+      reason: reason === 'عرض رسمي للتحقق أمام المحكمة'
+        ? 'عرض رسمي للتحقق أمام المحكمة'
+        : 'Authoritative identity view',
     },
     { simulateFailure: options.simulateAuditFailure }
   );

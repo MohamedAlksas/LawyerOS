@@ -72,27 +72,38 @@ Follow these steps to run LawOffice OS locally for development and testing:
      docker compose -f ops/docker-compose.test.yml ps
      ```
 
-4. **Run tests & quality checks**:
+4. **Install and initialize the local databases**:
    ```powershell
    npm ci
+   node --env-file=.env.local node_modules/prisma/build/index.js migrate deploy
+   ```
+   From a terminal with a TTY, run `node --env-file=.env.local --import tsx src/cli/provision-owner.ts` once for the development database. Enter the owner credentials at the prompt and complete the authenticator enrollment. Keep the recovery codes in a separate secure location.
+
+   Apply migrations to the isolated test database before running integration or browser checks. The subprocess below uses the configured test URL only.
+   ```powershell
+   node --env-file=.env.local -e "const {spawnSync}=require('node:child_process');const url=process.env.TEST_DATABASE_URL;if(!url || url===process.env.DATABASE_URL || !new URL(url).pathname.endsWith('_test'))process.exit(1);process.exit(spawnSync(process.execPath,['node_modules/prisma/build/index.js','migrate','deploy'],{stdio:'inherit',env:{...process.env,DATABASE_URL:url}}).status ?? 1)"
+   ```
+
+5. **Run tests & quality checks**:
+   ```powershell
    npm run lint             # ESLint flat configuration check
    npm run typecheck        # Strict TypeScript typechecking
    npm run test             # Unit tests (environment, pool lifecycle, and health routes)
    npm run test:integration # Real PostgreSQL readiness probe & failure mode checks
    npm run build            # Production compilation
    ```
-   *Note on `npm run test:e2e`:* E2E browser tests (Playwright) are deferred to Milestones M1 (T04) and M6 (T16) and intentionally exit non-zero (`NOT RUN`) in T02.
+   Install Playwright Chromium with `npx playwright install chromium`, then run `npm run test:e2e` after building. The `test:e2e:t03` through `test:e2e:t06` scripts run individual suites.
    The startup-process integration suite requires an explicit isolated `TEST_DATABASE_URL`, validates it against the original operational URL before spawning any process, and always builds the current checkout before its HTTP checks. Readiness must return HTTP 200 with the expected body and no-store headers; an unavailable database fails the test. It reports the fresh build ID and uses Turbopack by default. For environments with the documented local Turbopack CSS-worker failure, set `$env:STARTUP_TEST_BUNDLER='webpack'` explicitly to perform a fresh webpack test build; this does not change the application's default build command. Remove that environment variable to return to the default. No cached `.next` directory is accepted as build provenance.
 
-5. **Start development server**:
+6. **Start development server**:
    ```powershell
    npm run dev
    ```
-   - Placeholder page: `http://localhost:3000` (Arabic RTL, `lang="ar-EG"`)
+   - Sign in through the Arabic RTL application: `http://localhost:3000` (Arabic RTL, `lang="ar-EG"`)
    - Liveness probe: `http://localhost:3000/api/health/live` (HTTP 200)
-   - Readiness probe: `http://localhost:3000/api/health/ready` (HTTP 200 when DB is connected, HTTP 503 when down)
+   - Readiness probe: `http://localhost:3000/api/health/ready` (HTTP 200 when DB responds, HTTP 503 when down). This probe checks connectivity. Use the owner login and MFA flow to verify setup end to end.
 
-6. **Safe teardown**:
+7. **Safe teardown**:
    - To stop the disposable test database:
      ```powershell
      docker compose -f ops/docker-compose.test.yml down

@@ -1,6 +1,8 @@
 import { getPrismaClient } from '@/lib/auth';
 import { Actor, AuthorizationError, SessionInfo } from './types';
 import { authorize } from './authorize';
+import { recordAuditEvent } from '@/lib/audit';
+import { INACTIVITY_TIMEOUT_MS, MAX_SESSION_LIFETIME_MS } from './session-limits';
 
 /**
  * Lists all active, non-expired sessions for the specified user.
@@ -12,12 +14,16 @@ export async function listActiveSessions(
   const prisma = getPrismaClient();
   const now = new Date();
 
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { credentialVersion: true } });
+  if (!user) return [];
+
   const sessions = await prisma.session.findMany({
     where: {
       userId,
-      expiresAt: {
-        gt: now,
-      },
+      credentialVersion: user.credentialVersion,
+      expiresAt: { gt: now },
+      createdAt: { gte: new Date(now.getTime() - MAX_SESSION_LIFETIME_MS) },
+      updatedAt: { gte: new Date(now.getTime() - INACTIVITY_TIMEOUT_MS) },
     },
     orderBy: {
       updatedAt: 'desc',
@@ -56,8 +62,16 @@ export async function revokeSession(sessionId: string, actor: Actor): Promise<vo
     throw new AuthorizationError('غير مصرح لك بإنهاء جلسات تابعة لمستخدم آخر.');
   }
 
-  await prisma.session.delete({
-    where: { id: sessionId },
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.session.deleteMany({ where: { id: sessionId, userId: target.userId } });
+    if (count > 0) {
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'REVOKE_SESSION',
+        entityType: 'User',
+        entityId: target.userId,
+      });
+    }
   });
 }
 
@@ -67,14 +81,19 @@ export async function revokeSession(sessionId: string, actor: Actor): Promise<vo
 export async function revokeOtherSessions(actor: Actor): Promise<number> {
   const prisma = getPrismaClient();
 
-  const result = await prisma.session.deleteMany({
-    where: {
-      userId: actor.id,
-      id: {
-        not: actor.sessionId,
-      },
-    },
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.session.deleteMany({
+      where: { userId: actor.id, id: { not: actor.sessionId } },
+    });
+    if (count > 0) {
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'REVOKE_OTHER_SESSIONS',
+        entityType: 'User',
+        entityId: actor.id,
+        changedFields: { revokedCount: count },
+      });
+    }
+    return count;
   });
-
-  return result.count;
 }

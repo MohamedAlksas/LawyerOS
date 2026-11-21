@@ -10,10 +10,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts && playwright test --config=playwright.t05.config.ts",
+    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts && playwright test --config=playwright.t05.config.ts && playwright test --config=playwright.t06.config.ts",
     "test:e2e:t03": "playwright test",
     "test:e2e:t04": "playwright test --config=playwright.t04.config.ts",
     "test:e2e:t05": "playwright test --config=playwright.t05.config.ts",
+    "test:e2e:t06": "playwright test --config=playwright.t06.config.ts",
     "postinstall": "prisma generate",
     "auth:provision-owner": "tsx src/cli/provision-owner.ts"
   },
@@ -43,5 +44,13 @@
     "tsx": "4.23.15",
     "typescript": "5.8.3",
     "vitest": "5.1.0"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "effect": "3.22.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.1"
+    }
   }
 }

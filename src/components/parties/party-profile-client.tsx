@@ -1,9 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
+import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
+import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
 import { ClientProfileDTO } from '@/modules/parties/types';
+import {
+  MATTER_PARTY_ROLE_LABELS,
+  MATTER_STATUS_LABELS,
+} from '@/components/matters/matter-ui-types';
 import {
   PARTY_KIND_LABELS,
   IDENTIFICATION_TYPE_LABELS,
@@ -13,13 +19,90 @@ import { CommunicationNotesSection } from './communication-notes-section';
 import { PoaSection } from './poa-section';
 
 interface PartyProfileClientProps {
+  ownerId: string;
   party: ClientProfileDTO;
 }
 
-export function PartyProfileClient({ party }: PartyProfileClientProps) {
+export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) {
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
+
+  const [linkedMatters, setLinkedMatters] = useState<PartyMatterAssociationDTO[]>([]);
+  const [isLoadingMatters, setIsLoadingMatters] = useState(true);
+  const [mattersError, setMattersError] = useState<string | null>(null);
+  const [mattersPage, setMattersPage] = useState(0);
+  const requestedMattersPage = useRef(0);
+  const [mattersTotal, setMattersTotal] = useState(0);
+  const mattersGenRef = useRef(0);
+  const MATTERS_PAGE_SIZE = 50;
+  const mattersTotalPages = Math.max(1, Math.ceil(mattersTotal / MATTERS_PAGE_SIZE));
+
+  const loadMatters = useCallback(
+    async (pageIndex: number) => {
+      const gen = ++mattersGenRef.current;
+      requestedMattersPage.current = pageIndex;
+      setIsLoadingMatters(true);
+      setMattersError(null);
+      try {
+        const fetchPage = (index: number) => getPartyMatterAssociationsAction({
+          partyId: party.id,
+          limit: MATTERS_PAGE_SIZE,
+          offset: index * MATTERS_PAGE_SIZE,
+        });
+        let res = await fetchPage(pageIndex);
+        if (gen !== mattersGenRef.current) return;
+        if (res.success && res.data.associations.length === 0 && pageIndex > 0) {
+          pageIndex = Math.max(0, Math.ceil(res.data.total / MATTERS_PAGE_SIZE) - 1);
+          requestedMattersPage.current = pageIndex;
+          res = await fetchPage(pageIndex);
+        }
+        if (gen !== mattersGenRef.current) return;
+        if (!res.success) {
+          setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
+          return;
+        }
+        setLinkedMatters(res.data.associations);
+        setMattersTotal(res.data.total);
+        setMattersPage(pageIndex);
+      } catch {
+        if (gen !== mattersGenRef.current) return;
+        setMattersError('حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.');
+      } finally {
+        if (gen === mattersGenRef.current) setIsLoadingMatters(false);
+      }
+    },
+    [party.id]
+  );
+
+  useEffect(() => {
+    let ignore = false;
+    const gen = ++mattersGenRef.current;
+    getPartyMatterAssociationsAction({
+      partyId: party.id,
+      limit: MATTERS_PAGE_SIZE,
+      offset: 0,
+    })
+      .then((res) => {
+        if (ignore || gen !== mattersGenRef.current) return;
+        setIsLoadingMatters(false);
+        if (!res.success) {
+          setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
+          return;
+        }
+        setLinkedMatters(res.data.associations);
+        setMattersTotal(res.data.total);
+        setMattersPage(0);
+      })
+      .catch(() => {
+        if (ignore || gen !== mattersGenRef.current) return;
+        setIsLoadingMatters(false);
+        setMattersError('حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [party.id]);
 
   const handleRevealIdentity = async () => {
     setIsRevealing(true);
@@ -261,15 +344,131 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
       <CommunicationNotesSection partyId={party.id} initialNotes={party.communicationNotes} />
 
       {/* 4. Powers of Attorney Section */}
-      <PoaSection partyId={party.id} initialPoas={party.powersOfAttorney} />
+      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} />
 
-      {/* 5. Future Modules Indicator (Contract S09: strictly non-interactive, no fake data) */}
+      {/* 5. Linked Matters Section */}
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
+        <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+          <h2 className="text-base font-bold text-[#172A35]">
+            📁 ملفات القضايا والنزاعات المرتبطة ({mattersError ? '—' : isLoadingMatters && mattersTotal === 0 ? '…' : mattersTotal})
+          </h2>
+          <Link
+            href="/matters/new"
+            className="text-xs font-semibold text-[#14566B] hover:underline"
+          >
+            + فتح ملف جديد
+          </Link>
+        </div>
+
+        {mattersError ? (
+          <div
+            role="alert"
+            data-testid="party-matters-error-banner"
+            className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] flex items-center justify-between gap-2"
+          >
+            <span>⚠️ {mattersError}</span>
+            <button
+              type="button"
+              onClick={() => loadMatters(requestedMattersPage.current)}
+              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        ) : isLoadingMatters ? (
+          <p className="text-xs text-[#4D606A] italic">جارٍ تحميل ملفات القضايا المرتبطة...</p>
+        ) : mattersTotal === 0 ? (
+          <p className="text-xs text-[#4D606A] italic">لا توجد ملفات قضايا مسجلة لهذا الطرف بعد.</p>
+        ) : (
+          <div className="space-y-3">
+            <div className="divide-y divide-[#E8EEF1]">
+            {linkedMatters.map((m) => (
+              <div
+                key={m.matterPartyId}
+                data-testid={`linked-matter-${m.matterId}`}
+                className="py-3 flex items-center justify-between gap-3 text-xs"
+              >
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <bdi dir="ltr" className="font-mono font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                      {m.fileCode}
+                    </bdi>
+                    <Link
+                      href={`/matters/${m.matterId}`}
+                      className="font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
+                    >
+                      {m.title}
+                    </Link>
+                    <span
+                      data-testid={`matter-role-badge-${m.matterId}`}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                        m.role === 'CLIENT'
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : m.role === 'OPPONENT'
+                          ? 'bg-rose-50 text-rose-800 border-rose-200'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {MATTER_PARTY_ROLE_LABELS[m.role]}
+                    </span>
+                    {m.isPrimaryContact && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                        جهة الاتصال الرئيسية
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[#4D606A] block">
+                    الحالة: {MATTER_STATUS_LABELS[m.status] || m.status}
+                  </span>
+                </div>
+
+                <Link
+                  href={`/matters/${m.matterId}`}
+                  className="px-3 py-1.5 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] rounded border border-[#D5DFE3] min-h-[36px] flex items-center"
+                >
+                  عرض الملف
+                </Link>
+              </div>
+            ))}
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 text-[11px] text-[#4D606A]">
+              <span data-testid="party-matters-count">
+                عرض {linkedMatters.length} من {mattersTotal} ارتباط — صفحة {mattersPage + 1} من{' '}
+                {mattersTotalPages}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => loadMatters(mattersPage - 1)}
+                  disabled={mattersPage <= 0 || isLoadingMatters}
+                  data-testid="party-matters-prev"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                >
+                  السابق
+                </button>
+                <button
+                  type="button"
+                  onClick={() => loadMatters(mattersPage + 1)}
+                  disabled={mattersPage + 1 >= mattersTotalPages || isLoadingMatters}
+                  data-testid="party-matters-next"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                >
+                  التالي
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 6. Future Financial & Documents Modules Indicator */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          📁 ملفات القضايا والحسابات المالية المرتبطة
+          💰 الحسابات المالية والمستندات الرقمية
         </span>
         <p>
-          وحدات القضايا والنزاعات (T06) والمستندات الرقمية (T10) وحسابات الأتعاب والمصروفات (T11/T12)
+          وحدات المستندات الرقمية (T10) وحسابات الأتعاب والمصروفات (T11/T12)
           غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
         </p>
       </div>
