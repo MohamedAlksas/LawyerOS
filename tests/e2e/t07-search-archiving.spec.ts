@@ -263,9 +263,9 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     test.setTimeout(90_000);
     await signInWithTotp(page, owner);
 
-    // Navigate to unified search via header link
+    // Navigate to unified search via nav link
     await page.goto('/matters');
-    await page.getByTestId('header-search-link').click();
+    await page.getByTestId('nav-link-search').click();
     await expect(page).toHaveURL(/\/search/);
     await expect(page.locator('h1')).toContainText('البحث الموحد الشامل');
 

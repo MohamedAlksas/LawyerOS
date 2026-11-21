@@ -65,21 +65,6 @@ export function DesktopSidebar() {
             <span>الرئيسية / اليوم</span>
           </Link>
 
-          {/* Unified Search */}
-          <Link
-            href="/search"
-            data-testid="nav-link-search"
-            aria-current={isSearchActive ? 'page' : undefined}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-              isSearchActive
-                ? 'bg-[#14566B] text-white shadow-xs'
-                : 'text-[#172A35] hover:bg-[#E8EEF1]'
-            }`}
-          >
-            <span aria-hidden="true" className="text-base">🔍</span>
-            <span>البحث الموحد</span>
-          </Link>
-
           {/* Matters Directory */}
           <Link
             href="/matters"
@@ -123,6 +108,21 @@ export function DesktopSidebar() {
           >
             <span aria-hidden="true" className="text-base">🛡️</span>
             <span>إعدادات الأمان</span>
+          </Link>
+
+          {/* Unified Search */}
+          <Link
+            href="/search"
+            data-testid="nav-link-search"
+            aria-current={isSearchActive ? 'page' : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+              isSearchActive
+                ? 'bg-[#14566B] text-white shadow-xs'
+                : 'text-[#172A35] hover:bg-[#E8EEF1]'
+            }`}
+          >
+            <span aria-hidden="true" className="text-base">🔍</span>
+            <span>البحث الموحد</span>
           </Link>
 
           {/* Reference Settings */}
