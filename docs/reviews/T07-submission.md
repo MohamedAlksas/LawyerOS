@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-21
 **Task Branch:** `feature/t07-search-archiving`
-**Pull Request:** Draft PR (to be opened from `feature/t07-search-archiving` to `main`)
+**Pull Request:** [Draft PR #15](https://github.com/MohamedAlksas/LawyerOS/pull/15)
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`
 **Base Checkpoint (Accepted T06 / origin/main):** `317a6530e5f695338398b029b34f5305e72b1bd4`
 **Predecessor Review Acceptance:** `docs/reviews/T06-review.md` (ACCEPTED)
