@@ -6,8 +6,12 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`
 **Base Checkpoint (Accepted T06 / origin/main):** `317a6530e5f695338398b029b34f5305e72b1bd4`
 **Predecessor Review Acceptance:** `docs/reviews/T06-review.md` (ACCEPTED)
-**Implementation Candidate Checkpoint:** `fb745be`
+**Implementation Candidate Checkpoint:** `3ae47d3`
+**Published Remote Checkpoint:** `3ae47d3`
 **Current Status:** `READY_FOR_CODEX_REVIEW`
+**Hosted CI Status:**
+- [Planning package validation (Run 44939365329)](https://github.com/MohamedAlksas/LawyerOS/actions/runs/44939365329): **SUCCESS**
+- [Application CI — Lint, Test, and Build (Run 44939365379)](https://github.com/MohamedAlksas/LawyerOS/actions/runs/44939365379): **SUCCESS** (All 14 steps passed: setup, migrations, lint, typecheck, unit tests, build, integration tests, Playwright E2E tests)
 
 ---
 
@@ -102,9 +106,11 @@ All search queries execute well within 12ms–33ms at P95, easily satisfying the
 | `npm.cmd run lint` (`eslint .`) | **0** | Clean, 0 ESLint warnings, 0 errors. |
 | `npm.cmd test` (`vitest run tests/unit`) | **0** | **14 test files passed, 252 unit tests passed (5.16s)**. |
 | `npm.cmd run test:integration` (`vitest run tests/integration`) | **0** | **30 test files passed, 279 integration tests passed (374.6s)**. |
+| `npx playwright test tests/e2e/t04-04-accessibility-keyboard.spec.ts` | **0** | **8 passed in 34.2s** confirming tab order bounds and visible focus indicators. |
 | `npm.cmd run test:e2e:t07` (`playwright test`) | **0** | **7 passed in 44.1s** across Desktop (1440px), Tablet (768px), and Mobile (390px). |
 | `npm.cmd run build` (`next build` Turbopack) | **0** | Production build succeeded in 1.4s; all 22 routes generated including `ƒ /search`. |
 | `git diff --check` | **0** | Clean diff, 0 trailing whitespace or newline errors. |
+| Hosted CI (Run 44939365379) | **0** | **All 14 pipeline steps succeeded** on GitHub Actions runner. |
 
 ---
 
