@@ -402,6 +402,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       'archiveProceedingAction',
       'reopenProceedingAction',
       'unifiedSearchAction',
+      'searchMatterClientsAction',
     ];
     expect([...exposedT06Actions].sort()).toEqual([...requiredActionNames].sort());
     for (const name of requiredActionNames) {
@@ -944,6 +945,13 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           limit: 10,
         }],
       },
+      {
+        name: 'searchMatterClientsAction',
+        args: [{
+          query: 'موكل تجريبي',
+          limit: 10,
+        }],
+      },
     ];
 
     // Filter strictly to exposed Server Actions in the built client manifest
@@ -951,7 +959,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(actionIds[item.name]).toBeDefined();
     }
     const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
-    expect(exposed.length).toBe(21);
+    expect(exposed.length).toBe(22);
     expect(exposed.length).toBe(candidates.length);
     return exposed;
   }
@@ -1162,7 +1170,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('8. Verified Owner Success Transport', () => {
-    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 21 actions', async () => {
+    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 22 actions', async () => {
       // 1. Create Reference Item (Court)
       const courtKey = `owner-http-court-${crypto.randomUUID()}`;
       const courtRes = await postServerAction('createReferenceItemAction', [{
@@ -1457,6 +1465,15 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(unifiedRes.status).toBe(200);
       expect(unifiedRes.body).toContain('"success":true');
       expect(unifiedRes.body).toContain('قضية النقل الشبكي');
+
+      // 22. Search Matter Clients Action
+      const clientsRes = await postServerAction('searchMatterClientsAction', [{
+        query: 'موكل',
+        limit: 10,
+      }], { cookie: verifiedSessionCookie });
+      expect(clientsRes.status).toBe(200);
+      expect(clientsRes.body).toContain('"success":true');
+      expect(clientsRes.body).toContain('موكل نقل القضايا');
     });
   });
 
@@ -1523,6 +1540,8 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     it('handles competing concurrent lifecycle transitions safely (only one succeeds, version strictly increments by 1)', async () => {
       const client = await dedicatedPool.connect();
       const raceMid = crypto.randomUUID();
+      const key1 = `race-arch-1-${crypto.randomUUID()}`;
+      const key2 = `race-arch-2-${crypto.randomUUID()}`;
       try {
         await client.query(`
           INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
@@ -1537,14 +1556,14 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         matterId: raceMid,
         expectedVersion: 1,
         reason: 'أرشفة متزامنة أ',
-        idempotencyKey: `race-arch-1-${crypto.randomUUID()}`,
+        idempotencyKey: key1,
       }], { cookie: verifiedSessionCookie });
 
       const req2 = postServerAction('archiveMatterAction', [{
         matterId: raceMid,
         expectedVersion: 1,
         reason: 'أرشفة متزامنة ب',
-        idempotencyKey: `race-arch-2-${crypto.randomUUID()}`,
+        idempotencyKey: key2,
       }], { cookie: verifiedSessionCookie });
 
       const [res1, res2] = await Promise.all([req1, req2]);
@@ -1560,6 +1579,193 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(finalDb.rows[0].status).toBe('ARCHIVED');
       expect(finalDb.rows[0].version).toBe(2);
       expect(finalDb.rows[0].archivedAt).not.toBeNull();
+
+      // Verify winning audit event and claim
+      const isReq1Winner = res1.body.includes('"success":true');
+      const winningKey = isReq1Winner ? key1 : key2;
+      const losingKey = isReq1Winner ? key2 : key1;
+
+      const auditRes = await dedicatedPool.query(
+        'SELECT * FROM "audit_event" WHERE "entityId" = $1 AND "action" = \'ARCHIVE_MATTER\'',
+        [raceMid]
+      );
+      expect(auditRes.rows.length).toBe(1);
+      expect(auditRes.rows[0].entityType).toBe('Matter');
+
+      const claimRes = await dedicatedPool.query(
+        'SELECT * FROM "idempotency_record" WHERE "resultId" = $1 AND "commandType" = \'archiveMatter\'',
+        [raceMid]
+      );
+      expect(claimRes.rows.length).toBe(1);
+      expect(claimRes.rows[0].key).toBe(winningKey);
+      expect(claimRes.rows[0].status).toBe('COMPLETED');
+
+      // Verify losing idempotency record rolled back cleanly
+      const losingClaim = await dedicatedPool.query(
+        'SELECT * FROM "idempotency_record" WHERE "key" = $1 AND "commandType" = \'archiveMatter\'',
+        [losingKey]
+      );
+      expect(losingClaim.rows.length).toBe(0);
+    });
+
+    it('rolls back cleanly when audit insertion fails after domain update in archiveMatter, then retries successfully', async () => {
+      const client = await dedicatedPool.connect();
+      const testMid = crypto.randomUUID();
+      const failKey = `fail-audit-${crypto.randomUUID()}`;
+      try {
+        await client.query(`
+          INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, '2026/AUDIT-ROLL-01', 'ملف فحص تراجع التدقيق', 'LITIGATION', 'ACTIVE', 1, $2, $2, now(), now())
+        `, [testMid, ownerUserId]);
+
+        // Install PostgreSQL trigger on "audit_event" to force failure after domain update begins
+        await client.query(`
+          CREATE OR REPLACE FUNCTION fail_audit_event_on_mid() RETURNS trigger AS $$
+          BEGIN
+            IF NEW."action" = 'ARCHIVE_MATTER' AND NEW."entityId" = '${testMid}' THEN
+              RAISE EXCEPTION 'SIMULATED_POSTGRESQL_AUDIT_FAILURE';
+            END IF;
+            RETURN NEW;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          DROP TRIGGER IF EXISTS trg_fail_audit_event_on_mid ON "audit_event";
+          CREATE TRIGGER trg_fail_audit_event_on_mid
+          BEFORE INSERT ON "audit_event"
+          FOR EACH ROW EXECUTE FUNCTION fail_audit_event_on_mid();
+        `);
+      } finally {
+        client.release();
+      }
+
+      try {
+        // Attempt archive action — domain update succeeds, but audit write fails inside the same transaction
+        const failRes = await postServerAction('archiveMatterAction', [{
+          matterId: testMid,
+          expectedVersion: 1,
+          reason: 'أرشفة يجب أن تتراجع بسبب التدقيق',
+          idempotencyKey: failKey,
+        }], { cookie: verifiedSessionCookie });
+
+        expect(failRes.status).toBe(200);
+        expect(failRes.body).toContain('"success":false');
+
+        // Verify domain row rolled back cleanly: status ACTIVE, version 1, archivedAt null
+        const matterCheck = await dedicatedPool.query(
+          'SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1',
+          [testMid]
+        );
+        expect(matterCheck.rows[0].status).toBe('ACTIVE');
+        expect(matterCheck.rows[0].version).toBe(1);
+        expect(matterCheck.rows[0].archivedAt).toBeNull();
+
+        // Verify zero audit event records were committed
+        const auditCheck = await dedicatedPool.query(
+          'SELECT count(*)::int AS cnt FROM "audit_event" WHERE "entityId" = $1',
+          [testMid]
+        );
+        expect(auditCheck.rows[0].cnt).toBe(0);
+
+        // Verify zero idempotency records were left behind
+        const claimCheck = await dedicatedPool.query(
+          'SELECT count(*)::int AS cnt FROM "idempotency_record" WHERE "key" = $1',
+          [failKey]
+        );
+        expect(claimCheck.rows[0].cnt).toBe(0);
+      } finally {
+        // Remove trigger
+        await dedicatedPool.query(`
+          DROP TRIGGER IF EXISTS trg_fail_audit_event_on_mid ON "audit_event";
+          DROP FUNCTION IF EXISTS fail_audit_event_on_mid();
+        `);
+      }
+
+      // Retry the exact same command with the same key and payload
+      const retryRes = await postServerAction('archiveMatterAction', [{
+        matterId: testMid,
+        expectedVersion: 1,
+        reason: 'أرشفة يجب أن تتراجع بسبب التدقيق',
+        idempotencyKey: failKey,
+      }], { cookie: verifiedSessionCookie });
+
+      expect(retryRes.status).toBe(200);
+      expect(retryRes.body).toContain('"success":true');
+
+      // Verify exactly one change committed
+      const finalMatter = await dedicatedPool.query(
+        'SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1',
+        [testMid]
+      );
+      expect(finalMatter.rows[0].status).toBe('ARCHIVED');
+      expect(finalMatter.rows[0].version).toBe(2);
+      expect(finalMatter.rows[0].archivedAt).not.toBeNull();
+
+      const finalAudit = await dedicatedPool.query(
+        'SELECT count(*)::int AS cnt FROM "audit_event" WHERE "entityId" = $1 AND "action" = \'ARCHIVE_MATTER\'',
+        [testMid]
+      );
+      expect(finalAudit.rows[0].cnt).toBe(1);
+
+      const finalClaim = await dedicatedPool.query(
+        'SELECT "status", "resultId" FROM "idempotency_record" WHERE "key" = $1',
+        [failKey]
+      );
+      expect(finalClaim.rows.length).toBe(1);
+      expect(finalClaim.rows[0].status).toBe('COMPLETED');
+      expect(finalClaim.rows[0].resultId).toBe(testMid);
+    });
+
+    it('rejects same-key request with changed payload/intent (IDEMPOTENCY_PAYLOAD_MISMATCH)', async () => {
+      const client = await dedicatedPool.connect();
+      const testMid = crypto.randomUUID();
+      const sharedKey = `shared-intent-${crypto.randomUUID()}`;
+      try {
+        await client.query(`
+          INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, '2026/INTENT-01', 'ملف فحص تغيير النية', 'LITIGATION', 'ACTIVE', 1, $2, $2, now(), now())
+        `, [testMid, ownerUserId]);
+      } finally {
+        client.release();
+      }
+
+      // 1. Initial valid command
+      const res1 = await postServerAction('archiveMatterAction', [{
+        matterId: testMid,
+        expectedVersion: 1,
+        reason: 'السبب الأصلي للأرشفة',
+        idempotencyKey: sharedKey,
+      }], { cookie: verifiedSessionCookie });
+
+      expect(res1.status).toBe(200);
+      expect(res1.body).toContain('"success":true');
+
+      // 2. Replay with SAME key but CHANGED intent (different reason)
+      const res2 = await postServerAction('archiveMatterAction', [{
+        matterId: testMid,
+        expectedVersion: 1,
+        reason: 'سبب مختلف تماما مع نفس المفتاح',
+        idempotencyKey: sharedKey,
+      }], { cookie: verifiedSessionCookie });
+
+      expect(res2.status).toBe(200);
+      expect(res2.body).toContain('"success":false');
+      expect(res2.body).toContain('IDEMPOTENCY_PAYLOAD_MISMATCH');
+
+      // 3. Verify DB state is intact and reflects only the first intent
+      const checkRes = await dedicatedPool.query(
+        'SELECT "status", "version", "archiveReason" FROM "matter" WHERE id = $1',
+        [testMid]
+      );
+      expect(checkRes.rows[0].status).toBe('ARCHIVED');
+      expect(checkRes.rows[0].version).toBe(2);
+      expect(checkRes.rows[0].archiveReason).toBe('السبب الأصلي للأرشفة');
+
+      // 4. Verify exactly one audit event exists
+      const auditRes = await dedicatedPool.query(
+        'SELECT count(*)::int AS cnt FROM "audit_event" WHERE "entityId" = $1',
+        [testMid]
+      );
+      expect(auditRes.rows[0].cnt).toBe(1);
     });
   });
 });

@@ -19,6 +19,7 @@ interface PoaSectionProps {
   ownerId: string;
   partyId: string;
   initialPoas: PoASummaryDTO[];
+  readOnly?: boolean;
 }
 
 interface PoaDraft {
@@ -33,7 +34,7 @@ interface PoaDraft {
   pending: SavePowerOfAttorneyInput | null;
 }
 
-export function PoaSection({ ownerId, partyId, initialPoas }: PoaSectionProps) {
+export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: PoaSectionProps) {
   const draft = useFormDraft<PoaDraft>(ownerId, `/parties/${partyId}`);
   const restored = draft.restored;
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
@@ -187,19 +188,21 @@ export function PoaSection({ ownerId, partyId, initialPoas }: PoaSectionProps) {
           </p>
         </div>
 
-        <button
-          type="button"
-          data-testid="add-poa-button"
-          onClick={() => isFormOpen ? setIsFormOpen(false) : openForm(null)}
-          disabled={isSubmitting || !!pending}
-          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
-        >
-          <span>{isFormOpen ? 'إلغاء' : '＋ إضافة توكيل رسمي'}</span>
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            data-testid="add-poa-button"
+            onClick={() => isFormOpen ? setIsFormOpen(false) : openForm(null)}
+            disabled={isSubmitting || !!pending}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
+          >
+            <span>{isFormOpen ? 'إلغاء' : '＋ إضافة توكيل رسمي'}</span>
+          </button>
+        )}
       </div>
 
       {/* Add POA Form */}
-      {isFormOpen && (
+      {!readOnly && isFormOpen && (
         <form
           onSubmit={handleSubmit}
           onChange={() => setIsDirty(true)}
@@ -413,10 +416,12 @@ export function PoaSection({ ownerId, partyId, initialPoas }: PoaSectionProps) {
                     >
                       {statusConfig.label}
                     </span>
-                    <button type="button" onClick={() => openForm(poa)} disabled={isFormOpen}
-                      className="mr-2 min-h-[44px] px-2 text-sm font-semibold text-[#14566B] disabled:opacity-50">
-                      تعديل التوكيل
-                    </button>
+                    {!readOnly && (
+                      <button type="button" onClick={() => openForm(poa)} disabled={isFormOpen}
+                        className="mr-2 min-h-[44px] px-2 text-sm font-semibold text-[#14566B] disabled:opacity-50">
+                        تعديل التوكيل
+                      </button>
+                    )}
                   </div>
                 </div>
 

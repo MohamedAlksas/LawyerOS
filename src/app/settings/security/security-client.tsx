@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
+import { clearSearchSessionStore } from '@/lib/search-session-store';
 import {
   revokeSessionAction,
   revokeOtherSessionsAction,
@@ -144,6 +145,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
       }
 
       // Confirmed logout
+      clearSearchSessionStore();
       router.push('/login');
     } catch {
       setActionError(

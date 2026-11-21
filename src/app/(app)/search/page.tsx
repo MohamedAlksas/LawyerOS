@@ -47,17 +47,23 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     throw error;
   }
 
+  const rawType = Array.isArray(params.type) ? params.type[0] : params.type;
+  const rawPage = Array.isArray(params.page) ? params.page[0] : params.page;
+  const rawLimit = Array.isArray(params.limit) ? params.limit[0] : params.limit;
+  const rawQuery = Array.isArray(params.query) ? params.query[0] : params.query;
+  const rawIncArch = Array.isArray(params.includeArchived) ? params.includeArchived[0] : params.includeArchived;
+
   const validType: UnifiedSearchType =
-    params.type && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(params.type)
-      ? (params.type as UnifiedSearchType)
+    rawType && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(rawType)
+      ? (rawType as UnifiedSearchType)
       : 'ALL';
 
-  const page = Math.max(1, parseInt(params.page || '1', 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(params.limit || '20', 10) || 20));
-  const includeArchived = params.includeArchived === 'true';
+  const page = Math.max(1, parseInt(rawPage || '1', 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(rawLimit || '20', 10) || 20));
+  const includeArchived = rawIncArch === 'true';
 
   let initialResult: UnifiedSearchResult = {
-    query: params.query || '',
+    query: rawQuery || '',
     type: validType,
     includeArchived,
     page,
@@ -77,7 +83,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   try {
     initialResult = await unifiedSearch(
       {
-        query: params.query,
+        query: rawQuery,
         type: validType,
         includeArchived,
         page,
@@ -85,6 +91,20 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       },
       actor
     );
+
+    // Initial page recovery: if requested page is beyond totalPages but valid records exist, refetch the last valid page
+    if (page > initialResult.totalPages && initialResult.total > 0) {
+      initialResult = await unifiedSearch(
+        {
+          query: rawQuery,
+          type: validType,
+          includeArchived,
+          page: initialResult.totalPages,
+          limit,
+        },
+        actor
+      );
+    }
   } catch (error) {
     if (error instanceof MatterValidationError) {
       initialError = error.message;

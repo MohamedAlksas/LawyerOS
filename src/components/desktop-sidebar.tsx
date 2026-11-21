@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
+import { clearSearchSessionStore } from '@/lib/search-session-store';
 
 export function DesktopSidebar() {
   const pathname = usePathname();
@@ -27,6 +28,7 @@ export function DesktopSidebar() {
         setIsLoggingOut(false);
         return;
       }
+      clearSearchSessionStore();
       router.push('/login');
     } catch {
       setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');

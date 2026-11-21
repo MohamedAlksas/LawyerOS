@@ -2,7 +2,12 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { searchMattersAction } from '@/modules/matters/matter-actions';
+import { searchMattersAction, searchMatterClientsAction } from '@/modules/matters/matter-actions';
+import {
+  createNavigationKey,
+  setPrivateSearchState,
+  getPrivateSearchState,
+} from '@/lib/search-session-store';
 import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
 import {
   MATTER_KIND_LABELS,
@@ -55,17 +60,66 @@ export function MatterListClient({
     if (typeof window !== 'undefined') {
       const urlQ = new URLSearchParams(window.location.search).get('query');
       if (urlQ) return urlQ;
-      const transient = (window.history.state as { searchTransientQuery?: string } | null)?.searchTransientQuery;
-      if (transient) return transient;
+      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
+      const entry = getPrivateSearchState(navKey);
+      if (entry?.query) return entry.query;
     }
     return initialQuery;
   });
-  const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
-  const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(initialStatus);
-  const [selectedCourtId, setSelectedCourtId] = useState<string | undefined>(initialCourtId);
-  const [selectedClientId, setSelectedClientId] = useState<string | undefined>(initialClientId);
-  const [incompleteData, setIncompleteData] = useState<boolean>(initialIncompleteData);
-  const [includeArchived, setIncludeArchived] = useState<boolean>(initialIncludeArchived);
+  const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(() => {
+    if (typeof window !== 'undefined') {
+      const k = new URLSearchParams(window.location.search).get('kind') as MatterKind;
+      if (k) return k;
+    }
+    return initialKind;
+  });
+  const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(() => {
+    if (typeof window !== 'undefined') {
+      const s = new URLSearchParams(window.location.search).get('status') as MatterStatus;
+      if (s) return s;
+    }
+    return initialStatus;
+  });
+  const [selectedCourtId, setSelectedCourtId] = useState<string | undefined>(() => {
+    if (typeof window !== 'undefined') {
+      const c = new URLSearchParams(window.location.search).get('courtId');
+      if (c) return c;
+    }
+    return initialCourtId;
+  });
+  const [selectedClientId, setSelectedClientId] = useState<string | undefined>(() => {
+    if (typeof window !== 'undefined') {
+      const urlClient = new URLSearchParams(window.location.search).get('clientId');
+      if (urlClient) return urlClient;
+      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
+      const entry = getPrivateSearchState(navKey);
+      if (entry?.clientId) return entry.clientId;
+    }
+    return initialClientId;
+  });
+  const [clientsList, setClientsList] = useState<Array<{ id: string; name: string }>>(clients);
+  const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
+  const [clientPickerQuery, setClientPickerQuery] = useState('');
+  const [isSearchingClients, setIsSearchingClients] = useState(false);
+  const [clientSearchError, setClientSearchError] = useState<string | null>(null);
+  const [clientPickerPage, setClientPickerPage] = useState(1);
+  const [clientPickerTotalPages, setClientPickerTotalPages] = useState(1);
+  const [clientPickerTotalCount, setClientPickerTotalCount] = useState(clients.length);
+  const clientPickerRef = useRef<HTMLDivElement>(null);
+  const [incompleteData, setIncompleteData] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const inc = new URLSearchParams(window.location.search).get('incompleteData');
+      if (inc !== null) return inc === 'true';
+    }
+    return initialIncompleteData;
+  });
+  const [includeArchived, setIncludeArchived] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const arch = new URLSearchParams(window.location.search).get('includeArchived');
+      if (arch !== null) return arch === 'true';
+    }
+    return initialIncludeArchived;
+  });
   const [page, setPage] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const urlP = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
@@ -96,6 +150,59 @@ export function MatterListClient({
 
   const fetchMattersRef = useRef<FetchMattersFn | null>(null);
 
+  const searchClientsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fetchClientOptions = useCallback(async (searchQ: string, pageNum: number = 1) => {
+    setIsSearchingClients(true);
+    setClientSearchError(null);
+    try {
+      const res = await searchMatterClientsAction({
+        query: searchQ.trim() || undefined,
+        page: pageNum,
+        limit: 10,
+      });
+      if (res.success) {
+        setClientsList((prev) => {
+          const existingMap = new Map(prev.map((c) => [c.id, c]));
+          for (const c of res.data.clients) {
+            existingMap.set(c.id, c);
+          }
+          return Array.from(existingMap.values());
+        });
+        setClientPickerPage(res.data.page);
+        setClientPickerTotalPages(res.data.totalPages);
+        setClientPickerTotalCount(res.data.total);
+      } else {
+        setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
+      }
+    } catch {
+      setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
+    } finally {
+      setIsSearchingClients(false);
+    }
+  }, []);
+
+  const handleClientPickerQueryChange = (val: string) => {
+    setClientPickerQuery(val);
+    if (searchClientsTimeoutRef.current) {
+      clearTimeout(searchClientsTimeoutRef.current);
+    }
+    searchClientsTimeoutRef.current = setTimeout(() => {
+      fetchClientOptions(val, 1);
+    }, 300);
+  };
+
+  useEffect(() => {
+    if (!isClientPickerOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (clientPickerRef.current && !clientPickerRef.current.contains(e.target as Node)) {
+        setIsClientPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isClientPickerOpen]);
+
   const syncUrl = useCallback(
     (
       q: string,
@@ -119,8 +226,13 @@ export function MatterListClient({
       if (p && p > 1) params.set('page', String(p));
       const newQuery = params.toString();
       const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-      const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
-      window.history.replaceState({ ...currentState, searchTransientQuery: q }, '', cleanUrl);
+      const currentState = (window.history.state && typeof window.history.state === 'object') ? (window.history.state as Record<string, unknown>) : {};
+      let navKey = typeof currentState.navKey === 'string' ? currentState.navKey : undefined;
+      if (!navKey) {
+        navKey = createNavigationKey();
+      }
+      setPrivateSearchState(navKey, q, client);
+      window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
     },
     []
   );
@@ -253,13 +365,29 @@ export function MatterListClient({
     fetchMatters(query, selectedKind, selectedStatus, includeArchived, newPage, selectedCourtId, selectedClientId, incompleteData);
   };
 
-  // Clean URL on initial mount if coming with query in searchParams
+  const hasRestoredOnMountRef = useRef(false);
+
+  // Clean URL on initial mount if coming with query in searchParams, or restore from private store
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlParams = new URLSearchParams(window.location.search);
     const urlQuery = urlParams.get('query');
     if (urlQuery) {
       syncUrl(urlQuery, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData);
+      return;
+    }
+
+    if (!hasRestoredOnMountRef.current) {
+      hasRestoredOnMountRef.current = true;
+      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
+      const entry = getPrivateSearchState(navKey);
+      if (entry && (entry.query || entry.clientId)) {
+        const q = entry.query ?? '';
+        const cl = entry.clientId ?? selectedClientId;
+        setTimeout(() => {
+          fetchMattersRef.current?.(q, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, cl, incompleteData);
+        }, 0);
+      }
     }
   }, [syncUrl, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData]);
 
@@ -274,20 +402,22 @@ export function MatterListClient({
       const urlClient = params.get('clientId') || undefined;
       const urlIncData = params.get('incompleteData') === 'true';
       const urlIncArch = params.get('includeArchived') === 'true';
-      const restoredQuery =
-        ((event as PopStateEvent)?.state?.searchTransientQuery as string | undefined) ??
-        (window.history.state?.searchTransientQuery as string | undefined) ??
-        '';
+      const navKey =
+        ((event as PopStateEvent)?.state?.navKey as string | undefined) ??
+        (window.history.state?.navKey as string | undefined);
+      const entry = getPrivateSearchState(navKey);
+      const restoredQuery = entry?.query ?? '';
+      const restoredClient = urlClient ?? entry?.clientId ?? undefined;
 
       setQuery(restoredQuery);
       setSelectedKind(urlKind);
       setSelectedStatus(urlStatus);
       setSelectedCourtId(urlCourt);
-      setSelectedClientId(urlClient);
+      setSelectedClientId(restoredClient);
       setIncompleteData(urlIncData);
       setIncludeArchived(urlIncArch);
       setPage(urlPage);
-      fetchMatters(restoredQuery, urlKind, urlStatus, urlIncArch, urlPage, urlCourt, urlClient, urlIncData);
+      fetchMatters(restoredQuery, urlKind, urlStatus, urlIncArch, urlPage, urlCourt, restoredClient, urlIncData);
     };
 
     window.addEventListener('popstate', syncFromUrl);
@@ -481,7 +611,7 @@ export function MatterListClient({
             </div>
 
             {/* Client Filter */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 relative" ref={clientPickerRef}>
               <label htmlFor="filter-client" className="text-xs font-semibold text-[#4D606A]">الموكل:</label>
               <select
                 id="filter-client"
@@ -491,10 +621,130 @@ export function MatterListClient({
                 className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل الموكلين</option>
-                {clients.map((cl) => (
+                {clientsList.map((cl) => (
                   <option key={cl.id} value={cl.id}>{cl.name}</option>
                 ))}
               </select>
+
+              <button
+                type="button"
+                data-testid="open-client-picker-button"
+                onClick={() => {
+                  const nextState = !isClientPickerOpen;
+                  setIsClientPickerOpen(nextState);
+                  if (nextState && clientPickerQuery === '') {
+                    fetchClientOptions('', 1);
+                  }
+                }}
+                className="px-2 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                title="بحث موسع في الموكلين"
+              >
+                🔍 بحث
+              </button>
+
+              {isClientPickerOpen && (
+                <div
+                  data-testid="client-picker-popover"
+                  className="absolute top-full mt-1.5 right-0 z-30 w-72 bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between pb-1 border-b border-[#E8EEF1]">
+                    <span className="font-semibold text-[#172A35]">اختيار موكل</span>
+                    <button
+                      type="button"
+                      data-testid="close-client-picker-button"
+                      onClick={() => setIsClientPickerOpen(false)}
+                      className="text-[#4D606A] hover:text-[#172A35] text-sm p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <input
+                    type="search"
+                    data-testid="filter-client-search-input"
+                    value={clientPickerQuery}
+                    onChange={(e) => handleClientPickerQueryChange(e.target.value)}
+                    placeholder="ابحث بالاسم أو الهاتف..."
+                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-xs text-[#172A35] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                  />
+
+                  {isSearchingClients ? (
+                    <div className="py-3 text-center text-[#4D606A]" data-testid="client-picker-loading">
+                      جارٍ البحث في الموكلين...
+                    </div>
+                  ) : clientSearchError ? (
+                    <div className="py-2 text-center text-[#B3261E]" data-testid="client-picker-error">
+                      {clientSearchError}
+                    </div>
+                  ) : clientsList.length === 0 ? (
+                    <div className="py-3 text-center text-[#4D606A]">لا يوجد موكلين مطابقين</div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto divide-y divide-[#E8EEF1] border border-[#E8EEF1] rounded-[4px]">
+                      <button
+                        type="button"
+                        data-testid="filter-client-option-all"
+                        onClick={() => {
+                          handleClientChange(undefined);
+                          setIsClientPickerOpen(false);
+                        }}
+                        className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium block"
+                      >
+                        كل الموكلين
+                      </button>
+                      {clientsList.map((cl) => (
+                        <button
+                          key={cl.id}
+                          type="button"
+                          data-testid={`filter-client-option-${cl.id}`}
+                          onClick={() => {
+                            handleClientChange(cl.id);
+                            setIsClientPickerOpen(false);
+                          }}
+                          className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] block transition-colors ${
+                            selectedClientId === cl.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : 'text-[#172A35]'
+                          }`}
+                        >
+                          {cl.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {clientPickerTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1 border-t border-[#E8EEF1] text-[11px] text-[#4D606A]">
+                      <span data-testid="filter-client-picker-page-info">
+                        صفحة {clientPickerPage} من {clientPickerTotalPages} ({clientPickerTotalCount} موكل)
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          data-testid="filter-client-picker-prev"
+                          disabled={clientPickerPage <= 1}
+                          onClick={() => {
+                            const p = clientPickerPage - 1;
+                            fetchClientOptions(clientPickerQuery, p);
+                          }}
+                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                        >
+                          السابق
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="filter-client-picker-next"
+                          disabled={clientPickerPage >= clientPickerTotalPages}
+                          onClick={() => {
+                            const p = clientPickerPage + 1;
+                            fetchClientOptions(clientPickerQuery, p);
+                          }}
+                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                        >
+                          التالي
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Incomplete Data Toggle */}

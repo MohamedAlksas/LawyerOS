@@ -18,11 +18,13 @@ import {
 interface CommunicationNotesSectionProps {
   partyId: string;
   initialNotes: CommunicationNoteSummaryDTO[];
+  readOnly?: boolean;
 }
 
 export function CommunicationNotesSection({
   partyId,
   initialNotes,
+  readOnly = false,
 }: CommunicationNotesSectionProps) {
   const [notes, setNotes] = useState<CommunicationNoteSummaryDTO[]>(initialNotes);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -133,25 +135,27 @@ export function CommunicationNotesSection({
           </p>
         </div>
 
-        <button
-          type="button"
-          data-testid="add-note-button"
-          onClick={() => {
-            setIsFormOpen((prev) => {
-              if (!prev) {
-                setCommunicationAt(getCairoCurrentWallTime());
-              }
-              return !prev;
-            });
-          }}
-          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
-        >
-          <span>{isFormOpen ? 'إلغاء الإضافة' : '＋ إضافة ملاحظة تواصل'}</span>
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            data-testid="add-note-button"
+            onClick={() => {
+              setIsFormOpen((prev) => {
+                if (!prev) {
+                  setCommunicationAt(getCairoCurrentWallTime());
+                }
+                return !prev;
+              });
+            }}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
+          >
+            <span>{isFormOpen ? 'إلغاء الإضافة' : '＋ إضافة ملاحظة تواصل'}</span>
+          </button>
+        )}
       </div>
 
       {/* Add Note Form */}
-      {isFormOpen && (
+      {!readOnly && isFormOpen && (
         <form
           onSubmit={handleSubmit}
           data-testid="add-note-form"

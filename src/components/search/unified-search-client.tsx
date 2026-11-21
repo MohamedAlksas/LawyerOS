@@ -14,6 +14,11 @@ import {
   EmptyStateContainer,
 } from '@/components/presentation-state';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
+import {
+  createNavigationKey,
+  setPrivateSearchState,
+  getPrivateSearchState,
+} from '@/lib/search-session-store';
 
 interface UnifiedSearchClientProps {
   initialResult?: UnifiedSearchResult;
@@ -53,18 +58,38 @@ export function UnifiedSearchClient({
   initialPage = 1,
   initialError,
 }: UnifiedSearchClientProps) {
+  const isRestoringRef = useRef(false);
   const [query, setQuery] = useState(() => {
     if (typeof window !== 'undefined') {
       const urlQ = new URLSearchParams(window.location.search).get('query');
       if (urlQ) return urlQ;
-      const transient = (window.history.state as { searchTransientQuery?: string } | null)?.searchTransientQuery;
-      if (transient) return transient;
+      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
+      const entry = getPrivateSearchState(navKey);
+      if (entry?.query) return entry.query;
     }
     return initialQuery;
   });
-  const [searchType, setSearchType] = useState<UnifiedSearchType>(initialType);
-  const [includeArchived, setIncludeArchived] = useState<boolean>(initialIncludeArchived);
-  const [page, setPage] = useState<number>(initialPage);
+  const [searchType, setSearchType] = useState<UnifiedSearchType>(() => {
+    if (typeof window !== 'undefined') {
+      const t = new URLSearchParams(window.location.search).get('type') as UnifiedSearchType;
+      if (t && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(t)) return t;
+    }
+    return initialType;
+  });
+  const [includeArchived, setIncludeArchived] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const urlInc = new URLSearchParams(window.location.search).get('includeArchived');
+      if (urlInc !== null) return urlInc === 'true';
+    }
+    return initialIncludeArchived;
+  });
+  const [page, setPage] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const p = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
+      if (p > 0) return p;
+    }
+    return initialPage;
+  });
 
   const [searchResult, setSearchResult] = useState<UnifiedSearchResult | null>(
     initialResult || {
@@ -113,7 +138,9 @@ export function UnifiedSearchClient({
       const newQuery = params.toString();
       const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
       const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
-      window.history.replaceState({ ...currentState, searchTransientQuery: q }, '', cleanUrl);
+      const navKey = currentState.navKey || createNavigationKey();
+      setPrivateSearchState(navKey, q);
+      window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
     },
     []
   );
@@ -173,10 +200,21 @@ export function UnifiedSearchClient({
     executeSearchRef.current = executeSearch;
   });
 
-  // Debounced input change (300ms)
+  // Debounced input change (300ms) for direct typing only
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
+      // If query was restored on mount, fetch the matching results once asynchronously
+      if (query) {
+        setTimeout(() => {
+          executeSearchRef.current?.(query, searchType, includeArchived, page);
+        }, 0);
+      }
+      return;
+    }
+
+    if (isRestoringRef.current) {
+      isRestoringRef.current = false;
       return;
     }
 
@@ -194,7 +232,7 @@ export function UnifiedSearchClient({
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [query, searchType, includeArchived, executeSearch]);
+  }, [query, searchType, includeArchived, executeSearch, page]);
 
   // Clean URL on initial mount if coming with query in searchParams
   useEffect(() => {
@@ -213,11 +251,13 @@ export function UnifiedSearchClient({
       const urlType = (params.get('type') as UnifiedSearchType) || 'ALL';
       const urlIncArch = params.get('includeArchived') === 'true';
       const urlPage = parseInt(params.get('page') || '1', 10) || 1;
-      const restoredQuery =
-        (event?.state?.searchTransientQuery as string | undefined) ??
-        (window.history.state?.searchTransientQuery as string | undefined) ??
-        '';
+      const navKey = (event?.state as { navKey?: string } | null)?.navKey ?? (window.history.state as { navKey?: string } | null)?.navKey;
+      const restoredQuery = getPrivateSearchState(navKey)?.query ?? '';
 
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      isRestoringRef.current = true;
       setQuery(restoredQuery);
       setSearchType(urlType);
       setIncludeArchived(urlIncArch);

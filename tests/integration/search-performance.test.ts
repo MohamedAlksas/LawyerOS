@@ -27,8 +27,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     }
     testCourtId = court.id;
 
-    // Fast SQL bulk insert: Seed 2,000 synthetic casework records
-    // (600 parties + 700 matters + 700 proceedings = 2,000 records)
+    // Fast SQL bulk insert: Seed 4,000 synthetic casework records
+    // (800 parties + 2,000 matters + 1,200 proceedings = 4,000 records, meeting PRD 2,000 Matters target)
     await prisma.$executeRawUnsafe(`
       INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "primaryPhone", "primaryPhoneNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
       SELECT
@@ -40,7 +40,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
         '010' || lpad(i::text, 8, '0'),
         1,
         '${actor.id}', '${actor.id}', now(), now()
-      FROM generate_series(1, 600) AS s(i);
+      FROM generate_series(1, 800) AS s(i);
     `);
 
     await prisma.$executeRawUnsafe(`
@@ -54,7 +54,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
         CASE WHEN i % 5 = 0 THEN 'ARCHIVED'::"MatterStatus" ELSE 'ACTIVE'::"MatterStatus" END,
         1,
         '${actor.id}', '${actor.id}', now(), now()
-      FROM generate_series(1, 700) AS s(i);
+      FROM generate_series(1, 2000) AS s(i);
     `);
 
     await prisma.$executeRawUnsafe(`
@@ -73,7 +73,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
         'ACTIVE'::"ProceedingStatus",
         1,
         '${actor.id}', '${actor.id}', now(), now()
-      FROM generate_series(1, 700) AS s(i);
+      FROM generate_series(1, 1200) AS s(i);
     `);
   }, 60000);
 
@@ -114,6 +114,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
 
     const stats = calculatePercentiles(samples);
     console.log(`[PERF BENCHMARK] Party Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    // PRD NFR-04 contract: P50, P90, P95 must be strictly under 2,000ms.
+    // Internal safety threshold: enforce P95 < 500ms on relational index scans to guarantee sub-second headroom.
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
@@ -134,6 +136,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
 
     const stats = calculatePercentiles(samples);
     console.log(`[PERF BENCHMARK] Matter Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    // PRD NFR-04 contract: P50, P90, P95 must be strictly under 2,000ms.
+    // Internal safety threshold: enforce P95 < 500ms on 2,000 matters to guarantee sub-second headroom.
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
@@ -154,6 +158,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
 
     const stats = calculatePercentiles(samples);
     console.log(`[PERF BENCHMARK] Proceeding Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    // PRD NFR-04 contract: P50, P90, P95 must be strictly under 2,000ms.
+    // Internal safety threshold: enforce P95 < 500ms on 1,200 proceedings to guarantee sub-second headroom.
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
@@ -174,6 +180,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
 
     const stats = calculatePercentiles(samples);
     console.log(`[PERF BENCHMARK] Unified Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    // PRD NFR-04 contract: P50, P90, P95 must be strictly under 2,000ms across all categories.
+    // Internal safety threshold: enforce P95 < 500ms for unified category aggregation.
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);

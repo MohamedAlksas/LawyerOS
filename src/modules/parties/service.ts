@@ -549,7 +549,7 @@ export async function searchParties(
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
   const skip = (page - 1) * limit;
 
   const where: Prisma.PartyWhereInput = {};
@@ -1059,4 +1059,10 @@ export async function revealPartyIdentity(
     number: decryptedNumber,
   };
 }
+
+export {
+  searchMatterClients,
+  type SearchMatterClientsParams,
+  type SearchMatterClientsResult,
+} from '@/modules/matters/matter-service';
 

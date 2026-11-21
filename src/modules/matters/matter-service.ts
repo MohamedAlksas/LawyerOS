@@ -4,7 +4,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
-import { normalizeArabicDigits, normalizeArabicText } from '@/lib/normalization';
+import { normalizeArabicDigits, normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -2748,6 +2748,92 @@ export async function searchMatters(
   };
 }
 
+export interface SearchMatterClientsParams {
+  query?: string;
+  page?: number;
+  limit?: number;
+  includeArchived?: boolean;
+}
+
+export interface SearchMatterClientsResult {
+  clients: Array<{ id: string; name: string; primaryPhone: string | null }>;
+  total: number;
+  page: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export async function searchMatterClients(
+  actor: Actor,
+  rawParams: SearchMatterClientsParams = {},
+  options: ServiceExecutionOptions = {}
+): Promise<SearchMatterClientsResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  const page = Math.max(1, rawParams.page ?? 1);
+  const limit = Math.min(100, Math.max(1, rawParams.limit ?? 20));
+  const skip = (page - 1) * limit;
+
+  const prisma = options.prismaOverride ?? getPrismaClient();
+
+  const where: Prisma.PartyWhereInput = {
+    matterParties: {
+      some: {
+        role: 'CLIENT',
+        ...(rawParams.includeArchived ? {} : { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }),
+      },
+    },
+  };
+
+  if (!rawParams.includeArchived) {
+    where.archivedAt = null;
+  }
+
+  const rawQuery = rawParams.query?.trim();
+  if (rawQuery) {
+    const textNorm = normalizeArabicText(rawQuery);
+    const phoneNorm = normalizePhone(rawQuery);
+    const orClauses: Prisma.PartyWhereInput[] = [];
+    if (textNorm) {
+      orClauses.push({ nameNormalized: { contains: textNorm } });
+    }
+    if (phoneNorm) {
+      orClauses.push({ primaryPhoneNormalized: { contains: phoneNorm } });
+    }
+    if (orClauses.length > 0) {
+      where.OR = orClauses;
+    }
+  }
+
+  const [total, records] = await Promise.all([
+    prisma.party.count({ where }),
+    prisma.party.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        primaryPhone: true,
+      },
+    }),
+  ]);
+
+  const totalPages = Math.ceil(total / limit) || 1;
+
+  return {
+    clients: records,
+    total,
+    page,
+    totalPages,
+    hasMore: page < totalPages,
+  };
+}
+
 export async function getPartyMatterAssociations(
   actor: Actor,
   rawParams: GetPartyMatterAssociationsParams
@@ -3803,6 +3889,22 @@ function mapPartyToUnifiedItem(p: {
   };
 }
 
+const UNIFIED_MATTER_STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'مسودة',
+  ACTIVE: 'نشط',
+  ON_HOLD: 'معلق مؤقتاً',
+  CLOSED: 'منتهي ومغلق',
+  ARCHIVED: 'مؤرشف',
+};
+
+const UNIFIED_PROCEEDING_STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'مسودة قيد',
+  ACTIVE: 'متداول بالجلسات',
+  AWAITING_JUDGMENT: 'حجز للحكم',
+  DECIDED: 'محكوم فيه',
+  CLOSED: 'منتهي ومغلق',
+};
+
 function mapMatterToUnifiedItem(m: {
   id: string;
   fileCode: string;
@@ -3814,15 +3916,16 @@ function mapMatterToUnifiedItem(m: {
   parties?: Array<{ party: { name: string } }>;
 }): UnifiedSearchResultItem {
   const primaryClient = m.parties?.[0]?.party.name;
+  const isArchived = Boolean(m.archivedAt) || m.status === 'ARCHIVED';
   return {
     id: m.id,
     entityType: 'MATTER',
     title: m.title,
     subtitle: `${m.fileCode}${primaryClient ? ` • ${primaryClient}` : ''}`,
     code: m.fileCode,
-    badge: m.status === 'ARCHIVED' ? 'مؤرشف' : (m.status === 'ACTIVE' ? 'نشط' : 'مسودة'),
+    badge: isArchived ? 'مؤرشف' : (UNIFIED_MATTER_STATUS_LABELS[m.status] ?? m.status),
     href: `/matters/${m.id}`,
-    isArchived: Boolean(m.archivedAt),
+    isArchived,
     updatedAt: m.updatedAt.toISOString(),
   };
 }
@@ -3840,17 +3943,21 @@ function mapProceedingToUnifiedItem(p: {
   archivedAt: Date | null;
   updatedAt: Date;
   court: { name: string };
-  matter: { title: string; fileCode: string };
+  matter: { title: string; fileCode: string; archivedAt?: Date | null };
 }): UnifiedSearchResultItem {
   const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
+  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt);
+  const badge = isArchived
+    ? 'مؤرشف'
+    : (UNIFIED_PROCEEDING_STATUS_LABELS[p.status] ?? p.status);
   return {
     id: p.id,
     entityType: 'PROCEEDING',
     title: `${p.court.name} - ${docket}`,
     subtitle: `${p.matter.fileCode} • ${p.matter.title}`,
-    badge: p.archivedAt ? 'مؤرشف' : (p.status === 'ACTIVE' ? 'متداول' : p.status),
+    badge,
     href: `/matters/${p.matterId}/proceedings/${p.id}`,
-    isArchived: Boolean(p.archivedAt),
+    isArchived,
     updatedAt: p.updatedAt.toISOString(),
   };
 }
@@ -4050,7 +4157,7 @@ export async function unifiedSearch(
           archivedAt: true,
           updatedAt: true,
           court: { select: { name: true } },
-          matter: { select: { title: true, fileCode: true } },
+          matter: { select: { title: true, fileCode: true, archivedAt: true } },
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
@@ -4128,7 +4235,7 @@ export async function unifiedSearch(
                 archivedAt: true,
                 updatedAt: true,
                 court: { select: { name: true } },
-                matter: { select: { title: true, fileCode: true } },
+                matter: { select: { title: true, fileCode: true, archivedAt: true } },
               },
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               skip: skip2,

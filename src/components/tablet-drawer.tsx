@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
+import { clearSearchSessionStore } from '@/lib/search-session-store';
 
 interface TabletDrawerProps {
   isOpen: boolean;
@@ -118,6 +119,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
         setIsLoggingOut(false);
         return;
       }
+      clearSearchSessionStore();
       onClose();
       router.push('/login');
     } catch {

@@ -25,6 +25,9 @@ import {
   reopenProceeding,
   searchProceedings,
   unifiedSearch,
+  searchMatterClients,
+  type SearchMatterClientsParams,
+  type SearchMatterClientsResult,
 } from './matter-service';
 import {
   MatterDTO,
@@ -499,6 +502,18 @@ export async function unifiedSearchAction(
   try {
     const actor = await verifyActionSecurity();
     const data = await unifiedSearch(params, actor);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function searchMatterClientsAction(
+  params: SearchMatterClientsParams = {}
+): Promise<ActionResult<SearchMatterClientsResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await searchMatterClients(actor, params);
     return { success: true, data };
   } catch (error) {
     return handleActionError(error);
