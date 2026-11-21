@@ -113,6 +113,23 @@ function extractResourceId(claim: { resultId?: string | null; resultPayload?: un
   return resourceId ?? '';
 }
 
+function extractLifecycleResult(claim: { resultId?: string | null; resultPayload?: unknown }): LifecycleCommandResult | null {
+  const payload = claim.resultPayload as Record<string, unknown> | null;
+  if (!payload) return null;
+  const id = (payload.id as string) || (payload.resourceId as string) || claim.resultId;
+  if (!id || payload.version === undefined || !payload.status || !payload.updatedAt) {
+    return null;
+  }
+  return {
+    id,
+    version: Number(payload.version),
+    status: String(payload.status),
+    archivedAt: (payload.archivedAt as string | null) ?? null,
+    updatedAt: String(payload.updatedAt),
+    operationVersion: Number(payload.operationVersion ?? payload.version),
+  };
+}
+
 function formatZodError(err: z.ZodError): { message: string; fieldErrors: Record<string, string> } {
   const fieldErrors: Record<string, string> = {};
   for (const issue of err.issues) {
@@ -1421,13 +1438,24 @@ export async function unlinkMatterParty(
         ).sort();
 
         // Lock proceedings in deterministic order
-        await tx.$queryRaw`
-          SELECT "id", "version"
+        const lockedProceedings = await tx.$queryRaw<Array<{
+          id: string;
+          version: number;
+          archivedAt: Date | null;
+        }>>`
+          SELECT "id", "version", "archivedAt"
           FROM "proceeding"
           WHERE "id" IN (${Prisma.join(affectedProceedingIds)})
           ORDER BY "id" ASC
           FOR UPDATE;
         `;
+
+        const hasArchivedProceeding = lockedProceedings.some((p) => p.archivedAt !== null);
+        if (hasArchivedProceeding) {
+          throw new ProceedingArchivedError(
+            'لا يمكن إزالة طرف الملف لارتباطه بقيد قضائي مؤرشف. يجب إلغاء أرشفة القيد القضائي أولاً.'
+          );
+        }
 
         // Advance each affected proceeding's version
         await tx.$executeRaw`
@@ -2650,6 +2678,23 @@ export async function searchMatters(
     where.OR = orClauses;
   }
 
+  if (params.incompleteData) {
+    const incompleteClauses: Prisma.MatterWhereInput[] = [
+      { status: 'ACTIVE', paperLocationId: null },
+      { parties: { none: { role: 'CLIENT' } } },
+      { proceedings: { some: { status: 'DRAFT' } } },
+    ];
+    if (where.AND) {
+      if (Array.isArray(where.AND)) {
+        where.AND.push({ OR: incompleteClauses });
+      } else {
+        where.AND = [where.AND, { OR: incompleteClauses }];
+      }
+    } else {
+      where.AND = [{ OR: incompleteClauses }];
+    }
+  }
+
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const page = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
   const skip = (page - 1) * limit;
@@ -2907,6 +2952,10 @@ export async function archiveMatter(
       });
 
       if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(claim);
         const m = await tx.matter.findUnique({
           where: { id: resourceId },
@@ -2940,6 +2989,10 @@ export async function archiveMatter(
 
       if (matter.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError();
+      }
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new UnsupportedTransitionError('ملف القضية مؤرشف بالفعل ولا يمكن إعادة أرشفته.');
       }
 
       // =========================================================================
@@ -2996,11 +3049,13 @@ export async function archiveMatter(
         resultId: updated.id,
         resultPayload: {
           operation: 'ARCHIVE_MATTER',
+          id: updated.id,
           resourceId: updated.id,
           version: updated.version,
           status: updated.status,
           archivedAt: updated.archivedAt?.toISOString() ?? null,
           updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
         },
       });
 
@@ -3022,6 +3077,10 @@ export async function archiveMatter(
         payload: input,
       });
       if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(resolved);
         const m = await prisma.matter.findUnique({
           where: { id: resourceId },
@@ -3074,6 +3133,10 @@ export async function reopenMatter(
       });
 
       if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(claim);
         const m = await tx.matter.findUnique({
           where: { id: resourceId },
@@ -3107,6 +3170,10 @@ export async function reopenMatter(
 
       if (matter.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError();
+      }
+
+      if (matter.status !== 'ARCHIVED' || matter.archivedAt === null) {
+        throw new UnsupportedTransitionError('لا يمكن إلغاء أرشفة ملف قضية غير مؤرشف.');
       }
 
       // Check client presence to determine target status (ACTIVE if client present, else DRAFT)
@@ -3149,11 +3216,13 @@ export async function reopenMatter(
         resultId: updated.id,
         resultPayload: {
           operation: 'REOPEN_MATTER',
+          id: updated.id,
           resourceId: updated.id,
           version: updated.version,
           status: updated.status,
           archivedAt: null,
           updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
         },
       });
 
@@ -3175,6 +3244,10 @@ export async function reopenMatter(
         payload: input,
       });
       if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(resolved);
         const m = await prisma.matter.findUnique({
           where: { id: resourceId },
@@ -3227,6 +3300,10 @@ export async function archiveProceeding(
       });
 
       if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(claim);
         const p = await tx.proceeding.findUnique({
           where: { id: resourceId },
@@ -3283,17 +3360,26 @@ export async function archiveProceeding(
         throw new ConcurrencyConflictError();
       }
 
+      if (proceeding.archivedAt !== null) {
+        throw new UnsupportedTransitionError('القيد القضائي مؤرشف بالفعل ولا يمكن إعادة أرشفته.');
+      }
+
       // =========================================================================
-      // CRITICAL OBLIGATION EXTENSION POINT (T08)
+      // CRITICAL OBLIGATION EXTENSION POINT (T08 / T09)
       // =========================================================================
       // In accordance with WORKFLOWS.md Section 11:
-      // A SCHEDULED hearing blocks archiving the proceeding.
-      // In T07, Hearing table does not exist yet.
+      // A SCHEDULED hearing or an open CONFIRMED legal deadline blocks archiving the proceeding.
+      // In T07, Hearing and Deadline tables do not exist yet in Prisma schema.
       // When T08 introduces Hearing:
       //   const scheduledHearings = await tx.hearing.count({
       //     where: { proceedingId: input.proceedingId, status: 'SCHEDULED' }
       //   });
       //   if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود جلسات مجدولة قائمة.');
+      // When T09 introduces Deadline:
+      //   const openDeadlines = await tx.deadline.count({
+      //     where: { proceedingId: input.proceedingId, status: 'CONFIRMED', completedAt: null }
+      //   });
+      //   if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود مواعيد قانونية مؤكدة غير مكتملة.');
       // =========================================================================
 
       const now = new Date();
@@ -3337,11 +3423,13 @@ export async function archiveProceeding(
         resultId: updated.id,
         resultPayload: {
           operation: 'ARCHIVE_PROCEEDING',
+          id: updated.id,
           resourceId: updated.id,
           version: updated.version,
           status: updated.status,
           archivedAt: updated.archivedAt?.toISOString() ?? null,
           updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
         },
       });
 
@@ -3363,6 +3451,10 @@ export async function archiveProceeding(
         payload: input,
       });
       if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(resolved);
         const p = await prisma.proceeding.findUnique({
           where: { id: resourceId },
@@ -3415,6 +3507,10 @@ export async function reopenProceeding(
       });
 
       if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(claim);
         const p = await tx.proceeding.findUnique({
           where: { id: resourceId },
@@ -3471,6 +3567,10 @@ export async function reopenProceeding(
         throw new ConcurrencyConflictError();
       }
 
+      if (proceeding.archivedAt === null) {
+        throw new UnsupportedTransitionError('لا يمكن إلغاء أرشفة قيد قضائي غير مؤرشف.');
+      }
+
       const nextProceedingVersion = proceeding.version + 1;
 
       const updated = await tx.proceeding.update({
@@ -3510,11 +3610,13 @@ export async function reopenProceeding(
         resultId: updated.id,
         resultPayload: {
           operation: 'REOPEN_PROCEEDING',
+          id: updated.id,
           resourceId: updated.id,
           version: updated.version,
           status: updated.status,
           archivedAt: null,
           updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
         },
       });
 
@@ -3536,6 +3638,10 @@ export async function reopenProceeding(
         payload: input,
       });
       if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
         const resourceId = extractResourceId(resolved);
         const p = await prisma.proceeding.findUnique({
           where: { id: resourceId },
@@ -3676,6 +3782,79 @@ export async function searchProceedings(
   };
 }
 
+function mapPartyToUnifiedItem(p: {
+  id: string;
+  name: string;
+  kind: string;
+  primaryPhone: string | null;
+  archivedAt: Date | null;
+  updatedAt: Date;
+}): UnifiedSearchResultItem {
+  const subtitle = p.primaryPhone ? p.primaryPhone : (p.kind === 'PERSON' ? 'شخص طبيعي' : 'جهة اعتبارية / منشأة');
+  return {
+    id: p.id,
+    entityType: 'PARTY',
+    title: p.name,
+    subtitle: subtitle || 'طرف',
+    badge: p.kind === 'PERSON' ? 'فرد' : 'جهة',
+    href: `/parties/${p.id}`,
+    isArchived: Boolean(p.archivedAt),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
+function mapMatterToUnifiedItem(m: {
+  id: string;
+  fileCode: string;
+  title: string;
+  kind: string;
+  status: string;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  parties?: Array<{ party: { name: string } }>;
+}): UnifiedSearchResultItem {
+  const primaryClient = m.parties?.[0]?.party.name;
+  return {
+    id: m.id,
+    entityType: 'MATTER',
+    title: m.title,
+    subtitle: `${m.fileCode}${primaryClient ? ` • ${primaryClient}` : ''}`,
+    code: m.fileCode,
+    badge: m.status === 'ARCHIVED' ? 'مؤرشف' : (m.status === 'ACTIVE' ? 'نشط' : 'مسودة'),
+    href: `/matters/${m.id}`,
+    isArchived: Boolean(m.archivedAt),
+    updatedAt: m.updatedAt.toISOString(),
+  };
+}
+
+function mapProceedingToUnifiedItem(p: {
+  id: string;
+  matterId: string;
+  courtId: string;
+  instance: string;
+  registerType: string | null;
+  circuit: string | null;
+  numberText: string | null;
+  yearLabel: string | null;
+  status: string;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  court: { name: string };
+  matter: { title: string; fileCode: string };
+}): UnifiedSearchResultItem {
+  const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
+  return {
+    id: p.id,
+    entityType: 'PROCEEDING',
+    title: `${p.court.name} - ${docket}`,
+    subtitle: `${p.matter.fileCode} • ${p.matter.title}`,
+    badge: p.archivedAt ? 'مؤرشف' : (p.status === 'ACTIVE' ? 'متداول' : p.status),
+    href: `/matters/${p.matterId}/proceedings/${p.id}`,
+    isArchived: Boolean(p.archivedAt),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
 export async function unifiedSearch(
   rawParams: UnifiedSearchParams = {},
   actor?: Actor
@@ -3702,39 +3881,118 @@ export async function unifiedSearch(
   const includeArchived = params.includeArchived ?? false;
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 50);
 
-  const items: UnifiedSearchResultItem[] = [];
-  let mattersCount = 0;
-  let proceedingsCount = 0;
-  let partiesCount = 0;
+  // 1. Party where clause
+  const partyWhere: Prisma.PartyWhereInput = {};
+  if (!includeArchived) {
+    partyWhere.archivedAt = null;
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const qText = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
 
-  // 1. Search Parties
-  if (searchType === 'ALL' || searchType === 'PARTY') {
-    const partyWhere: Prisma.PartyWhereInput = {};
-    if (!includeArchived) {
-      partyWhere.archivedAt = null;
+    const orClauses: Prisma.PartyWhereInput[] = [
+      { name: { contains: query, mode: 'insensitive' } },
+      { primaryPhone: { contains: query, mode: 'insensitive' } },
+      { primaryPhone: { contains: qDigits, mode: 'insensitive' } },
+      { primaryPhoneNormalized: { contains: qDigits, mode: 'insensitive' } },
+    ];
+    if (qText) {
+      orClauses.push({ nameNormalized: { contains: qText, mode: 'insensitive' } });
     }
-    if (query) {
-      const qDigits = normalizeArabicDigits(query);
-      const qText = normalizeArabicText(query);
-      const variants = expandSearchVariants(query);
+    for (const v of variants) {
+      orClauses.push({ name: { contains: v, mode: 'insensitive' } });
+    }
+    partyWhere.OR = orClauses;
+  }
 
-      const orClauses: Prisma.PartyWhereInput[] = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { primaryPhone: { contains: query, mode: 'insensitive' } },
-        { primaryPhone: { contains: qDigits, mode: 'insensitive' } },
-        { primaryPhoneNormalized: { contains: qDigits, mode: 'insensitive' } },
-      ];
-      if (qText) {
-        orClauses.push({ nameNormalized: { contains: qText, mode: 'insensitive' } });
-      }
-      for (const v of variants) {
-        orClauses.push({ name: { contains: v, mode: 'insensitive' } });
-      }
-      partyWhere.OR = orClauses;
+  // 2. Matter where clause
+  const matterWhere: Prisma.MatterWhereInput = {};
+  if (!includeArchived) {
+    matterWhere.archivedAt = null;
+    matterWhere.status = { not: 'ARCHIVED' };
+  }
+  if (query) {
+    const queryVariants = expandSearchVariants(query);
+    const normQuery = normalizeArabicText(query);
+
+    const orClauses: Prisma.MatterWhereInput[] = [];
+    if (normQuery) {
+      orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+    }
+    for (const v of queryVariants) {
+      orClauses.push({ title: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ fileCode: { contains: v, mode: 'insensitive' } });
+    }
+    matterWhere.OR = orClauses;
+  }
+
+  // 3. Proceeding where clause
+  const procWhere: Prisma.ProceedingWhereInput = {};
+  if (!includeArchived) {
+    procWhere.archivedAt = null;
+    procWhere.matter = { archivedAt: null, status: { not: 'ARCHIVED' } };
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const normText = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
+
+    const orClauses: Prisma.ProceedingWhereInput[] = [
+      { numberText: { contains: query, mode: 'insensitive' } },
+      { numberNormalized: { contains: qDigits, mode: 'insensitive' } },
+      { yearLabel: { contains: query, mode: 'insensitive' } },
+      { yearNormalized: { contains: qDigits, mode: 'insensitive' } },
+      { circuit: { contains: query, mode: 'insensitive' } },
+      { registerType: { contains: query, mode: 'insensitive' } },
+      { court: { name: { contains: query, mode: 'insensitive' } } },
+      { matter: { title: { contains: query, mode: 'insensitive' } } },
+      { matter: { fileCode: { contains: query, mode: 'insensitive' } } },
+    ];
+
+    if (normText) {
+      orClauses.push({ court: { name: { contains: normText, mode: 'insensitive' } } });
+      orClauses.push({ matter: { titleNormalized: { contains: normText, mode: 'insensitive' } } });
     }
 
-    const [parties, pCount] = await Promise.all([
-      prisma.party.findMany({
+    for (const v of variants) {
+      orClauses.push({ numberText: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ circuit: { contains: v, mode: 'insensitive' } });
+    }
+
+    procWhere.OR = orClauses;
+  }
+
+  // Always compute accurate counts for all categories regardless of active tab
+  const [partiesCount, mattersCount, proceedingsCount] = await Promise.all([
+    prisma.party.count({ where: partyWhere }),
+    prisma.matter.count({ where: matterWhere }),
+    prisma.proceeding.count({ where: procWhere }),
+  ]);
+  const totalAll = mattersCount + proceedingsCount + partiesCount;
+
+  const counts = {
+    all: totalAll,
+    parties: partiesCount,
+    matters: mattersCount,
+    proceedings: proceedingsCount,
+  };
+
+  let total: number;
+  if (searchType === 'PARTY') total = partiesCount;
+  else if (searchType === 'MATTER') total = mattersCount;
+  else if (searchType === 'PROCEEDING') total = proceedingsCount;
+  else total = totalAll;
+
+  const totalPages = Math.ceil(total / limit) || 1;
+  const page = Math.max(params.page ?? 1, 1);
+  const skip = (page - 1) * limit;
+
+  let items: UnifiedSearchResultItem[] = [];
+
+  if (searchType === 'PARTY') {
+    if (skip < partiesCount) {
+      const parties = await prisma.party.findMany({
         where: partyWhere,
         select: {
           id: true,
@@ -3745,86 +4003,163 @@ export async function unifiedSearch(
           updatedAt: true,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
         take: limit,
-      }),
-      prisma.party.count({ where: partyWhere }),
-    ]);
-
-    partiesCount = pCount;
-    for (const p of parties) {
-      const subtitle = p.primaryPhone ? p.primaryPhone : (p.kind === 'PERSON' ? 'شخص طبيعي' : 'جهة اعتبارية / منشأة');
-      items.push({
-        id: p.id,
-        entityType: 'PARTY',
-        title: p.name,
-        subtitle: subtitle || 'طرف',
-        badge: p.kind === 'PERSON' ? 'فرد' : 'جهة',
-        href: `/parties/${p.id}`,
-        isArchived: Boolean(p.archivedAt),
-        updatedAt: p.updatedAt.toISOString(),
       });
+      items = parties.map(mapPartyToUnifiedItem);
+    }
+  } else if (searchType === 'MATTER') {
+    if (skip < mattersCount) {
+      const matters = await prisma.matter.findMany({
+        where: matterWhere,
+        select: {
+          id: true,
+          fileCode: true,
+          title: true,
+          kind: true,
+          status: true,
+          archivedAt: true,
+          updatedAt: true,
+          parties: {
+            where: { role: 'CLIENT' },
+            orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+            take: 1,
+            select: { party: { select: { name: true } } },
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = matters.map(mapMatterToUnifiedItem);
+    }
+  } else if (searchType === 'PROCEEDING') {
+    if (skip < proceedingsCount) {
+      const proceedings = await prisma.proceeding.findMany({
+        where: procWhere,
+        select: {
+          id: true,
+          matterId: true,
+          courtId: true,
+          instance: true,
+          registerType: true,
+          circuit: true,
+          numberText: true,
+          yearLabel: true,
+          status: true,
+          archivedAt: true,
+          updatedAt: true,
+          court: { select: { name: true } },
+          matter: { select: { title: true, fileCode: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = proceedings.map(mapProceedingToUnifiedItem);
+    }
+  } else {
+    // searchType === 'ALL'
+    if (skip < totalAll) {
+      const s1 = mattersCount;
+      const s2 = proceedingsCount;
+      const s3 = partiesCount;
+
+      let take1 = 0;
+      let skip1 = 0;
+      if (skip < s1) {
+        skip1 = skip;
+        take1 = Math.min(limit, s1 - skip1);
+      }
+
+      let take2 = 0;
+      let skip2 = 0;
+      const rem1 = limit - take1;
+      if (rem1 > 0 && skip < s1 + s2) {
+        skip2 = Math.max(0, skip - s1);
+        take2 = Math.min(rem1, s2 - skip2);
+      }
+
+      let take3 = 0;
+      let skip3 = 0;
+      const rem2 = rem1 - take2;
+      if (rem2 > 0 && skip < s1 + s2 + s3) {
+        skip3 = Math.max(0, skip - (s1 + s2));
+        take3 = Math.min(rem2, s3 - skip3);
+      }
+
+      const [matters, proceedings, parties] = await Promise.all([
+        take1 > 0
+          ? prisma.matter.findMany({
+              where: matterWhere,
+              select: {
+                id: true,
+                fileCode: true,
+                title: true,
+                kind: true,
+                status: true,
+                archivedAt: true,
+                updatedAt: true,
+                parties: {
+                  where: { role: 'CLIENT' },
+                  orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+                  take: 1,
+                  select: { party: { select: { name: true } } },
+                },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip1,
+              take: take1,
+            })
+          : [],
+        take2 > 0
+          ? prisma.proceeding.findMany({
+              where: procWhere,
+              select: {
+                id: true,
+                matterId: true,
+                courtId: true,
+                instance: true,
+                registerType: true,
+                circuit: true,
+                numberText: true,
+                yearLabel: true,
+                status: true,
+                archivedAt: true,
+                updatedAt: true,
+                court: { select: { name: true } },
+                matter: { select: { title: true, fileCode: true } },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip2,
+              take: take2,
+            })
+          : [],
+        take3 > 0
+          ? prisma.party.findMany({
+              where: partyWhere,
+              select: {
+                id: true,
+                name: true,
+                kind: true,
+                primaryPhone: true,
+                archivedAt: true,
+                updatedAt: true,
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip3,
+              take: take3,
+            })
+          : [],
+      ]);
+
+      items = [
+        ...matters.map(mapMatterToUnifiedItem),
+        ...proceedings.map(mapProceedingToUnifiedItem),
+        ...parties.map(mapPartyToUnifiedItem),
+      ];
     }
   }
-
-  // 2. Search Matters
-  if (searchType === 'ALL' || searchType === 'MATTER') {
-    const matterRes = await searchMatters({
-      query,
-      includeArchived,
-      limit,
-    }, actor);
-
-    mattersCount = matterRes.total;
-    for (const m of matterRes.matters) {
-      items.push({
-        id: m.id,
-        entityType: 'MATTER',
-        title: m.title,
-        subtitle: `${m.fileCode}${m.primaryClientName ? ` • ${m.primaryClientName}` : ''}`,
-        code: m.fileCode,
-        badge: m.status === 'ARCHIVED' ? 'مؤرشف' : (m.status === 'ACTIVE' ? 'نشط' : 'مسودة'),
-        href: `/matters/${m.id}`,
-        isArchived: Boolean(m.archivedAt),
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  // 3. Search Proceedings
-  if (searchType === 'ALL' || searchType === 'PROCEEDING') {
-    const procRes = await searchProceedings({
-      query,
-      includeArchived,
-      limit,
-    }, actor);
-
-    proceedingsCount = procRes.total;
-    for (const p of procRes.proceedings) {
-      const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
-      items.push({
-        id: p.id,
-        entityType: 'PROCEEDING',
-        title: `${p.courtName} - ${docket}`,
-        subtitle: `${p.matterFileCode} • ${p.matterTitle}`,
-        badge: p.archivedAt ? 'مؤرشف' : (p.status === 'ACTIVE' ? 'متداول' : p.status),
-        href: `/matters/${p.matterId}?proceedingId=${p.id}`,
-        isArchived: Boolean(p.archivedAt),
-        updatedAt: p.updatedAt,
-      });
-    }
-  }
-
-  // Deterministic sorting of aggregated items:
-  // Non-archived first, then deterministic by id
-  items.sort((a, b) => {
-    if (a.isArchived !== b.isArchived) {
-      return a.isArchived ? 1 : -1;
-    }
-    return a.id.localeCompare(b.id);
-  });
-
-  const total = mattersCount + proceedingsCount + partiesCount;
-  const page = params.page ?? 1;
 
   return {
     query,
@@ -3833,13 +4168,8 @@ export async function unifiedSearch(
     page,
     limit,
     total,
-    totalPages: Math.ceil(total / limit) || 1,
-    items: items.slice(0, limit),
-    counts: {
-      all: total,
-      parties: partiesCount,
-      matters: mattersCount,
-      proceedings: proceedingsCount,
-    },
+    totalPages,
+    items,
+    counts,
   };
 }

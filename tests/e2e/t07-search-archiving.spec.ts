@@ -19,6 +19,10 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
   let archivedMatterId = '';
   let lifecycleMatterId = '';
   let lifecycleProcId = '';
+  let closedProcMatterId = '';
+  let closedProcId = '';
+  let incompleteMatterId = '';
+  let retryMatterId = '';
   let testPartyId = '';
   const pageRunId = `pg_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -66,6 +70,19 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     });
     normMatterId = normMatter.id;
     createdMatterIds.push(normMatter.id);
+
+    // Link party to normMatter as CLIENT
+    await prisma.matterParty.create({
+      data: {
+        matterId: normMatter.id,
+        partyId: party.id,
+        role: 'CLIENT',
+        isPrimaryContact: true,
+        version: 1,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
 
     // Proceeding under normMatter
     const normProc = await prisma.proceeding.create({
@@ -152,6 +169,71 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
       },
     });
     lifecycleProcId = lifecycleProc.id;
+
+    // 6. Seed closed proceeding matter for CLOSED vs ARCHIVED verification
+    const closedMatter = await prisma.matter.create({
+      data: {
+        fileCode: `2026/44${runId.slice(0, 2)}`,
+        title: `قضية قيد مغلق للتعديل ${runId}`,
+        titleNormalized: normalizeArabicText(`قضية قيد مغلق للتعديل ${runId}`),
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    closedProcMatterId = closedMatter.id;
+    createdMatterIds.push(closedMatter.id);
+
+    const closedProc = await prisma.proceeding.create({
+      data: {
+        matterId: closedMatter.id,
+        courtId: testCourtId,
+        instance: 'FIRST_INSTANCE',
+        registerType: 'مدني كلي',
+        circuit: 'الدائرة 9',
+        numberText: '9922',
+        numberNormalized: '9922',
+        yearLabel: '2026',
+        yearNormalized: '2026',
+        status: 'CLOSED',
+        archivedAt: null,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    closedProcId = closedProc.id;
+
+    // 7. Seed incomplete matter (ACTIVE without paper location and without client)
+    const incompleteMatter = await prisma.matter.create({
+      data: {
+        fileCode: `2026/33${runId.slice(0, 2)}`,
+        title: `ملف ناقص البيانات للاختبار ${runId}`,
+        titleNormalized: normalizeArabicText(`ملف ناقص البيانات للاختبار ${runId}`),
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        paperLocationId: null,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    incompleteMatterId = incompleteMatter.id;
+    createdMatterIds.push(incompleteMatter.id);
+
+    // 8. Seed dedicated matter for frozen retry testing
+    const retryMatter = await prisma.matter.create({
+      data: {
+        fileCode: `2026/22${runId.slice(0, 2)}`,
+        title: `قضية فحص إعادة المحاولة والمفتاح المجمد ${runId}`,
+        titleNormalized: normalizeArabicText(`قضية فحص إعادة المحاولة والمفتاح المجمد ${runId}`),
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    retryMatterId = retryMatter.id;
+    createdMatterIds.push(retryMatter.id);
   });
 
   test.afterAll(async () => {
@@ -187,14 +269,14 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await page.getByTestId('matters-search-submit').click();
 
     // Verify matching matters appear
-    await expect(page.locator(`text=${runId}`).first()).toBeVisible();
+    await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: runId }).first()).toBeVisible();
 
     // 2. Search with unnormalized Arabic text (Alef without hamza: الاهرام vs الأهرام)
     await searchInput.fill(`الاهرام ${runId}`);
     await page.getByTestId('matters-search-submit').click();
 
     // Must find the matter with "الأهرام"
-    await expect(page.locator(`text=الأهرام ${runId}`).first()).toBeVisible();
+    await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: `الأهرام ${runId}` }).first()).toBeVisible();
 
     // 3. Search with non-matching query -> triggers empty state
     await searchInput.fill(`سجل_غير_موجود_${runId}_9999`);
@@ -277,6 +359,11 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     // Verify search results list is visible
     const resultsList = page.getByTestId('search-results-list');
     await expect(resultsList).toBeVisible();
+
+    // Assert private search text is absent from page.url() and localStorage
+    expect(page.url()).not.toContain(runId);
+    const storageKeys = await page.evaluate(() => JSON.stringify(window.localStorage));
+    expect(storageKeys).not.toContain(runId);
 
     // 1. Verify tabs live counts
     const tabAll = page.getByTestId('tab-all');
@@ -480,5 +567,156 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
       return document.documentElement.scrollWidth > document.documentElement.clientWidth;
     });
     expect(hasHorizontalOverflow).toBe(false);
+  });
+
+  // =========================================================================
+  // 6. Modal Keyboard Focus Trap & Restoration
+  // =========================================================================
+  test('verifies modal keyboard focus trap, Tab cycling, Escape dismissal, and focus restoration to opener @t07 @a11y', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    await page.goto(`/matters/${normMatterId}`);
+
+    const archiveBtn = page.getByTestId('archive-matter-button');
+    await expect(archiveBtn).toBeVisible();
+    await archiveBtn.focus();
+    await archiveBtn.click();
+
+    const modal = page.getByTestId('archive-matter-modal');
+    await expect(modal).toBeVisible();
+
+    // 1. Initial focus lands on the reason input inside the modal
+    const reasonInput = page.getByTestId('archive-matter-reason-input');
+    await expect(reasonInput).toBeFocused();
+
+    // 2. Tab cycling stays trapped within modal
+    await page.keyboard.press('Tab');
+    const isInsideModalAfterTab = await page.evaluate(() => {
+      const modalEl = document.querySelector('[data-testid="archive-matter-modal"]');
+      return modalEl ? modalEl.contains(document.activeElement) : false;
+    });
+    expect(isInsideModalAfterTab).toBe(true);
+
+    // 3. Escape key closes the modal
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+
+    // 4. Focus is restored to the opener button
+    await expect(archiveBtn).toBeFocused();
+  });
+
+  // =========================================================================
+  // 7. Closed Proceeding Editable & Not Archived
+  // =========================================================================
+  test('verifies closed proceeding is editable and not presented as archived @t07 @proceedings', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    await page.goto(`/matters/${closedProcMatterId}/proceedings/${closedProcId}`);
+
+    // Closed proceeding must NOT be presented as archived
+    await expect(page.getByTestId('proceeding-archived-banner')).toBeHidden();
+    await expect(page.getByTestId('proceeding-archived-badge')).toBeHidden();
+
+    // Must be editable (edit button visible with valid link)
+    const editBtn = page.getByTestId('edit-proceeding-button');
+    await expect(editBtn).toBeVisible();
+    await expect(editBtn).toHaveAttribute('href', `/matters/${closedProcMatterId}/proceedings/${closedProcId}/edit`);
+  });
+
+  // =========================================================================
+  // 8. Filter by Court, Client, and Incomplete Data
+  // =========================================================================
+  test('filters matters by Court, Client, and Incomplete Data filters @t07 @filters', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    await page.goto('/matters');
+
+    // 1. Filter by Court
+    const courtSelect = page.getByTestId('filter-court-select');
+    await courtSelect.selectOption(testCourtId);
+    await page.getByTestId('matters-search-submit').click();
+    await expect(page).toHaveURL(new RegExp(`courtId=${testCourtId}`));
+    await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: runId }).first()).toBeVisible();
+
+    // 2. Filter by Client
+    const clientSelect = page.getByTestId('filter-client-select');
+    await clientSelect.selectOption(testPartyId);
+    await page.getByTestId('matters-search-submit').click();
+    await expect(page).toHaveURL(new RegExp(`clientId=${testPartyId}`));
+    await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: `الأهرام ${runId}` }).first()).toBeVisible();
+
+    // 3. Filter by Incomplete Data
+    await page.getByTestId('matters-clear-filters').click();
+    const incompleteCheckbox = page.getByTestId('incomplete-data-checkbox');
+    await incompleteCheckbox.check();
+    await page.getByTestId('matters-search-submit').click();
+    await expect(page).toHaveURL(/incompleteData=true/);
+    expect(incompleteMatterId).toBeTruthy();
+    await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: `ملف ناقص البيانات للاختبار ${runId}` }).first()).toBeVisible();
+  });
+
+  // =========================================================================
+  // 9. Frozen Operation Retry on Lifecycle Failure
+  // =========================================================================
+  test('verifies frozen operation retry on lifecycle failure @t07 @retry', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    // Dedicated retry matter
+    await page.goto(`/matters/${retryMatterId}`);
+    await expect(page.locator('h1')).toContainText(runId);
+
+    const archiveMatterBtn = page.getByTestId('archive-matter-button');
+    await expect(archiveMatterBtn).toBeVisible();
+    await archiveMatterBtn.click();
+
+    const reasonInput = page.getByTestId('archive-matter-reason-input');
+    await expect(reasonInput).toBeVisible();
+    await reasonInput.fill('أرشفة تجريبية لفحص إعادة المحاولة والمفتاح المجمد');
+
+    // Intercept POST requests to simulate failure on first attempt
+    let interceptedOnce = false;
+    await page.route('**/matters/**', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST' && !interceptedOnce) {
+        interceptedOnce = true;
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
+
+    // Submit -> fails on network
+    await page.getByTestId('confirm-archive-matter-button').click();
+
+    // Assert alert and amber frozen key banner appear
+    await expect(page.locator('[role="alert"]').first()).toBeVisible();
+    await expect(page.locator('text=العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار')).toBeVisible();
+
+    // The retry button is rendered
+    const retryBtn = page.getByTestId('retry-archive-matter-button');
+    await expect(retryBtn).toBeVisible();
+
+    // Remove route interception so retry can succeed
+    await page.unroute('**/matters/**');
+
+    // Click retry
+    await retryBtn.click();
+
+    // Modal closes and archived state is reflected
+    await expect(page.getByTestId('archive-matter-modal')).toBeHidden();
+    await expect(page.getByTestId('matter-archived-banner')).toBeVisible();
+    await expect(page.getByTestId('matter-status-badge')).toContainText('مؤرشف');
   });
 });

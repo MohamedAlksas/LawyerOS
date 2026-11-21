@@ -25,8 +25,13 @@ interface MatterListClientProps {
   initialQuery?: string;
   initialKind?: MatterKind;
   initialStatus?: MatterStatus;
+  initialCourtId?: string;
+  initialClientId?: string;
+  initialIncompleteData?: boolean;
   initialIncludeArchived?: boolean;
   initialError?: string;
+  courts?: { id: string; name: string }[];
+  clients?: { id: string; name: string }[];
 }
 
 export function MatterListClient({
@@ -38,14 +43,36 @@ export function MatterListClient({
   initialQuery = '',
   initialKind,
   initialStatus,
+  initialCourtId,
+  initialClientId,
+  initialIncompleteData = false,
   initialIncludeArchived = false,
   initialError,
+  courts = [],
+  clients = [],
 }: MatterListClientProps) {
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlQ = new URLSearchParams(window.location.search).get('query');
+      if (urlQ) return urlQ;
+      const transient = (window.history.state as { searchTransientQuery?: string } | null)?.searchTransientQuery;
+      if (transient) return transient;
+    }
+    return initialQuery;
+  });
   const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
   const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(initialStatus);
+  const [selectedCourtId, setSelectedCourtId] = useState<string | undefined>(initialCourtId);
+  const [selectedClientId, setSelectedClientId] = useState<string | undefined>(initialClientId);
+  const [incompleteData, setIncompleteData] = useState<boolean>(initialIncompleteData);
   const [includeArchived, setIncludeArchived] = useState<boolean>(initialIncludeArchived);
-  const [page, setPage] = useState<number>(initialPage);
+  const [page, setPage] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const urlP = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
+      if (!isNaN(urlP) && urlP > 0) return urlP;
+    }
+    return initialPage;
+  });
   const [totalPages, setTotalPages] = useState<number>(initialTotalPages);
   const [limit] = useState<number>(initialLimit);
   const [matters, setMatters] = useState<MatterListItemDTO[]>(initialMatters);
@@ -54,19 +81,46 @@ export function MatterListClient({
   const [error, setError] = useState<string | null>(initialError || null);
 
   const requestGenRef = useRef(0);
+  const requestedPageRef = useRef<number>(initialPage);
+
+  type FetchMattersFn = (
+    searchQuery: string,
+    kind?: MatterKind,
+    status?: MatterStatus,
+    incArch?: boolean,
+    pageNum?: number,
+    court?: string,
+    client?: string,
+    incData?: boolean
+  ) => Promise<void>;
+
+  const fetchMattersRef = useRef<FetchMattersFn | null>(null);
 
   const syncUrl = useCallback(
-    (q: string, k?: MatterKind, s?: MatterStatus, incArch?: boolean, p?: number) => {
+    (
+      q: string,
+      k?: MatterKind,
+      s?: MatterStatus,
+      incArch?: boolean,
+      p?: number,
+      court?: string,
+      client?: string,
+      incData?: boolean
+    ) => {
       if (typeof window === 'undefined') return;
       const params = new URLSearchParams();
-      if (q.trim()) params.set('query', q.trim());
+      // Omit `query` from the URL string completely so no private names or numbers appear in browser history or URLs
       if (k) params.set('kind', k);
       if (s) params.set('status', s);
+      if (court) params.set('courtId', court);
+      if (client) params.set('clientId', client);
+      if (incData) params.set('incompleteData', 'true');
       if (incArch) params.set('includeArchived', 'true');
       if (p && p > 1) params.set('page', String(p));
       const newQuery = params.toString();
-      const newUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-      window.history.replaceState(null, '', newUrl);
+      const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+      const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
+      window.history.replaceState({ ...currentState, searchTransientQuery: q }, '', cleanUrl);
     },
     []
   );
@@ -77,18 +131,25 @@ export function MatterListClient({
       kind?: MatterKind,
       status?: MatterStatus,
       incArch: boolean = false,
-      pageNum: number = 1
+      pageNum: number = 1,
+      court?: string,
+      client?: string,
+      incData: boolean = false
     ) => {
       const currentGen = ++requestGenRef.current;
+      requestedPageRef.current = pageNum;
       setIsLoading(true);
       setError(null);
-      syncUrl(searchQuery, kind, status, incArch, pageNum);
+      syncUrl(searchQuery, kind, status, incArch, pageNum, court, client, incData);
 
       try {
         const res = await searchMattersAction({
           query: searchQuery.trim() || undefined,
           kind,
           status,
+          courtId: court,
+          clientId: client,
+          incompleteData: incData,
           includeArchived: incArch,
           page: pageNum,
           limit,
@@ -100,6 +161,15 @@ export function MatterListClient({
           setError(res.error || 'تعذر تحميل ملفات القضايا.');
           setIsLoading(false);
           return;
+        }
+
+        // When the result set shrinks, clamp and refetch the last valid page
+        if (res.data.matters.length === 0 && pageNum > 1 && res.data.total > 0) {
+          const lastValidPage = Math.max(1, Math.ceil(res.data.total / limit));
+          if (lastValidPage !== pageNum) {
+            await fetchMattersRef.current?.(searchQuery, kind, status, incArch, lastValidPage, court, client, incData);
+            return;
+          }
         }
 
         setMatters(res.data.matters);
@@ -120,75 +190,123 @@ export function MatterListClient({
     [limit, syncUrl]
   );
 
+  useEffect(() => {
+    fetchMattersRef.current = fetchMatters;
+  });
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
   };
 
   const handleKindChange = (kind?: MatterKind) => {
     setSelectedKind(kind);
     setPage(1);
-    fetchMatters(query, kind, selectedStatus, includeArchived, 1);
+    fetchMatters(query, kind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
   };
 
   const handleStatusChange = (status?: MatterStatus) => {
     setSelectedStatus(status);
     setPage(1);
-    fetchMatters(query, selectedKind, status, includeArchived, 1);
+    fetchMatters(query, selectedKind, status, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
+  };
+
+  const handleCourtChange = (courtId?: string) => {
+    setSelectedCourtId(courtId);
+    setPage(1);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, courtId, selectedClientId, incompleteData);
+  };
+
+  const handleClientChange = (clientId?: string) => {
+    setSelectedClientId(clientId);
+    setPage(1);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, clientId, incompleteData);
+  };
+
+  const handleIncompleteDataChange = (checked: boolean) => {
+    setIncompleteData(checked);
+    setPage(1);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, checked);
   };
 
   const handleIncludeArchivedChange = (checked: boolean) => {
     setIncludeArchived(checked);
     setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, checked, 1);
+    fetchMatters(query, selectedKind, selectedStatus, checked, 1, selectedCourtId, selectedClientId, incompleteData);
   };
 
   const handleClearFilters = () => {
     setQuery('');
     setSelectedKind(undefined);
     setSelectedStatus(undefined);
+    setSelectedCourtId(undefined);
+    setSelectedClientId(undefined);
+    setIncompleteData(false);
     setIncludeArchived(false);
     setPage(1);
-    fetchMatters('', undefined, undefined, false, 1);
+    fetchMatters('', undefined, undefined, false, 1, undefined, undefined, false);
   };
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, newPage);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, newPage, selectedCourtId, selectedClientId, incompleteData);
   };
+
+  // Clean URL on initial mount if coming with query in searchParams
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlQuery = urlParams.get('query');
+    if (urlQuery) {
+      syncUrl(urlQuery, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData);
+    }
+  }, [syncUrl, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const syncFromUrl = () => {
+    const syncFromUrl = (event?: PopStateEvent | PageTransitionEvent) => {
       const params = new URLSearchParams(window.location.search);
       const urlPage = parseInt(params.get('page') || '1', 10) || 1;
-      const urlQuery = params.get('query') || '';
       const urlKind = (params.get('kind') as MatterKind) || undefined;
       const urlStatus = (params.get('status') as MatterStatus) || undefined;
+      const urlCourt = params.get('courtId') || undefined;
+      const urlClient = params.get('clientId') || undefined;
+      const urlIncData = params.get('incompleteData') === 'true';
       const urlIncArch = params.get('includeArchived') === 'true';
+      const restoredQuery =
+        ((event as PopStateEvent)?.state?.searchTransientQuery as string | undefined) ??
+        (window.history.state?.searchTransientQuery as string | undefined) ??
+        '';
 
-      setQuery(urlQuery);
+      setQuery(restoredQuery);
       setSelectedKind(urlKind);
       setSelectedStatus(urlStatus);
+      setSelectedCourtId(urlCourt);
+      setSelectedClientId(urlClient);
+      setIncompleteData(urlIncData);
       setIncludeArchived(urlIncArch);
       setPage(urlPage);
-      fetchMatters(urlQuery, urlKind, urlStatus, urlIncArch, urlPage);
+      fetchMatters(restoredQuery, urlKind, urlStatus, urlIncArch, urlPage, urlCourt, urlClient, urlIncData);
     };
 
     window.addEventListener('popstate', syncFromUrl);
-    const initialParams = new URLSearchParams(window.location.search);
-    const initialUrlPage = parseInt(initialParams.get('page') || '1', 10) || 1;
-    if (initialUrlPage !== page) {
-      syncFromUrl();
-    }
-
+    window.addEventListener('pageshow', syncFromUrl);
     return () => {
       window.removeEventListener('popstate', syncFromUrl);
+      window.removeEventListener('pageshow', syncFromUrl);
     };
-  }, [fetchMatters, page]);
+  }, [fetchMatters]);
 
-  const hasActiveFilters = Boolean(query.trim() || selectedKind || selectedStatus || includeArchived);
+  const hasActiveFilters = Boolean(
+    query.trim() ||
+      selectedKind ||
+      selectedStatus ||
+      selectedCourtId ||
+      selectedClientId ||
+      incompleteData ||
+      includeArchived
+  );
 
   return (
     <div className="space-y-6">
@@ -341,6 +459,57 @@ export function MatterListClient({
             إجمالي الملفات: <span className="font-bold text-[#172A35]">{totalCount}</span>
           </div>
         </div>
+
+        {/* Extended Filters: Court, Client, Incomplete Data */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E8EEF1]">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Court Filter */}
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="filter-court" className="text-xs font-semibold text-[#4D606A]">المحكمة:</label>
+              <select
+                id="filter-court"
+                data-testid="filter-court-select"
+                value={selectedCourtId || ''}
+                onChange={(e) => handleCourtChange(e.target.value || undefined)}
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              >
+                <option value="">كل المحاكم</option>
+                {courts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Client Filter */}
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="filter-client" className="text-xs font-semibold text-[#4D606A]">الموكل:</label>
+              <select
+                id="filter-client"
+                data-testid="filter-client-select"
+                value={selectedClientId || ''}
+                onChange={(e) => handleClientChange(e.target.value || undefined)}
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              >
+                <option value="">كل الموكلين</option>
+                {clients.map((cl) => (
+                  <option key={cl.id} value={cl.id}>{cl.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Incomplete Data Toggle */}
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+              <input
+                type="checkbox"
+                data-testid="incomplete-data-checkbox"
+                checked={incompleteData}
+                onChange={(e) => handleIncompleteDataChange(e.target.checked)}
+                className="w-4 h-4 rounded text-[#14566B] focus:ring-[#14566B] border-[#D5DFE3]"
+              />
+              <span>بيانات غير مكتملة</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       {/* Content Area */}
@@ -350,7 +519,18 @@ export function MatterListClient({
         <ErrorContainer
           title="تعذر تحميل ملفات القضايا"
           message={error}
-          onRetry={() => fetchMatters(query, selectedKind, selectedStatus, includeArchived, page)}
+          onRetry={() =>
+            fetchMatters(
+              query,
+              selectedKind,
+              selectedStatus,
+              includeArchived,
+              requestedPageRef.current,
+              selectedCourtId,
+              selectedClientId,
+              incompleteData
+            )
+          }
         />
       ) : matters.length === 0 ? (
         hasActiveFilters ? (

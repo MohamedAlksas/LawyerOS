@@ -897,6 +897,53 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           numberText: '777',
         }],
       },
+      // 8. T07 Archive & Reopen Lifecycle and Unified Search
+      {
+        name: 'archiveMatterAction',
+        args: [{
+          matterId: existingMatterId,
+          reason: 'أرشفة تجريبية غير مصرحة للملف',
+          expectedVersion: 1,
+          idempotencyKey: `unauth-archm-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'reopenMatterAction',
+        args: [{
+          matterId: existingMatterId,
+          reason: 'إعادة فتح تجريبية غير مصرحة للملف',
+          expectedVersion: 1,
+          idempotencyKey: `unauth-reopm-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'archiveProceedingAction',
+        args: [{
+          proceedingId: existingProcId,
+          matterId: existingMatterId,
+          reason: 'أرشفة تجريبية غير مصرحة للقيد',
+          expectedVersion: 1,
+          idempotencyKey: `unauth-archp-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'reopenProceedingAction',
+        args: [{
+          proceedingId: existingProcId,
+          matterId: existingMatterId,
+          reason: 'إعادة فتح تجريبية غير مصرحة للقيد',
+          expectedVersion: 1,
+          idempotencyKey: `unauth-reopp-${crypto.randomUUID()}`,
+        }],
+      },
+      {
+        name: 'unifiedSearchAction',
+        args: [{
+          query: 'بحث تجريبي غير مصرح',
+          type: 'ALL',
+          limit: 10,
+        }],
+      },
     ];
 
     // Filter strictly to exposed Server Actions in the built client manifest
@@ -904,7 +951,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(actionIds[item.name]).toBeDefined();
     }
     const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
-    expect(exposed.length).toBe(16);
+    expect(exposed.length).toBe(21);
     expect(exposed.length).toBe(candidates.length);
     return exposed;
   }
@@ -1115,7 +1162,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('8. Verified Owner Success Transport', () => {
-    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 16 actions', async () => {
+    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 21 actions', async () => {
       // 1. Create Reference Item (Court)
       const courtKey = `owner-http-court-${crypto.randomUUID()}`;
       const courtRes = await postServerAction('createReferenceItemAction', [{
@@ -1322,6 +1369,197 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       });
       expect(ownerPageRes.status).toBe(200);
       expect(ownerPageRes.body).toContain('قضية النقل الشبكي');
+
+      // 17. Archive Proceeding Action
+      const archProcKey = `owner-http-arch-proc-${crypto.randomUUID()}`;
+      const archProcRes = await postServerAction('archiveProceedingAction', [{
+        proceedingId: createdProcId,
+        matterId: createdMatterId,
+        expectedVersion: 2,
+        reason: 'أرشفة القيد للنقل الشبكي بعد الحكم',
+        idempotencyKey: archProcKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(archProcRes.status).toBe(200);
+      expect(archProcRes.body).toContain('"success":true');
+
+      const procArchDb = await dedicatedPool.query('SELECT version, "archivedAt", "archiveReason" FROM "proceeding" WHERE id = $1', [createdProcId]);
+      expect(procArchDb.rows[0].archivedAt).not.toBeNull();
+      expect(procArchDb.rows[0].archiveReason).toBe('أرشفة القيد للنقل الشبكي بعد الحكم');
+      const procArchVersion = procArchDb.rows[0].version;
+
+      // 18. Reopen Proceeding Action
+      const reopenProcKey = `owner-http-reop-proc-${crypto.randomUUID()}`;
+      const reopenProcRes = await postServerAction('reopenProceedingAction', [{
+        proceedingId: createdProcId,
+        matterId: createdMatterId,
+        expectedVersion: procArchVersion,
+        reason: 'إعادة فتح القيد للنقل الشبكي للاستئناف',
+        idempotencyKey: reopenProcKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(reopenProcRes.status).toBe(200);
+      expect(reopenProcRes.body).toContain('"success":true');
+
+      const procReopDb = await dedicatedPool.query('SELECT version, "archivedAt" FROM "proceeding" WHERE id = $1', [createdProcId]);
+      expect(procReopDb.rows[0].archivedAt).toBeNull();
+      const procReopVersion = procReopDb.rows[0].version;
+
+      // Archive proceeding again before matter archiving
+      const archProcPrepKey = `owner-http-arch-p-prep-${crypto.randomUUID()}`;
+      await postServerAction('archiveProceedingAction', [{
+        proceedingId: createdProcId,
+        matterId: createdMatterId,
+        expectedVersion: procReopVersion,
+        reason: 'أرشفة القيد تمهيداً لأرشفة القضية',
+        idempotencyKey: archProcPrepKey,
+      }], { cookie: verifiedSessionCookie });
+
+      // 19. Archive Matter Action
+      const mDbBeforeArch = await dedicatedPool.query('SELECT version FROM "matter" WHERE id = $1', [createdMatterId]);
+      const matterPreArchVersion = mDbBeforeArch.rows[0].version;
+
+      const archMatterKey = `owner-http-arch-m-${crypto.randomUUID()}`;
+      const archMatterRes = await postServerAction('archiveMatterAction', [{
+        matterId: createdMatterId,
+        expectedVersion: matterPreArchVersion,
+        reason: 'أرشفة ملف القضية للنقل الشبكي بالكامل',
+        idempotencyKey: archMatterKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(archMatterRes.status).toBe(200);
+      expect(archMatterRes.body).toContain('"success":true');
+
+      const mArchDb = await dedicatedPool.query('SELECT status, version, "archivedAt", "archiveReason" FROM "matter" WHERE id = $1', [createdMatterId]);
+      expect(mArchDb.rows[0].status).toBe('ARCHIVED');
+      expect(mArchDb.rows[0].archivedAt).not.toBeNull();
+      expect(mArchDb.rows[0].archiveReason).toBe('أرشفة ملف القضية للنقل الشبكي بالكامل');
+      const mArchVersion = mArchDb.rows[0].version;
+
+      // 20. Reopen Matter Action
+      const reopenMatterKey = `owner-http-reop-m-${crypto.randomUUID()}`;
+      const reopenMatterRes = await postServerAction('reopenMatterAction', [{
+        matterId: createdMatterId,
+        expectedVersion: mArchVersion,
+        reason: 'إعادة فتح ملف القضية للنقل الشبكي',
+        idempotencyKey: reopenMatterKey,
+      }], { cookie: verifiedSessionCookie });
+      expect(reopenMatterRes.status).toBe(200);
+      expect(reopenMatterRes.body).toContain('"success":true');
+
+      const mReopDb = await dedicatedPool.query('SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1', [createdMatterId]);
+      expect(['ACTIVE', 'DRAFT']).toContain(mReopDb.rows[0].status);
+      expect(mReopDb.rows[0].archivedAt).toBeNull();
+
+      // 21. Unified Search Action
+      const unifiedRes = await postServerAction('unifiedSearchAction', [{
+        query: 'النقل الشبكي',
+        type: 'ALL',
+        limit: 10,
+      }], { cookie: verifiedSessionCookie });
+      expect(unifiedRes.status).toBe(200);
+      expect(unifiedRes.body).toContain('"success":true');
+      expect(unifiedRes.body).toContain('قضية النقل الشبكي');
+    });
+  });
+
+  describe('9. T07 Lifecycle Rollback and Competing-Transition Regressions', () => {
+    it('rolls back cleanly on optimistic concurrency conflict and leaves DB state unchanged', async () => {
+      const client = await dedicatedPool.connect();
+      let beforeMatter: { status: string; version: number; archivedAt: Date | null };
+      try {
+        const res = await client.query('SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1', [existingMatterId]);
+        beforeMatter = res.rows[0];
+      } finally {
+        client.release();
+      }
+
+      // Stale expectedVersion
+      const staleRes = await postServerAction('archiveMatterAction', [{
+        matterId: existingMatterId,
+        expectedVersion: beforeMatter.version + 999,
+        reason: 'أرشفة بنسخة غير متزامنة',
+        idempotencyKey: `conflict-arch-${crypto.randomUUID()}`,
+      }], { cookie: verifiedSessionCookie });
+
+      expect(staleRes.status).toBe(200);
+      expect(staleRes.body).toContain('"success":false');
+      expect(staleRes.body).toMatch(/CONFLICT|تعارض/);
+
+      // Verify no changes to DB
+      const afterRes = await dedicatedPool.query('SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1', [existingMatterId]);
+      expect(afterRes.rows[0].status).toBe(beforeMatter.status);
+      expect(afterRes.rows[0].version).toBe(beforeMatter.version);
+      expect(afterRes.rows[0].archivedAt).toBe(beforeMatter.archivedAt);
+    });
+
+    it('rolls back cleanly on invalid state transition (attempting to archive already archived matter)', async () => {
+      const client = await dedicatedPool.connect();
+      const testMid = crypto.randomUUID();
+      try {
+        await client.query(`
+          INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "archivedAt", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, '2026/ROLL-01', 'ملف مؤرشف مسبقا لفحص التراجع', 'LITIGATION', 'ARCHIVED', now(), 1, $2, $2, now(), now())
+        `, [testMid, ownerUserId]);
+      } finally {
+        client.release();
+      }
+
+      // Attempt to archive matter that is ALREADY archived
+      const res = await postServerAction('archiveMatterAction', [{
+        matterId: testMid,
+        expectedVersion: 1,
+        reason: 'محاولة إعادة أرشفة غير صالحة',
+        idempotencyKey: `fail-arch-${crypto.randomUUID()}`,
+      }], { cookie: verifiedSessionCookie });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toContain('"success":false');
+      expect(res.body).toContain('مؤرشف بالفعل');
+
+      // Assert rollback in DB: matter remains ARCHIVED, version is 1
+      const checkRes = await dedicatedPool.query('SELECT status, version FROM "matter" WHERE id = $1', [testMid]);
+      expect(checkRes.rows[0].status).toBe('ARCHIVED');
+      expect(checkRes.rows[0].version).toBe(1);
+    });
+
+    it('handles competing concurrent lifecycle transitions safely (only one succeeds, version strictly increments by 1)', async () => {
+      const client = await dedicatedPool.connect();
+      const raceMid = crypto.randomUUID();
+      try {
+        await client.query(`
+          INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, '2026/RACE-01', 'ملف فحص تنافس التحولات', 'LITIGATION', 'ACTIVE', 1, $2, $2, now(), now())
+        `, [raceMid, ownerUserId]);
+      } finally {
+        client.release();
+      }
+
+      // Launch 2 concurrent archive actions targeting the exact same expectedVersion: 1
+      const req1 = postServerAction('archiveMatterAction', [{
+        matterId: raceMid,
+        expectedVersion: 1,
+        reason: 'أرشفة متزامنة أ',
+        idempotencyKey: `race-arch-1-${crypto.randomUUID()}`,
+      }], { cookie: verifiedSessionCookie });
+
+      const req2 = postServerAction('archiveMatterAction', [{
+        matterId: raceMid,
+        expectedVersion: 1,
+        reason: 'أرشفة متزامنة ب',
+        idempotencyKey: `race-arch-2-${crypto.randomUUID()}`,
+      }], { cookie: verifiedSessionCookie });
+
+      const [res1, res2] = await Promise.all([req1, req2]);
+
+      const successCount = (res1.body.includes('"success":true') ? 1 : 0) + (res2.body.includes('"success":true') ? 1 : 0);
+      const failureCount = (res1.body.includes('"success":false') ? 1 : 0) + (res2.body.includes('"success":false') ? 1 : 0);
+
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
+
+      // Verify DB final state is consistent and exactly version 2
+      const finalDb = await dedicatedPool.query('SELECT status, version, "archivedAt" FROM "matter" WHERE id = $1', [raceMid]);
+      expect(finalDb.rows[0].status).toBe('ARCHIVED');
+      expect(finalDb.rows[0].version).toBe(2);
+      expect(finalDb.rows[0].archivedAt).not.toBeNull();
     });
   });
 });

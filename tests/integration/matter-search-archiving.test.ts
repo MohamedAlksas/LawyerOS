@@ -17,11 +17,13 @@ import {
   searchMatters,
   searchProceedings,
   unifiedSearch,
+  linkProceedingParty,
 } from '@/modules/matters/matter-service';
 import {
   MatterArchivedError,
   ProceedingArchivedError,
   ConcurrencyConflictError,
+  UnsupportedTransitionError,
 } from '@/modules/matters/matter-types';
 import {
   createSyntheticActor,
@@ -29,7 +31,7 @@ import {
   setupTestEncryptionKeys,
 } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures } from '../helpers/matter-test-helper';
-import { saveParty } from '@/modules/parties/service';
+import { saveParty, getClientProfile } from '@/modules/parties/service';
 
 describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving', () => {
   const prisma = getPrismaClient();
@@ -566,7 +568,7 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
     // Apply the exact translation logic from the T07 migration script
     await prisma.$executeRaw`
       UPDATE "proceeding"
-      SET 
+      SET
         "numberNormalized" = trim(translate("numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')),
         "yearNormalized"   = trim(translate("yearLabel",  '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789'))
       WHERE "id" = ${procId};
@@ -579,5 +581,475 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
 
     expect(backfilled?.numberNormalized).toBe('9876');
     expect(backfilled?.yearNormalized).toBe('2023');
+  });
+
+  it('T07-12: Standards 1 — Invalid source state rejects on all 4 lifecycle commands with UnsupportedTransitionError', async () => {
+    // 1. Open active matter
+    const clientRes = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'عمرو دياب العميل للاختبار',
+      idempotencyKey: `client-inv-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(clientRes.party.id);
+
+    const m = await openMatter(actor, {
+      title: 'ملف اختبار الحالات غير الصالحة لدورة الحياة',
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: clientRes.party.id,
+      idempotencyKey: `open-inv-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+
+    const proc = await addProceeding(actor, {
+      matterId: m.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: '5566',
+      yearLabel: '2024',
+      status: 'DRAFT',
+      idempotencyKey: `proc-inv-${crypto.randomUUID()}`,
+    });
+
+    // 1a. Reopen a non-archived matter -> must reject
+    const freshMatter = await getMatter(m.matter.id, actor);
+    const reopenNonArchKey = `reopen-nonarch-${crypto.randomUUID()}`;
+    await expect(
+      reopenMatter(actor, {
+        matterId: m.matter.id,
+        expectedVersion: freshMatter.version,
+        reason: 'محاولة إعادة فتح ملف غير مؤرشف',
+        idempotencyKey: reopenNonArchKey,
+      })
+    ).rejects.toThrow(UnsupportedTransitionError);
+
+    // Verify claim, audit, and version remain unchanged
+    const matterAfterFailedReopen = await getMatter(m.matter.id, actor);
+    expect(matterAfterFailedReopen.version).toBe(freshMatter.version);
+    const reopenClaims = await prisma.idempotencyRecord.findMany({ where: { key: reopenNonArchKey } });
+    expect(reopenClaims.length).toBe(0);
+
+    // 1b. Reopen a non-archived proceeding -> must reject
+    const freshProc = await prisma.proceeding.findUniqueOrThrow({ where: { id: proc.id } });
+    const reopenProcNonArchKey = `reopen-p-nonarch-${crypto.randomUUID()}`;
+    await expect(
+      reopenProceeding(actor, {
+        matterId: m.matter.id,
+        proceedingId: proc.id,
+        expectedVersion: freshProc.version,
+        reason: 'محاولة إعادة فتح قيد غير مؤرشف',
+        idempotencyKey: reopenProcNonArchKey,
+      })
+    ).rejects.toThrow(UnsupportedTransitionError);
+
+    // 1c. Archive matter
+    const archResult = await archiveMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: freshMatter.version,
+      reason: 'أرشفة شرعية أولى',
+      idempotencyKey: `arch-legit-${crypto.randomUUID()}`,
+    });
+    expect(archResult.status).toBe('ARCHIVED');
+
+    // 1d. Archive an already archived matter -> must reject
+    const reArchiveKey = `arch-again-${crypto.randomUUID()}`;
+    await expect(
+      archiveMatter(actor, {
+        matterId: m.matter.id,
+        expectedVersion: archResult.version,
+        reason: 'محاولة أرشفة ملف مؤرشف بالفعل',
+        idempotencyKey: reArchiveKey,
+      })
+    ).rejects.toThrow(UnsupportedTransitionError);
+
+    const reArchClaims = await prisma.idempotencyRecord.findMany({ where: { key: reArchiveKey } });
+    expect(reArchClaims.length).toBe(0);
+
+    // 1e. Reopen matter to test proceeding archive states
+    await reopenMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: archResult.version,
+      reason: 'إعادة فتح الملف الشرعية',
+      idempotencyKey: `reopen-legit-${crypto.randomUUID()}`,
+    });
+
+    // 1f. Archive proceeding
+    const archProcResult = await archiveProceeding(actor, {
+      matterId: m.matter.id,
+      proceedingId: proc.id,
+      expectedVersion: proc.version,
+      reason: 'أرشفة قيد قضائي شرعية',
+      idempotencyKey: `arch-p-legit-${crypto.randomUUID()}`,
+    });
+    expect(archProcResult.archivedAt).toBeTruthy();
+
+    // 1g. Archive an already archived proceeding -> must reject
+    const reArchProcKey = `arch-p-again-${crypto.randomUUID()}`;
+    await expect(
+      archiveProceeding(actor, {
+        matterId: m.matter.id,
+        proceedingId: proc.id,
+        expectedVersion: archProcResult.version,
+        reason: 'محاولة أرشفة قيد مؤرشف بالفعل',
+        idempotencyKey: reArchProcKey,
+      })
+    ).rejects.toThrow(UnsupportedTransitionError);
+  });
+
+  it('T07-13: Standards 2 — unlinkMatterParty rejects with ProceedingArchivedError if linked to an archived proceeding', async () => {
+    // 1. Create client and matter
+    const clientRes = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'سليمان عبد الحميد التاجر',
+      idempotencyKey: `party-unlink-arch-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(clientRes.party.id);
+
+    const secondParty = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'هيثم عبد الجواد الخصم',
+      idempotencyKey: `party-unlink-2-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(secondParty.party.id);
+
+    const m = await openMatter(actor, {
+      title: 'نزاع تجاري متعدد الأطراف والقيود',
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: clientRes.party.id,
+      idempotencyKey: `open-m-unlink-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+
+    // Link second party to matter
+    const linkedSecond = await linkMatterParty(actor, {
+      matterId: m.matter.id,
+      partyId: secondParty.party.id,
+      role: 'OPPONENT',
+      idempotencyKey: `link-sec-${crypto.randomUUID()}`,
+    });
+
+    // Create a proceeding
+    const proc = await addProceeding(actor, {
+      matterId: m.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: '7788',
+      yearLabel: '2024',
+      status: 'DRAFT',
+      idempotencyKey: `proc-unlink-${crypto.randomUUID()}`,
+    });
+
+    // Link the second matter party to the proceeding
+    await linkProceedingParty(actor, {
+      proceedingId: proc.id,
+      matterPartyId: linkedSecond.id,
+      legalCapacity: 'DEFENDANT',
+      expectedVersion: proc.version,
+      idempotencyKey: `link-proc-party-${crypto.randomUUID()}`,
+    });
+
+    // Archive the proceeding
+    await archiveProceeding(actor, {
+      matterId: m.matter.id,
+      proceedingId: proc.id,
+      expectedVersion: proc.version + 1,
+      reason: 'أرشفة القيد قبل فك ارتباط الطرف',
+      idempotencyKey: `arch-proc-for-unlink-${crypto.randomUUID()}`,
+    });
+
+    // Try to unlink the second party from the parent matter
+    // This must be REJECTED because the party is in an archived proceeding!
+    const unlinkKey = `unlink-blocked-arch-${crypto.randomUUID()}`;
+    await expect(
+      unlinkMatterParty(actor, {
+        matterId: m.matter.id,
+        id: linkedSecond.id,
+        expectedVersion: linkedSecond.version,
+        idempotencyKey: unlinkKey,
+      })
+    ).rejects.toThrow(ProceedingArchivedError);
+
+    // Assert matter party, proceeding party, audit, and claim rows are completely intact
+    const survivingMatterParty = await prisma.matterParty.findUnique({
+      where: { id: linkedSecond.id },
+    });
+    expect(survivingMatterParty).toBeTruthy();
+
+    const survivingProceedingParty = await prisma.proceedingParty.findFirst({
+      where: { matterPartyId: linkedSecond.id },
+    });
+    expect(survivingProceedingParty).toBeTruthy();
+
+    const failedClaims = await prisma.idempotencyRecord.findMany({ where: { key: unlinkKey } });
+    expect(failedClaims.length).toBe(0);
+  });
+
+  it('T07-14: Standards 4 — Lifecycle idempotency replay returns original committed LifecycleCommandResult even after opposite transition', async () => {
+    const clientRes = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'معتز الشريف الموكل',
+      idempotencyKey: `party-replay-opp-${crypto.randomUUID()}`,
+    });
+    createdPartyIds.push(clientRes.party.id);
+
+    const m = await openMatter(actor, {
+      title: 'ملف اختبار إرجاع النتيجة الأصلية عند إعادة التشغيل',
+      kind: 'CONTRACT',
+      status: 'ACTIVE',
+      initialClientId: clientRes.party.id,
+      idempotencyKey: `open-replay-opp-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+
+    const archiveKey = `archive-cmd-${crypto.randomUUID()}`;
+    const archiveResult = await archiveMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: m.matter.version,
+      reason: 'أرشفة أولية للاختبار',
+      idempotencyKey: archiveKey,
+    });
+    expect(archiveResult.status).toBe('ARCHIVED');
+    expect(archiveResult.version).toBe(m.matter.version + 1);
+
+    // Later: reopen the matter with a different idempotency key
+    const reopenKey = `reopen-cmd-${crypto.randomUUID()}`;
+    const reopenResult = await reopenMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: archiveResult.version,
+      reason: 'إعادة الفتح بعد فترة',
+      idempotencyKey: reopenKey,
+    });
+    expect(reopenResult.status).toBe('ACTIVE');
+    expect(reopenResult.version).toBe(archiveResult.version + 1);
+
+    // Now replay the ORIGINAL archive request with key `archiveKey`:
+    // It MUST return the archived state (version N, status ARCHIVED), NOT the newly reopened ACTIVE state!
+    const replayedArchive = await archiveMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: m.matter.version,
+      reason: 'أرشفة أولية للاختبار',
+      idempotencyKey: archiveKey,
+    });
+    expect(replayedArchive.status).toBe('ARCHIVED');
+    expect(replayedArchive.version).toBe(archiveResult.version);
+    expect(replayedArchive.archivedAt).toBe(archiveResult.archivedAt);
+    expect(replayedArchive.operationVersion).toBe(archiveResult.version);
+
+    // And replay the reopen request:
+    // It MUST return the reopen state (version N+1, status ACTIVE, archivedAt null)!
+    const replayedReopen = await reopenMatter(actor, {
+      matterId: m.matter.id,
+      expectedVersion: archiveResult.version,
+      reason: 'إعادة الفتح بعد فترة',
+      idempotencyKey: reopenKey,
+    });
+    expect(replayedReopen.status).toBe('ACTIVE');
+    expect(replayedReopen.version).toBe(reopenResult.version);
+    expect(replayedReopen.archivedAt).toBeNull();
+  });
+
+  it('T07-15: Spec 1 & Spec 3 — Unified search returns accurate category counts regardless of tab, bounded paging, and correct links', async () => {
+    const batchTag = `batch_${Date.now()}`;
+
+    // Create 3 parties
+    for (let i = 1; i <= 3; i++) {
+      const p = await saveParty(actor, {
+        kind: 'PERSON',
+        name: `طرف مجمع ${batchTag} رقم ${i}`,
+        idempotencyKey: `p-uni-${batchTag}-${i}`,
+      });
+      createdPartyIds.push(p.party.id);
+    }
+
+    // Create 2 matters
+    for (let i = 1; i <= 2; i++) {
+      const mat = await openMatter(actor, {
+        title: `قضية مجمعة ${batchTag} رقم ${i}`,
+        kind: 'LITIGATION',
+        status: 'DRAFT',
+        idempotencyKey: `m-uni-${batchTag}-${i}`,
+      });
+      createdMatterIds.push(mat.matter.id);
+    }
+
+    // Create 2 proceedings under matter 1
+    const firstMatterId = createdMatterIds[0];
+    const createdProcIds: string[] = [];
+    for (let i = 1; i <= 2; i++) {
+      const pr = await addProceeding(actor, {
+        matterId: firstMatterId,
+        courtId: testCourtId,
+        instance: 'FIRST_INSTANCE',
+        circuit: `دائرة ${batchTag}`,
+        numberText: `90${i}`,
+        yearLabel: '2025',
+        status: 'DRAFT',
+        idempotencyKey: `pr-uni-${batchTag}-${i}`,
+      });
+      createdProcIds.push(pr.id);
+    }
+
+    // 1. Search with type = 'MATTER': verify that counts for ALL categories are still accurate!
+    const matterTabSearch = await unifiedSearch({
+      query: batchTag,
+      type: 'MATTER',
+      limit: 10,
+    }, actor);
+    expect(matterTabSearch.counts.matters).toBe(2);
+    expect(matterTabSearch.counts.parties).toBe(3);
+    expect(matterTabSearch.counts.proceedings).toBe(2);
+    expect(matterTabSearch.counts.all).toBe(7);
+    expect(matterTabSearch.total).toBe(2);
+    expect(matterTabSearch.items.length).toBe(2);
+    expect(matterTabSearch.items.every((it) => it.entityType === 'MATTER')).toBe(true);
+
+    // 2. Search with type = 'ALL' and limit = 4: Page 1 and Page 2 must have disjoint IDs
+    const page1 = await unifiedSearch({
+      query: batchTag,
+      type: 'ALL',
+      page: 1,
+      limit: 4,
+    }, actor);
+    expect(page1.items.length).toBe(4);
+    expect(page1.total).toBe(7);
+    expect(page1.totalPages).toBe(2);
+
+    const page2 = await unifiedSearch({
+      query: batchTag,
+      type: 'ALL',
+      page: 2,
+      limit: 4,
+    }, actor);
+    expect(page2.items.length).toBe(3); // 7 - 4 = 3 items remaining
+
+    const p1Ids = new Set(page1.items.map((i) => i.id));
+    for (const item of page2.items) {
+      expect(p1Ids.has(item.id)).toBe(false);
+    }
+
+    // 3. Spec 3: Verify proceeding result link format: /matters/${matterId}/proceedings/${procId}
+    const procTabSearch = await unifiedSearch({
+      query: batchTag,
+      type: 'PROCEEDING',
+      limit: 10,
+    }, actor);
+    expect(procTabSearch.items.length).toBe(2);
+    for (const pItem of procTabSearch.items) {
+      expect(pItem.href).toBe(`/matters/${firstMatterId}/proceedings/${pItem.id}`);
+    }
+
+    // 4. Spec 3: Archived Party profile retrieval via getClientProfile
+    const partyToArchive = createdPartyIds[0];
+    await prisma.party.update({
+      where: { id: partyToArchive },
+      data: { archivedAt: new Date() },
+    });
+
+    const archivedProfile = await getClientProfile(actor, partyToArchive);
+    expect(archivedProfile.id).toBe(partyToArchive);
+    expect(archivedProfile.archivedAt).toBeTruthy();
+  });
+
+  it('T07-16: Spec 5 — searchMatters incompleteData filter properly matches active matters missing paper location, matters without client, and matters with draft proceedings', async () => {
+    const incTag = `inc_${Date.now()}`;
+
+    // 1. Client party for testing
+    const validClient = await saveParty(actor, {
+      kind: 'PERSON',
+      name: `موكل كامل ${incTag}`,
+      idempotencyKey: `p-full-${incTag}`,
+    });
+    createdPartyIds.push(validClient.party.id);
+
+    // Create a paper location
+    let paperLoc = await prisma.storageLocation.findFirst({ where: { isActive: true } });
+    if (!paperLoc) {
+      paperLoc = await prisma.storageLocation.create({
+        data: {
+          name: `موقع حفظ ${incTag}`,
+          code: `LOC-${incTag}`,
+          isActive: true,
+          createdById: actor.id,
+          updatedById: actor.id,
+        },
+      });
+    }
+
+    // 2. Incomplete Matter 1: ACTIVE but paperLocationId is null
+    const mActiveNoLoc = await openMatter(actor, {
+      title: `قضية نشطة بدون موقع حفظ ${incTag}`,
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: validClient.party.id,
+      idempotencyKey: `m-no-loc-${incTag}`,
+    });
+    createdMatterIds.push(mActiveNoLoc.matter.id);
+
+    // 3. Incomplete Matter 2: DRAFT without client
+    const mNoClient = await openMatter(actor, {
+      title: `قضية بدون موكل ${incTag}`,
+      kind: 'CONSULTATION',
+      status: 'DRAFT',
+      idempotencyKey: `m-no-client-${incTag}`,
+    });
+    createdMatterIds.push(mNoClient.matter.id);
+
+    // 4. Incomplete Matter 3: Has a DRAFT proceeding
+    const mWithDraftProc = await openMatter(actor, {
+      title: `قضية بقيد مسودة ${incTag}`,
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: validClient.party.id,
+      paperLocationId: paperLoc.id,
+      idempotencyKey: `m-draft-proc-${incTag}`,
+    });
+    createdMatterIds.push(mWithDraftProc.matter.id);
+
+    await addProceeding(actor, {
+      matterId: mWithDraftProc.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: '1122',
+      yearLabel: '2025',
+      status: 'DRAFT',
+      idempotencyKey: `proc-draft-${incTag}`,
+    });
+
+    // 5. Complete Matter: ACTIVE, has client, has paper location, and NO draft proceeding
+    const mComplete = await openMatter(actor, {
+      title: `قضية مكتملة البيانات ${incTag}`,
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: validClient.party.id,
+      paperLocationId: paperLoc.id,
+      idempotencyKey: `m-complete-${incTag}`,
+    });
+    createdMatterIds.push(mComplete.matter.id);
+
+    // Add an ACTIVE (not DRAFT) proceeding to the complete matter
+    await addProceeding(actor, {
+      matterId: mComplete.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      registerType: 'مدني كلي',
+      numberText: '3344',
+      yearLabel: '2025',
+      status: 'ACTIVE',
+      idempotencyKey: `proc-active-${incTag}`,
+    });
+
+    // Query with incompleteData: true
+    const searchInc = await searchMatters({
+      query: incTag,
+      incompleteData: true,
+      limit: 20,
+    }, actor);
+
+    const incIds = new Set(searchInc.matters.map((m) => m.id));
+    expect(incIds.has(mActiveNoLoc.matter.id)).toBe(true);
+    expect(incIds.has(mNoClient.matter.id)).toBe(true);
+    expect(incIds.has(mWithDraftProc.matter.id)).toBe(true);
+    expect(incIds.has(mComplete.matter.id)).toBe(false);
   });
 });

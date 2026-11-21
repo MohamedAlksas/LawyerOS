@@ -166,6 +166,7 @@ export interface ClientProfileDTO {
   version: number;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
   identityMask: {
     identificationType: IdentificationType;
     lastFour: string;

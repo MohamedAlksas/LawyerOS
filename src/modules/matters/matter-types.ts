@@ -266,6 +266,7 @@ export interface SearchMattersParams {
   page?: number;
   limit?: number;
   offset?: number;
+  incompleteData?: boolean;
 }
 
 export interface MatterListItemDTO {
@@ -697,6 +698,7 @@ export const searchMattersParamsSchema = z
     page: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
+    incompleteData: z.boolean().optional(),
   })
   .strict();
 

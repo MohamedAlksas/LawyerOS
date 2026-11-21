@@ -1,17 +1,13 @@
 ﻿import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import crypto from 'crypto';
 import { performance } from 'perf_hooks';
 import { getPrismaClient } from '@/lib/auth';
-import { openMatter, addProceeding, searchMatters, searchProceedings, unifiedSearch } from '@/modules/matters/matter-service';
-import { searchParties, saveParty } from '@/modules/parties/service';
-import { createSyntheticActor, cleanupPartyFixtures, setupTestEncryptionKeys } from '../helpers/party-test-helper';
-import { cleanupMatterFixtures } from '../helpers/matter-test-helper';
+import { searchMatters, searchProceedings, unifiedSearch } from '@/modules/matters/matter-service';
+import { searchParties } from '@/modules/parties/service';
+import { createSyntheticActor, setupTestEncryptionKeys } from '../helpers/party-test-helper';
 
-describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', () => {
+describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2000ms) & NFR-01', () => {
   const prisma = getPrismaClient();
   const actor = createSyntheticActor();
-  const createdMatterIds: string[] = [];
-  const createdPartyIds: string[] = [];
   let testCourtId: string;
 
   beforeAll(async () => {
@@ -31,43 +27,62 @@ describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', ()
     }
     testCourtId = court.id;
 
-    // Seed 20 synthetic parties, 20 matters, 20 proceedings
-    for (let i = 1; i <= 20; i++) {
-      const pad = String(i).padStart(2, '0');
-      const party = await saveParty(actor, {
-        kind: i % 2 === 0 ? 'PERSON' : 'ORGANIZATION',
-        name: `طرف تجريبي للأداء ${pad} شركة الفهد`,
-        primaryPhone: `010${String(i).padStart(8, '0')}`,
-        idempotencyKey: `perf-p-${pad}-${crypto.randomUUID()}`,
-      });
-      createdPartyIds.push(party.party.id);
+    // Fast SQL bulk insert: Seed 2,000 synthetic casework records
+    // (600 parties + 700 matters + 700 proceedings = 2,000 records)
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "primaryPhone", "primaryPhoneNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+      SELECT
+        'perf-party-' || i,
+        CASE WHEN i % 2 = 0 THEN 'PERSON'::"PartyKind" ELSE 'ORGANIZATION'::"PartyKind" END,
+        'طرف تجريبي للأداء ' || i || ' شركة الفهد للحلول',
+        'طرف تجريبي للاداء ' || i || ' شركه الفهد للحلول',
+        '010' || lpad(i::text, 8, '0'),
+        '010' || lpad(i::text, 8, '0'),
+        1,
+        '${actor.id}', '${actor.id}', now(), now()
+      FROM generate_series(1, 600) AS s(i);
+    `);
 
-      const matter = await openMatter(actor, {
-        title: `قضية أداء المعاملات والبحث ${pad} نزاع استثماري`,
-        kind: 'LITIGATION',
-        status: 'ACTIVE',
-        initialClientId: party.party.id,
-        idempotencyKey: `perf-m-${pad}-${crypto.randomUUID()}`,
-      });
-      createdMatterIds.push(matter.matter.id);
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "matter" ("id", "fileCode", "title", "titleNormalized", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+      SELECT
+        'perf-matter-' || i,
+        '2026/P' || lpad(i::text, 5, '0'),
+        'قضية أداء المعاملات والبحث ' || i || ' نزاع استثماري تجاري الفهد',
+        'قضيه اداء المعاملات والبحث ' || i || ' نزاع استثماري تجاري الفهد',
+        'LITIGATION'::"MatterKind",
+        CASE WHEN i % 5 = 0 THEN 'ARCHIVED'::"MatterStatus" ELSE 'ACTIVE'::"MatterStatus" END,
+        1,
+        '${actor.id}', '${actor.id}', now(), now()
+      FROM generate_series(1, 700) AS s(i);
+    `);
 
-      await addProceeding(actor, {
-        matterId: matter.matter.id,
-        courtId: testCourtId,
-        instance: 'FIRST_INSTANCE',
-        registerType: 'تجاري',
-        circuit: `الدائرة ${pad}`,
-        numberText: `${1000 + i}`,
-        yearLabel: '2024',
-        status: 'ACTIVE',
-        idempotencyKey: `perf-proc-${pad}-${crypto.randomUUID()}`,
-      });
-    }
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "proceeding" ("id", "matterId", "courtId", "instance", "registerType", "circuit", "numberText", "numberNormalized", "yearLabel", "yearNormalized", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+      SELECT
+        'perf-proc-' || i,
+        'perf-matter-' || i,
+        '${testCourtId}',
+        'FIRST_INSTANCE'::"ProceedingInstance",
+        'تجاري',
+        'الدائرة ' || (i % 20),
+        (1000 + i)::text,
+        (1000 + i)::text,
+        '2026',
+        '2026',
+        'ACTIVE'::"ProceedingStatus",
+        1,
+        '${actor.id}', '${actor.id}', now(), now()
+      FROM generate_series(1, 700) AS s(i);
+    `);
   }, 60000);
 
   afterAll(async () => {
-    await cleanupMatterFixtures(prisma, createdMatterIds);
-    await cleanupPartyFixtures(prisma, createdPartyIds);
+    await prisma.$executeRawUnsafe(`
+      DELETE FROM "proceeding" WHERE id LIKE 'perf-proc-%';
+      DELETE FROM "matter" WHERE id LIKE 'perf-matter-%';
+      DELETE FROM "party" WHERE id LIKE 'perf-party-%';
+    `);
   });
 
   function calculatePercentiles(latencies: number[]) {
@@ -98,7 +113,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', ()
     }
 
     const stats = calculatePercentiles(samples);
-    console.log(`[PERF BENCHMARK] Party Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    console.log(`[PERF BENCHMARK] Party Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    expect(stats.p50).toBeLessThan(2000);
+    expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
   });
 
@@ -116,7 +133,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', ()
     }
 
     const stats = calculatePercentiles(samples);
-    console.log(`[PERF BENCHMARK] Matter Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    console.log(`[PERF BENCHMARK] Matter Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    expect(stats.p50).toBeLessThan(2000);
+    expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
   });
 
@@ -134,7 +153,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', ()
     }
 
     const stats = calculatePercentiles(samples);
-    console.log(`[PERF BENCHMARK] Proceeding Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    console.log(`[PERF BENCHMARK] Proceeding Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    expect(stats.p50).toBeLessThan(2000);
+    expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
   });
 
@@ -152,7 +173,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-01 (P95 < 500ms)', ()
     }
 
     const stats = calculatePercentiles(samples);
-    console.log(`[PERF BENCHMARK] Unified Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    console.log(`[PERF BENCHMARK] Unified Search: min=${stats.min.toFixed(1)}ms, avg=${stats.avg.toFixed(1)}ms, P50=${stats.p50.toFixed(1)}ms, P90=${stats.p90.toFixed(1)}ms, P95=${stats.p95.toFixed(1)}ms, max=${stats.max.toFixed(1)}ms`);
+    expect(stats.p50).toBeLessThan(2000);
+    expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
   });
 });

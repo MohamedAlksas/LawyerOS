@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -102,6 +102,65 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
   const [isProceedingLifecycleSubmitting, setIsProceedingLifecycleSubmitting] = useState(false);
   const [proceedingLifecycleError, setProceedingLifecycleError] = useState<string | null>(null);
 
+  // Lifecycle Operations Recovery & Frozen Key (Standards 3)
+  type LifecycleOp =
+    | {
+        kind: 'archiveMatter';
+        key: string;
+        payload: {
+          matterId: string;
+          reason: string;
+          expectedVersion: number;
+        };
+        description: string;
+      }
+    | {
+        kind: 'reopenMatter';
+        key: string;
+        payload: {
+          matterId: string;
+          reason: string;
+          expectedVersion: number;
+        };
+        description: string;
+      }
+    | {
+        kind: 'archiveProceeding';
+        key: string;
+        proceedingId: string;
+        payload: {
+          proceedingId: string;
+          matterId: string;
+          reason: string;
+          expectedVersion: number;
+        };
+        description: string;
+      }
+    | {
+        kind: 'reopenProceeding';
+        key: string;
+        proceedingId: string;
+        payload: {
+          proceedingId: string;
+          matterId: string;
+          reason: string;
+          expectedVersion: number;
+        };
+        description: string;
+      };
+
+  const pendingLifecycleOpRef = useRef<LifecycleOp | null>(null);
+  const [pendingLifecycleOp, setPendingLifecycleOp] = useState<LifecycleOp | null>(null);
+
+  // Standards 5: Modal Focus Management
+  const lastLifecycleTriggerRef = useRef<HTMLElement | null>(null);
+  const archiveMatterModalRef = useRef<HTMLDivElement>(null);
+  const archiveMatterReasonInputRef = useRef<HTMLTextAreaElement>(null);
+  const reopenMatterModalRef = useRef<HTMLDivElement>(null);
+  const reopenMatterReasonInputRef = useRef<HTMLTextAreaElement>(null);
+  const procLifecycleModalRef = useRef<HTMLDivElement>(null);
+  const procLifecycleReasonInputRef = useRef<HTMLTextAreaElement>(null);
+
   // Association Operations Recovery & Frozen Key (U1/U3)
   type AssociationOp =
     | {
@@ -198,6 +257,200 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     setIsSearchingParty(false);
     setShowAddPartyModal(false);
   };
+
+  const openArchiveMatterModal = (triggerEl?: HTMLElement | null) => {
+    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
+    setLifecycleError(null);
+    setMatterLifecycleReason(
+      pendingLifecycleOpRef.current?.kind === 'archiveMatter'
+        ? pendingLifecycleOpRef.current.payload.reason
+        : ''
+    );
+    setShowArchiveMatterModal(true);
+  };
+
+  const closeArchiveMatterModal = useCallback(() => {
+    if (isLifecycleSubmitting) return;
+    setShowArchiveMatterModal(false);
+    const trigger = lastLifecycleTriggerRef.current;
+    if (trigger && typeof trigger.focus === 'function') {
+      requestAnimationFrame(() => trigger.focus());
+    }
+  }, [isLifecycleSubmitting]);
+
+  const openReopenMatterModal = (triggerEl?: HTMLElement | null) => {
+    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
+    setLifecycleError(null);
+    setMatterLifecycleReason(
+      pendingLifecycleOpRef.current?.kind === 'reopenMatter'
+        ? pendingLifecycleOpRef.current.payload.reason
+        : ''
+    );
+    setShowReopenMatterModal(true);
+  };
+
+  const closeReopenMatterModal = useCallback(() => {
+    if (isLifecycleSubmitting) return;
+    setShowReopenMatterModal(false);
+    const trigger = lastLifecycleTriggerRef.current;
+    if (trigger && typeof trigger.focus === 'function') {
+      requestAnimationFrame(() => trigger.focus());
+    }
+  }, [isLifecycleSubmitting]);
+
+  const openProceedingLifecycleModal = (
+    proc: ProceedingSummaryDTO,
+    action: 'archive' | 'reopen',
+    triggerEl?: HTMLElement | null
+  ) => {
+    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
+    setSelectedProceedingForLifecycle(proc);
+    setProceedingLifecycleAction(action);
+    setProceedingLifecycleError(null);
+    const isFrozenMatching =
+      pendingLifecycleOpRef.current &&
+      ((action === 'archive' && pendingLifecycleOpRef.current.kind === 'archiveProceeding') ||
+        (action === 'reopen' && pendingLifecycleOpRef.current.kind === 'reopenProceeding')) &&
+      pendingLifecycleOpRef.current.proceedingId === proc.id;
+    setProceedingLifecycleReason(
+      isFrozenMatching && pendingLifecycleOpRef.current
+        ? pendingLifecycleOpRef.current.payload.reason
+        : ''
+    );
+  };
+
+  const closeProceedingLifecycleModal = useCallback(() => {
+    if (isProceedingLifecycleSubmitting) return;
+    setSelectedProceedingForLifecycle(null);
+    setProceedingLifecycleAction(null);
+    const trigger = lastLifecycleTriggerRef.current;
+    if (trigger && typeof trigger.focus === 'function') {
+      requestAnimationFrame(() => trigger.focus());
+    }
+  }, [isProceedingLifecycleSubmitting]);
+
+  // Focus trap and initial focus for Archive Matter Modal
+  useEffect(() => {
+    if (showArchiveMatterModal) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          if (!isLifecycleSubmitting) {
+            e.preventDefault();
+            closeArchiveMatterModal();
+          }
+          return;
+        }
+        if (e.key === 'Tab' && archiveMatterModalRef.current) {
+          const focusables = archiveMatterModalRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      requestAnimationFrame(() => {
+        archiveMatterReasonInputRef.current?.focus();
+      });
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [showArchiveMatterModal, isLifecycleSubmitting, closeArchiveMatterModal]);
+
+  // Focus trap and initial focus for Reopen Matter Modal
+  useEffect(() => {
+    if (showReopenMatterModal) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          if (!isLifecycleSubmitting) {
+            e.preventDefault();
+            closeReopenMatterModal();
+          }
+          return;
+        }
+        if (e.key === 'Tab' && reopenMatterModalRef.current) {
+          const focusables = reopenMatterModalRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      requestAnimationFrame(() => {
+        reopenMatterReasonInputRef.current?.focus();
+      });
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [showReopenMatterModal, isLifecycleSubmitting, closeReopenMatterModal]);
+
+  // Focus trap and initial focus for Proceeding Lifecycle Modal
+  useEffect(() => {
+    if (selectedProceedingForLifecycle && proceedingLifecycleAction) {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          if (!isProceedingLifecycleSubmitting) {
+            e.preventDefault();
+            closeProceedingLifecycleModal();
+          }
+          return;
+        }
+        if (e.key === 'Tab' && procLifecycleModalRef.current) {
+          const focusables = procLifecycleModalRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey) {
+            if (document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            }
+          } else {
+            if (document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      requestAnimationFrame(() => {
+        procLifecycleReasonInputRef.current?.focus();
+      });
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+      };
+    }
+  }, [selectedProceedingForLifecycle, proceedingLifecycleAction, isProceedingLifecycleSubmitting, closeProceedingLifecycleModal]);
 
   // Search Parties for Linking (C11/U4: separate query from selection, clear
   // stale rows on query change, and invalidate generations on selection/close)
@@ -816,28 +1069,40 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   const isMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
 
-  const handleArchiveMatter = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (matterLifecycleReason.trim().length < 3) {
-      setLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
-      return;
-    }
+  const executeArchiveMatter = async (op: Extract<LifecycleOp, { kind: 'archiveMatter' }>) => {
     setIsLifecycleSubmitting(true);
     setLifecycleError(null);
     try {
       const res = await archiveMatterAction({
-        matterId: matter.id,
-        reason: matterLifecycleReason.trim(),
-        expectedVersion: matter.version,
-        idempotencyKey: generateClientRequestId('arch-m'),
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setLifecycleError(res.error || 'تعذر أرشفة الملف.');
-        setIsLifecycleSubmitting(false);
+        if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setLifecycleError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
+          );
+        } else {
+          pendingLifecycleOpRef.current = null;
+          setPendingLifecycleOp(null);
+          setLifecycleError(res.error || 'تعذر أرشفة الملف.');
+        }
         return;
       }
 
+      pendingLifecycleOpRef.current = null;
+      setPendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         status: 'ARCHIVED',
@@ -849,34 +1114,77 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت أرشفة ملف القضية بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      pendingLifecycleOpRef.current = op;
+      setPendingLifecycleOp(op);
+      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsLifecycleSubmitting(false);
     }
   };
 
-  const handleReopenMatter = async (e: React.FormEvent) => {
+  const handleArchiveMatter = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (matterLifecycleReason.trim().length < 3) {
-      setLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+    if (isLifecycleSubmitting) return;
+
+    if (pendingLifecycleOpRef.current?.kind === 'archiveMatter') {
+      await executeArchiveMatter(pendingLifecycleOpRef.current as Extract<LifecycleOp, { kind: 'archiveMatter' }>);
       return;
     }
+
+    if (matterLifecycleReason.trim().length < 3) {
+      setLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+
+    const op: Extract<LifecycleOp, { kind: 'archiveMatter' }> = {
+      kind: 'archiveMatter',
+      key: generateClientRequestId('arch-m'),
+      payload: {
+        matterId: matter.id,
+        reason: matterLifecycleReason.trim(),
+        expectedVersion: matter.version,
+      },
+      description: 'أرشفة ملف القضية',
+    };
+    pendingLifecycleOpRef.current = op;
+    setPendingLifecycleOp(op);
+    await executeArchiveMatter(op);
+  };
+
+  const executeReopenMatter = async (op: Extract<LifecycleOp, { kind: 'reopenMatter' }>) => {
     setIsLifecycleSubmitting(true);
     setLifecycleError(null);
     try {
       const res = await reopenMatterAction({
-        matterId: matter.id,
-        reason: matterLifecycleReason.trim(),
-        expectedVersion: matter.version,
-        idempotencyKey: generateClientRequestId('reop-m'),
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setLifecycleError(res.error || 'تعذر إعادة فتح الملف.');
-        setIsLifecycleSubmitting(false);
+        if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setLifecycleError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
+          );
+        } else {
+          pendingLifecycleOpRef.current = null;
+          setPendingLifecycleOp(null);
+          setLifecycleError(res.error || 'تعذر إعادة فتح الملف.');
+        }
         return;
       }
 
+      pendingLifecycleOpRef.current = null;
+      setPendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         status: (res.data.status as MatterStatus) || 'ACTIVE',
@@ -888,41 +1196,83 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت إعادة فتح ملف القضية بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      pendingLifecycleOpRef.current = op;
+      setPendingLifecycleOp(op);
+      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsLifecycleSubmitting(false);
     }
   };
 
-  const handleArchiveProceeding = async (e: React.FormEvent) => {
+  const handleReopenMatter = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProceedingForLifecycle) return;
-    if (proceedingLifecycleReason.trim().length < 3) {
-      setProceedingLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
+    if (isLifecycleSubmitting) return;
+
+    if (pendingLifecycleOpRef.current?.kind === 'reopenMatter') {
+      await executeReopenMatter(pendingLifecycleOpRef.current as Extract<LifecycleOp, { kind: 'reopenMatter' }>);
       return;
     }
+
+    if (matterLifecycleReason.trim().length < 3) {
+      setLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+
+    const op: Extract<LifecycleOp, { kind: 'reopenMatter' }> = {
+      kind: 'reopenMatter',
+      key: generateClientRequestId('reop-m'),
+      payload: {
+        matterId: matter.id,
+        reason: matterLifecycleReason.trim(),
+        expectedVersion: matter.version,
+      },
+      description: 'إعادة فتح ملف القضية',
+    };
+    pendingLifecycleOpRef.current = op;
+    setPendingLifecycleOp(op);
+    await executeReopenMatter(op);
+  };
+
+  const executeArchiveProceeding = async (op: Extract<LifecycleOp, { kind: 'archiveProceeding' }>) => {
     setIsProceedingLifecycleSubmitting(true);
     setProceedingLifecycleError(null);
     try {
       const res = await archiveProceedingAction({
-        proceedingId: selectedProceedingForLifecycle.id,
-        matterId: matter.id,
-        reason: proceedingLifecycleReason.trim(),
-        expectedVersion: selectedProceedingForLifecycle.version ?? 1,
-        idempotencyKey: generateClientRequestId('arch-p'),
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setProceedingLifecycleError(res.error || 'تعذر أرشفة القيد القضائي.');
-        setIsProceedingLifecycleSubmitting(false);
+        if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setProceedingLifecycleError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
+          );
+        } else {
+          pendingLifecycleOpRef.current = null;
+          setPendingLifecycleOp(null);
+          setProceedingLifecycleError(res.error || 'تعذر أرشفة القيد القضائي.');
+        }
         return;
       }
 
+      pendingLifecycleOpRef.current = null;
+      setPendingLifecycleOp(null);
+      // NOTE (Spec 4): Closed Proceeding must not be presented as archived, and archiving keeps existing status
       setMatter((prev) => ({
         ...prev,
         proceedings: prev.proceedings?.map((p) =>
-          p.id === selectedProceedingForLifecycle.id
-            ? { ...p, status: 'CLOSED', archivedAt: res.data.archivedAt, version: res.data.version }
+          p.id === op.proceedingId
+            ? { ...p, archivedAt: res.data.archivedAt, version: res.data.version }
             : p
         ),
       }));
@@ -932,41 +1282,87 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت أرشفة القيد القضائي بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      pendingLifecycleOpRef.current = op;
+      setPendingLifecycleOp(op);
+      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsProceedingLifecycleSubmitting(false);
     }
   };
 
-  const handleReopenProceeding = async (e: React.FormEvent) => {
+  const handleArchiveProceeding = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProceedingForLifecycle) return;
-    if (proceedingLifecycleReason.trim().length < 3) {
-      setProceedingLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+    if (!selectedProceedingForLifecycle || isProceedingLifecycleSubmitting) return;
+
+    if (
+      pendingLifecycleOpRef.current?.kind === 'archiveProceeding' &&
+      pendingLifecycleOpRef.current.proceedingId === selectedProceedingForLifecycle.id
+    ) {
+      await executeArchiveProceeding(pendingLifecycleOpRef.current as Extract<LifecycleOp, { kind: 'archiveProceeding' }>);
       return;
     }
-    setIsProceedingLifecycleSubmitting(true);
-    setProceedingLifecycleError(null);
-    try {
-      const res = await reopenProceedingAction({
+
+    if (proceedingLifecycleReason.trim().length < 3) {
+      setProceedingLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+
+    const op: Extract<LifecycleOp, { kind: 'archiveProceeding' }> = {
+      kind: 'archiveProceeding',
+      key: generateClientRequestId('arch-p'),
+      proceedingId: selectedProceedingForLifecycle.id,
+      payload: {
         proceedingId: selectedProceedingForLifecycle.id,
         matterId: matter.id,
         reason: proceedingLifecycleReason.trim(),
         expectedVersion: selectedProceedingForLifecycle.version ?? 1,
-        idempotencyKey: generateClientRequestId('reop-p'),
+      },
+      description: 'أرشفة القيد القضائي',
+    };
+    pendingLifecycleOpRef.current = op;
+    setPendingLifecycleOp(op);
+    await executeArchiveProceeding(op);
+  };
+
+  const executeReopenProceeding = async (op: Extract<LifecycleOp, { kind: 'reopenProceeding' }>) => {
+    setIsProceedingLifecycleSubmitting(true);
+    setProceedingLifecycleError(null);
+    try {
+      const res = await reopenProceedingAction({
+        ...op.payload,
+        idempotencyKey: op.key,
       });
 
       if (!res.success) {
-        setProceedingLifecycleError(res.error || 'تعذر إعادة فتح القيد القضائي.');
-        setIsProceedingLifecycleSubmitting(false);
+        if (
+          !res.code ||
+          res.code === 'INTERNAL_ERROR' ||
+          res.code === 'DATABASE_UNAVAILABLE' ||
+          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
+          res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+        ) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setProceedingLifecycleError(
+            res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
+              ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
+              : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
+          );
+        } else {
+          pendingLifecycleOpRef.current = null;
+          setPendingLifecycleOp(null);
+          setProceedingLifecycleError(res.error || 'تعذر إعادة فتح القيد القضائي.');
+        }
         return;
       }
 
+      pendingLifecycleOpRef.current = null;
+      setPendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         proceedings: prev.proceedings?.map((p) =>
-          p.id === selectedProceedingForLifecycle.id
-            ? { ...p, status: (res.data.status as ProceedingStatus) || 'ACTIVE', archivedAt: null, version: res.data.version }
+          p.id === op.proceedingId
+            ? { ...p, status: (res.data.status as ProceedingStatus) || p.status, archivedAt: null, version: res.data.version }
             : p
         ),
       }));
@@ -976,10 +1372,46 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت إعادة فتح القيد القضائي بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+      pendingLifecycleOpRef.current = op;
+      setPendingLifecycleOp(op);
+      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsProceedingLifecycleSubmitting(false);
     }
+  };
+
+  const handleReopenProceeding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProceedingForLifecycle || isProceedingLifecycleSubmitting) return;
+
+    if (
+      pendingLifecycleOpRef.current?.kind === 'reopenProceeding' &&
+      pendingLifecycleOpRef.current.proceedingId === selectedProceedingForLifecycle.id
+    ) {
+      await executeReopenProceeding(pendingLifecycleOpRef.current as Extract<LifecycleOp, { kind: 'reopenProceeding' }>);
+      return;
+    }
+
+    if (proceedingLifecycleReason.trim().length < 3) {
+      setProceedingLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+
+    const op: Extract<LifecycleOp, { kind: 'reopenProceeding' }> = {
+      kind: 'reopenProceeding',
+      key: generateClientRequestId('reop-p'),
+      proceedingId: selectedProceedingForLifecycle.id,
+      payload: {
+        proceedingId: selectedProceedingForLifecycle.id,
+        matterId: matter.id,
+        reason: proceedingLifecycleReason.trim(),
+        expectedVersion: selectedProceedingForLifecycle.version ?? 1,
+      },
+      description: 'إعادة فتح القيد القضائي',
+    };
+    pendingLifecycleOpRef.current = op;
+    setPendingLifecycleOp(op);
+    await executeReopenProceeding(op);
   };
 
   return (
@@ -1026,10 +1458,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <button
                 type="button"
                 data-testid="archive-matter-button"
-                onClick={() => {
-                  setLifecycleError(null);
-                  setMatterLifecycleReason('');
-                  setShowArchiveMatterModal(true);
+                onClick={(e) => {
+                  openArchiveMatterModal(e.currentTarget);
                 }}
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-[6px] border border-amber-300 transition-colors min-h-[44px]"
               >
@@ -1057,10 +1487,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <button
               type="button"
               data-testid="reopen-matter-button"
-              onClick={() => {
-                setLifecycleError(null);
-                setMatterLifecycleReason('');
-                setShowReopenMatterModal(true);
+              onClick={(e) => {
+                openReopenMatterModal(e.currentTarget);
               }}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
             >
@@ -1694,7 +2122,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <div className="space-y-4">
               {proceedings.map((proc) => {
                 const isDraft = proc.status === 'DRAFT' || !proc.numberText || !proc.yearLabel;
-                const isProcArchived = proc.status === 'CLOSED' || Boolean(proc.archivedAt);
+                const isProcArchived = Boolean(proc.archivedAt);
 
                 return (
                   <div
@@ -1780,11 +2208,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                             <button
                               type="button"
                               data-testid={`archive-proceeding-${proc.id}`}
-                              onClick={() => {
-                                setSelectedProceedingForLifecycle(proc);
-                                setProceedingLifecycleAction('archive');
-                                setProceedingLifecycleReason('');
-                                setProceedingLifecycleError(null);
+                              onClick={(e) => {
+                                openProceedingLifecycleModal(proc, 'archive', e.currentTarget);
                               }}
                               className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-medium rounded-[6px] border border-amber-300 transition-colors min-h-[36px] flex items-center"
                             >
@@ -1794,11 +2219,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                             <button
                               type="button"
                               data-testid={`reopen-proceeding-${proc.id}`}
-                              onClick={() => {
-                                setSelectedProceedingForLifecycle(proc);
-                                setProceedingLifecycleAction('reopen');
-                                setProceedingLifecycleReason('');
-                                setProceedingLifecycleError(null);
+                              onClick={(e) => {
+                                openProceedingLifecycleModal(proc, 'reopen', e.currentTarget);
                               }}
                               className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium rounded-[6px] border border-emerald-300 transition-colors min-h-[36px] flex items-center"
                             >
@@ -2095,10 +2517,16 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       {/* Archive Matter Modal */}
       {showArchiveMatterModal && (
         <div
+          ref={archiveMatterModalRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="archive-matter-title"
           data-testid="archive-matter-modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isLifecycleSubmitting) {
+              closeArchiveMatterModal();
+            }
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
         >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
@@ -2109,8 +2537,9 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <button
                 type="button"
                 data-testid="cancel-archive-matter-button"
-                onClick={() => setShowArchiveMatterModal(false)}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+                disabled={isLifecycleSubmitting}
+                onClick={closeArchiveMatterModal}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2126,6 +2555,21 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               </div>
             )}
 
+            {pendingLifecycleOp?.kind === 'archiveMatter' && (
+              <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
+                <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
+                <button
+                  type="button"
+                  data-testid="retry-archive-matter-button"
+                  disabled={isLifecycleSubmitting}
+                  onClick={() => executeArchiveMatter(pendingLifecycleOp)}
+                  className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[32px] disabled:opacity-50"
+                >
+                  {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleArchiveMatter} className="space-y-4">
               <div className="space-y-1">
                 <label htmlFor="archive-matter-reason" className="block text-xs font-bold text-[#172A35]">
@@ -2133,6 +2577,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 </label>
                 <textarea
                   id="archive-matter-reason"
+                  ref={archiveMatterReasonInputRef}
                   data-testid="archive-matter-reason-input"
                   value={matterLifecycleReason}
                   onChange={(e) => setMatterLifecycleReason(e.target.value)}
@@ -2140,15 +2585,17 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   rows={3}
                   minLength={3}
                   required
-                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                  disabled={isLifecycleSubmitting}
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                 />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowArchiveMatterModal(false)}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                  disabled={isLifecycleSubmitting}
+                  onClick={closeArchiveMatterModal}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2158,7 +2605,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   data-testid="confirm-archive-matter-button"
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
                 >
-                  {isLifecycleSubmitting ? 'جارٍ الأرشفة...' : 'تأكيد الأرشفة'}
+                  {isLifecycleSubmitting
+                    ? 'جارٍ الأرشفة...'
+                    : pendingLifecycleOp?.kind === 'archiveMatter'
+                    ? 'إعادة المحاولة'
+                    : 'تأكيد الأرشفة'}
                 </button>
               </div>
             </form>
@@ -2169,10 +2620,16 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       {/* Reopen Matter Modal */}
       {showReopenMatterModal && (
         <div
+          ref={reopenMatterModalRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="reopen-matter-title"
           data-testid="reopen-matter-modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isLifecycleSubmitting) {
+              closeReopenMatterModal();
+            }
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
         >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
@@ -2183,8 +2640,9 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <button
                 type="button"
                 data-testid="cancel-reopen-matter-button"
-                onClick={() => setShowReopenMatterModal(false)}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+                disabled={isLifecycleSubmitting}
+                onClick={closeReopenMatterModal}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2200,6 +2658,21 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               </div>
             )}
 
+            {pendingLifecycleOp?.kind === 'reopenMatter' && (
+              <div className="flex items-center justify-between p-2.5 bg-sky-50 border border-sky-200 rounded-[6px] text-xs text-sky-900">
+                <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
+                <button
+                  type="button"
+                  data-testid="retry-reopen-matter-button"
+                  disabled={isLifecycleSubmitting}
+                  onClick={() => executeReopenMatter(pendingLifecycleOp)}
+                  className="px-3 py-1 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded min-h-[32px] disabled:opacity-50"
+                >
+                  {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleReopenMatter} className="space-y-4">
               <div className="space-y-1">
                 <label htmlFor="reopen-matter-reason" className="block text-xs font-bold text-[#172A35]">
@@ -2207,6 +2680,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 </label>
                 <textarea
                   id="reopen-matter-reason"
+                  ref={reopenMatterReasonInputRef}
                   data-testid="reopen-matter-reason-input"
                   value={matterLifecycleReason}
                   onChange={(e) => setMatterLifecycleReason(e.target.value)}
@@ -2214,15 +2688,17 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   rows={3}
                   minLength={3}
                   required
-                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                  disabled={isLifecycleSubmitting}
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                 />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowReopenMatterModal(false)}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                  disabled={isLifecycleSubmitting}
+                  onClick={closeReopenMatterModal}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2232,7 +2708,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   data-testid="confirm-reopen-matter-button"
                   className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
                 >
-                  {isLifecycleSubmitting ? 'جارٍ إعادة الفتح...' : 'تأكيد إعادة الفتح'}
+                  {isLifecycleSubmitting
+                    ? 'جارٍ إعادة الفتح...'
+                    : pendingLifecycleOp?.kind === 'reopenMatter'
+                    ? 'إعادة المحاولة'
+                    : 'تأكيد إعادة الفتح'}
                 </button>
               </div>
             </form>
@@ -2243,10 +2723,16 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       {/* Proceeding Lifecycle Modal (Archive or Reopen) */}
       {selectedProceedingForLifecycle && proceedingLifecycleAction && (
         <div
+          ref={procLifecycleModalRef}
           role="dialog"
           aria-modal="true"
           aria-labelledby="proceeding-lifecycle-title"
           data-testid="proceeding-lifecycle-modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isProceedingLifecycleSubmitting) {
+              closeProceedingLifecycleModal();
+            }
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
         >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
@@ -2257,11 +2743,9 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <button
                 type="button"
                 data-testid="cancel-proceeding-lifecycle-button"
-                onClick={() => {
-                  setSelectedProceedingForLifecycle(null);
-                  setProceedingLifecycleAction(null);
-                }}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+                disabled={isProceedingLifecycleSubmitting}
+                onClick={closeProceedingLifecycleModal}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2279,6 +2763,29 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               </div>
             )}
 
+            {pendingLifecycleOp &&
+              (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
+              pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id && (
+                <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
+                  <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
+                  <button
+                    type="button"
+                    data-testid="retry-proceeding-lifecycle-button"
+                    disabled={isProceedingLifecycleSubmitting}
+                    onClick={() => {
+                      if (pendingLifecycleOp.kind === 'archiveProceeding') {
+                        executeArchiveProceeding(pendingLifecycleOp);
+                      } else {
+                        executeReopenProceeding(pendingLifecycleOp);
+                      }
+                    }}
+                    className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[32px] disabled:opacity-50"
+                  >
+                    {isProceedingLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                  </button>
+                </div>
+              )}
+
             <form
               onSubmit={proceedingLifecycleAction === 'archive' ? handleArchiveProceeding : handleReopenProceeding}
               className="space-y-4"
@@ -2289,6 +2796,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 </label>
                 <textarea
                   id="proceeding-lifecycle-reason"
+                  ref={procLifecycleReasonInputRef}
                   data-testid="proceeding-lifecycle-reason-input"
                   value={proceedingLifecycleReason}
                   onChange={(e) => setProceedingLifecycleReason(e.target.value)}
@@ -2296,7 +2804,8 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   rows={3}
                   minLength={3}
                   required
-                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                  disabled={isProceedingLifecycleSubmitting}
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                 />
               </div>
 
@@ -2304,11 +2813,9 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 <button
                   type="button"
                   data-testid="cancel-proceeding-lifecycle-button"
-                  onClick={() => {
-                    setSelectedProceedingForLifecycle(null);
-                    setProceedingLifecycleAction(null);
-                  }}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                  disabled={isProceedingLifecycleSubmitting}
+                  onClick={closeProceedingLifecycleModal}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2324,6 +2831,10 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                 >
                   {isProceedingLifecycleSubmitting
                     ? 'جارٍ التنفيذ...'
+                    : pendingLifecycleOp &&
+                      (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
+                      pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id
+                    ? 'إعادة المحاولة'
                     : proceedingLifecycleAction === 'archive'
                     ? 'تأكيد الأرشفة'
                     : 'تأكيد إعادة الفتح'}

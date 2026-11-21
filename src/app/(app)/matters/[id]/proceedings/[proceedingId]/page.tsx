@@ -116,7 +116,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   }
 
   const isDraft = !proceeding.numberText || !proceeding.yearLabel;
-  const isProcArchived = proceeding.status === 'CLOSED' || Boolean(proceeding.archivedAt);
+  const isProcArchived = Boolean(proceeding.archivedAt);
   const isParentMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
   const isReadOnly = isProcArchived || isParentMatterArchived;
 

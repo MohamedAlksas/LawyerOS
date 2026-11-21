@@ -611,7 +611,7 @@ export async function getClientProfile(
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const party = await prisma.party.findUnique({
-    where: { id: partyId, archivedAt: null },
+    where: { id: partyId },
     include: {
       identities: true,
       communicationNotes: {
@@ -641,6 +641,7 @@ export async function getClientProfile(
     version: party.version,
     createdAt: party.createdAt.toISOString(),
     updatedAt: party.updatedAt.toISOString(),
+    archivedAt: party.archivedAt ? party.archivedAt.toISOString() : null,
     identityMask: primaryIdentity
       ? {
           identificationType: primaryIdentity.identificationType,

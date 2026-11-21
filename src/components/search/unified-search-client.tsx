@@ -53,7 +53,15 @@ export function UnifiedSearchClient({
   initialPage = 1,
   initialError,
 }: UnifiedSearchClientProps) {
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlQ = new URLSearchParams(window.location.search).get('query');
+      if (urlQ) return urlQ;
+      const transient = (window.history.state as { searchTransientQuery?: string } | null)?.searchTransientQuery;
+      if (transient) return transient;
+    }
+    return initialQuery;
+  });
   const [searchType, setSearchType] = useState<UnifiedSearchType>(initialType);
   const [includeArchived, setIncludeArchived] = useState<boolean>(initialIncludeArchived);
   const [page, setPage] = useState<number>(initialPage);
@@ -83,18 +91,29 @@ export function UnifiedSearchClient({
   const isInitialMount = useRef(true);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const requestGenRef = useRef(0);
+  const requestedPageRef = useRef<number>(initialPage);
+
+  type ExecuteSearchFn = (
+    q: string,
+    t: UnifiedSearchType,
+    incArch: boolean,
+    pageNum: number
+  ) => Promise<void>;
+
+  const executeSearchRef = useRef<ExecuteSearchFn | null>(null);
 
   const syncUrl = useCallback(
     (q: string, t: UnifiedSearchType, incArch: boolean, p: number) => {
       if (typeof window === 'undefined') return;
       const params = new URLSearchParams();
-      if (q.trim()) params.set('query', q.trim());
+      // Omit `query` from the URL string completely so no private names or numbers appear in browser history, address bar, or URLs
       if (t !== 'ALL') params.set('type', t);
       if (incArch) params.set('includeArchived', 'true');
       if (p > 1) params.set('page', String(p));
       const newQuery = params.toString();
-      const newUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-      window.history.replaceState(null, '', newUrl);
+      const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+      const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
+      window.history.replaceState({ ...currentState, searchTransientQuery: q }, '', cleanUrl);
     },
     []
   );
@@ -107,6 +126,7 @@ export function UnifiedSearchClient({
       pageNum: number
     ) => {
       const currentGen = ++requestGenRef.current;
+      requestedPageRef.current = pageNum;
       setIsLoading(true);
       setError(null);
       syncUrl(q, t, incArch, pageNum);
@@ -128,6 +148,15 @@ export function UnifiedSearchClient({
           return;
         }
 
+        // When the result set shrinks, clamp and refetch the last valid page
+        if (res.data.items.length === 0 && pageNum > 1 && res.data.total > 0) {
+          const lastValidPage = Math.max(1, Math.ceil(res.data.total / 20));
+          if (lastValidPage !== pageNum) {
+            await executeSearchRef.current?.(q, t, incArch, lastValidPage);
+            return;
+          }
+        }
+
         setSearchResult(res.data);
         setPage(res.data.page);
         setIsLoading(false);
@@ -139,6 +168,10 @@ export function UnifiedSearchClient({
     },
     [syncUrl]
   );
+
+  useEffect(() => {
+    executeSearchRef.current = executeSearch;
+  });
 
   // Debounced input change (300ms)
   useEffect(() => {
@@ -163,20 +196,33 @@ export function UnifiedSearchClient({
     };
   }, [query, searchType, includeArchived, executeSearch]);
 
+  // Clean URL on initial mount if coming with query in searchParams
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const syncFromUrl = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlQuery = urlParams.get('query');
+    if (urlQuery) {
+      syncUrl(urlQuery, searchType, includeArchived, page);
+    }
+  }, [syncUrl, searchType, includeArchived, page]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncFromUrl = (event?: PopStateEvent) => {
       const params = new URLSearchParams(window.location.search);
-      const urlQuery = params.get('query') || '';
       const urlType = (params.get('type') as UnifiedSearchType) || 'ALL';
       const urlIncArch = params.get('includeArchived') === 'true';
       const urlPage = parseInt(params.get('page') || '1', 10) || 1;
+      const restoredQuery =
+        (event?.state?.searchTransientQuery as string | undefined) ??
+        (window.history.state?.searchTransientQuery as string | undefined) ??
+        '';
 
-      setQuery(urlQuery);
+      setQuery(restoredQuery);
       setSearchType(urlType);
       setIncludeArchived(urlIncArch);
       setPage(urlPage);
-      executeSearch(urlQuery, urlType, urlIncArch, urlPage);
+      executeSearch(restoredQuery, urlType, urlIncArch, urlPage);
     };
 
     window.addEventListener('popstate', syncFromUrl);
@@ -423,7 +469,7 @@ export function UnifiedSearchClient({
         <ErrorContainer
           title="تعذر استرجاع نتائج البحث"
           message={error}
-          onRetry={() => executeSearch(query, searchType, includeArchived, page)}
+          onRetry={() => executeSearch(query, searchType, includeArchived, requestedPageRef.current)}
         />
       ) : items.length === 0 ? (
         hasActiveFilters ? (

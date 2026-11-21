@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { searchMatters } from '@/modules/matters/matter-service';
+import { listReferenceItems } from '@/modules/settings/reference-service';
+import { searchParties } from '@/modules/parties/service';
 import { MatterKind, MatterStatus, MatterValidationError, SearchMattersResult } from '@/modules/matters/matter-types';
 import { MatterListClient } from '@/components/matters/matter-list-client';
 
@@ -15,6 +17,9 @@ interface MattersPageProps {
     query?: string;
     kind?: string;
     status?: string;
+    courtId?: string;
+    clientId?: string;
+    incompleteData?: string;
     page?: string;
     limit?: string;
     includeArchived?: string;
@@ -55,9 +60,19 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
       ? (rawStatus as MatterStatus)
       : undefined;
 
+  const validCourtId = params.courtId && params.courtId.trim() ? params.courtId.trim() : undefined;
+  const validClientId = params.clientId && params.clientId.trim() ? params.clientId.trim() : undefined;
+  const isIncompleteData = params.incompleteData === 'true';
+
   const page = Math.max(1, parseInt(params.page || '1', 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(params.limit || '20', 10) || 20));
   const includeArchived = params.includeArchived === 'true' || validStatus === 'ARCHIVED';
+
+  const [courts, clientsRes] = await Promise.all([
+    listReferenceItems('COURT', false, actor).catch(() => []),
+    searchParties(actor, { limit: 100 }).catch(() => ({ parties: [] })),
+  ]);
+  const clients = (clientsRes?.parties || []).map((p) => ({ id: p.id, name: p.name }));
 
   let initialResult: SearchMattersResult = { matters: [], total: 0, page: 1, totalPages: 1, limit };
   let initialError: string | undefined = undefined;
@@ -67,6 +82,9 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         query: params.query,
         kind: validKind,
         status: validStatus,
+        courtId: validCourtId,
+        clientId: validClientId,
+        incompleteData: isIncompleteData,
         includeArchived,
         page,
         limit,
@@ -93,8 +111,13 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         initialQuery={params.query || ''}
         initialKind={validKind}
         initialStatus={validStatus}
+        initialCourtId={validCourtId}
+        initialClientId={validClientId}
+        initialIncompleteData={isIncompleteData}
         initialIncludeArchived={includeArchived}
         initialError={initialError}
+        courts={courts.map((c) => ({ id: c.id, name: c.name }))}
+        clients={clients}
       />
     </div>
   );
