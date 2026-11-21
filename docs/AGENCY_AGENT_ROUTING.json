@@ -232,7 +232,7 @@
         "agency-database-optimizer",
         "agency-test-automation-engineer"
       ],
-      "focus": "Separate reimbursable expenses, office costs and advances with locked balance checks and independent expected outcomes."
+      "focus": "Separate reimbursable matter expenses and client advances with locked balance checks and independent expected outcomes; office operating expenses are excluded by owner-approved ADR 0004."
     },
     "T15a": {
       "lead": "agency-backend-architect",

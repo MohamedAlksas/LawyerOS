@@ -78,13 +78,13 @@ An interrupted upload must not produce an empty document page labeled successful
 
 The payer does not have to be the debtor. If someone pays for two clients, allocate each part to its client, matter, and item type, displaying the breakdown in confirmation and the receipt. Selecting a payer alone does not transfer the clients' debts to that person or combine their balances into one account.
 
-## 9. Matter expense, client advance, and office expense
+## 9. Matter expense and client advance
 
 For the UI action “تسجيل مصروف” (record expense), choose the funding source before posting:
 
 - **Lawyer-funded and recoverable from the client:** an expense linked to a matter and client opens `EXPENSE_RECEIVABLE`. Client reimbursement settles the expense without increasing fee collections.
 - **Spending funds supplied by the client:** sufficient advance funds must exist for the same client and matter. Spending reduces `CLIENT_ADVANCE` without creating new expense debt. If the advance is insufficient, explicitly split the expense into an advance-funded part and a lawyer-funded part, or cancel until funding is selected. Implementation records two `Expense` parts sharing one `expenseGroupId` and evidence within one command and transaction. Their total equals the amount on screen, without introducing a general allocation table.
-- **Office expense:** internet or office supplies, for example, creates no client debt. It is not allocated to matters automatically.
+- **V1 scope:** office operating expenses such as rent, internet, utilities and supplies are excluded by ADR 0004. Do not offer them as a transaction choice or automatically allocate them to matters.
 
 Receiving 2,000 for expenses and then spending 700 must show: advance 1,300, expense incurred 700, and zero fee collection from these two transactions. Moving part of an advance to fees is a separate action with explanation and internal approval, not a button that hides the movement inside a balance.
 
@@ -96,7 +96,7 @@ The UI action “رد مبلغ فعلي” (refund money actually paid) is diffe
 
 Double-deduction prevention example: receive 5,000 in fees, then refund 1,000 = a 5,000 receipt and a 1,000 `REFUND`. Net cash is 4,000, and debt increases again by 1,000. Do not reverse the 5,000 and add another refund, or create a second refund entry when printing a receipt. If a 5,000 payment was recorded twice but actually received once, reverse only the duplicate record without disbursing money. Misclassifying money actually received between fees and advance is corrected through a noncash reclassification adjustment using an entry format approved in the financial task.
 
-Every correction appears in the statement with its date and references. The matter summary shows four separate amounts: remaining fees, expenses due, available advance, and office expenses if any. The father's UI presents transaction meanings rather than debit/credit account names.
+Every correction appears in the statement with its date and references. The matter summary shows three separate amounts: remaining fees, matter expenses due, and available advance. The father's UI presents transaction meanings rather than debit/credit account names. No office operating-expense total is included in V1.
 
 ## 11. Close and archive a matter
 

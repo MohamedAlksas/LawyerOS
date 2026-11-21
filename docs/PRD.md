@@ -16,6 +16,8 @@ The project owner's father opens the system in the morning to see his hearings a
 
 Outside V1: calculating appeal periods from general rules, automatic submissions to court platforms, a client portal, an accredited tax or electronic invoicing system, multioffice SaaS, a native application, or offline synchronization of confidential data.
 
+Owner decision, 18 November 2026: office operating expenses (rent, internet, utilities and office supplies) are outside V1. Finance covers fees, matter-specific reimbursable expenses and client advances; no office-expense screen, account, command or report is required. See [ADR 0004](adr/0004-exclude-office-operating-expenses.md).
+
 ## 3. Functional requirements
 
 | ID | Requirement | Acceptance evidence |

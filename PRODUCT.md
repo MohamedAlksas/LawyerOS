@@ -24,7 +24,7 @@ The desktop is used to enter files, review accounts, and print. The mobile is us
 - One matter may involve multiple clients and opponents, as well as multiple court instances and court case numbers.
 - Legal deadlines are entered or reviewed by the lawyer; the application does not determine them independently.
 - Paper remains in use during the transition, and its location is part of the matter's data.
-- Fees, judicial expenses, office expenses, and client money received for future spending are separate accounts.
+- Fees, matter expenses, and client money received for future spending remain separate. Office operating expenses (rent, internet, utilities and supplies) are outside V1 by owner decision; see docs/adr/0004-exclude-office-operating-expenses.md.
 - The current request assigns planning and review to Codex and implementation to Gemini 3.8 Flash, using the model name specified by the project owner. Model availability, operation, and file access have not been tested.
 
 ## Stack
