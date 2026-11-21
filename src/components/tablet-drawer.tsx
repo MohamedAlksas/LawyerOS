@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
 
@@ -14,6 +14,7 @@ interface TabletDrawerProps {
 export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const canLeavePage = useCanLeavePage();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -103,7 +104,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   if (!isOpen) return null;
 
   const handleLogout = async () => {
-    if (isLoggingOut) return;
+    if (isLoggingOut || !canLeavePage()) return;
     if (!window.confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
       return;
     }
@@ -182,7 +183,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/"
               data-testid="nav-link-home"
               aria-current={isHomeActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isHomeActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -197,7 +198,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/matters"
               data-testid="nav-link-matters"
               aria-current={isMattersActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isMattersActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -212,7 +213,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/parties"
               data-testid="nav-link-parties"
               aria-current={isPartiesActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isPartiesActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -227,7 +228,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/settings/security"
               data-testid="nav-link-security"
               aria-current={isSecurityActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isSecurityActive
                   ? 'bg-[#14566B] text-white shadow-xs'
@@ -242,7 +243,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/settings/reference"
               data-testid="nav-link-reference"
               aria-current={isReferenceActive ? 'page' : undefined}
-              onClick={onClose}
+              onNavigate={onClose}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
                 isReferenceActive
                   ? 'bg-[#14566B] text-white shadow-xs'

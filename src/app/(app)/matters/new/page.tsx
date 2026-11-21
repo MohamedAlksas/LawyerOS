@@ -13,7 +13,7 @@ export const metadata = {
 export default async function NewMatterPage() {
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {

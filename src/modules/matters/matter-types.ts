@@ -260,8 +260,21 @@ export interface SearchMattersParams {
   offset?: number;
 }
 
+export interface MatterListItemDTO {
+  id: string;
+  fileCode: string;
+  title: string;
+  kind: MatterKind;
+  status: MatterStatus;
+  practiceAreaName: string | null;
+  paperLocationName: string | null;
+  openingDate: string | null;
+  primaryClientName: string | null;
+  clientCount: number;
+}
+
 export interface SearchMattersResult {
-  matters: MatterDTO[];
+  matters: MatterListItemDTO[];
   total: number;
 }
 
@@ -273,15 +286,9 @@ export interface PartyMatterAssociationDTO {
   matterId: string;
   fileCode: string;
   title: string;
-  kind: MatterKind;
   status: MatterStatus;
   role: MatterPartyRole;
   isPrimaryContact: boolean;
-  billingEnabled: boolean;
-  notes?: string | null;
-  openingDate?: string | null;
-  closingDate?: string | null;
-  createdAt: string;
 }
 
 export interface PartyMatterAssociationsResult {

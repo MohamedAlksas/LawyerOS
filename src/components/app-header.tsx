@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from './navigation-guard';
 import { UserIdentityBadge } from './user-identity-badge';
 
 interface AppHeaderProps {

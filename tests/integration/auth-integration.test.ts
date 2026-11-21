@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { Pool } from 'pg';
 import fs from 'fs';
 import path from 'path';
+import { spawnSync } from 'node:child_process';
 import {
   provisionOwner,
   confirmOwnerProvisioning,
@@ -160,8 +161,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     getEnv(true);
     await clearGlobalSingletons();
 
-    // 2. Schema installation / migration check from T02
-    await applyAllTestMigrations(pool);
+    // Install the current schema, including the audit table used by Identity.
+    // Legacy-bootstrap fixtures further below still use the historical SQL.
+    const migration = spawnSync(process.execPath, ['node_modules/prisma/build/index.js', 'migrate', 'deploy'], {
+      env: { ...process.env, DATABASE_URL: dedicated.url },
+      encoding: 'utf8',
+    });
+    expect(migration.status, migration.stderr).toBe(0);
   }, 30000);
 
   afterAll(async () => {
@@ -2652,11 +2658,21 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const tfWhileLocked = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
     expect(tfWhileLocked?.backupCodes).toBe(initialCodes); // Strictly unchanged
 
-    // 5. Simulate lock expiry: reset lock
+    // An elapsed lock must start a fresh attempt window on the next request.
     await prisma.twoFactor.updateMany({
       where: { userId: provisionedOwner.userId },
-      data: { failedVerificationCount: 0, lockedUntil: null },
+      data: { failedVerificationCount: 5, lockedUntil: new Date(Date.now() - 1_000) },
     });
+    const expiredLockRequest = new NextRequest(generateUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: sessionCookieHeader, origin: testOrigin },
+      body: JSON.stringify({ password: 'Synthetic-Wrong-Password' }),
+    });
+    const expiredLockResponse = await authRoutePOST(expiredLockRequest);
+    expect(expiredLockResponse.status).toBe(400);
+    const renewed = await prisma.twoFactor.findFirstOrThrow({ where: { userId: provisionedOwner.userId } });
+    expect(renewed.failedVerificationCount).toBe(1);
+    expect(renewed.lockedUntil).toBeNull();
 
     // Valid authenticated request succeeds with 200 and issues 10 new codes
     const validReq = new NextRequest(generateUrl, {
@@ -2676,6 +2692,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     const tfAfterSuccess = await prisma.twoFactor.findFirst({ where: { userId: provisionedOwner.userId } });
     expect(tfAfterSuccess?.backupCodes).not.toBe(initialCodes); // Rotated
+    const event = await prisma.auditEvent.findFirstOrThrow({
+      where: { action: 'REGENERATE_RECOVERY_CODES', userId: provisionedOwner.userId },
+    });
+    expect(event.changedFields).toBeNull();
   });
 
   it('invalidates prior-password unfinished MFA challenges upon password rotation (F10)', async () => {

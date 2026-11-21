@@ -2555,20 +2555,22 @@ export async function searchMatters(
   const [matters, total] = await Promise.all([
     prisma.matter.findMany({
       where,
-      include: {
-        practiceArea: true,
-        paperLocation: true,
-        parties: { include: { party: true } },
-        proceedings: {
-          include: {
-            court: true,
-            parentProceeding: { include: { court: true } },
-            parties: { include: { matterParty: { include: { party: true } } }, orderBy: { createdAt: 'asc' } },
-          },
+      select: {
+        id: true,
+        fileCode: true,
+        title: true,
+        kind: true,
+        status: true,
+        openingDate: true,
+        practiceArea: { select: { name: true } },
+        paperLocation: { select: { name: true } },
+        parties: {
+          where: { role: 'CLIENT' },
+          orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          take: 1,
+          select: { party: { select: { name: true } } },
         },
-        authorizations: {
-          include: { powerOfAttorney: { include: { party: true } } },
-        },
+        _count: { select: { parties: { where: { role: 'CLIENT' } } } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: params.limit ?? 50,
@@ -2578,7 +2580,18 @@ export async function searchMatters(
   ]);
 
   return {
-    matters: matters.map(mapMatterToDTO),
+    matters: matters.map((matter) => ({
+      id: matter.id,
+      fileCode: matter.fileCode,
+      title: matter.title,
+      kind: matter.kind,
+      status: matter.status,
+      openingDate: matter.openingDate?.toISOString().slice(0, 10) ?? null,
+      practiceAreaName: matter.practiceArea?.name ?? null,
+      paperLocationName: matter.paperLocation?.name ?? null,
+      primaryClientName: matter.parties[0]?.party.name ?? null,
+      clientCount: matter._count.parties,
+    })),
     total,
   };
 }
@@ -2616,8 +2629,11 @@ export async function getPartyMatterAssociations(
   const [associations, total] = await Promise.all([
     prisma.matterParty.findMany({
       where,
-      include: {
-        matter: true,
+      select: {
+        id: true,
+        role: true,
+        isPrimaryContact: true,
+        matter: { select: { id: true, fileCode: true, title: true, status: true } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
@@ -2631,15 +2647,9 @@ export async function getPartyMatterAssociations(
     matterId: mp.matter.id,
     fileCode: mp.matter.fileCode,
     title: mp.matter.title,
-    kind: mp.matter.kind,
     status: mp.matter.status,
     role: mp.role,
     isPrimaryContact: mp.isPrimaryContact,
-    billingEnabled: mp.billingEnabled,
-    notes: mp.notes,
-    openingDate: mp.matter.openingDate ? mp.matter.openingDate.toISOString().slice(0, 10) : null,
-    closingDate: mp.matter.closingDate ? mp.matter.closingDate.toISOString().slice(0, 10) : null,
-    createdAt: mp.createdAt.toISOString(),
   }));
 
   return {

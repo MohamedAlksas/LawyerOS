@@ -179,10 +179,13 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
 
   let existingPartyId: string;
   let existingPoaId: string;
+  let unlinkedPoaId: string;
   let existingCourtId: string;
   let existingMatterId: string;
   let existingProcId: string;
   let existingMatterPartyId: string;
+  let otherMatterPartyId: string;
+  let serverOutput = '';
   let existingAuthId: string;
   let existingProcPartyId: string;
 
@@ -249,6 +252,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "createdById", "updatedById", "createdAt", "updatedAt")
           VALUES ($1, $2, '5544/ق', '2026', 'مكتب توثيق النزهة', 'GENERAL', 'VALID', $3, $3, now(), now())
         `, [existingPoaId, existingPartyId, ownerUserId]);
+        unlinkedPoaId = crypto.randomUUID();
+        await client.query(`
+          INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, $2, '5567/ق', '2026', 'مكتب توثيق النزهة', 'GENERAL', 'VALID', $3, $3, now(), now())
+        `, [unlinkedPoaId, existingPartyId, ownerUserId]);
 
         existingCourtId = crypto.randomUUID();
         await client.query(`
@@ -267,6 +275,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           INSERT INTO "matter_party" ("id", "matterId", "partyId", "role", "isPrimaryContact", "version", "createdById", "updatedById", "createdAt", "updatedAt")
           VALUES ($1, $2, $3, 'CLIENT', true, 1, $4, $4, now(), now())
         `, [existingMatterPartyId, existingMatterId, existingPartyId, ownerUserId]);
+        otherMatterPartyId = crypto.randomUUID();
+        await client.query(`
+          INSERT INTO "matter_party" ("id", "matterId", "partyId", "role", "isPrimaryContact", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+          VALUES ($1, $2, $3, 'OTHER', false, 1, $4, $4, now(), now())
+        `, [otherMatterPartyId, existingMatterId, existingPartyId, ownerUserId]);
 
         existingProcId = crypto.randomUUID();
         await client.query(`
@@ -355,10 +368,15 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
     expect(fs.existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const nodeEntries = manifest.node || {};
+    const exposedT06Actions = new Set<string>();
     for (const [id, meta] of Object.entries(nodeEntries)) {
-      const entry = meta as { exportedName?: string };
+      const entry = meta as { exportedName?: string; filename?: string };
       if (entry.exportedName) {
         actionIds[entry.exportedName] = id;
+        const filename = entry.filename?.replaceAll('\\', '/');
+        if (filename?.endsWith('/matter-actions.ts') || filename?.endsWith('/reference-actions.ts')) {
+          exposedT06Actions.add(entry.exportedName);
+        }
       }
     }
 
@@ -376,9 +394,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       'createReferenceItemAction',
       'updateReferenceItemAction',
       'updateOfficeSettingsAction',
+      'getOfficeSettingsAction',
       'getPartyMatterAssociationsAction',
       'findSimilarProceedingsAction',
     ];
+    expect([...exposedT06Actions].sort()).toEqual([...requiredActionNames].sort());
     for (const name of requiredActionNames) {
       expect(actionIds[name], `Missing actionId for ${name}`).toBeDefined();
     }
@@ -407,7 +427,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    let serverOutput = '';
+    serverOutput = '';
     let serverExitCode: number | null = null;
     serverChild.stdout?.on('data', (d) => { serverOutput += d.toString(); });
     serverChild.stderr?.on('data', (d) => { serverOutput += d.toString(); });
@@ -766,7 +786,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         args: [{
           matterId: existingMatterId,
           partyId: existingPartyId,
-          role: 'CLIENT',
+          role: 'OPPONENT',
           idempotencyKey: `unauth-lmp-${crypto.randomUUID()}`,
         }],
       },
@@ -783,7 +803,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       {
         name: 'unlinkMatterPartyAction',
         args: [{
-          id: existingMatterPartyId,
+          id: otherMatterPartyId,
           matterId: existingMatterId,
           expectedVersion: 1,
           idempotencyKey: `unauth-unmp-${crypto.randomUUID()}`,
@@ -816,7 +836,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         name: 'linkMatterAuthorizationAction',
         args: [{
           matterId: existingMatterId,
-          powerOfAttorneyId: existingPoaId,
+          powerOfAttorneyId: unlinkedPoaId,
           idempotencyKey: `unauth-lma-${crypto.randomUUID()}`,
         }],
       },
@@ -857,6 +877,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         }],
       },
       // 7. Direct Reads & Queries
+      { name: 'getOfficeSettingsAction', args: [] },
       {
         name: 'getPartyMatterAssociationsAction',
         args: [{
@@ -878,7 +899,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(actionIds[item.name]).toBeDefined();
     }
     const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
-    expect(exposed.length).toBe(15);
+    expect(exposed.length).toBe(16);
     expect(exposed.length).toBe(candidates.length);
     return exposed;
   }
@@ -1014,6 +1035,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       const before = await takeDbSnapshot();
 
       for (const badOrigin of untrustedOrigins) {
+        const outputStart = serverOutput.length;
         const res = await postServerAction(
           'openMatterAction',
           [{
@@ -1034,17 +1056,9 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
           expect(res.body).toContain('"success":false');
           expect(res.body).toContain('FORBIDDEN');
         } else {
-          // Next.js framework Server Action CSRF protection surfaces mismatched Origin as 500 (with Flight error digest) or 403/400
-          expect([400, 403, 500]).toContain(res.status);
-          const isConfirmedRejection =
-            res.status === 403 ||
-            res.status === 400 ||
-            (res.status === 500 && (res.body.includes('digest') || res.body.includes('E{'))) ||
-            res.body.includes('Invalid Server Action request') ||
-            res.body.includes('CSRF') ||
-            res.body.includes('FORBIDDEN') ||
-            res.body.includes('Failed to find Server Action');
-          expect(isConfirmedRejection).toBe(true);
+          expect([400, 500]).toContain(res.status);
+          await expect.poll(() => serverOutput.slice(outputStart))
+            .toMatch(/does not match `origin` header[^\n]+Aborting the action/);
         }
       }
 
@@ -1096,7 +1110,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
   });
 
   describe('8. Verified Owner Success Transport', () => {
-    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 15 actions', async () => {
+    it('executes genuine target Server Actions successfully over HTTP with verified owner session across all 16 actions', async () => {
       // 1. Create Reference Item (Court)
       const courtKey = `owner-http-court-${crypto.randomUUID()}`;
       const courtRes = await postServerAction('createReferenceItemAction', [{
@@ -1167,6 +1181,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(setRes.status).toBe(200);
       expect(setRes.body).toContain('"success":true');
       expect(setRes.body).toContain('مكتب المحاماة الرئيسي المتكامل');
+
+      const settingsRead = await postServerAction('getOfficeSettingsAction', [], { cookie: verifiedSessionCookie });
+      expect(settingsRead.status).toBe(200);
+      expect(settingsRead.body).toContain('"success":true');
+      expect(settingsRead.body).toContain('مكتب المحاماة الرئيسي المتكامل');
 
       // 6. Add Proceeding
       const procKey = `owner-http-proc-${crypto.randomUUID()}`;

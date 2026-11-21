@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireActor } from '@/modules/identity/require-actor';
 import { regenerateRecoveryCodes } from '@/modules/identity/recovery-codes';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { recordAuditEvent } from '@/lib/audit';
 import { randomUUID } from 'crypto';
 import {
   getUserCredentialVersion,
@@ -11,8 +12,20 @@ import {
   isSessionCredentialVersionMismatched,
 } from '@/modules/identity/credential-version';
 
-const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
+import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from '@/modules/identity/session-limits';
+
+async function auditSignInMfa(userId: string, accepted: boolean) {
+  try {
+    await recordAuditEvent(getPrismaClient(), {
+      userId,
+      action: accepted ? 'VERIFY_SIGN_IN_MFA' : 'REJECT_SIGN_IN_MFA',
+      entityType: 'User',
+      entityId: userId,
+    });
+  } catch {
+    console.error('[Identity Audit] Failed to persist MFA outcome');
+  }
+}
 
 function extractRawTokens(cookiePart: string): {
   rawToken: string;
@@ -286,10 +299,20 @@ export async function POST(request: NextRequest) {
   // Fail closed immediately with HTTP 500 if database query throws.
   let signInUserCredentialVersion: number | null = null;
   if (pathname.includes('/sign-in/email')) {
-    const body = await request.clone().json().catch(() => ({}));
-    if (body.email && typeof body.email === 'string') {
+    const contentType = request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    let email: unknown;
+    if (contentType === 'application/x-www-form-urlencoded') {
+      const emailFields = await request.clone().formData().then((body) => body.getAll('email')).catch(() => []);
+      if (emailFields.length > 1) {
+        return NextResponse.json({ error: 'أدخل عنوان بريد إلكتروني واحداً.' }, { status: 400 });
+      }
+      email = emailFields[0];
+    } else {
+      email = (await request.clone().json().catch(() => null))?.email;
+    }
+    if (typeof email === 'string' && email) {
       try {
-        signInUserCredentialVersion = await getUserCredentialVersionByEmail(body.email);
+        signInUserCredentialVersion = await getUserCredentialVersionByEmail(email);
       } catch {
         return NextResponse.json(
           { error: 'فشل في قراءة حالة أمان الحساب. يرجى إعادة المحاولة.' },
@@ -359,6 +382,7 @@ export async function POST(request: NextRequest) {
               );
               errRes.cookies.delete('better-auth.two_factor');
               errRes.cookies.delete('__Secure-better-auth.two_factor');
+              await auditSignInMfa(targetUserId, false);
               return errRes;
             }
 
@@ -588,6 +612,7 @@ export async function POST(request: NextRequest) {
             errRes.cookies.delete('__Secure-better-auth.session_token');
             errRes.cookies.delete('better-auth.two_factor');
             errRes.cookies.delete('__Secure-better-auth.two_factor');
+            await auditSignInMfa(uid, false);
             return errRes;
           }
 
@@ -621,6 +646,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (targetUserId && /(verify-totp|verify-backup-code)$/.test(pathname)) {
+    await auditSignInMfa(targetUserId, response.ok);
+  }
   return response;
 }
 

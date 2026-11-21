@@ -335,7 +335,7 @@ export const savePowerOfAttorneySchema = z
       .transform((val) => (val === '' ? null : val))
       .nullable()
       .optional(),
-    humanReviewStatus: poaReviewStatusSchema.optional().default('UNREVIEWED'),
+    humanReviewStatus: poaReviewStatusSchema.optional(),
     notes: z
       .string()
       .trim()
@@ -368,7 +368,10 @@ export const savePowerOfAttorneySchema = z
         });
       }
     }
-  });
+  })
+  .transform((data) => data.id || data.humanReviewStatus !== undefined
+    ? data
+    : { ...data, humanReviewStatus: 'UNREVIEWED' as const });
 
 /**
  * Validates input against a schema and throws a structured ValidationError with Arabic messages.

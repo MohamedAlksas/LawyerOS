@@ -38,6 +38,70 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     }
   });
 
+  test('retries the requested linked-matter page and recovers from an empty offset @desktop', async ({
+    page,
+  }) => {
+    const party = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: 'طرف تجريبي لاختبار الصفحات',
+        nameNormalized: 'طرف تجريبي لاختبار الصفحات',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(party.id);
+
+    const matters = Array.from({ length: 51 }, (_, index) => ({
+      id: crypto.randomUUID(),
+      fileCode: `TEST-PAGE-${party.id}-${index}`,
+      title: `ملف تجريبي ${index}`,
+      kind: 'CONSULTATION' as const,
+      createdById: owner.id,
+      updatedById: owner.id,
+    }));
+    await prisma.$transaction([
+      prisma.matter.createMany({ data: matters }),
+      prisma.matterParty.createMany({
+        data: matters.map((matter, index) => ({
+          matterId: matter.id,
+          partyId: party.id,
+          role: 'CLIENT',
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)),
+          createdById: owner.id,
+          updatedById: owner.id,
+        })),
+      }),
+    ]);
+    createdMatterIds.push(...matters.map((matter) => matter.id));
+
+    await signInWithTotp(page, owner);
+    await page.goto(`/parties/${party.id}`);
+    const count = page.getByTestId('party-matters-count');
+    const next = page.getByTestId('party-matters-next');
+    const prev = page.getByTestId('party-matters-prev');
+    await expect(count).toContainText('عرض 50 من 51');
+
+    const profileUrl = `**/parties/${party.id}`;
+    await page.route(profileUrl, (route) => (
+      route.request().method() === 'POST' ? route.abort('failed') : route.continue()
+    ));
+    await next.click();
+    const error = page.getByTestId('party-matters-error-banner');
+    await expect(error).toBeVisible();
+    await page.unroute(profileUrl);
+    await error.getByRole('button', { name: 'إعادة المحاولة' }).click();
+    await expect(count).toContainText('عرض 1 من 51');
+    await expect(page.getByTestId(`linked-matter-${matters[0].id}`)).toBeVisible();
+
+    await prev.click();
+    await expect(count).toContainText('عرض 50 من 51');
+    await prisma.matterParty.deleteMany({ where: { partyId: party.id, matterId: matters[0].id } });
+    await next.click();
+    await expect(count).toContainText('عرض 50 من 50');
+    await expect(next).toBeDisabled();
+  });
+
   test('validates required fields and enforces in-memory form retention @matters', async ({
     page,
   }) => {
@@ -60,6 +124,29 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
 
     // Ensure memory retention
     await expect(page.getByTestId('matter-summary-textarea')).toHaveValue(testSummary);
+  });
+
+  test('keeps a dirty matter draft when shell navigation is cancelled @matters', async ({ page }) => {
+    await signInWithTotp(page, owner);
+    await page.goto('/matters/new');
+    const summary = page.getByTestId('matter-summary-textarea');
+    await summary.fill('مسودة اختبارية غير محفوظة');
+    const home = page.getByTestId('nav-link-home').filter({ visible: true });
+    const viewport = page.viewportSize();
+    if (viewport && viewport.width >= 640 && viewport.width < 1024) {
+      await page.getByTestId('drawer-toggle-button').click();
+    }
+    const confirmation = page.waitForEvent('dialog').then(async (dialog) => {
+      expect(dialog.type()).toBe('confirm');
+      await dialog.dismiss();
+    });
+    await home.click();
+    await confirmation;
+    await expect(page).toHaveURL(/\/matters\/new$/);
+    if (viewport && viewport.width >= 640 && viewport.width < 1024) {
+      await page.getByTestId('drawer-close-button').click();
+    }
+    await expect(summary).toHaveValue('مسودة اختبارية غير محفوظة');
   });
 
   test('enforces last client invariant on active matter @matters', async ({
@@ -711,6 +798,10 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     expect(preRetryAuditUnlinkB).toBe(1);
 
     const preRetryMatter = await prisma.matter.findUniqueOrThrow({ where: { id: matter.id } });
+    const preRetryClaim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { actorId: owner.id, commandType: 'unlinkMatterParty', resultId: mpB.id },
+    });
+    expect(preRetryClaim.status).toBe('COMPLETED');
 
     // Verify Party A controls are DISABLED while Party B operation is pending/unsettled
     const toggleBtnA = page.getByTestId(`toggle-primary-${mpA.id}`);
@@ -759,6 +850,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
 
     const postRetryMatter = await prisma.matter.findUniqueOrThrow({ where: { id: matter.id } });
     expect(postRetryMatter.version).toBe(preRetryMatter.version);
+    expect(await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: preRetryClaim.id } }))
+      .toEqual(preRetryClaim);
   });
 
   test('invalidates proceeding similarity confirmation immediately on docket change (U7) @matters', async ({
@@ -1073,15 +1166,13 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
   }) => {
     test.setTimeout(120_000);
     const tabA = page;
+    await signInWithTotp(tabA, owner);
+    await tabA.goto('/settings/reference');
+    await expect(tabA.getByTestId('office-name-input')).toBeVisible();
+    const originalOffice = await prisma.officeSettings.findFirstOrThrow();
     const tabB = await page.context().newPage();
 
-    // 1. Snapshot original office singleton for guaranteed cleanup
-    const originalOffice = await prisma.officeSettings.findFirstOrThrow();
-
     try {
-      await signInWithTotp(tabA, owner);
-      await tabA.goto('/settings/reference');
-      await expect(tabA.getByTestId('office-name-input')).toBeVisible();
 
       await tabB.goto('/settings/reference');
       await expect(tabB.getByTestId('office-phone-input')).toBeVisible();
@@ -1168,12 +1259,12 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     page,
   }) => {
     test.setTimeout(120_000);
+    await signInWithTotp(page, owner);
+    await page.goto('/settings/reference');
+    await expect(page.getByTestId('office-name-input')).toBeVisible();
     const originalOffice = await prisma.officeSettings.findFirstOrThrow();
 
     try {
-      await signInWithTotp(page, owner);
-      await page.goto('/settings/reference');
-      await expect(page.getByTestId('office-name-input')).toBeVisible();
 
       // Edit phone number to make form dirty
       const newPhone = '01299998888';
@@ -1294,9 +1385,6 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.getByTestId('proceeding-year-input').fill('2026');
     await page.getByTestId('proceeding-number-input').fill(uniqueNumber);
 
-    // Wait for debounced similarity check to finish so route interception only catches form submission
-    await page.waitForTimeout(500);
-
     let interceptedOnce = false;
     await page.route(`**/matters/${matter.id}/proceedings**`, async (route) => {
       const postData = route.request().postData() || '';
@@ -1330,10 +1418,10 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     });
     expect(preRetryAudit).toHaveLength(1);
 
-    const preRetryIdempCount = await prisma.idempotencyRecord.count({
-      where: { commandType: 'addProceeding' },
+    const preRetryClaim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { actorId: owner.id, commandType: 'addProceeding', resultId: preRetryProcs[0].id },
     });
-    expect(preRetryIdempCount).toBeGreaterThan(0);
+    expect(preRetryClaim.status).toBe('COMPLETED');
 
     await page.unroute(`**/matters/${matter.id}/proceedings**`);
 
@@ -1350,6 +1438,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     expect(matchingProcs).toHaveLength(1);
     expect(matchingProcs[0].id).toBe(preRetryProcs[0].id);
     expect(matchingProcs[0].version).toBe(preRetryProcs[0].version);
+    expect(await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: preRetryClaim.id } }))
+      .toEqual(preRetryClaim);
 
     const auditEvents = await prisma.auditEvent.findMany({
       where: {
@@ -1412,6 +1502,10 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
       },
     });
     expect(preRetryAuditCount).toBe(1);
+    const preRetryClaim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { actorId: owner.id, commandType: 'updateReferenceItem:COURT', resultId: court.id },
+    });
+    expect(preRetryClaim.status).toBe('COMPLETED');
 
     await page.unroute('**/settings/reference**');
 
@@ -1425,6 +1519,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     const reloadedCourt = await prisma.court.findUniqueOrThrow({ where: { id: court.id } });
     expect(reloadedCourt.isActive).toBe(false);
     expect(reloadedCourt.version).toBe(preRetryCourt.version);
+    expect(await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: preRetryClaim.id } }))
+      .toEqual(preRetryClaim);
 
     const auditCount = await prisma.auditEvent.count({
       where: {

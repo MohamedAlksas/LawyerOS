@@ -126,7 +126,7 @@ describe('T05-05: Transaction Atomicity & Redacted Audit Logging (Integration)',
     const identityChange = changes.identity as { identificationType: string; lastFour: string };
     expect(identityChange).toBeDefined();
     expect(identityChange.identificationType).toBe('NATIONAL_ID');
-    expect(identityChange.lastFour).toBe('4567');
+    expect(identityChange).not.toHaveProperty('lastFour');
   });
 });
 

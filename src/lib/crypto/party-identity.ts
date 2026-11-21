@@ -139,7 +139,8 @@ export function encryptPartyIdentity(params: EncryptIdentityParams): EncryptedId
 
   // Extract last 4 characters for display masking
   const trimmed = plaintext.trim();
-  const lastFour = trimmed.length >= 4 ? trimmed.slice(-4) : trimmed;
+  const characters = Array.from(trimmed);
+  const lastFour = characters.length > 4 ? characters.slice(-4).join('') : '';
 
   return {
     ciphertext: ciphertextBuf.toString('base64'),
@@ -219,6 +220,13 @@ export function decryptPartyIdentity(params: DecryptIdentityParams): string {
 /**
  * Formats display mask string (e.g. "****1234").
  */
+// Older envelopes could store the whole value as their suffix. GCM preserves the
+// plaintext byte length, so a suffix is safe only when some bytes are omitted.
+export function getIdentityMaskSuffix(envelope: { ciphertext: string; lastFour: string }): string {
+  const ciphertextBytes = Buffer.from(envelope.ciphertext, 'base64').length;
+  return ciphertextBytes > Buffer.byteLength(envelope.lastFour, 'utf8') ? envelope.lastFour : '';
+}
+
 export function formatMaskedIdentity(lastFour: string): string {
   return `****${lastFour}`;
 }

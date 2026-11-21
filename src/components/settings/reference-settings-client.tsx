@@ -333,7 +333,7 @@ export function ReferenceSettingsClient({
           setOfficePending(false);
           setOfficeConflictPending(true);
           setOfficeError(
-            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك محفوظة؛ يمكنك استعراض وتحديث بأحدث بيانات من الخادم واعتمادها أو بدء تعديل جديد.'
+            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك محفوظة؛ يمكنك استعراض وتحديث بأحدث بيانات من الخادم واعتمادها ثم اعتمادها قبل إعادة التعديل.'
           );
         } else if (
           !res.code ||
@@ -927,7 +927,7 @@ export function ReferenceSettingsClient({
                 <span>تعارض في التعديل المتزامن: بيانات أحدث موجودة على الخادم</span>
               </div>
               <p className="leading-relaxed">
-                تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك المحلية محفوظة؛ يمكنك استعراض بيانات الخادم واعتمادها أو بدء تعديل جديد.
+                تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك المحلية محفوظة. استعرض بيانات الخادم ثم اعتمدها لبدء تعديل من النسخة الحالية.
               </p>
               {reconcilePreview ? (
                 <div data-testid="office-reconcile-preview" className="p-3 bg-white border border-amber-200 rounded-[6px] space-y-2">
@@ -937,6 +937,8 @@ export function ReferenceSettingsClient({
                     <div><span className="font-medium">الهاتف:</span> {reconcilePreview.phone || '—'}</div>
                     <div><span className="font-medium">العنوان:</span> {reconcilePreview.address || '—'}</div>
                     <div><span className="font-medium">المحامي:</span> {reconcilePreview.lawyerName || '—'}</div>
+                    <div><span className="font-medium">البريد الإلكتروني:</span> {reconcilePreview.email || '—'}</div>
+                    <div><span className="font-medium">الرقم الضريبي:</span> {reconcilePreview.taxNumber || '—'}</div>
                   </div>
                   <div className="flex items-center gap-2 pt-2">
                     <button
@@ -969,15 +971,6 @@ export function ReferenceSettingsClient({
                     className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
                   >
                     {isReconcilingOffice ? 'جارٍ جلب بيانات الخادم...' : 'استعراض وتحديث بأحدث بيانات من الخادم'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleStartNewOfficeEdit}
-                    disabled={isSavingOffice || isReconcilingOffice}
-                    data-testid="office-operation-start-new-button"
-                    className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
-                  >
-                    بدء تعديل جديد
                   </button>
                 </div>
               )}
@@ -1037,7 +1030,7 @@ export function ReferenceSettingsClient({
             onChange={() => setOfficeDirty(true)}
             className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4"
           >
-            <fieldset disabled={officePending} className="space-y-4 border-0 p-0 m-0 min-w-0">
+            <fieldset disabled={officePending || isSavingOffice || isReconcilingOffice || !!reconcilePreview} className="space-y-4 border-0 p-0 m-0 min-w-0">
               <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
                 الملف التعريفي للمكتب
               </h2>

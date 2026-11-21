@@ -19,9 +19,6 @@ export class IdempotencyConcurrentConflictError extends Error {
  * Checks whether an error is a Prisma unique constraint violation (P2002) on IdempotencyRecord.
  */
 export function isIdempotencyUniqueConflict(error: unknown): boolean {
-  if (error instanceof IdempotencyConcurrentConflictError) {
-    return true;
-  }
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     const meta = error.meta as { target?: string[] | string; modelName?: string } | undefined;
     if (meta?.modelName === 'IdempotencyRecord') {
@@ -77,6 +74,24 @@ export interface ClaimIdempotencyParams {
   commandType: string;
   key: string;
   payload: unknown;
+  privateHashSecret?: string;
+  legacyPayload?: unknown;
+  digestVersion?: 'poa-v2';
+}
+
+function commandPayloadHashes(params: ClaimIdempotencyParams) {
+  const { actorId, commandType, key, payload, privateHashSecret, legacyPayload, digestVersion } = params;
+  const currentHash = computePayloadHash(payload);
+  const legacyHash = legacyPayload === undefined ? currentHash : computePayloadHash(legacyPayload);
+  if (!privateHashSecret) {
+    return { legacyHash, payloadHash: digestVersion ? `${digestVersion}:${currentHash}` : currentHash };
+  }
+
+  const digest = crypto.createHmac('sha256', privateHashSecret)
+    .update('lawoffice/idempotency/v1\0')
+    .update(canonicalizeJson([actorId, commandType, key, currentHash]))
+    .digest('hex');
+  return { legacyHash, payloadHash: `hmac-v1:${digest}` };
 }
 
 export type ClaimIdempotencyResult =
@@ -101,8 +116,8 @@ export async function claimIdempotencyKey(
   tx: Prisma.TransactionClient,
   params: ClaimIdempotencyParams
 ): Promise<ClaimIdempotencyResult> {
-  const { actorId, commandType, key, payload } = params;
-  const payloadHash = computePayloadHash(payload);
+  const { actorId, commandType, key } = params;
+  const { legacyHash, payloadHash } = commandPayloadHashes(params);
 
   const existing = await tx.idempotencyRecord.findUnique({
     where: {
@@ -115,11 +130,17 @@ export async function claimIdempotencyKey(
   });
 
   if (existing) {
-    if (existing.payloadHash !== payloadHash) {
+    if (existing.payloadHash !== payloadHash && existing.payloadHash !== legacyHash) {
       throw new IdempotencyPayloadMismatchError();
     }
 
     if (existing.status === 'COMPLETED') {
+      if (params.privateHashSecret && existing.payloadHash !== payloadHash) {
+        await tx.idempotencyRecord.updateMany({
+          where: { id: existing.id, payloadHash: legacyHash },
+          data: { payloadHash },
+        });
+      }
       return {
         isReplay: true,
         payloadHash,
@@ -213,8 +234,8 @@ export async function resolveConcurrentIdempotency(
   params: ClaimIdempotencyParams,
   options: ResolveConcurrentOptions = {}
 ): Promise<ClaimReplayResult | null> {
-  const { actorId, commandType, key, payload } = params;
-  const payloadHash = computePayloadHash(payload);
+  const { actorId, commandType, key } = params;
+  const { legacyHash, payloadHash } = commandPayloadHashes(params);
   const maxRetries = options.maxRetries ?? 8;
   const retryDelayMs = options.retryDelayMs ?? 100;
 
@@ -234,7 +255,7 @@ export async function resolveConcurrentIdempotency(
       return null;
     }
 
-    if (existing.payloadHash !== payloadHash) {
+    if (existing.payloadHash !== payloadHash && existing.payloadHash !== legacyHash) {
       throw new IdempotencyPayloadMismatchError();
     }
 

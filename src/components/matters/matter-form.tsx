@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useState, useEffect, useId, useRef } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import { openMatterAction, updateMatterAction } from '@/modules/matters/matter-actions';
 import { searchPartiesAction } from '@/modules/parties/actions';
@@ -291,21 +291,13 @@ export function MatterForm({
     setIsDirty(true);
   };
 
-  useEffect(() => {
-    if (!isDirty || isSaving) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isDirty, isSaving]);
+  useLeaveGuard(isDirty, isSaving || operationPending);
 
-  const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if ((isDirty || operationPending) && !window.confirm('لديك تغييرات غير محفوظة أو عملية قيد الانتظار. هل تريد المغادرة وفقدانها؟')) {
-      event.preventDefault();
-    }
-  };
+  useEffect(() => {
+    if (Object.keys(fieldErrors).length === 0) return;
+    const form = document.getElementById(formDomId);
+    (form?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? form?.querySelector<HTMLElement>('[role="alert"]'))?.focus();
+  }, [fieldErrors, formDomId]);
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -336,13 +328,13 @@ export function MatterForm({
       <div className="pb-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1">
-            <Link href="/matters" onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
+            <Link href="/matters" className="hover:text-[#14566B] hover:underline">
               ملفات القضايا
             </Link>
             <span aria-hidden="true" className="mx-1.5">/</span>
             <span>{isEdit ? 'تعديل الملف' : 'فتح ملف جديد'}</span>
           </nav>
-          <h1 className="text-2xl font-bold text-[#172A35]">
+          <h1 className="text-2xl font-bold text-[#172A35] [overflow-wrap:anywhere]">
             {isEdit ? `تعديل الملف: ${initialMatter?.title}` : 'فتح ملف قضية جديد'}
           </h1>
         </div>
@@ -476,7 +468,7 @@ export function MatterForm({
         onChange={() => setIsDirty(true)}
         className="space-y-6"
       >
-        <fieldset disabled={operationPending} className="space-y-6 border-0 p-0 m-0 min-w-0">
+        <fieldset disabled={operationPending || isSaving} className="space-y-6 border-0 p-0 m-0 min-w-0">
         {/* Section 1: Basic Information */}
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4">
           <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
@@ -573,8 +565,11 @@ export function MatterForm({
                 value={openingDate}
                 onChange={(e) => setOpeningDate(e.target.value)}
                 data-testid="matter-opening-date-input"
+                aria-invalid={Boolean(fieldErrors.openingDate)}
+                aria-describedby={fieldErrors.openingDate ? `${formId}-openingDate-error` : undefined}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {fieldErrors.openingDate && <p id={`${formId}-openingDate-error`} className="text-xs text-red-700">{fieldErrors.openingDate}</p>}
             </div>
 
             {/* Status (Edit mode only - C14: excludes ARCHIVED in T06) */}
@@ -611,8 +606,11 @@ export function MatterForm({
                 value={closingDate}
                 onChange={(e) => setClosingDate(e.target.value)}
                 data-testid="matter-closing-date-input"
+                aria-invalid={Boolean(fieldErrors.closingDate)}
+                aria-describedby={fieldErrors.closingDate ? `${formId}-closingDate-error` : undefined}
                 className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
+              {fieldErrors.closingDate && <p id={`${formId}-closingDate-error`} className="text-xs text-red-700">{fieldErrors.closingDate}</p>}
             </div>
           )}
         </div>
@@ -832,7 +830,6 @@ export function MatterForm({
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <Link
             href={isEdit && initialMatter ? `/matters/${initialMatter.id}` : '/matters'}
-            onClick={handleCancelNavigation}
             className="w-full sm:w-auto px-5 py-2.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] text-center min-h-[44px] flex items-center justify-center transition-colors"
           >
             إلغاء والعودة

@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { searchMattersAction } from '@/modules/matters/matter-actions';
-import { MatterDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
+import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
 import {
   MATTER_KIND_LABELS,
   MATTER_STATUS_LABELS,
@@ -17,7 +17,7 @@ import {
 } from '@/components/presentation-state';
 
 interface MatterListClientProps {
-  initialMatters?: MatterDTO[];
+  initialMatters?: MatterListItemDTO[];
   initialTotal?: number;
   initialQuery?: string;
   initialKind?: MatterKind;
@@ -36,7 +36,7 @@ export function MatterListClient({
   const [query, setQuery] = useState(initialQuery);
   const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
   const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(initialStatus);
-  const [matters, setMatters] = useState<MatterDTO[]>(initialMatters);
+  const [matters, setMatters] = useState<MatterListItemDTO[]>(initialMatters);
   const [totalCount, setTotalCount] = useState<number>(initialTotal);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialError || null);
@@ -310,10 +310,8 @@ export function MatterListClient({
                 </thead>
                 <tbody className="divide-y divide-[#E8EEF1]">
                   {matters.map((matter) => {
-                    const primaryClient = matter.parties?.find(
-                      (p) => p.role === 'CLIENT' && p.isPrimaryContact
-                    ) || matter.parties?.find((p) => p.role === 'CLIENT');
-                    const otherClientCount = (matter.parties?.filter((p) => p.role === 'CLIENT').length || 0) - (primaryClient ? 1 : 0);
+                    const primaryClient = matter.primaryClientName;
+                    const otherClientCount = Math.max(0, matter.clientCount - 1);
 
                     return (
                       <tr
@@ -350,7 +348,7 @@ export function MatterListClient({
                           {primaryClient ? (
                             <div className="flex items-center gap-1.5">
                               <span className="font-semibold text-[#172A35]">
-                                {primaryClient.partyName}
+                                {primaryClient}
                               </span>
                               {otherClientCount > 0 && (
                                 <span className="text-[10px] bg-slate-100 text-[#4D606A] px-1.5 py-0.5 rounded border border-slate-200">
@@ -404,9 +402,7 @@ export function MatterListClient({
           {/* Mobile Card View */}
           <div className="md:hidden space-y-3">
             {matters.map((matter) => {
-              const primaryClient = matter.parties?.find(
-                (p) => p.role === 'CLIENT' && p.isPrimaryContact
-              ) || matter.parties?.find((p) => p.role === 'CLIENT');
+              const primaryClient = matter.primaryClientName;
 
               return (
                 <div
@@ -415,14 +411,14 @@ export function MatterListClient({
                   className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-3"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-1">
+                    <div className="min-w-0 space-y-1">
                       <bdi dir="ltr" className="font-mono text-xs text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200 inline-block font-bold">
                         {matter.fileCode}
                       </bdi>
-                      <h2 className="text-base font-bold text-[#172A35] leading-snug">
+                      <h2 className="text-base font-bold text-[#172A35] leading-snug break-words">
                         <Link
                           href={`/matters/${matter.id}`}
-                          className="hover:text-[#14566B] focus:outline-none"
+                          className="hover:text-[#14566B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#14566B]"
                         >
                           {matter.title}
                         </Link>
@@ -441,7 +437,7 @@ export function MatterListClient({
                     <div className="flex justify-between items-center">
                       <span className="font-medium">الموكل:</span>
                       <span className="font-semibold text-[#172A35]">
-                        {primaryClient ? primaryClient.partyName : '— (مسودة)'}
+                        {primaryClient ? primaryClient : '— (مسودة)'}
                       </span>
                     </div>
 

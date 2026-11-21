@@ -255,7 +255,7 @@ model IdempotencyRecord {
   actorId            String
   commandType        String            // e.g. "saveParty", "savePowerOfAttorney"
   key                String
-  payloadHash        String            // SHA-256 of canonical normalized payload
+  payloadHash        String            // Scoped payload digest with a version prefix when keyed
   status             IdempotencyStatus @default(IN_PROGRESS)
   resultType         String?
   resultId           String?

@@ -808,7 +808,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             </bdi>
           </nav>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
+            <h1 className="min-w-0 max-w-full text-2xl font-bold text-[#172A35] tracking-tight [overflow-wrap:anywhere]">
               {matter.title}
             </h1>
             <span

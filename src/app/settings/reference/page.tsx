@@ -15,7 +15,7 @@ export const metadata = {
 export default async function ReferenceSettingsPage() {
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {

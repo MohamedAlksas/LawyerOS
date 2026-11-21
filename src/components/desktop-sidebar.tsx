@@ -1,18 +1,19 @@
 ﻿'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname, useRouter } from 'next/navigation';
 import { signOut } from '@/lib/auth-client';
 
 export function DesktopSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const canLeavePage = useCanLeavePage();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const handleLogout = async () => {
-    if (isLoggingOut) return;
+    if (isLoggingOut || !canLeavePage()) return;
     if (!window.confirm('هل ترغب في تسجيل الخروج من هذا الجهاز؟')) {
       return;
     }

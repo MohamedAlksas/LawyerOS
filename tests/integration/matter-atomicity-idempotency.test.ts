@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest
 import crypto from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
+import { getCairoYear } from '@/modules/matters/file-code-allocator';
 import * as auditModule from '@/lib/audit';
 import {
   openMatter,
@@ -61,7 +62,7 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
     const testTitle = 'ملف اختبار إخفاق التدقيق الذري المتعمد';
 
     // 0. Pre-failure allocator state inspection (Codex T06-02 / T06-11 requirement)
-    const cairoYear = new Date().getFullYear();
+    const cairoYear = getCairoYear();
     const preSeqRow = await prisma.$queryRaw<{ nextVal: number }[]>`
       SELECT "nextVal" FROM file_code_sequence WHERE year = ${cairoYear}
     `;
@@ -109,10 +110,8 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
     createdMatterIds.push(retryRes.matter.id);
 
     // Verify allocated code matches expected nextVal without sequence gaps
-    if (preNextVal !== null) {
-      const expectedCode = `${cairoYear}/${String(preNextVal).padStart(4, '0')}`;
-      expect(retryRes.matter.fileCode).toBe(expectedCode);
-    }
+    const expectedCode = `${cairoYear}/${String(preNextVal ?? 1).padStart(4, '0')}`;
+    expect(retryRes.matter.fileCode).toBe(expectedCode);
 
     // 4. Verify audit event exists and contains required actor and sanitized payload
     const audits = await prisma.auditEvent.findMany({
@@ -574,6 +573,8 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
     const m1 = await openMatter(owner, {
       title: 'دعوى تعويض عن أضرار حادث سيارة',
       kind: 'LITIGATION',
+      notes: 'PRIVATE_SYNTHETIC_MATTER_NOTE',
+      summary: 'PRIVATE_SYNTHETIC_MATTER_SUMMARY',
       idempotencyKey: `search-m1-${crypto.randomUUID()}`,
     });
     createdMatterIds.push(m1.matter.id);
@@ -589,6 +590,9 @@ describe('T06-11, T06-12, T06-13 & T06-14: Atomicity, Idempotency & Authorizatio
     const searchRes = await searchMatters({ query: 'تعويض' }, owner);
     expect(searchRes.matters.some((m) => m.id === m1.matter.id)).toBe(true);
     expect(searchRes.matters.some((m) => m.id === m2.matter.id)).toBe(false);
+    expect(JSON.stringify(searchRes)).not.toContain('PRIVATE_SYNTHETIC_MATTER');
+    const detail = await getMatter(m1.matter.id, owner);
+    expect(detail.notes).toBe('PRIVATE_SYNTHETIC_MATTER_NOTE');
 
     // Search by exact fileCode
     const codeSearch = await searchMatters({ query: m2.fileCode }, owner);

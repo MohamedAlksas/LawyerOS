@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
+import { computePayloadHash } from '@/lib/idempotency';
 import {
   saveParty,
   getClientProfile,
@@ -88,6 +89,33 @@ describe('T05-07: Party Identity Storage, Masking & Audited Reveal (Integration)
     // DTO serialization does not contain full plaintext passport
     const profileJson = JSON.stringify(profile);
     expect(profileJson).not.toContain(rawPassport);
+  });
+
+  it('suppresses complete short identifiers in stored masks and redacts reveal audit data', async () => {
+    const number = 'Z9L2';
+    const input = {
+      kind: 'PERSON' as const,
+      name: 'صاحب وثيقة اختبارية',
+      identity: { identificationType: 'PASSPORT' as const, number },
+      idempotencyKey: `short-identity-${crypto.randomUUID()}`,
+    };
+    const result = await saveParty(actor, input);
+    partyIds.push(result.party.id);
+    const identity = await prisma.partyIdentity.findFirstOrThrow({ where: { partyId: result.party.id } });
+    expect(identity.lastFour).toBe('');
+    expect(result.party.identityMask?.lastFour).toBe('');
+    // Legacy records can contain the entire identifier in their display suffix.
+    await prisma.partyIdentity.update({ where: { id: identity.id }, data: { lastFour: number } });
+    expect((await getClientProfile(actor, result.party.id)).identityMask?.lastFour).toBe('');
+    expect((await revealPartyIdentity(actor, result.party.id, number)).number).toBe(number);
+    const audit = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityId: identity.id, action: 'REVEAL_IDENTITY' },
+    });
+    expect(JSON.stringify([audit.reason, audit.changedFields])).not.toContain(number);
+    const claim = await prisma.idempotencyRecord.findFirstOrThrow({ where: { key: input.idempotencyKey } });
+    expect(claim.payloadHash).toMatch(/^hmac-v1:[a-f0-9]{64}$/);
+    expect(claim.payloadHash).not.toBe(computePayloadHash(input));
+    expect((await saveParty(actor, input)).party.id).toBe(result.party.id);
   });
 
   it('revealPartyIdentity decrypts full number for authorized owner and writes audit trail', async () => {

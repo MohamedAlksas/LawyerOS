@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
+import { useLeaveGuard } from '@/components/navigation-guard';
 import {
   PoAType,
   PoAReviewStatus,
@@ -22,10 +23,12 @@ interface PoaSectionProps {
 export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [editing, setEditing] = useState<PoASummaryDTO | null>(null);
 
   // Form inputs
   const [poaNumberText, setPoaNumberText] = useState('');
-  const [poaYearLabel, setPoaYearLabel] = useState(() => String(new Date().getFullYear()));
+  const [poaYearLabel, setPoaYearLabel] = useState('');
   const [notarizationOffice, setNotarizationOffice] = useState('');
   const [poaType, setPoaType] = useState<PoAType>('LITIGATION');
   const [issueDate, setIssueDate] = useState('');
@@ -36,6 +39,8 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
   const [error, setError] = useState<string | null>(null);
 
   const idempotencyKeyRef = useRef<string | null>(null);
+  const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(null);
+  useLeaveGuard(isFormOpen && isDirty, isSubmitting || !!pending);
 
   const getIdempotencyKey = (): string => {
     if (!idempotencyKeyRef.current) {
@@ -47,8 +52,25 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
     return idempotencyKeyRef.current;
   };
 
+  const openForm = (record: PoASummaryDTO | null) => {
+    setEditing(record);
+    setIsDirty(false);
+    setPoaNumberText(record?.poaNumberText ?? '');
+    setPoaYearLabel(record?.poaYearLabel ?? new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Cairo' }).format());
+    setNotarizationOffice(record?.notarizationOffice ?? '');
+    setPoaType(record?.poaType ?? 'LITIGATION');
+    setIssueDate(record?.issueDate ?? '');
+    setHumanReviewStatus(record?.humanReviewStatus ?? 'UNREVIEWED');
+    setNotes(record?.notes ?? '');
+    setError(null);
+    idempotencyKeyRef.current = null;
+    setPending(null);
+    setIsFormOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setError(null);
 
     if (!poaNumberText.trim()) {
@@ -68,8 +90,9 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
 
     setIsSubmitting(true);
 
-    const payload: SavePowerOfAttorneyInput = {
+    const payload: SavePowerOfAttorneyInput = pending ?? {
       partyId,
+      ...(editing ? { id: editing.id, expectedVersion: editing.version } : {}),
       poaNumberText: poaNumberText.trim(),
       poaYearLabel: poaYearLabel.trim(),
       notarizationOffice: notarizationOffice.trim(),
@@ -84,12 +107,24 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
       const result = await savePowerOfAttorneyAction(payload);
 
       if (!result.success) {
-        setError(result.error || 'تعذر تسجيل التوكيل.');
+        setError(result.error || 'تعذر حفظ التوكيل.');
+        if (!result.code || result.code === 'INTERNAL_ERROR' || result.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT') {
+          setPending(payload);
+        } else {
+          setPending(null);
+          idempotencyKeyRef.current = null;
+        }
         setIsSubmitting(false);
         return;
       }
 
-      setPoas((prev) => [result.data, ...prev]);
+      setPoas((prev) => {
+        if (prev.some((record) => record.id === result.data.id)) {
+          return prev.map((record) => record.id === result.data.id ? result.data : record);
+        }
+        return [result.data, ...prev];
+      });
+      setPending(null);
 
       // Reset form and clear idempotency key
       setPoaNumberText('');
@@ -101,7 +136,8 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
       idempotencyKeyRef.current = null;
       setIsSubmitting(false);
     } catch {
-      setError('حدث خطأ في الاتصال أثناء حفظ بيانات التوكيل.');
+      setPending(payload);
+      setError('تعذر تأكيد الحفظ. أعد المحاولة بنفس البيانات.');
       setIsSubmitting(false);
     }
   };
@@ -125,10 +161,11 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
         <button
           type="button"
           data-testid="add-poa-button"
-          onClick={() => setIsFormOpen((prev) => !prev)}
+          onClick={() => isFormOpen ? setIsFormOpen(false) : openForm(null)}
+          disabled={isSubmitting || !!pending}
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
         >
-          <span>{isFormOpen ? 'إلغاء الإضافة' : '＋ إضافة توكيل رسمي'}</span>
+          <span>{isFormOpen ? 'إلغاء' : '＋ إضافة توكيل رسمي'}</span>
         </button>
       </div>
 
@@ -136,11 +173,13 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
       {isFormOpen && (
         <form
           onSubmit={handleSubmit}
+          onChange={() => setIsDirty(true)}
           data-testid="add-poa-form"
           className="p-4 bg-[#F4F6F7] rounded-[6px] border border-[#D5DFE3] space-y-4"
         >
-          <h3 className="text-sm font-bold text-[#172A35]">تسجيل توكيل رسمي جديد</h3>
+          <h3 className="text-sm font-bold text-[#172A35]">{editing ? 'تعديل بيانات التوكيل ومراجعته' : 'تسجيل توكيل رسمي جديد'}</h3>
 
+          <fieldset disabled={isSubmitting || !!pending} className="min-w-0 space-y-4">
           {error && (
             <div
               role="alert"
@@ -280,6 +319,7 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
           <div className="flex justify-end gap-2 pt-2 border-t border-[#D5DFE3]">
             <button
               type="button"
+              disabled={isSubmitting || !!pending}
               onClick={() => setIsFormOpen(false)}
               className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px]"
             >
@@ -294,6 +334,10 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
               {isSubmitting ? 'جارٍ الحفظ...' : 'حفظ بيانات التوكيل'}
             </button>
           </div>
+          </fieldset>
+          {pending && !isSubmitting && (
+            <button type="submit" className="min-h-[44px] px-3 font-semibold text-[#14566B]">إعادة محاولة الحفظ</button>
+          )}
         </form>
       )}
 
@@ -340,6 +384,10 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
                     >
                       {statusConfig.label}
                     </span>
+                    <button type="button" onClick={() => openForm(poa)} disabled={isFormOpen}
+                      className="mr-2 min-h-[44px] px-2 text-sm font-semibold text-[#14566B] disabled:opacity-50">
+                      تعديل التوكيل
+                    </button>
                   </div>
                 </div>
 

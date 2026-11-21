@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import crypto from 'crypto';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 import * as requireActorModule from '@/modules/identity/require-actor';
@@ -755,9 +755,8 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         expect(auditCount).toBe(1);
 
         // 3. Force the resolved-claim-missing branch (reference-service.ts:276):
-        // Pre-create an in-flight PROCESSING idempotency record to trigger isIdempotencyUniqueConflict.
-        // Mock resolveConcurrentIdempotency to simulate concurrent worker rollback and return null.
-        // Assert that updateOfficeSettings recursively retries and stays strictly on dedicatedPrisma.
+        // Model a database uniqueness collision followed by an absent claim.
+        // Verify the subsequent transaction stays on the dedicated client.
         const fallbackKey = `c08-fallback-${crypto.randomUUID()}`;
         const currentOffice = await getOfficeSettings(actor, { prisma: dedicatedPrisma });
         const fallbackPayload = {
@@ -765,23 +764,14 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
           expectedVersion: currentOffice.version,
           idempotencyKey: fallbackKey,
         };
-        const payloadHash = idempotencyModule.computePayloadHash(fallbackPayload);
-
-        const createdRecord = await dedicatedPrisma.idempotencyRecord.create({
-          data: {
-            key: fallbackKey,
-            actorId: actor.id,
-            commandType: 'updateOfficeSettings',
-            payloadHash,
-            status: 'IN_PROGRESS',
-          },
-        });
-
-        const spyResolve = vi.spyOn(idempotencyModule, 'resolveConcurrentIdempotency').mockImplementationOnce(async () => {
-          // Simulate concurrent worker transaction rolling back and deleting its claim
-          await dedicatedPrisma.idempotencyRecord.delete({ where: { id: createdRecord.id } });
-          return null; // Forces line 276 recursive fallback branch!
-        });
+        const spyClaim = vi.spyOn(idempotencyModule, 'claimIdempotencyKey').mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Synthetic idempotency collision', {
+            code: 'P2002',
+            clientVersion: Prisma.prismaVersion.client,
+            meta: { modelName: 'IdempotencyRecord' },
+          })
+        );
+        const spyResolve = vi.spyOn(idempotencyModule, 'resolveConcurrentIdempotency').mockResolvedValueOnce(null);
 
         const fallbackRes = await updateOfficeSettings(
           actor,
@@ -799,8 +789,11 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
         expect(verifiedDbRow.officeName).toBe('مكتب المحاماة المحدث عبر مسار الاسترجاع التكراري');
         expect(verifiedDbRow.version).toBe(currentOffice.version + 1);
 
+        expect(spyResolve).toHaveBeenCalledWith(dedicatedPrisma, expect.objectContaining({ key: fallbackKey }));
+        spyClaim.mockRestore();
         spyResolve.mockRestore();
       } finally {
+        vi.restoreAllMocks();
         await dedicatedPrisma.$disconnect();
       }
     } finally {

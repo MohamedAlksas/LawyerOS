@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { searchMatters } from '@/modules/matters/matter-service';
-import { MatterKind, MatterStatus, SearchMattersResult } from '@/modules/matters/matter-types';
+import { MatterKind, MatterStatus, MatterValidationError, SearchMattersResult } from '@/modules/matters/matter-types';
 import { MatterListClient } from '@/components/matters/matter-list-client';
 
 export const metadata = {
@@ -22,7 +22,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
   const params = searchParams ? await searchParams : {};
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -65,8 +65,13 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
       },
       actor
     );
-  } catch (err) {
-    initialError = err instanceof Error ? err.message : 'تعذر تحميل ملفات القضايا من الخادم.';
+  } catch (error) {
+    if (error instanceof MatterValidationError) {
+      initialError = error.message;
+    } else {
+      console.error('[Matter list] Failed to load the initial results');
+      initialError = 'تعذر تحميل ملفات القضايا من الخادم.';
+    }
   }
 
   return (

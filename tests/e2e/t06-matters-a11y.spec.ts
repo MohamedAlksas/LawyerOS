@@ -83,6 +83,10 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
     const mobileMattersLink = page.getByTestId('mobile-bottom-nav').getByTestId('nav-link-matters');
     await expect(mobileMattersLink).toBeVisible();
     await expect(mobileMattersLink).toHaveAttribute('aria-current', 'page');
+    await expect(mobileMattersLink).toHaveAccessibleName(/الملفات/);
+    const touchBounds = await mobileMattersLink.boundingBox();
+    expect(touchBounds?.height).toBeGreaterThanOrEqual(44);
+    expect(touchBounds?.width).toBeGreaterThanOrEqual(44);
 
     // Verify mobile cards visible, desktop table hidden
     await expect(page.getByTestId('matters-table')).toBeHidden();
@@ -94,6 +98,45 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
       return document.documentElement.scrollWidth > window.innerWidth;
     });
     expect(hasHorizontalOverflow).toBe(false);
+
+    const longTitle = `ملف ${'اختبارA12'.repeat(18)}`;
+    await prisma.matter.update({ where: { id: createdMatterIds[0] }, data: { title: longTitle } });
+    try {
+      await page.reload();
+      await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+      const card = page.getByTestId(`matter-card-${createdMatterIds[0]}`);
+      const title = card.getByRole('link', { name: longTitle, exact: true });
+      await expect(title).toBeVisible();
+      await title.focus();
+      await expect(title).toBeFocused();
+      const contrast = await title.evaluate((element) => {
+        const luminance = (color: string) => {
+          const channels = Array.from(color.matchAll(/\d+/g)).slice(0, 3).map(([value]) => Number(value) / 255);
+          return channels.reduce((total, channel, index) => total + [0.2126, 0.7152, 0.0722][index]
+            * (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4), 0);
+        };
+        const foreground = luminance(getComputedStyle(element).color);
+        const background = luminance(getComputedStyle(element.closest('[data-testid^="matter-card-"]')!).backgroundColor);
+        return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+      });
+      expect(contrast).toBeGreaterThanOrEqual(4.5);
+      expect(await title.evaluate((element) => {
+        const cardBounds = element.closest<HTMLElement>('[data-testid^="matter-card-"]')!.getBoundingClientRect();
+        const textRange = document.createRange();
+        textRange.selectNodeContents(element);
+        return Array.from(textRange.getClientRects()).every((line) =>
+          line.left >= cardBounds.left - 1 && line.right <= cardBounds.right + 1
+        );
+      })).toBe(true);
+      await test.info().attach('320px reflow at 200% text size', {
+        body: await page.screenshot(), contentType: 'image/png',
+      });
+    } finally {
+      await prisma.matter.update({
+        where: { id: createdMatterIds[0] },
+        data: { title: 'دعوى اختبار المعايير وإمكانية الوصول الرقمي' },
+      });
+    }
   });
 
   test('keyboard accessibility and visible focus indication @matters @a11y', async ({

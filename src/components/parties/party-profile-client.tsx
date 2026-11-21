@@ -31,6 +31,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   const [isLoadingMatters, setIsLoadingMatters] = useState(true);
   const [mattersError, setMattersError] = useState<string | null>(null);
   const [mattersPage, setMattersPage] = useState(0);
+  const requestedMattersPage = useRef(0);
   const [mattersTotal, setMattersTotal] = useState(0);
   const mattersGenRef = useRef(0);
   const MATTERS_PAGE_SIZE = 50;
@@ -39,14 +40,22 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
   const loadMatters = useCallback(
     async (pageIndex: number) => {
       const gen = ++mattersGenRef.current;
+      requestedMattersPage.current = pageIndex;
       setIsLoadingMatters(true);
       setMattersError(null);
       try {
-        const res = await getPartyMatterAssociationsAction({
+        const fetchPage = (index: number) => getPartyMatterAssociationsAction({
           partyId: party.id,
           limit: MATTERS_PAGE_SIZE,
-          offset: pageIndex * MATTERS_PAGE_SIZE,
+          offset: index * MATTERS_PAGE_SIZE,
         });
+        let res = await fetchPage(pageIndex);
+        if (gen !== mattersGenRef.current) return;
+        if (res.success && res.data.associations.length === 0 && pageIndex > 0) {
+          pageIndex = Math.max(0, Math.ceil(res.data.total / MATTERS_PAGE_SIZE) - 1);
+          requestedMattersPage.current = pageIndex;
+          res = await fetchPage(pageIndex);
+        }
         if (gen !== mattersGenRef.current) return;
         if (!res.success) {
           setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
@@ -55,11 +64,9 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
         setLinkedMatters(res.data.associations);
         setMattersTotal(res.data.total);
         setMattersPage(pageIndex);
-      } catch (err: unknown) {
+      } catch {
         if (gen !== mattersGenRef.current) return;
-        setMattersError(
-          err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
-        );
+        setMattersError('حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.');
       } finally {
         if (gen === mattersGenRef.current) setIsLoadingMatters(false);
       }
@@ -69,13 +76,14 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
 
   useEffect(() => {
     let ignore = false;
+    const gen = ++mattersGenRef.current;
     getPartyMatterAssociationsAction({
       partyId: party.id,
       limit: MATTERS_PAGE_SIZE,
       offset: 0,
     })
       .then((res) => {
-        if (ignore) return;
+        if (ignore || gen !== mattersGenRef.current) return;
         setIsLoadingMatters(false);
         if (!res.success) {
           setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
@@ -85,12 +93,10 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
         setMattersTotal(res.data.total);
         setMattersPage(0);
       })
-      .catch((err: unknown) => {
-        if (ignore) return;
+      .catch(() => {
+        if (ignore || gen !== mattersGenRef.current) return;
         setIsLoadingMatters(false);
-        setMattersError(
-          err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.'
-        );
+        setMattersError('حدث خطأ في الاتصال أثناء استرجاع القضايا المرتبطة.');
       });
     return () => {
       ignore = true;
@@ -362,7 +368,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
             <span>⚠️ {mattersError}</span>
             <button
               type="button"
-              onClick={() => loadMatters(mattersPage)}
+              onClick={() => loadMatters(requestedMattersPage.current)}
               className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
             >
               إعادة المحاولة
@@ -370,7 +376,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
           </div>
         ) : isLoadingMatters ? (
           <p className="text-xs text-[#4D606A] italic">جارٍ تحميل ملفات القضايا المرتبطة...</p>
-        ) : linkedMatters.length === 0 ? (
+        ) : mattersTotal === 0 ? (
           <p className="text-xs text-[#4D606A] italic">لا توجد ملفات قضايا مسجلة لهذا الطرف بعد.</p>
         ) : (
           <div className="space-y-3">
