@@ -100,7 +100,7 @@ Upload accepts the formats and size defined by security, showing limits before s
 
 ## S11 — Accounts
 
-The interface has four clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل، مصاريف المكتب" (fees, matter expenses, client money, office expenses). Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
+The interface has three clear literal sections: "الأتعاب، مصاريف القضايا، أموال الموكل" (fees, matter expenses, client money). Office operating expenses are excluded by [ADR 0004](adr/0004-exclude-office-operating-expenses.md): no fourth section, entry form or report. Reports distinguish "المستحق" (due), "المحصل" (collected), and "المتاح بالصندوق" (available cash).
 
 | Form | Core fields |
 |---|---|
@@ -108,7 +108,6 @@ The interface has four clear literal sections: "الأتعاب، مصاريف ا
 | Receive money | Payer, date, amount, payment method, cash/account, classification, and allocation required; transfer reference and note optional; allocated total equals the amount |
 | Matter expense | Matter, date, amount, description/category, funding source, and whether reimbursable by the client required; receipt and linked proceeding optional |
 | Client advance / expense deposit | Client and matter, amount, date, and collection method required; balance is client money, not fee revenue |
-| Office expense | Date, amount, category, account, and description required; document optional; not charged to a client's receivable |
 | Full transaction reversal | Original transaction, date, and reason required; display-only amount matches the entire original, with no partial edit; preview reversal effects and dependencies before posting; prohibit repeated reversal |
 | Actual refund | Original transaction/source of money, beneficiary, refund amount, date, disbursement method, and reason required; may be partial within available limits; show whether it reopens a receivable or reduces an advance according to the original type |
 
