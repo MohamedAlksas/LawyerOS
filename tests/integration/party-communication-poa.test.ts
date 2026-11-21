@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
+import { computePayloadHash, IdempotencyPayloadMismatchError } from '@/lib/idempotency';
+import { savePowerOfAttorneySchema } from '@/modules/parties/validation';
 import {
   saveParty,
   getClientProfile,
@@ -121,6 +123,53 @@ describe('T05-09: Communication Notes & Powers of Attorney (Integration)', () =>
       expect(updated.humanReviewStatus).toBe('VALID');
       expect(updated.humanReviewedAt).toBeDefined();
       expect(updated.humanReviewedById).toBe(actor.id);
+
+      const editable = {
+        id: created.id,
+        partyId,
+        poaNumberText: created.poaNumberText,
+        poaYearLabel: created.poaYearLabel,
+        notarizationOffice: 'مكتب توثيق اختباري',
+        poaType: created.poaType,
+      };
+      const metadataOnly = await savePowerOfAttorney(actor, {
+        ...editable,
+        expectedVersion: updated.version,
+        idempotencyKey: `poa-metadata-${crypto.randomUUID()}`,
+      });
+      expect(metadataOnly.humanReviewStatus).toBe('VALID');
+      expect(metadataOnly.humanReviewedAt).toBe(updated.humanReviewedAt);
+      expect(metadataOnly.humanReviewedById).toBe(actor.id);
+      const requestWithoutStatus = {
+        ...editable,
+        expectedVersion: metadataOnly.version,
+        idempotencyKey: `poa-review-reset-${crypto.randomUUID()}`,
+      };
+      const resetRequest = { ...requestWithoutStatus, humanReviewStatus: 'UNREVIEWED' as const };
+      const resetReview = await savePowerOfAttorney(actor, resetRequest);
+      const replayMetadata = {
+        isReplay: true,
+        currentVersion: resetReview.version,
+        operationVersion: resetReview.version,
+      };
+      await expect(savePowerOfAttorney(actor, resetRequest)).resolves.toEqual({
+        ...resetReview, ...replayMetadata,
+      });
+      await expect(savePowerOfAttorney(actor, requestWithoutStatus)).rejects.toThrow(
+        IdempotencyPayloadMismatchError,
+      );
+      // Before this change the old schema defaulted omitted update status to UNREVIEWED.
+      const legacyDigest = computePayloadHash(savePowerOfAttorneySchema.parse(resetRequest));
+      await prisma.idempotencyRecord.updateMany({
+        where: { actorId: actor.id, key: resetRequest.idempotencyKey },
+        data: { payloadHash: legacyDigest },
+      });
+      await expect(savePowerOfAttorney(actor, requestWithoutStatus)).resolves.toEqual({
+        ...resetReview, ...replayMetadata,
+      });
+      expect(resetReview.humanReviewStatus).toBe('UNREVIEWED');
+      expect(resetReview.humanReviewedAt).toBeNull();
+      expect(resetReview.humanReviewedById).toBeNull();
 
       // Attempting to update with stale version 1 must fail
       await expect(

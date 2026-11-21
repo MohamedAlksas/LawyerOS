@@ -112,7 +112,36 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await page.getByTestId('poa-type-select').selectOption('LITIGATION');
     await page.getByTestId('poa-status-select').selectOption('VALID');
     await page.getByTestId('poa-notes-input').fill('شامل المرافعة أمام محاكم الاستئناف');
+    await page.goBack();
+    await expect(page).toHaveURL(/\/parties\/new$/);
+    await page.goForward();
+    await expect(page).toHaveURL(partyUrl);
+    await expect(page.getByTestId('poa-number-input')).toHaveValue('0045');
+    await expect(page.getByTestId('poa-notes-input')).toHaveValue('شامل المرافعة أمام محاكم الاستئناف');
+
+    await page.route(partyUrl, async (route) => {
+      if (route.request().method() === 'POST' && route.request().postData()?.includes('0045')) {
+        await page.request.fetch(route.request());
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
     await page.getByTestId('save-poa-button').click();
+    await expect(page.getByTestId('poa-form-error')).toBeVisible();
+    await page.unroute(partyUrl);
+    const committedPoa = await prisma.powerOfAttorney.findFirstOrThrow({ where: { partyId } });
+    const originalClaim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { actorId: owner.id, commandType: 'savePowerOfAttorney', resultId: committedPoa.id },
+    });
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/parties\/new$/);
+    await page.goForward();
+    await expect(page).toHaveURL(partyUrl);
+    await expect(page.getByTestId('poa-number-input')).toHaveValue('0045');
+    await expect(page.getByTestId('poa-number-input')).toBeDisabled();
+    await page.getByRole('button', { name: 'إعادة محاولة الحفظ', exact: true }).click();
 
     // Verify POA in list
     const poaItem = page.getByTestId('poa-item').first();
@@ -121,6 +150,9 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await expect(poaItem).toContainText('2026');
     await expect(poaItem).toContainText('مكتب توثيق الأهرام النموذجي');
     await expect(poaItem.getByTestId('poa-review-status-badge')).toContainText('سارٍ ومعتمد');
+    expect(await prisma.powerOfAttorney.count({ where: { partyId } })).toBe(1);
+    expect(await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: originalClaim.id } }))
+      .toEqual(originalClaim);
 
     // 9. Edit Party with Optimistic Version Protection (R05-03)
     await page.getByTestId('edit-party-button').click();

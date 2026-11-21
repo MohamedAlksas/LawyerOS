@@ -217,6 +217,7 @@ const baseEnvSchema = z.object({
     })
     .optional(),
   CI: z.string().optional(),
+  PARTY_IDEMPOTENCY_SECRET: z.string().min(32).optional(),
   BETTER_AUTH_SECRET: z
     .string()
     .min(32, 'BETTER_AUTH_SECRET must be at least 32 characters'),

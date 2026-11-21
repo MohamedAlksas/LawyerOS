@@ -1,17 +1,18 @@
 ﻿'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 
 interface MobileBottomNavProps {
-  onOpenDrawer: () => void;
+  onOpenDrawer: (opener: HTMLButtonElement) => void;
 }
 
 export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
+  const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
 
@@ -33,7 +34,21 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">📅</span>
-        <span className="text-sm leading-tight mt-0.5">الرئيسية</span>
+        <span className="text-xs leading-tight mt-0.5">الرئيسية</span>
+      </Link>
+
+      {/* Matters Link */}
+      <Link
+        href="/matters"
+        data-testid="nav-link-matters"
+        aria-label="الملفات القضائية"
+        aria-current={isMattersActive ? 'page' : undefined}
+        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+          isMattersActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
+        }`}
+      >
+        <span aria-hidden="true" className="text-lg">📁</span>
+        <span className="text-xs leading-tight mt-0.5">الملفات</span>
       </Link>
 
       {/* Parties Link */}
@@ -47,7 +62,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">👥</span>
-        <span className="text-sm leading-tight mt-0.5">الأطراف</span>
+        <span className="text-xs leading-tight mt-0.5">الأطراف</span>
       </Link>
 
       {/* Security Link */}
@@ -61,7 +76,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         }`}
       >
         <span aria-hidden="true" className="text-lg">🛡️</span>
-        <span className="text-sm leading-tight mt-0.5">الأمان</span>
+        <span className="text-xs leading-tight mt-0.5">الأمان</span>
       </Link>
 
       {/* Menu / Drawer Toggle */}
@@ -69,11 +84,11 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         type="button"
         aria-label="فتح القائمة الكاملة"
         data-testid="mobile-nav-menu"
-        onClick={onOpenDrawer}
+        onClick={(event) => onOpenDrawer(event.currentTarget)}
         className="flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
       >
         <span aria-hidden="true" className="text-lg">☰</span>
-        <span className="text-sm leading-tight mt-0.5">المزيد</span>
+        <span className="text-xs leading-tight mt-0.5">المزيد</span>
       </button>
     </nav>
   );

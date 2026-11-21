@@ -40,12 +40,11 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
       continue;
     }
 
-    // Redact raw identity numbers (preserve only type and masked lastFour)
+    // Keep only the identity document type in audit history.
     if (lowerKey === 'identity' && typeof value === 'object' && value !== null) {
       const idObj = value as Record<string, unknown>;
       sanitized[key] = {
         identificationType: idObj.identificationType,
-        lastFour: idObj.lastFour ?? (typeof idObj.number === 'string' ? idObj.number.slice(-4) : '****'),
       };
       continue;
     }

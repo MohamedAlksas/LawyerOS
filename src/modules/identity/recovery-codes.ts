@@ -1,5 +1,6 @@
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
+import { recordAuditEvent } from '@/lib/audit';
 import { verifyPassword, symmetricEncrypt, generateRandomString } from 'better-auth/crypto';
 import { Actor, AuthenticationError } from './types';
 import { assertAuthorized } from './authorize';
@@ -73,7 +74,7 @@ export async function regenerateRecoveryCodes(
     });
 
     if (!isValid) {
-      const currentCount = Number(twoFactorRecord.failedVerificationCount) || 0;
+      const currentCount = twoFactorRecord.lockedUntil ? 0 : twoFactorRecord.failedVerificationCount;
       const newCount = currentCount + 1;
       const shouldLock = newCount >= MAX_FAILED_ATTEMPTS;
       const lockUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
@@ -86,6 +87,13 @@ export async function regenerateRecoveryCodes(
         },
       });
 
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'REJECT_RECOVERY_CODE_REGENERATION',
+        entityType: 'User',
+        entityId: actor.id,
+        changedFields: { locked: shouldLock },
+      });
       return {
         status: 'INVALID_PASSWORD',
         shouldLock,
@@ -112,6 +120,12 @@ export async function regenerateRecoveryCodes(
       },
     });
 
+    await recordAuditEvent(tx, {
+      userId: actor.id,
+      action: 'REGENERATE_RECOVERY_CODES',
+      entityType: 'User',
+      entityId: actor.id,
+    });
     return {
       status: 'SUCCESS',
       freshBackupCodes,

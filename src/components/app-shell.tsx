@@ -9,6 +9,7 @@ import { DesktopSidebar } from './desktop-sidebar';
 import { TabletDrawer } from './tablet-drawer';
 import { MobileBottomNav } from './mobile-bottom-nav';
 import { SessionExpiredAlert } from './session-expired-alert';
+import { NavigationGuardProvider } from './navigation-guard';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -18,6 +19,7 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const drawerOpenerRef = useRef<HTMLButtonElement | null>(null);
 
   // Safely register public-only service worker
   useEffect(() => {
@@ -68,7 +70,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <>
+    <NavigationGuardProvider>
       <div
         id="app-shell-content"
         inert={isDrawerOpen ? true : undefined}
@@ -88,7 +90,10 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* 4. Accessible Header */}
         <AppHeader
-          onToggleDrawer={() => setIsDrawerOpen((prev) => !prev)}
+          onToggleDrawer={() => {
+            drawerOpenerRef.current = triggerRef.current;
+            setIsDrawerOpen((prev) => !prev);
+          }}
           isDrawerOpen={isDrawerOpen}
           drawerTriggerRef={triggerRef}
         />
@@ -113,7 +118,10 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* 6. Mobile Bottom Nav Bar */}
         <MobileBottomNav
-          onOpenDrawer={() => setIsDrawerOpen(true)}
+          onOpenDrawer={(opener) => {
+            drawerOpenerRef.current = opener;
+            setIsDrawerOpen(true);
+          }}
         />
       </div>
 
@@ -121,8 +129,8 @@ export function AppShell({ children }: AppShellProps) {
       <TabletDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        triggerRef={triggerRef}
+        triggerRef={drawerOpenerRef}
       />
-    </>
+    </NavigationGuardProvider>
   );
 }

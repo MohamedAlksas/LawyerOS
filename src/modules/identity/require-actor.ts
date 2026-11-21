@@ -8,8 +8,7 @@ export interface RequireActorOptions {
   requiredPermission?: Permission;
 }
 
-const MAX_SESSION_LIFETIME_MS = 12 * 60 * 60 * 1000; // 12 hours
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;        // 30 minutes
+import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from './session-limits';
 
 /**
  * Server-side extraction and authoritative validation of current verified session and actor.

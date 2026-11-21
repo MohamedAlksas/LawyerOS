@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import path from 'path';
+import { readFileSync } from 'node:fs';
+import { decryptPartyIdentity, encryptPartyIdentity } from '@/lib/crypto/party-identity';
 import { spawnSync } from 'child_process';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 import { setupTestEncryptionKeys } from '../helpers/party-test-helper';
@@ -94,6 +96,55 @@ describe('T05-10: Schema Migrations & Upgrade Safety (Integration)', () => {
       await dedicated.drop();
     }
   }, 60000);
+
+  it('redacts legacy identity metadata while keeping encrypted identifiers readable', async () => {
+    const dedicated = await createDedicatedTestDatabase();
+    try {
+      runPrismaMigrateDeploy(dedicated.url);
+      const partyId = crypto.randomUUID();
+      const actorId = 'synthetic-migration-owner';
+      const identificationType = 'PASSPORT';
+      const plaintext = 'A123';
+      const envelope = encryptPartyIdentity({ partyId, identificationType, plaintext });
+      await dedicated.pool.query(
+        `INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "createdById", "updatedById", "updatedAt")
+         VALUES ($1, 'PERSON', 'Synthetic party', 'synthetic party', $2, $2, now())`,
+        [partyId, actorId],
+      );
+      await dedicated.pool.query(
+        `INSERT INTO "party_identity" ("id", "partyId", "identificationType", "ciphertext", "iv", "authTag", "keyId", "lastFour", "createdById")
+         VALUES ('legacy-id', $1, $2, $3, $4, $5, $6, $7, $8)`,
+        [partyId, identificationType, envelope.ciphertext, envelope.iv, envelope.authTag, envelope.keyId, plaintext, actorId],
+      );
+      await dedicated.pool.query(
+        `INSERT INTO "audit_event" ("id", "userId", "action", "entityType", "entityId", "changedFields", "reason")
+         VALUES ('legacy-create', $1, 'CREATE_PARTY', 'Party', $2, $3, null),
+                ('legacy-reveal', $1, 'REVEAL_IDENTITY', 'PartyIdentity', 'legacy-id', $4, $5)`,
+        [actorId, partyId, { identity: { type: identificationType, lastFour: plaintext } },
+          { type: identificationType, lastFour: plaintext }, `Legacy reason ${plaintext}`],
+      );
+
+      const migration = readFileSync(path.resolve(
+        'prisma/migrations/20261121000000_redact_legacy_identity_metadata/migration.sql',
+      ), 'utf8');
+      await dedicated.pool.query(migration);
+
+      const [stored] = (await dedicated.pool.query(
+        'SELECT * FROM "party_identity" WHERE "partyId" = $1', [partyId],
+      )).rows;
+      expect(stored).toMatchObject({ ciphertext: envelope.ciphertext, lastFour: '' });
+      expect(decryptPartyIdentity({ ...stored, partyId, identificationType })).toBe(plaintext);
+      const { rows: audit } = await dedicated.pool.query(
+        'SELECT "id", "userId", "changedFields", "reason" FROM "audit_event" ORDER BY "id"',
+      );
+      expect(audit).toEqual([
+        { id: 'legacy-create', userId: actorId, changedFields: { identity: { type: identificationType } }, reason: null },
+        { id: 'legacy-reveal', userId: actorId, changedFields: { type: identificationType }, reason: 'Authoritative identity view' },
+      ]);
+    } finally {
+      await dedicated.drop();
+    }
+  }, 60_000);
 
   it('preserves existing T03 auth records during upgrade and allows new party writes', async () => {
     const dedicated = await createDedicatedTestDatabase();
