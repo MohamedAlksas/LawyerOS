@@ -397,6 +397,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       'getOfficeSettingsAction',
       'getPartyMatterAssociationsAction',
       'findSimilarProceedingsAction',
+      'archiveMatterAction',
+      'reopenMatterAction',
+      'archiveProceedingAction',
+      'reopenProceedingAction',
+      'unifiedSearchAction',
     ];
     expect([...exposedT06Actions].sort()).toEqual([...requiredActionNames].sort());
     for (const name of requiredActionNames) {

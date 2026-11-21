@@ -55,6 +55,15 @@ export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef }: Ap
       </div>
 
       <div className="flex items-center gap-2">
+        <Link
+          href="/search"
+          data-testid="header-search-link"
+          aria-label="البحث الموحد"
+          className="flex items-center justify-center w-11 h-11 rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px] transition-colors"
+        >
+          <span aria-hidden="true" className="text-lg">🔍</span>
+          <span className="sr-only">البحث الموحد</span>
+        </Link>
         <UserIdentityBadge />
       </div>
     </header>

@@ -8,6 +8,9 @@ import {
   MatterPartyRole,
   MatterPartySummaryDTO,
   MatterAuthorizationSummaryDTO,
+  ProceedingSummaryDTO,
+  MatterStatus,
+  ProceedingStatus,
 } from '@/modules/matters/matter-types';
 import {
   linkMatterPartyAction,
@@ -15,6 +18,10 @@ import {
   unlinkMatterPartyAction,
   linkMatterAuthorizationAction,
   unlinkMatterAuthorizationAction,
+  archiveMatterAction,
+  reopenMatterAction,
+  archiveProceedingAction,
+  reopenProceedingAction,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   getMatterAction,
 } from '@/modules/matters/matter-actions';
@@ -80,6 +87,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
 
   // General Notification / Error
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Matter Archive/Reopen State
+  const [showArchiveMatterModal, setShowArchiveMatterModal] = useState(false);
+  const [showReopenMatterModal, setShowReopenMatterModal] = useState(false);
+  const [matterLifecycleReason, setMatterLifecycleReason] = useState('');
+  const [isLifecycleSubmitting, setIsLifecycleSubmitting] = useState(false);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+
+  // Proceeding Archive/Reopen State
+  const [selectedProceedingForLifecycle, setSelectedProceedingForLifecycle] = useState<ProceedingSummaryDTO | null>(null);
+  const [proceedingLifecycleAction, setProceedingLifecycleAction] = useState<'archive' | 'reopen' | null>(null);
+  const [proceedingLifecycleReason, setProceedingLifecycleReason] = useState('');
+  const [isProceedingLifecycleSubmitting, setIsProceedingLifecycleSubmitting] = useState(false);
+  const [proceedingLifecycleError, setProceedingLifecycleError] = useState<string | null>(null);
 
   // Association Operations Recovery & Frozen Key (U1/U3)
   type AssociationOp =
@@ -793,6 +814,174 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
     }
   };
 
+  const isMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
+
+  const handleArchiveMatter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (matterLifecycleReason.trim().length < 3) {
+      setLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+    setIsLifecycleSubmitting(true);
+    setLifecycleError(null);
+    try {
+      const res = await archiveMatterAction({
+        matterId: matter.id,
+        reason: matterLifecycleReason.trim(),
+        expectedVersion: matter.version,
+        idempotencyKey: generateClientRequestId('arch-m'),
+      });
+
+      if (!res.success) {
+        setLifecycleError(res.error || 'تعذر أرشفة الملف.');
+        setIsLifecycleSubmitting(false);
+        return;
+      }
+
+      setMatter((prev) => ({
+        ...prev,
+        status: 'ARCHIVED',
+        archivedAt: res.data.archivedAt,
+        version: res.data.version,
+      }));
+      setShowArchiveMatterModal(false);
+      setMatterLifecycleReason('');
+      setActionMessage('تمت أرشفة ملف القضية بنجاح.');
+      router.refresh();
+    } catch (err: unknown) {
+      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+    } finally {
+      setIsLifecycleSubmitting(false);
+    }
+  };
+
+  const handleReopenMatter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (matterLifecycleReason.trim().length < 3) {
+      setLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+    setIsLifecycleSubmitting(true);
+    setLifecycleError(null);
+    try {
+      const res = await reopenMatterAction({
+        matterId: matter.id,
+        reason: matterLifecycleReason.trim(),
+        expectedVersion: matter.version,
+        idempotencyKey: generateClientRequestId('reop-m'),
+      });
+
+      if (!res.success) {
+        setLifecycleError(res.error || 'تعذر إعادة فتح الملف.');
+        setIsLifecycleSubmitting(false);
+        return;
+      }
+
+      setMatter((prev) => ({
+        ...prev,
+        status: (res.data.status as MatterStatus) || 'ACTIVE',
+        archivedAt: null,
+        version: res.data.version,
+      }));
+      setShowReopenMatterModal(false);
+      setMatterLifecycleReason('');
+      setActionMessage('تمت إعادة فتح ملف القضية بنجاح.');
+      router.refresh();
+    } catch (err: unknown) {
+      setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+    } finally {
+      setIsLifecycleSubmitting(false);
+    }
+  };
+
+  const handleArchiveProceeding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProceedingForLifecycle) return;
+    if (proceedingLifecycleReason.trim().length < 3) {
+      setProceedingLifecycleError('سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+    setIsProceedingLifecycleSubmitting(true);
+    setProceedingLifecycleError(null);
+    try {
+      const res = await archiveProceedingAction({
+        proceedingId: selectedProceedingForLifecycle.id,
+        matterId: matter.id,
+        reason: proceedingLifecycleReason.trim(),
+        expectedVersion: selectedProceedingForLifecycle.version ?? 1,
+        idempotencyKey: generateClientRequestId('arch-p'),
+      });
+
+      if (!res.success) {
+        setProceedingLifecycleError(res.error || 'تعذر أرشفة القيد القضائي.');
+        setIsProceedingLifecycleSubmitting(false);
+        return;
+      }
+
+      setMatter((prev) => ({
+        ...prev,
+        proceedings: prev.proceedings?.map((p) =>
+          p.id === selectedProceedingForLifecycle.id
+            ? { ...p, status: 'CLOSED', archivedAt: res.data.archivedAt, version: res.data.version }
+            : p
+        ),
+      }));
+      setSelectedProceedingForLifecycle(null);
+      setProceedingLifecycleAction(null);
+      setProceedingLifecycleReason('');
+      setActionMessage('تمت أرشفة القيد القضائي بنجاح.');
+      router.refresh();
+    } catch (err: unknown) {
+      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+    } finally {
+      setIsProceedingLifecycleSubmitting(false);
+    }
+  };
+
+  const handleReopenProceeding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProceedingForLifecycle) return;
+    if (proceedingLifecycleReason.trim().length < 3) {
+      setProceedingLifecycleError('سبب إعادة الفتح مطلوب ويجب ألا يقل عن 3 أحرف.');
+      return;
+    }
+    setIsProceedingLifecycleSubmitting(true);
+    setProceedingLifecycleError(null);
+    try {
+      const res = await reopenProceedingAction({
+        proceedingId: selectedProceedingForLifecycle.id,
+        matterId: matter.id,
+        reason: proceedingLifecycleReason.trim(),
+        expectedVersion: selectedProceedingForLifecycle.version ?? 1,
+        idempotencyKey: generateClientRequestId('reop-p'),
+      });
+
+      if (!res.success) {
+        setProceedingLifecycleError(res.error || 'تعذر إعادة فتح القيد القضائي.');
+        setIsProceedingLifecycleSubmitting(false);
+        return;
+      }
+
+      setMatter((prev) => ({
+        ...prev,
+        proceedings: prev.proceedings?.map((p) =>
+          p.id === selectedProceedingForLifecycle.id
+            ? { ...p, status: (res.data.status as ProceedingStatus) || 'ACTIVE', archivedAt: null, version: res.data.version }
+            : p
+        ),
+      }));
+      setSelectedProceedingForLifecycle(null);
+      setProceedingLifecycleAction(null);
+      setProceedingLifecycleReason('');
+      setActionMessage('تمت إعادة فتح القيد القضائي بنجاح.');
+      router.refresh();
+    } catch (err: unknown) {
+      setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال.');
+    } finally {
+      setIsProceedingLifecycleSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* 1. Header & Breadcrumbs */}
@@ -811,36 +1000,93 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <h1 className="min-w-0 max-w-full text-2xl font-bold text-[#172A35] tracking-tight [overflow-wrap:anywhere]">
               {matter.title}
             </h1>
-            <span
-              data-testid="matter-status-badge"
-              className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold border ${
-                MATTER_STATUS_CLASSES[matter.status]
-              }`}
-            >
-              {MATTER_STATUS_LABELS[matter.status]}
-            </span>
+            {isMatterArchived ? (
+              <span
+                data-testid="matter-status-badge"
+                className="inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold border bg-stone-100 text-stone-700 border-stone-300"
+              >
+                مؤرشف
+              </span>
+            ) : (
+              <span
+                data-testid="matter-status-badge"
+                className={`inline-flex items-center px-2.5 py-0.5 rounded text-xs font-bold border ${
+                  MATTER_STATUS_CLASSES[matter.status]
+                }`}
+              >
+                {MATTER_STATUS_LABELS[matter.status]}
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={`/matters/${matter.id}/edit`}
-            data-testid="edit-matter-button"
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
-          >
-            <span>✏️</span>
-            <span>تعديل بيانات الملف</span>
-          </Link>
-          <Link
-            href={`/matters/${matter.id}/proceedings/new`}
-            data-testid="add-proceeding-button"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
-          >
-            <span>⚖️</span>
-            <span>+ إضافة قيد قضائي</span>
-          </Link>
+          {!isMatterArchived ? (
+            <>
+              <button
+                type="button"
+                data-testid="archive-matter-button"
+                onClick={() => {
+                  setLifecycleError(null);
+                  setMatterLifecycleReason('');
+                  setShowArchiveMatterModal(true);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-[6px] border border-amber-300 transition-colors min-h-[44px]"
+              >
+                <span>📦</span>
+                <span>أرشفة الملف</span>
+              </button>
+              <Link
+                href={`/matters/${matter.id}/edit`}
+                data-testid="edit-matter-button"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
+              >
+                <span>✏️</span>
+                <span>تعديل بيانات الملف</span>
+              </Link>
+              <Link
+                href={`/matters/${matter.id}/proceedings/new`}
+                data-testid="add-proceeding-button"
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
+              >
+                <span>⚖️</span>
+                <span>+ إضافة قيد قضائي</span>
+              </Link>
+            </>
+          ) : (
+            <button
+              type="button"
+              data-testid="reopen-matter-button"
+              onClick={() => {
+                setLifecycleError(null);
+                setMatterLifecycleReason('');
+                setShowReopenMatterModal(true);
+              }}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
+            >
+              <span>📂</span>
+              <span>إعادة فتح الملف</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Read-Only Banner for Archived Matter */}
+      {isMatterArchived && (
+        <div
+          role="alert"
+          data-testid="matter-archived-banner"
+          className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
+            <span aria-hidden="true" className="text-lg">📁</span>
+            <span>ملف القضية مؤرشف — وضع القراءة فقط</span>
+          </div>
+          <p className="text-xs text-stone-700 leading-relaxed">
+            تمت أرشفة هذا الملف وهو في حالة قراءة فقط. تم تعطيل عمليات التعديل وإضافة القيود وربط الأطراف والتوكيلات. لإجراء أي تعديل، يجب إعادة فتح الملف أولاً.
+          </p>
+        </div>
+      )}
 
       {/* Notifications */}
       {actionMessage && (
@@ -1077,18 +1323,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <h2 className="text-base font-bold text-[#172A35]">
               أطراف الملف (الموكلون والخصوم)
             </h2>
-            <button
-              type="button"
-              data-testid="open-add-party-modal"
-              onClick={handleOpenPartyModal}
-              disabled={isAssocSubmitting || !!pendingAssocOp}
-              className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
-                isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <span>+</span>
-              <span>ربط طرف جديد بالملف</span>
-            </button>
+            {!isMatterArchived && (
+              <button
+                type="button"
+                data-testid="open-add-party-modal"
+                onClick={handleOpenPartyModal}
+                disabled={isAssocSubmitting || !!pendingAssocOp}
+                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
+                  isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                <span>+</span>
+                <span>ربط طرف جديد بالملف</span>
+              </button>
+            )}
           </div>
 
           {/* Add Party Modal / Panel */}
@@ -1275,32 +1523,34 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          data-testid={`toggle-primary-${c.id}`}
-                          onClick={() => handleTogglePrimary(c)}
-                          disabled={isAssocSubmitting || !!pendingAssocOp}
-                          title={c.isPrimaryContact ? 'إلغاء التعيين كأساسي' : 'تعيين كأساسي'}
-                          className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded ${
-                            isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                        >
-                          {c.isPrimaryContact ? '⭐' : '☆'}
-                        </button>
-                        <button
-                          type="button"
-                          data-testid={`unlink-party-${c.id}`}
-                          onClick={() => handleUnlinkParty(c)}
-                          disabled={isAssocSubmitting || !!pendingAssocOp}
-                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
-                            isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                          title="إزالة الطرف من الملف"
-                        >
-                          ✕
-                        </button>
-                      </div>
+                      {!isMatterArchived && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            data-testid={`toggle-primary-${c.id}`}
+                            onClick={() => handleTogglePrimary(c)}
+                            disabled={isAssocSubmitting || !!pendingAssocOp}
+                            title={c.isPrimaryContact ? 'إلغاء التعيين كأساسي' : 'تعيين كأساسي'}
+                            className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded ${
+                              isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            {c.isPrimaryContact ? '⭐' : '☆'}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`unlink-party-${c.id}`}
+                            onClick={() => handleUnlinkParty(c)}
+                            disabled={isAssocSubmitting || !!pendingAssocOp}
+                            className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                              isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                            title="إزالة الطرف من الملف"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {c.notes && (
@@ -1339,18 +1589,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                       >
                         {op.partyName}
                       </Link>
-                      <button
-                        type="button"
-                        data-testid={`unlink-opponent-${op.id}`}
-                        onClick={() => handleUnlinkParty(op)}
-                        disabled={isAssocSubmitting || !!pendingAssocOp}
-                        className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
-                          isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                        title="إزالة الخصم"
-                      >
-                        ✕
-                      </button>
+                      {!isMatterArchived && (
+                        <button
+                          type="button"
+                          data-testid={`unlink-opponent-${op.id}`}
+                          onClick={() => handleUnlinkParty(op)}
+                          disabled={isAssocSubmitting || !!pendingAssocOp}
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                            isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                          title="إزالة الخصم"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                     {op.notes && (
                       <p className="text-xs text-[#4D606A] leading-relaxed pt-1 border-t border-[#E8EEF1]">
@@ -1377,16 +1629,18 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="font-bold text-sm text-[#172A35]">{oth.partyName}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleUnlinkParty(oth)}
-                        disabled={isAssocSubmitting || !!pendingAssocOp}
-                        className={`text-xs text-red-600 hover:text-red-800 p-1 ${
-                          isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        ✕
-                      </button>
+                      {!isMatterArchived && (
+                        <button
+                          type="button"
+                          onClick={() => handleUnlinkParty(oth)}
+                          disabled={isAssocSubmitting || !!pendingAssocOp}
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 ${
+                            isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1403,14 +1657,16 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <h2 className="text-base font-bold text-[#172A35]">
               القيود والدعاوى القضائية المسجلة
             </h2>
-            <Link
-              href={`/matters/${matter.id}/proceedings/new`}
-              data-testid="add-proceeding-tab-button"
-              className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
-            >
-              <span>⚖️</span>
-              <span>+ تسجيل قيد قضائي جديد</span>
-            </Link>
+            {!isMatterArchived && (
+              <Link
+                href={`/matters/${matter.id}/proceedings/new`}
+                data-testid="add-proceeding-tab-button"
+                className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
+              >
+                <span>⚖️</span>
+                <span>+ تسجيل قيد قضائي جديد</span>
+              </Link>
+            )}
           </div>
 
           {proceedings.length === 0 ? (
@@ -1423,19 +1679,22 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               <p className="text-xs text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 لم يتم قيد أي دعوى أو استئناف في المحاكم لهذا الملف حتى الآن. يمكنك تسجيل أول قيد قضائي بالمحكمة لتنظيم الجلسات.
               </p>
-              <div className="pt-2">
-                <Link
-                  href={`/matters/${matter.id}/proceedings/new`}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#14566B] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
-                >
-                  <span>تسجيل أول قيد قضائي</span>
-                </Link>
-              </div>
+              {!isMatterArchived && (
+                <div className="pt-2">
+                  <Link
+                    href={`/matters/${matter.id}/proceedings/new`}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-[#14566B] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
+                  >
+                    <span>تسجيل أول قيد قضائي</span>
+                  </Link>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-4">
               {proceedings.map((proc) => {
                 const isDraft = proc.status === 'DRAFT' || !proc.numberText || !proc.yearLabel;
+                const isProcArchived = proc.status === 'CLOSED' || Boolean(proc.archivedAt);
 
                 return (
                   <div
@@ -1452,7 +1711,15 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                           <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[#E8EEF1] text-[#14566B]">
                             {PROCEEDING_INSTANCE_LABELS[proc.instance]}
                           </span>
-                          {isDraft ? (
+                          {isProcArchived ? (
+                            <span
+                              data-testid="proceeding-archived-badge"
+                              className="text-xs font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 inline-flex items-center gap-1"
+                            >
+                              <span>📁</span>
+                              <span>مؤرشف</span>
+                            </span>
+                          ) : isDraft ? (
                             <span
                               data-testid="proceeding-draft-badge"
                               className="text-xs font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"
@@ -1499,13 +1766,46 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                         >
                           عرض تفاصيل القيد
                         </Link>
-                        <Link
-                          href={`/matters/${matter.id}/proceedings/${proc.id}/edit`}
-                          data-testid={`edit-proceeding-${proc.id}`}
-                          className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px] flex items-center"
-                        >
-                          تعديل القيد
-                        </Link>
+                        {!isMatterArchived && !isProcArchived && (
+                          <Link
+                            href={`/matters/${matter.id}/proceedings/${proc.id}/edit`}
+                            data-testid={`edit-proceeding-${proc.id}`}
+                            className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px] flex items-center"
+                          >
+                            تعديل القيد
+                          </Link>
+                        )}
+                        {!isMatterArchived && (
+                          !isProcArchived ? (
+                            <button
+                              type="button"
+                              data-testid={`archive-proceeding-${proc.id}`}
+                              onClick={() => {
+                                setSelectedProceedingForLifecycle(proc);
+                                setProceedingLifecycleAction('archive');
+                                setProceedingLifecycleReason('');
+                                setProceedingLifecycleError(null);
+                              }}
+                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-medium rounded-[6px] border border-amber-300 transition-colors min-h-[36px] flex items-center"
+                            >
+                              أرشفة القيد
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              data-testid={`reopen-proceeding-${proc.id}`}
+                              onClick={() => {
+                                setSelectedProceedingForLifecycle(proc);
+                                setProceedingLifecycleAction('reopen');
+                                setProceedingLifecycleReason('');
+                                setProceedingLifecycleError(null);
+                              }}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium rounded-[6px] border border-emerald-300 transition-colors min-h-[36px] flex items-center"
+                            >
+                              إعادة فتح القيد
+                            </button>
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -1568,18 +1868,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
               </p>
             </div>
 
-            <button
-              type="button"
-              data-testid="open-add-poa-modal"
-              onClick={handleOpenPoaModal}
-              disabled={isAssocSubmitting || !!pendingAssocOp}
-              className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
-                isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <span>+</span>
-              <span>ربط توكيل بالملف</span>
-            </button>
+            {!isMatterArchived && (
+              <button
+                type="button"
+                data-testid="open-add-poa-modal"
+                onClick={handleOpenPoaModal}
+                disabled={isAssocSubmitting || !!pendingAssocOp}
+                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
+                  isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                <span>+</span>
+                <span>ربط توكيل بالملف</span>
+              </button>
+            )}
           </div>
 
           {/* Add POA Modal */}
@@ -1714,18 +2016,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      data-testid={`unlink-poa-${auth.id}`}
-                      onClick={() => handleUnlinkPoa(auth)}
-                      disabled={isAssocSubmitting || !!pendingAssocOp}
-                      className={`text-xs text-red-600 hover:text-red-800 p-1 ${
-                        isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
-                      }`}
-                      title="إلغاء ربط التوكيل"
-                    >
-                      ✕ إلغاء الربط
-                    </button>
+                    {!isMatterArchived && (
+                      <button
+                        type="button"
+                        data-testid={`unlink-poa-${auth.id}`}
+                        onClick={() => handleUnlinkPoa(auth)}
+                        disabled={isAssocSubmitting || !!pendingAssocOp}
+                        className={`text-xs text-red-600 hover:text-red-800 p-1 ${
+                          isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                        title="إلغاء ربط التوكيل"
+                      >
+                        ✕ إلغاء الربط
+                      </button>
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-[#E8EEF1] flex items-center justify-between text-xs">
@@ -1787,6 +2091,248 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           سيتم ربطها تلقائياً بهذا الملف فور إطلاقها في المراحل القادمة.
         </p>
       </div>
+
+      {/* Archive Matter Modal */}
+      {showArchiveMatterModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="archive-matter-title"
+          data-testid="archive-matter-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+              <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
+                📦 أرشفة ملف القضية
+              </h3>
+              <button
+                type="button"
+                data-testid="cancel-archive-matter-button"
+                onClick={() => setShowArchiveMatterModal(false)}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4D606A] leading-relaxed">
+              عند أرشفة الملف، سيتحول إلى وضع القراءة فقط ولن تتمكن من تعديل بياناته أو إضافة قيود جديدة أو ربط أطراف إلا بعد إلغاء الأرشفة.
+            </p>
+
+            {lifecycleError && (
+              <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
+                ⚠️ {lifecycleError}
+              </div>
+            )}
+
+            <form onSubmit={handleArchiveMatter} className="space-y-4">
+              <div className="space-y-1">
+                <label htmlFor="archive-matter-reason" className="block text-xs font-bold text-[#172A35]">
+                  سبب الأرشفة (مطلوب — 3 أحرف على الأقل) <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id="archive-matter-reason"
+                  data-testid="archive-matter-reason-input"
+                  value={matterLifecycleReason}
+                  onChange={(e) => setMatterLifecycleReason(e.target.value)}
+                  placeholder="اكتب سبب أرشفة هذا الملف (مثال: انتهاء الإجراءات وحفظ الأوراق)..."
+                  rows={3}
+                  minLength={3}
+                  required
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowArchiveMatterModal(false)}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLifecycleSubmitting || matterLifecycleReason.trim().length < 3}
+                  data-testid="confirm-archive-matter-button"
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
+                >
+                  {isLifecycleSubmitting ? 'جارٍ الأرشفة...' : 'تأكيد الأرشفة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen Matter Modal */}
+      {showReopenMatterModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reopen-matter-title"
+          data-testid="reopen-matter-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+              <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
+                📂 إعادة فتح ملف القضية
+              </h3>
+              <button
+                type="button"
+                data-testid="cancel-reopen-matter-button"
+                onClick={() => setShowReopenMatterModal(false)}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4D606A] leading-relaxed">
+              إعادة فتح الملف سيعيده إلى الحالة النشطة ويسمح باستئناف التعديل وإضافة القيود القضائية وربط التوكيلات.
+            </p>
+
+            {lifecycleError && (
+              <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
+                ⚠️ {lifecycleError}
+              </div>
+            )}
+
+            <form onSubmit={handleReopenMatter} className="space-y-4">
+              <div className="space-y-1">
+                <label htmlFor="reopen-matter-reason" className="block text-xs font-bold text-[#172A35]">
+                  سبب إعادة الفتح (مطلوب — 3 أحرف على الأقل) <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id="reopen-matter-reason"
+                  data-testid="reopen-matter-reason-input"
+                  value={matterLifecycleReason}
+                  onChange={(e) => setMatterLifecycleReason(e.target.value)}
+                  placeholder="اكتب سبب إعادة فتح الملف (مثال: ظهور مستندات جديدة أو استئناف النزاع)..."
+                  rows={3}
+                  minLength={3}
+                  required
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReopenMatterModal(false)}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLifecycleSubmitting || matterLifecycleReason.trim().length < 3}
+                  data-testid="confirm-reopen-matter-button"
+                  className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
+                >
+                  {isLifecycleSubmitting ? 'جارٍ إعادة الفتح...' : 'تأكيد إعادة الفتح'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Proceeding Lifecycle Modal (Archive or Reopen) */}
+      {selectedProceedingForLifecycle && proceedingLifecycleAction && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="proceeding-lifecycle-title"
+          data-testid="proceeding-lifecycle-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
+              <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
+                {proceedingLifecycleAction === 'archive' ? '📦 أرشفة القيد القضائي' : '📂 إعادة فتح القيد القضائي'}
+              </h3>
+              <button
+                type="button"
+                data-testid="cancel-proceeding-lifecycle-button"
+                onClick={() => {
+                  setSelectedProceedingForLifecycle(null);
+                  setProceedingLifecycleAction(null);
+                }}
+                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded"
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4D606A] leading-relaxed">
+              {proceedingLifecycleAction === 'archive'
+                ? `هل ترغب في أرشفة القيد القضائي (${selectedProceedingForLifecycle.courtName})؟ سيتحول إلى قراءة فقط.`
+                : `إعادة فتح القيد القضائي (${selectedProceedingForLifecycle.courtName}) سيعيده للحالة النشطة ويسمح بالتعديل.`}
+            </p>
+
+            {proceedingLifecycleError && (
+              <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
+                ⚠️ {proceedingLifecycleError}
+              </div>
+            )}
+
+            <form
+              onSubmit={proceedingLifecycleAction === 'archive' ? handleArchiveProceeding : handleReopenProceeding}
+              className="space-y-4"
+            >
+              <div className="space-y-1">
+                <label htmlFor="proceeding-lifecycle-reason" className="block text-xs font-bold text-[#172A35]">
+                  السبب (مطلوب — 3 أحرف على الأقل) <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id="proceeding-lifecycle-reason"
+                  data-testid="proceeding-lifecycle-reason-input"
+                  value={proceedingLifecycleReason}
+                  onChange={(e) => setProceedingLifecycleReason(e.target.value)}
+                  placeholder="اكتب سبب هذا الإجراء..."
+                  rows={3}
+                  minLength={3}
+                  required
+                  className="w-full p-2 text-xs border border-[#D5DFE3] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  data-testid="cancel-proceeding-lifecycle-button"
+                  onClick={() => {
+                    setSelectedProceedingForLifecycle(null);
+                    setProceedingLifecycleAction(null);
+                  }}
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProceedingLifecycleSubmitting || proceedingLifecycleReason.trim().length < 3}
+                  data-testid="confirm-proceeding-lifecycle-button"
+                  className={`px-4 py-2 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px] ${
+                    proceedingLifecycleAction === 'archive'
+                      ? 'bg-amber-600 hover:bg-amber-700'
+                      : 'bg-[#14566B] hover:bg-[#0F4354]'
+                  }`}
+                >
+                  {isProceedingLifecycleSubmitting
+                    ? 'جارٍ التنفيذ...'
+                    : proceedingLifecycleAction === 'archive'
+                    ? 'تأكيد الأرشفة'
+                    : 'تأكيد إعادة الفتح'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

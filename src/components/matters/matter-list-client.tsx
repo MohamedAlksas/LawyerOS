@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { searchMattersAction } from '@/modules/matters/matter-actions';
 import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
@@ -19,23 +19,35 @@ import {
 interface MatterListClientProps {
   initialMatters?: MatterListItemDTO[];
   initialTotal?: number;
+  initialPage?: number;
+  initialTotalPages?: number;
+  initialLimit?: number;
   initialQuery?: string;
   initialKind?: MatterKind;
   initialStatus?: MatterStatus;
+  initialIncludeArchived?: boolean;
   initialError?: string;
 }
 
 export function MatterListClient({
   initialMatters = [],
   initialTotal = 0,
+  initialPage = 1,
+  initialTotalPages = 1,
+  initialLimit = 20,
   initialQuery = '',
   initialKind,
   initialStatus,
+  initialIncludeArchived = false,
   initialError,
 }: MatterListClientProps) {
   const [query, setQuery] = useState(initialQuery);
   const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
   const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(initialStatus);
+  const [includeArchived, setIncludeArchived] = useState<boolean>(initialIncludeArchived);
+  const [page, setPage] = useState<number>(initialPage);
+  const [totalPages, setTotalPages] = useState<number>(initialTotalPages);
+  const [limit] = useState<number>(initialLimit);
   const [matters, setMatters] = useState<MatterListItemDTO[]>(initialMatters);
   const [totalCount, setTotalCount] = useState<number>(initialTotal);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,19 +55,43 @@ export function MatterListClient({
 
   const requestGenRef = useRef(0);
 
+  const syncUrl = useCallback(
+    (q: string, k?: MatterKind, s?: MatterStatus, incArch?: boolean, p?: number) => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams();
+      if (q.trim()) params.set('query', q.trim());
+      if (k) params.set('kind', k);
+      if (s) params.set('status', s);
+      if (incArch) params.set('includeArchived', 'true');
+      if (p && p > 1) params.set('page', String(p));
+      const newQuery = params.toString();
+      const newUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+      window.history.replaceState(null, '', newUrl);
+    },
+    []
+  );
+
   const fetchMatters = useCallback(
-    async (searchQuery: string, kind?: MatterKind, status?: MatterStatus) => {
+    async (
+      searchQuery: string,
+      kind?: MatterKind,
+      status?: MatterStatus,
+      incArch: boolean = false,
+      pageNum: number = 1
+    ) => {
       const currentGen = ++requestGenRef.current;
       setIsLoading(true);
       setError(null);
+      syncUrl(searchQuery, kind, status, incArch, pageNum);
 
       try {
         const res = await searchMattersAction({
           query: searchQuery.trim() || undefined,
           kind,
           status,
-          limit: 50,
-          offset: 0,
+          includeArchived: incArch,
+          page: pageNum,
+          limit,
         });
 
         if (currentGen !== requestGenRef.current) return;
@@ -68,6 +104,8 @@ export function MatterListClient({
 
         setMatters(res.data.matters);
         setTotalCount(res.data.total);
+        setPage(res.data.page ?? pageNum);
+        setTotalPages(res.data.totalPages ?? 1);
         setIsLoading(false);
       } catch (err: unknown) {
         if (currentGen !== requestGenRef.current) return;
@@ -79,32 +117,78 @@ export function MatterListClient({
         setIsLoading(false);
       }
     },
-    []
+    [limit, syncUrl]
   );
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchMatters(query, selectedKind, selectedStatus);
+    setPage(1);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1);
   };
 
   const handleKindChange = (kind?: MatterKind) => {
     setSelectedKind(kind);
-    fetchMatters(query, kind, selectedStatus);
+    setPage(1);
+    fetchMatters(query, kind, selectedStatus, includeArchived, 1);
   };
 
   const handleStatusChange = (status?: MatterStatus) => {
     setSelectedStatus(status);
-    fetchMatters(query, selectedKind, status);
+    setPage(1);
+    fetchMatters(query, selectedKind, status, includeArchived, 1);
+  };
+
+  const handleIncludeArchivedChange = (checked: boolean) => {
+    setIncludeArchived(checked);
+    setPage(1);
+    fetchMatters(query, selectedKind, selectedStatus, checked, 1);
   };
 
   const handleClearFilters = () => {
     setQuery('');
     setSelectedKind(undefined);
     setSelectedStatus(undefined);
-    fetchMatters('', undefined, undefined);
+    setIncludeArchived(false);
+    setPage(1);
+    fetchMatters('', undefined, undefined, false, 1);
   };
 
-  const hasActiveFilters = Boolean(query.trim() || selectedKind || selectedStatus);
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+    fetchMatters(query, selectedKind, selectedStatus, includeArchived, newPage);
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncFromUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlPage = parseInt(params.get('page') || '1', 10) || 1;
+      const urlQuery = params.get('query') || '';
+      const urlKind = (params.get('kind') as MatterKind) || undefined;
+      const urlStatus = (params.get('status') as MatterStatus) || undefined;
+      const urlIncArch = params.get('includeArchived') === 'true';
+
+      setQuery(urlQuery);
+      setSelectedKind(urlKind);
+      setSelectedStatus(urlStatus);
+      setIncludeArchived(urlIncArch);
+      setPage(urlPage);
+      fetchMatters(urlQuery, urlKind, urlStatus, urlIncArch, urlPage);
+    };
+
+    window.addEventListener('popstate', syncFromUrl);
+    const initialParams = new URLSearchParams(window.location.search);
+    const initialUrlPage = parseInt(initialParams.get('page') || '1', 10) || 1;
+    if (initialUrlPage !== page) {
+      syncFromUrl();
+    }
+
+    return () => {
+      window.removeEventListener('popstate', syncFromUrl);
+    };
+  }, [fetchMatters, page]);
+
+  const hasActiveFilters = Boolean(query.trim() || selectedKind || selectedStatus || includeArchived);
 
   return (
     <div className="space-y-6">
@@ -221,7 +305,7 @@ export function MatterListClient({
             >
               الكل
             </button>
-            {(['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'] as MatterStatus[]).map((st) => (
+            {(['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED', 'ARCHIVED'] as MatterStatus[]).map((st) => (
               <button
                 key={st}
                 type="button"
@@ -239,6 +323,20 @@ export function MatterListClient({
             ))}
           </div>
 
+          {/* Include Archived Toggle */}
+          <div className="flex items-center gap-2">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+              <input
+                type="checkbox"
+                data-testid="include-archived-checkbox"
+                checked={includeArchived}
+                onChange={(e) => handleIncludeArchivedChange(e.target.checked)}
+                className="w-4 h-4 rounded text-[#14566B] focus:ring-[#14566B] border-[#D5DFE3]"
+              />
+              <span>تضمين الملفات المؤرشفة</span>
+            </label>
+          </div>
+
           <div className="text-xs font-medium text-[#4D606A]" data-testid="matters-total-count">
             إجمالي الملفات: <span className="font-bold text-[#172A35]">{totalCount}</span>
           </div>
@@ -252,7 +350,7 @@ export function MatterListClient({
         <ErrorContainer
           title="تعذر تحميل ملفات القضايا"
           message={error}
-          onRetry={() => fetchMatters(query, selectedKind, selectedStatus)}
+          onRetry={() => fetchMatters(query, selectedKind, selectedStatus, includeArchived, page)}
         />
       ) : matters.length === 0 ? (
         hasActiveFilters ? (
@@ -361,13 +459,22 @@ export function MatterListClient({
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${
-                              MATTER_STATUS_CLASSES[matter.status]
-                            }`}
-                          >
-                            {MATTER_STATUS_LABELS[matter.status]}
-                          </span>
+                          {matter.status === 'ARCHIVED' || matter.archivedAt ? (
+                            <span
+                              data-testid="matter-archived-badge"
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border bg-stone-100 text-stone-700 border-stone-300"
+                            >
+                              مؤرشف
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${
+                                MATTER_STATUS_CLASSES[matter.status]
+                              }`}
+                            >
+                              {MATTER_STATUS_LABELS[matter.status]}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs">
                           {matter.paperLocationName ? (
@@ -424,13 +531,22 @@ export function MatterListClient({
                         </Link>
                       </h2>
                     </div>
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 ${
-                        MATTER_STATUS_CLASSES[matter.status]
-                      }`}
-                    >
-                      {MATTER_STATUS_LABELS[matter.status]}
-                    </span>
+                    {matter.status === 'ARCHIVED' || matter.archivedAt ? (
+                      <span
+                        data-testid="matter-archived-badge"
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 bg-stone-100 text-stone-700 border-stone-300"
+                      >
+                        مؤرشف
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 ${
+                          MATTER_STATUS_CLASSES[matter.status]
+                        }`}
+                      >
+                        {MATTER_STATUS_LABELS[matter.status]}
+                      </span>
+                    )}
                   </div>
 
                   <div className="text-xs text-[#4D606A] space-y-1.5 pt-2 border-t border-[#E8EEF1]">
@@ -473,6 +589,39 @@ export function MatterListClient({
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div
+              data-testid="pagination-controls"
+              className="flex items-center justify-between bg-white px-4 py-3 rounded-[6px] border border-[#D5DFE3] text-sm"
+            >
+              <button
+                type="button"
+                data-testid="prev-page-button"
+                onClick={() => handlePageChange(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+              >
+                السابق
+              </button>
+
+              <span className="text-xs text-[#4D606A]">
+                صفحة <span className="font-bold text-[#172A35]">{page}</span> من{' '}
+                <span className="font-bold text-[#172A35]">{totalPages}</span>
+              </span>
+
+              <button
+                type="button"
+                data-testid="next-page-button"
+                onClick={() => handlePageChange(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+              >
+                التالي
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

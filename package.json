@@ -15,6 +15,7 @@
     "test:e2e:t04": "playwright test --config=playwright.t04.config.ts",
     "test:e2e:t05": "playwright test --config=playwright.t05.config.ts",
     "test:e2e:t06": "playwright test --config=playwright.t06.config.ts",
+    "test:e2e:t07": "playwright test --config=playwright.t07.config.ts",
     "postinstall": "prisma generate",
     "auth:provision-owner": "tsx src/cli/provision-owner.ts"
   },

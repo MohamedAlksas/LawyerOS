@@ -15,6 +15,9 @@ interface MattersPageProps {
     query?: string;
     kind?: string;
     status?: string;
+    page?: string;
+    limit?: string;
+    includeArchived?: string;
   }>;
 }
 
@@ -48,11 +51,15 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
 
   const rawStatus = params.status === 'SUSPENDED' ? 'ON_HOLD' : params.status;
   const validStatus: MatterStatus | undefined =
-    rawStatus && ['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'].includes(rawStatus)
+    rawStatus && ['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED', 'ARCHIVED'].includes(rawStatus)
       ? (rawStatus as MatterStatus)
       : undefined;
 
-  let initialResult: SearchMattersResult = { matters: [], total: 0 };
+  const page = Math.max(1, parseInt(params.page || '1', 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(params.limit || '20', 10) || 20));
+  const includeArchived = params.includeArchived === 'true' || validStatus === 'ARCHIVED';
+
+  let initialResult: SearchMattersResult = { matters: [], total: 0, page: 1, totalPages: 1, limit };
   let initialError: string | undefined = undefined;
   try {
     initialResult = await searchMatters(
@@ -60,8 +67,9 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         query: params.query,
         kind: validKind,
         status: validStatus,
-        limit: 50,
-        offset: 0,
+        includeArchived,
+        page,
+        limit,
       },
       actor
     );
@@ -79,9 +87,13 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
       <MatterListClient
         initialMatters={initialResult.matters}
         initialTotal={initialResult.total}
+        initialPage={initialResult.page ?? page}
+        initialTotalPages={initialResult.totalPages ?? 1}
+        initialLimit={limit}
         initialQuery={params.query || ''}
         initialKind={validKind}
         initialStatus={validStatus}
+        initialIncludeArchived={includeArchived}
         initialError={initialError}
       />
     </div>
