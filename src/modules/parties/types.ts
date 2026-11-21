@@ -84,6 +84,7 @@ export interface SavePartyResult {
 export interface SearchPartiesParams {
   query?: string;
   kind?: PartyKind;
+  includeArchived?: boolean;
   page?: number;
   limit?: number;
 }

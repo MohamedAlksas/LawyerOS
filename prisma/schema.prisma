@@ -332,6 +332,8 @@ model Matter {
   summary         String?
   notes           String?
   paperLocationId String?
+  archivedAt      DateTime?         @db.Timestamptz(3)
+  archiveReason   String?
   version         Int               @default(1)
   createdAt       DateTime          @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
@@ -345,6 +347,8 @@ model Matter {
   authorizations  MatterAuthorization[]
 
   @@index([status])
+  @@index([status, updatedAt])
+  @@index([archivedAt])
   @@index([kind])
   @@index([practiceAreaId])
   @@index([paperLocationId])
@@ -385,10 +389,14 @@ model Proceeding {
   registerType       String?
   circuit            String?
   numberText         String?
+  numberNormalized   String?
   yearLabel          String?
+  yearNormalized     String?
   filingDate         DateTime?          @db.Date
   claimAmount        String?
   status             ProceedingStatus   @default(DRAFT)
+  archivedAt         DateTime?          @db.Timestamptz(3)
+  archiveReason      String?
   version            Int                @default(1)
   createdAt          DateTime           @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
@@ -405,6 +413,9 @@ model Proceeding {
   @@index([courtId])
   @@index([parentProceedingId])
   @@index([numberText, yearLabel])
+  @@index([numberNormalized, yearLabel])
+  @@index([courtId, numberNormalized])
+  @@index([archivedAt])
   @@map("proceeding")
 }
 

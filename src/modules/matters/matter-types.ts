@@ -62,10 +62,14 @@ export interface ProceedingSummaryDTO {
   registerType?: string | null;
   circuit?: string | null;
   numberText?: string | null;
+  numberNormalized?: string | null;
   yearLabel?: string | null;
+  yearNormalized?: string | null;
   filingDate?: string | null;
   claimAmount?: string | null;
   status: ProceedingStatus;
+  archivedAt?: string | null;
+  archiveReason?: string | null;
   version: number;
   operationVersion?: number;
   createdAt: string;
@@ -102,6 +106,8 @@ export interface MatterDTO {
   notes?: string | null;
   paperLocationId?: string | null;
   paperLocationName?: string | null;
+  archivedAt?: string | null;
+  archiveReason?: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -256,6 +262,8 @@ export interface SearchMattersParams {
   role?: MatterPartyRole;
   courtId?: string;
   practiceAreaId?: string;
+  includeArchived?: boolean;
+  page?: number;
   limit?: number;
   offset?: number;
 }
@@ -271,11 +279,130 @@ export interface MatterListItemDTO {
   openingDate: string | null;
   primaryClientName: string | null;
   clientCount: number;
+  archivedAt?: string | null;
 }
 
 export interface SearchMattersResult {
   matters: MatterListItemDTO[];
   total: number;
+  page?: number;
+  totalPages?: number;
+  limit?: number;
+}
+
+export interface ArchiveMatterInput {
+  matterId: string;
+  reason: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface ReopenMatterInput {
+  matterId: string;
+  reason: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface ArchiveProceedingInput {
+  proceedingId: string;
+  matterId: string;
+  reason: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface ReopenProceedingInput {
+  proceedingId: string;
+  matterId: string;
+  reason: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
+export interface LifecycleCommandResult {
+  id: string;
+  version: number;
+  status: string;
+  archivedAt: string | null;
+  updatedAt: string;
+  operationVersion?: number;
+}
+
+export interface SearchProceedingsParams {
+  query?: string;
+  courtId?: string;
+  instance?: ProceedingInstance;
+  status?: ProceedingStatus;
+  matterId?: string;
+  includeArchived?: boolean;
+  page?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ProceedingSearchResultItemDTO {
+  id: string;
+  matterId: string;
+  matterTitle: string;
+  matterFileCode: string;
+  courtId: string;
+  courtName: string;
+  instance: ProceedingInstance;
+  registerType: string | null;
+  circuit: string | null;
+  numberText: string | null;
+  yearLabel: string | null;
+  status: ProceedingStatus;
+  archivedAt: string | null;
+  updatedAt: string;
+}
+
+export interface SearchProceedingsResult {
+  proceedings: ProceedingSearchResultItemDTO[];
+  total: number;
+  page: number;
+  totalPages: number;
+  limit: number;
+}
+
+export type UnifiedSearchType = 'ALL' | 'PARTY' | 'MATTER' | 'PROCEEDING';
+
+export interface UnifiedSearchParams {
+  query?: string;
+  type?: UnifiedSearchType;
+  includeArchived?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+export interface UnifiedSearchResultItem {
+  entityType: 'PARTY' | 'MATTER' | 'PROCEEDING';
+  id: string;
+  title: string;
+  subtitle?: string;
+  code?: string;
+  badge?: string;
+  href: string;
+  isArchived: boolean;
+  updatedAt: string;
+}
+
+export interface UnifiedSearchResult {
+  query: string;
+  type: UnifiedSearchType;
+  includeArchived: boolean;
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  items: UnifiedSearchResultItem[];
+  counts: {
+    all: number;
+    parties: number;
+    matters: number;
+    proceedings: number;
+  };
 }
 
 // ==========================================
@@ -566,8 +693,72 @@ export const searchMattersParamsSchema = z
     role: z.nativeEnum(MatterPartyRole).optional(),
     courtId: z.string().uuid().optional(),
     practiceAreaId: z.string().uuid().optional(),
+    includeArchived: z.boolean().optional(),
+    page: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const archiveMatterSchema = z
+  .object({
+    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
+    reason: z.string().trim().min(3, 'سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.'),
+    expectedVersion: z.number().int().min(1, 'رقم الإصدار المتوقع غير صالح.'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.'),
+  })
+  .strict();
+
+export const reopenMatterSchema = z
+  .object({
+    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
+    reason: z.string().trim().min(3, 'سبب إلغاء الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.'),
+    expectedVersion: z.number().int().min(1, 'رقم الإصدار المتوقع غير صالح.'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.'),
+  })
+  .strict();
+
+export const archiveProceedingSchema = z
+  .object({
+    proceedingId: z.string().uuid('معرف القيد القضائي غير صالح.'),
+    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
+    reason: z.string().trim().min(3, 'سبب الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.'),
+    expectedVersion: z.number().int().min(1, 'رقم الإصدار المتوقع غير صالح.'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.'),
+  })
+  .strict();
+
+export const reopenProceedingSchema = z
+  .object({
+    proceedingId: z.string().uuid('معرف القيد القضائي غير صالح.'),
+    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
+    reason: z.string().trim().min(3, 'سبب إلغاء الأرشفة مطلوب ويجب ألا يقل عن 3 أحرف.'),
+    expectedVersion: z.number().int().min(1, 'رقم الإصدار المتوقع غير صالح.'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.'),
+  })
+  .strict();
+
+export const searchProceedingsParamsSchema = z
+  .object({
+    query: z.string().max(200).optional(),
+    courtId: z.string().uuid().optional(),
+    instance: z.nativeEnum(ProceedingInstance).optional(),
+    status: z.nativeEnum(ProceedingStatus).optional(),
+    matterId: z.string().uuid().optional(),
+    includeArchived: z.boolean().optional(),
+    page: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const unifiedSearchParamsSchema = z
+  .object({
+    query: z.string().max(200).optional(),
+    type: z.enum(['ALL', 'PARTY', 'MATTER', 'PROCEEDING']).optional(),
+    includeArchived: z.boolean().optional(),
+    page: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(50).optional(),
   })
   .strict();
 
@@ -669,5 +860,26 @@ export class UnsupportedTransitionError extends Error {
   constructor(message = 'الانتقال إلى هذه الحالة غير مدعوم في هذا الإصدار.') {
     super(message);
     this.name = 'UnsupportedTransitionError';
+  }
+}
+
+export class MatterArchivedError extends Error {
+  constructor(message = 'ملف القضية مؤرشف ولا يمكن تعديله. يرجى إلغاء الأرشفة أولاً.') {
+    super(message);
+    this.name = 'MatterArchivedError';
+  }
+}
+
+export class ProceedingArchivedError extends Error {
+  constructor(message = 'القيد القضائي مؤرشف ولا يمكن تعديله. يرجى إلغاء الأرشفة أولاً.') {
+    super(message);
+    this.name = 'ProceedingArchivedError';
+  }
+}
+
+export class ActiveObligationError extends Error {
+  constructor(message = 'لا يمكن الأرشفة لوجود التزامات أو جلسات مجدولة قائمة.') {
+    super(message);
+    this.name = 'ActiveObligationError';
   }
 }

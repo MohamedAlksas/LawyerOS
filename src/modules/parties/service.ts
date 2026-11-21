@@ -552,9 +552,10 @@ export async function searchParties(
   const limit = Math.min(50, Math.max(1, params.limit ?? 20));
   const skip = (page - 1) * limit;
 
-  const where: Prisma.PartyWhereInput = {
-    archivedAt: null,
-  };
+  const where: Prisma.PartyWhereInput = {};
+  if (!params.includeArchived) {
+    where.archivedAt = null;
+  }
 
   if (params.kind) {
     where.kind = params.kind;
@@ -584,7 +585,7 @@ export async function searchParties(
       where,
       skip,
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       include: { identities: true },
     }),
   ]);
@@ -617,7 +618,7 @@ export async function getClientProfile(
         orderBy: { communicationAt: 'desc' },
       },
       powersOfAttorney: {
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       },
     },
   });

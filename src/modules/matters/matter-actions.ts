@@ -19,6 +19,12 @@ import {
   searchMatters,
   getPartyMatterAssociations,
   findSimilarProceedings,
+  archiveMatter,
+  reopenMatter,
+  archiveProceeding,
+  reopenProceeding,
+  searchProceedings,
+  unifiedSearch,
 } from './matter-service';
 import {
   MatterDTO,
@@ -45,6 +51,15 @@ import {
   UnlinkMatterAuthorizationInput,
   SearchMattersParams,
   SearchMattersResult,
+  ArchiveMatterInput,
+  ReopenMatterInput,
+  ArchiveProceedingInput,
+  ReopenProceedingInput,
+  LifecycleCommandResult,
+  SearchProceedingsParams,
+  SearchProceedingsResult,
+  UnifiedSearchParams,
+  UnifiedSearchResult,
   MatterValidationError,
   LastClientRequiredError,
   PrimaryContactConflictError,
@@ -55,6 +70,9 @@ import {
   ConcurrencyConflictError,
   NotFoundError,
   UnsupportedTransitionError,
+  MatterArchivedError,
+  ProceedingArchivedError,
+  ActiveObligationError,
 } from './matter-types';
 import {
   IdempotencyPayloadMismatchError,
@@ -149,6 +167,30 @@ function handleActionError(error: unknown): ActionResult<never> {
       success: false,
       error: error.message,
       code: 'UNSUPPORTED_TRANSITION',
+    };
+  }
+
+  if (error instanceof MatterArchivedError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'MATTER_ARCHIVED',
+    };
+  }
+
+  if (error instanceof ProceedingArchivedError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'PROCEEDING_ARCHIVED',
+    };
+  }
+
+  if (error instanceof ActiveObligationError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'ACTIVE_OBLIGATION',
     };
   }
 
@@ -385,6 +427,78 @@ export async function findSimilarProceedingsAction(
   try {
     const actor = await verifyActionSecurity();
     const data = await findSimilarProceedings(actor, params);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function archiveMatterAction(
+  input: ArchiveMatterInput
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await archiveMatter(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function reopenMatterAction(
+  input: ReopenMatterInput
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await reopenMatter(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function archiveProceedingAction(
+  input: ArchiveProceedingInput
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await archiveProceeding(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function reopenProceedingAction(
+  input: ReopenProceedingInput
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await reopenProceeding(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function searchProceedingsAction(
+  params: SearchProceedingsParams
+): Promise<ActionResult<SearchProceedingsResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await searchProceedings(params, actor);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function unifiedSearchAction(
+  params: UnifiedSearchParams
+): Promise<ActionResult<UnifiedSearchResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await unifiedSearch(params, actor);
     return { success: true, data };
   } catch (error) {
     return handleActionError(error);
