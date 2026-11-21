@@ -45,15 +45,15 @@
     },
     {
       "Name": "LawOffice-OS-Gemini-Prompts.md",
-      "Length": 211040
+      "Length": 211015
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 564017
+      "Length": 563992
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1854903
+      "Length": 1855166
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",
@@ -65,7 +65,7 @@
     },
     {
       "Name": "Prompt-Skill-Validation.json",
-      "Length": 7925
+      "Length": 7643
     }
   ]
 }

@@ -126,11 +126,17 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await expect(page.getByTestId('matter-summary-textarea')).toHaveValue(testSummary);
   });
 
-  test('keeps a dirty matter draft when shell navigation is cancelled @matters', async ({ page }) => {
+  test('keeps a dirty matter draft through browser history and cancelled shell navigation @matters', async ({ page }) => {
     await signInWithTotp(page, owner);
-    await page.goto('/matters/new');
+    await page.goto('/matters');
+    await page.getByTestId('new-matter-button').click();
     const summary = page.getByTestId('matter-summary-textarea');
     await summary.fill('مسودة اختبارية غير محفوظة');
+    await page.goBack();
+    await expect(page).toHaveURL(/\/matters$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/matters\/new$/);
+    await expect(summary).toHaveValue('مسودة اختبارية غير محفوظة');
     const home = page.getByTestId('nav-link-home').filter({ visible: true });
     const viewport = page.viewportSize();
     if (viewport && viewport.width >= 640 && viewport.width < 1024) {
@@ -147,6 +153,21 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
       await page.getByTestId('drawer-close-button').click();
     }
     await expect(summary).toHaveValue('مسودة اختبارية غير محفوظة');
+
+    const otherTab = await page.context().newPage();
+    try {
+      await otherTab.goto('/matters/new');
+      await expect(otherTab.getByTestId('matter-summary-textarea')).toHaveValue('');
+    } finally {
+      await otherTab.close();
+    }
+
+    const discard = page.waitForEvent('dialog').then((dialog) => dialog.accept());
+    await page.getByRole('link', { name: 'إلغاء والعودة', exact: true }).click();
+    await discard;
+    await expect(page).toHaveURL(/\/matters$/);
+    await page.getByTestId('new-matter-button').click();
+    await expect(summary).toHaveValue('');
   });
 
   test('enforces last client invariant on active matter @matters', async ({
@@ -545,14 +566,15 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     expect(createdMatter?.createdById).toBe(owner.id);
   });
 
-  test('recovers from transport-uncertain save via retry without creating duplicate records @matters', async ({
+  test('recovers from a lost matter response after browser history without creating duplicates @matters', async ({
     page,
   }) => {
     test.setTimeout(120_000);
     await signInWithTotp(page, owner);
 
     // 1. Navigate to matter create form
-    await page.goto('/matters/new');
+    await page.goto('/matters');
+    await page.getByTestId('new-matter-button').click();
     await expect(page).toHaveURL(/\/matters\/new/);
 
     const uniqueTitle = `دعوى التحقق من عدم التكرار ${Date.now()}`;
@@ -581,6 +603,20 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // 5. Unroute so retry goes through cleanly
     await page.unroute('**/matters**');
 
+    const committedMatter = await prisma.matter.findFirstOrThrow({ where: { title: uniqueTitle } });
+    createdMatterIds.push(committedMatter.id);
+    const originalClaim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { actorId: owner.id, commandType: 'openMatter', resultId: committedMatter.id },
+    });
+    expect(originalClaim.status).toBe('COMPLETED');
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/matters$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/matters\/new$/);
+    await expect(page.getByTestId('matter-title-input')).toHaveValue(uniqueTitle);
+    await expect(pendingBanner).toBeVisible();
+
     // 6. Click retry original operation
     const retryBtn = page.getByTestId('operation-retry-button');
     await expect(retryBtn).toBeVisible();
@@ -589,7 +625,9 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // 7. Verify navigation settles on created matter
     await page.waitForURL((url) => url.pathname.startsWith('/matters/') && url.pathname !== '/matters/new');
     const createdId = new URL(page.url()).pathname.split('/').pop()!;
-    createdMatterIds.push(createdId);
+    expect(createdId).toBe(committedMatter.id);
+    expect(await prisma.idempotencyRecord.findUniqueOrThrow({ where: { id: originalClaim.id } }))
+      .toEqual(originalClaim);
 
     // 8. Verify exactly ONE matter row was created in DB for this title (no duplicate records)
     const matchingMatters = await prisma.matter.findMany({
@@ -1348,7 +1386,7 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     }
   });
 
-  test('recovers from committed proceeding creation with lost response using original idempotency key without duplicate creation (E1) @matters', async ({
+  test('recovers from a committed proceeding after browser history interrupts its response (E1) @matters', async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -1377,7 +1415,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     });
     createdMatterIds.push(matter.id);
 
-    await page.goto(`/matters/${matter.id}/proceedings/new`);
+    await page.goto(`/matters/${matter.id}`);
+    await page.getByTestId('add-proceeding-button').click();
     await expect(page).toHaveURL(new RegExp(`/matters/${matter.id}/proceedings/new$`));
 
     const uniqueNumber = `${Date.now().toString().slice(-4)}/ف`;
@@ -1386,18 +1425,33 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.getByTestId('proceeding-number-input').fill(uniqueNumber);
 
     let interceptedOnce = false;
+    const committed = Promise.withResolvers<void>();
+    const releaseResponse = Promise.withResolvers<void>();
     await page.route(`**/matters/${matter.id}/proceedings**`, async (route) => {
       const postData = route.request().postData() || '';
       if (route.request().method() === 'POST' && postData.includes('FIRST_INSTANCE') && !interceptedOnce) {
         interceptedOnce = true;
         await page.request.fetch(route.request());
+        committed.resolve();
+        await releaseResponse.promise;
         await route.abort('failed');
       } else {
         await route.continue();
       }
     });
 
-    await page.getByTestId('proceeding-submit-button').click();
+    try {
+      await page.getByTestId('proceeding-submit-button').click();
+      await committed.promise;
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`/matters/${matter.id}$`));
+    } finally {
+      releaseResponse.resolve();
+    }
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.goForward();
+    await expect(page).toHaveURL(new RegExp(`/matters/${matter.id}/proceedings/new$`));
+    await expect(page.getByTestId('proceeding-number-input')).toHaveValue(uniqueNumber);
 
     const pendingBanner = page.getByTestId('operation-pending-banner');
     await expect(pendingBanner).toBeVisible();
@@ -1422,8 +1476,6 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
       where: { actorId: owner.id, commandType: 'addProceeding', resultId: preRetryProcs[0].id },
     });
     expect(preRetryClaim.status).toBe('COMPLETED');
-
-    await page.unroute(`**/matters/${matter.id}/proceedings**`);
 
     const retryBtn = page.getByTestId('operation-retry-button');
     await expect(retryBtn).toBeVisible();

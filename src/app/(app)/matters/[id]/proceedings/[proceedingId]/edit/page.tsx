@@ -113,6 +113,8 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
   return (
     <div className="py-2">
       <ProceedingForm
+        key={actor.id}
+        ownerId={actor.id}
         matter={matter}
         courts={courts.map((c) => ({ id: c.id, name: c.name, isActive: c.isActive }))}
         initialProceeding={proceeding}

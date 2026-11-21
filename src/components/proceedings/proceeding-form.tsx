@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useId, useMemo, useEffect, useRef } from 'react';
-import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
+import React, { useState, useId, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import {
   addProceedingAction,
@@ -43,13 +43,41 @@ interface CourtOption {
 }
 
 interface ProceedingFormProps {
+  ownerId: string;
   matter: MatterDTO;
   courts: CourtOption[];
   initialProceeding?: ProceedingSummaryDTO;
   lookupError?: boolean;
 }
 
+type ProceedingOperation = {
+  key: string;
+  kind: 'create' | 'update';
+  payload: AddProceedingInput | UpdateProceedingInput;
+};
+
+interface ProceedingDraft {
+  courtId: string;
+  instance: ProceedingInstance;
+  parentProceedingId: string;
+  numberText: string;
+  yearLabel: string;
+  registerType: string;
+  circuit: string;
+  filingDate: string;
+  claimAmount: string;
+  status: ProceedingStatus;
+  includedPartyIds: Set<string>;
+  partyCapacities: Record<string, PartyCapacityState>;
+  incompleteDraftAcknowledged: boolean;
+  expectedVersion: number | undefined;
+  idempotencyKey: string;
+  isDirty: boolean;
+  operation: ProceedingOperation | null;
+}
+
 export function ProceedingForm({
+  ownerId,
   matter,
   courts,
   initialProceeding,
@@ -57,29 +85,35 @@ export function ProceedingForm({
 }: ProceedingFormProps) {
   const router = useRouter();
   const isEdit = Boolean(initialProceeding);
+  const draft = useFormDraft<ProceedingDraft>(
+    ownerId, `/matters/${matter.id}/proceedings/${initialProceeding ? `${initialProceeding.id}/edit` : 'new'}`,
+  );
+  const restored = draft.restored;
 
   // Form State
-  const [courtId, setCourtId] = useState(initialProceeding?.courtId || '');
+  const [courtId, setCourtId] = useState(restored?.courtId ?? initialProceeding?.courtId ?? '');
   const [instance, setInstance] = useState<ProceedingInstance>(
-    initialProceeding?.instance || 'FIRST_INSTANCE'
+    restored?.instance ?? initialProceeding?.instance ?? 'FIRST_INSTANCE'
   );
   const [parentProceedingId, setParentProceedingId] = useState<string>(
-    initialProceeding?.parentProceedingId || ''
+    restored?.parentProceedingId ?? initialProceeding?.parentProceedingId ?? ''
   );
-  const [numberText, setNumberText] = useState(initialProceeding?.numberText || '');
-  const [yearLabel, setYearLabel] = useState(initialProceeding?.yearLabel || '');
-  const [registerType, setRegisterType] = useState(initialProceeding?.registerType || '');
-  const [circuit, setCircuit] = useState(initialProceeding?.circuit || '');
-  const [filingDate, setFilingDate] = useState(initialProceeding?.filingDate || '');
-  const [claimAmount, setClaimAmount] = useState(initialProceeding?.claimAmount || '');
+  const [numberText, setNumberText] = useState(restored?.numberText ?? initialProceeding?.numberText ?? '');
+  const [yearLabel, setYearLabel] = useState(restored?.yearLabel ?? initialProceeding?.yearLabel ?? '');
+  const [registerType, setRegisterType] = useState(restored?.registerType ?? initialProceeding?.registerType ?? '');
+  const [circuit, setCircuit] = useState(restored?.circuit ?? initialProceeding?.circuit ?? '');
+  const [filingDate, setFilingDate] = useState(restored?.filingDate ?? initialProceeding?.filingDate ?? '');
+  const [claimAmount, setClaimAmount] = useState(restored?.claimAmount ?? initialProceeding?.claimAmount ?? '');
   const [status, setStatus] = useState<ProceedingStatus>(
-    initialProceeding?.status || 'DRAFT'
+    restored?.status ?? initialProceeding?.status ?? 'DRAFT'
   );
+  const [expectedVersion, setExpectedVersion] = useState(restored?.expectedVersion ?? initialProceeding?.version);
 
   // Track which matter parties are explicitly included in this proceeding (C12/U2).
   // A new proceeding starts with no inferred membership: every unlinked party is
   // a candidate that requires a deliberate inclusion decision.
   const [includedPartyIds, setIncludedPartyIds] = useState<Set<string>>(() => {
+    if (restored) return restored.includedPartyIds;
     if (initialProceeding?.parties) {
       return new Set(initialProceeding.parties.map((p) => p.matterPartyId));
     }
@@ -90,6 +124,7 @@ export function ProceedingForm({
   // Only existing links carry a saved capacity; candidates start unselected ('')
   // requiring an explicit capacity decision upon inclusion (P2/U2).
   const [partyCapacities, setPartyCapacities] = useState<Record<string, PartyCapacityState>>(() => {
+    if (restored) return restored.partyCapacities;
     const initial: Record<string, PartyCapacityState> = {};
     const existingPartiesMap = new Map<string, ProceedingPartySummaryDTO>();
     if (initialProceeding?.parties) {
@@ -113,10 +148,15 @@ export function ProceedingForm({
     return initial;
   });
 
-  // Full snapshot synchronization on initialProceeding change (C10)
+  const [isDirty, setIsDirty] = useState(restored?.isDirty ?? false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [operationPending, setOperationPending] = useState(Boolean(restored?.operation));
+
+  // Synchronize clean forms and explicit conflict reloads with the latest server version.
   const [prevProceeding, setPrevProceeding] = useState(initialProceeding);
-  if (initialProceeding && initialProceeding !== prevProceeding) {
+  if (initialProceeding && initialProceeding !== prevProceeding && !isDirty && !isSaving && !operationPending) {
     setPrevProceeding(initialProceeding);
+    setExpectedVersion(initialProceeding.version);
     setCourtId(initialProceeding.courtId || '');
     setInstance(initialProceeding.instance || 'FIRST_INSTANCE');
     setParentProceedingId(initialProceeding.parentProceedingId || '');
@@ -154,23 +194,28 @@ export function ProceedingForm({
   }
 
   // UI States
-  const [isSaving, setIsSaving] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [incompleteDraftAcknowledged, setIncompleteDraftAcknowledged] = useState(false);
+  const [incompleteDraftAcknowledged, setIncompleteDraftAcknowledged] = useState(restored?.incompleteDraftAcknowledged ?? false);
 
   // In-memory Idempotency Key plus the frozen semantic payload for the original
   // operation. A retry after an uncertain outcome must reuse both.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('proc'));
-  const pendingOperationRef = useRef<{
-    key: string;
-    kind: 'create' | 'update';
-    payload: AddProceedingInput | UpdateProceedingInput;
-  } | null>(null);
-  const [operationPending, setOperationPending] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => restored?.idempotencyKey ?? generateClientRequestId('proc'));
+  const pendingOperationRef = useRef<ProceedingOperation | null>(restored?.operation ?? null);
+
+  const fields = {
+    courtId, instance, parentProceedingId, numberText, yearLabel, registerType, circuit,
+    filingDate, claimAmount, status, includedPartyIds, partyCapacities, incompleteDraftAcknowledged,
+    expectedVersion, idempotencyKey, isDirty,
+  };
+  useLayoutEffect(() => {
+    if (!draft.isCurrent()) return;
+    const operation = pendingOperationRef.current;
+    if (isDirty || operation) draft.keep({ ...fields, operation });
+    else draft.clear();
+  });
 
   const formId = useId();
   const formDomId = `${formId}-form`;
@@ -289,6 +334,7 @@ export function ProceedingForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving || !draft.isCurrent()) return;
     setIsSaving(true);
     setGeneralError(null);
     setFieldErrors({});
@@ -314,7 +360,7 @@ export function ProceedingForm({
               excludeProceedingId: initialProceeding?.id ?? null,
               limit: 10,
             });
-            if (submitGen !== similarGenRef.current) {
+            if (submitGen !== similarGenRef.current || !draft.isCurrent()) {
               setIsSaving(false);
               return;
             }
@@ -407,7 +453,7 @@ export function ProceedingForm({
           payload: {
             id: initialProceeding.id,
             matterId: matter.id,
-            expectedVersion: initialProceeding.version,
+            expectedVersion: expectedVersion ?? initialProceeding.version,
             courtId,
             instance,
             parentProceedingId: parentProceedingId || null,
@@ -445,12 +491,19 @@ export function ProceedingForm({
       }
       pendingOperationRef.current = operation;
     }
+    draft.keep({ ...fields, operation });
 
     try {
       const res =
         operation.kind === 'update'
           ? await updateProceedingAction(operation.payload as UpdateProceedingInput)
           : await addProceedingAction(operation.payload as AddProceedingInput);
+
+      if (!draft.isCurrent()) {
+        setOperationPending(true);
+        setIsSaving(false);
+        return;
+      }
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -490,15 +543,14 @@ export function ProceedingForm({
       }
 
       pendingOperationRef.current = null;
+      draft.clear();
       setOperationPending(false);
       setIsDirty(false);
-      router.push(`/matters/${matter.id}`);
-    } catch (err: unknown) {
+      router.replace(`/matters/${matter.id}`);
+    } catch {
       setOperationPending(true);
       setGeneralError(
-        err instanceof Error
-          ? err.message
-          : 'حدث خطأ في الاتصال أثناء حفظ البيانات. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
+        'حدث خطأ في الاتصال أثناء حفظ البيانات. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
       );
       setIsSaving(false);
     }
@@ -586,6 +638,8 @@ export function ProceedingForm({
             <button
               type="button"
               onClick={() => {
+                draft.clear();
+                setIsDirty(false);
                 setIdempotencyKey(generateClientRequestId('proc'));
                 setConcurrencyConflict(false);
                 router.refresh();
@@ -1262,6 +1316,11 @@ export function ProceedingForm({
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <Link
             href={`/matters/${matter.id}`}
+            replace
+            onNavigate={() => {
+              draft.clear();
+              setIsDirty(false);
+            }}
             className="w-full sm:w-auto px-5 py-2.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] text-center min-h-[44px] flex items-center justify-center transition-colors"
           >
             إلغاء والعودة للملف

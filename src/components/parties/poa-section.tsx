@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useLayoutEffect, useRef } from 'react';
 import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
-import { useLeaveGuard } from '@/components/navigation-guard';
+import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import {
   PoAType,
   PoAReviewStatus,
@@ -16,31 +16,52 @@ import {
 } from './party-types';
 
 interface PoaSectionProps {
+  ownerId: string;
   partyId: string;
   initialPoas: PoASummaryDTO[];
 }
 
-export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
+interface PoaDraft {
+  editing: Pick<PoASummaryDTO, 'id' | 'version'> | null;
+  poaNumberText: string;
+  poaYearLabel: string;
+  notarizationOffice: string;
+  poaType: PoAType;
+  issueDate: string;
+  humanReviewStatus: PoAReviewStatus;
+  notes: string;
+  pending: SavePowerOfAttorneyInput | null;
+}
+
+export function PoaSection({ ownerId, partyId, initialPoas }: PoaSectionProps) {
+  const draft = useFormDraft<PoaDraft>(ownerId, `/parties/${partyId}`);
+  const restored = draft.restored;
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [editing, setEditing] = useState<PoASummaryDTO | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(Boolean(restored));
+  const [isDirty, setIsDirty] = useState(Boolean(restored));
+  const [editing, setEditing] = useState<PoaDraft['editing']>(restored?.editing ?? null);
 
   // Form inputs
-  const [poaNumberText, setPoaNumberText] = useState('');
-  const [poaYearLabel, setPoaYearLabel] = useState('');
-  const [notarizationOffice, setNotarizationOffice] = useState('');
-  const [poaType, setPoaType] = useState<PoAType>('LITIGATION');
-  const [issueDate, setIssueDate] = useState('');
-  const [humanReviewStatus, setHumanReviewStatus] = useState<PoAReviewStatus>('UNREVIEWED');
-  const [notes, setNotes] = useState('');
+  const [poaNumberText, setPoaNumberText] = useState(restored?.poaNumberText ?? '');
+  const [poaYearLabel, setPoaYearLabel] = useState(restored?.poaYearLabel ?? '');
+  const [notarizationOffice, setNotarizationOffice] = useState(restored?.notarizationOffice ?? '');
+  const [poaType, setPoaType] = useState<PoAType>(restored?.poaType ?? 'LITIGATION');
+  const [issueDate, setIssueDate] = useState(restored?.issueDate ?? '');
+  const [humanReviewStatus, setHumanReviewStatus] = useState<PoAReviewStatus>(restored?.humanReviewStatus ?? 'UNREVIEWED');
+  const [notes, setNotes] = useState(restored?.notes ?? '');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const idempotencyKeyRef = useRef<string | null>(null);
-  const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(null);
-  useLeaveGuard(isFormOpen && isDirty, isSubmitting || !!pending);
+  const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(restored?.pending ?? null);
+  const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, humanReviewStatus, notes };
+  useLayoutEffect(() => {
+    if (!draft.isCurrent()) return;
+    if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
+    else draft.clear();
+  });
+  useLeaveGuard(isFormOpen && isDirty, isSubmitting || Boolean(pending));
 
   const getIdempotencyKey = (): string => {
     if (!idempotencyKeyRef.current) {
@@ -53,7 +74,7 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
   };
 
   const openForm = (record: PoASummaryDTO | null) => {
-    setEditing(record);
+    setEditing(record ? { id: record.id, version: record.version } : null);
     setIsDirty(false);
     setPoaNumberText(record?.poaNumberText ?? '');
     setPoaYearLabel(record?.poaYearLabel ?? new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Cairo' }).format());
@@ -70,7 +91,7 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || !draft.isCurrent()) return;
     setError(null);
 
     if (!poaNumberText.trim()) {
@@ -102,9 +123,16 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
       notes: notes.trim() || null,
       idempotencyKey: getIdempotencyKey(),
     };
+    setPending(payload);
+    draft.keep({ ...fields, pending: payload });
 
     try {
       const result = await savePowerOfAttorneyAction(payload);
+
+      if (!draft.isCurrent()) {
+        setIsSubmitting(false);
+        return;
+      }
 
       if (!result.success) {
         setError(result.error || 'تعذر حفظ التوكيل.');
@@ -125,6 +153,7 @@ export function PoaSection({ partyId, initialPoas }: PoaSectionProps) {
         return [result.data, ...prev];
       });
       setPending(null);
+      draft.clear();
 
       // Reset form and clear idempotency key
       setPoaNumberText('');

@@ -1,7 +1,7 @@
 ﻿'use client';
 
-import React, { useState, useEffect, useId, useRef } from 'react';
-import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
+import React, { useState, useEffect, useLayoutEffect, useId, useRef } from 'react';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import { openMatterAction, updateMatterAction } from '@/modules/matters/matter-actions';
 import { searchPartiesAction } from '@/modules/parties/actions';
@@ -33,6 +33,7 @@ interface ClientOptionItem {
 }
 
 interface MatterFormProps {
+  ownerId: string;
   initialMatter?: MatterDTO;
   practiceAreas: OptionItem[];
   storageLocations: OptionItem[];
@@ -40,7 +41,32 @@ interface MatterFormProps {
   lookupError?: boolean;
 }
 
+type MatterOperation = {
+  key: string;
+  kind: 'create' | 'update';
+  payload: OpenMatterInput | UpdateMatterInput;
+};
+
+interface MatterDraft {
+  title: string;
+  kind: MatterKind;
+  status: MatterStatus;
+  practiceAreaId: string;
+  paperLocationId: string;
+  openingDate: string;
+  closingDate: string;
+  summary: string;
+  notes: string;
+  expectedVersion: number | undefined;
+  selectedClientId: string;
+  selectedClientObj: ClientOptionItem | null;
+  idempotencyKey: string;
+  isDirty: boolean;
+  operation: MatterOperation | null;
+}
+
 export function MatterForm({
+  ownerId,
   initialMatter,
   practiceAreas,
   storageLocations,
@@ -49,19 +75,24 @@ export function MatterForm({
 }: MatterFormProps) {
   const router = useRouter();
   const isEdit = Boolean(initialMatter);
+  const draft = useFormDraft<MatterDraft>(
+    ownerId, initialMatter ? `/matters/${initialMatter.id}/edit` : '/matters/new',
+  );
+  const restored = draft.restored;
 
   // Form State
-  const [title, setTitle] = useState(initialMatter?.title || '');
-  const [kind, setKind] = useState<MatterKind>(initialMatter?.kind || 'LITIGATION');
-  const [status, setStatus] = useState<MatterStatus>(initialMatter?.status || 'ACTIVE');
-  const [practiceAreaId, setPracticeAreaId] = useState<string>(initialMatter?.practiceAreaId || '');
-  const [paperLocationId, setPaperLocationId] = useState<string>(initialMatter?.paperLocationId || '');
+  const [title, setTitle] = useState(restored?.title ?? initialMatter?.title ?? '');
+  const [kind, setKind] = useState<MatterKind>(restored?.kind ?? initialMatter?.kind ?? 'LITIGATION');
+  const [status, setStatus] = useState<MatterStatus>(restored?.status ?? initialMatter?.status ?? 'ACTIVE');
+  const [practiceAreaId, setPracticeAreaId] = useState(restored?.practiceAreaId ?? initialMatter?.practiceAreaId ?? '');
+  const [paperLocationId, setPaperLocationId] = useState(restored?.paperLocationId ?? initialMatter?.paperLocationId ?? '');
   const [openingDate, setOpeningDate] = useState<string>(
-    initialMatter ? (initialMatter.openingDate || '') : getCairoTodayDate()
+    restored?.openingDate ?? (initialMatter ? initialMatter.openingDate ?? '' : getCairoTodayDate())
   );
-  const [closingDate, setClosingDate] = useState<string>(initialMatter?.closingDate || '');
-  const [summary, setSummary] = useState(initialMatter?.summary || '');
-  const [notes, setNotes] = useState(initialMatter?.notes || '');
+  const [closingDate, setClosingDate] = useState(restored?.closingDate ?? initialMatter?.closingDate ?? '');
+  const [summary, setSummary] = useState(restored?.summary ?? initialMatter?.summary ?? '');
+  const [notes, setNotes] = useState(restored?.notes ?? initialMatter?.notes ?? '');
+  const [expectedVersion, setExpectedVersion] = useState(restored?.expectedVersion ?? initialMatter?.version);
 
   // UI States
   const [isSaving, setIsSaving] = useState(false);
@@ -72,18 +103,14 @@ export function MatterForm({
 
   // In-memory Idempotency Key (frozen across transport retries, regenerated only
   // after the original operation has a definitive committed/rolled-back outcome)
-  const [idempotencyKey, setIdempotencyKey] = useState(() => generateClientRequestId('mform'));
-  const pendingOperationRef = useRef<{
-    key: string;
-    kind: 'create' | 'update';
-    payload: OpenMatterInput | UpdateMatterInput;
-  } | null>(null);
-  const [operationPending, setOperationPending] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState(() => restored?.idempotencyKey ?? generateClientRequestId('mform'));
+  const pendingOperationRef = useRef<MatterOperation | null>(restored?.operation ?? null);
+  const [operationPending, setOperationPending] = useState(Boolean(restored?.operation));
+  const [isDirty, setIsDirty] = useState(restored?.isDirty ?? false);
 
   // C17: Client Selection with Server-Backed Normalized Search
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [selectedClientObj, setSelectedClientObj] = useState<ClientOptionItem | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState(restored?.selectedClientId ?? '');
+  const [selectedClientObj, setSelectedClientObj] = useState<ClientOptionItem | null>(restored?.selectedClientObj ?? null);
   const [clientSearchQuery, setClientSearchQuery] = useState('');
   const [partiesList, setPartiesList] = useState<ClientOptionItem[]>(parties);
   const [isSearchingClient, setIsSearchingClient] = useState(false);
@@ -94,10 +121,22 @@ export function MatterForm({
   const searchGenRef = useRef(0);
   const prevMatterRef = useRef(initialMatter);
 
-  // C10: Reset complete form snapshot when initialMatter updates or page reloads
+  const fields = {
+    title, kind, status, practiceAreaId, paperLocationId, openingDate, closingDate, summary,
+    notes, expectedVersion, selectedClientId, selectedClientObj, idempotencyKey, isDirty,
+  };
+  useLayoutEffect(() => {
+    if (!draft.isCurrent()) return;
+    const operation = pendingOperationRef.current;
+    if (isDirty || operation) draft.keep({ ...fields, operation });
+    else draft.clear();
+  });
+
+  // Keep a restored edit on its original version until the user reloads after a conflict.
   useEffect(() => {
-    if (initialMatter && prevMatterRef.current !== initialMatter) {
+    if (initialMatter && prevMatterRef.current !== initialMatter && !isDirty && !isSaving && !operationPending) {
       prevMatterRef.current = initialMatter;
+      setExpectedVersion(initialMatter.version);
       setTitle(initialMatter.title || '');
       setKind(initialMatter.kind || 'LITIGATION');
       setStatus(initialMatter.status || 'ACTIVE');
@@ -110,7 +149,7 @@ export function MatterForm({
       setConcurrencyConflict(false);
       setGeneralError(null);
     }
-  }, [initialMatter]);
+  }, [initialMatter, isDirty, isSaving, operationPending]);
 
   const formId = useId();
   const formDomId = `${formId}-form`;
@@ -169,6 +208,7 @@ export function MatterForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving || !draft.isCurrent()) return;
     setIsSaving(true);
     setGeneralError(null);
     setFieldErrors({});
@@ -183,7 +223,7 @@ export function MatterForm({
       if (isEdit && initialMatter) {
         const payload: UpdateMatterInput = {
           id: initialMatter.id,
-          expectedVersion: initialMatter.version,
+          expectedVersion: expectedVersion ?? initialMatter.version,
           title: title.trim(),
           kind,
           status,
@@ -213,12 +253,19 @@ export function MatterForm({
       }
       pendingOperationRef.current = operation;
     }
+    draft.keep({ ...fields, operation });
 
     try {
       const res =
         operation.kind === 'update'
           ? await updateMatterAction(operation.payload as UpdateMatterInput)
           : await openMatterAction(operation.payload as OpenMatterInput);
+
+      if (!draft.isCurrent()) {
+        setOperationPending(true);
+        setIsSaving(false);
+        return;
+      }
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -261,17 +308,16 @@ export function MatterForm({
       }
 
       pendingOperationRef.current = null;
+      draft.clear();
       setOperationPending(false);
       setIsDirty(false);
-      router.push(`/matters/${res.data.matter.id}`);
-    } catch (err: unknown) {
+      router.replace(`/matters/${res.data.matter.id}`);
+    } catch {
       // C09: transport failure leaves the committed outcome unknown. Keep the
       // original key AND payload frozen; do not create a new operation.
       setOperationPending(true);
       setGeneralError(
-        err instanceof Error
-          ? err.message
-          : 'حدث خطأ في الاتصال أثناء حفظ البيانات. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
+        'حدث خطأ في الاتصال أثناء حفظ البيانات. العملية الأصلية محفوظة ويمكنك إعادة المحاولة بأمان.'
       );
       setIsSaving(false);
     }
@@ -366,7 +412,11 @@ export function MatterForm({
           <div>
             <button
               type="button"
-              onClick={() => router.refresh()}
+              onClick={() => {
+                draft.clear();
+                setIsDirty(false);
+                router.refresh();
+              }}
               className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px]"
             >
               تحديث الصفحة وتحميل أحدث البيانات
@@ -656,6 +706,7 @@ export function MatterForm({
                   onClick={() => {
                     setSelectedClientId('');
                     setSelectedClientObj(null);
+                    setIsDirty(true);
                   }}
                   className="text-xs font-semibold text-red-700 hover:text-red-900 p-1 rounded"
                 >
@@ -701,6 +752,7 @@ export function MatterForm({
                         onClick={() => {
                           setSelectedClientId(p.id);
                           setSelectedClientObj(p);
+                          setIsDirty(true);
                         }}
                         className="w-full text-right p-2.5 text-xs hover:bg-[#F4F6F7] flex items-center justify-between transition-colors min-h-[40px]"
                       >
@@ -830,6 +882,11 @@ export function MatterForm({
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <Link
             href={isEdit && initialMatter ? `/matters/${initialMatter.id}` : '/matters'}
+            replace
+            onNavigate={() => {
+              draft.clear();
+              setIsDirty(false);
+            }}
             className="w-full sm:w-auto px-5 py-2.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] text-center min-h-[44px] flex items-center justify-center transition-colors"
           >
             إلغاء والعودة

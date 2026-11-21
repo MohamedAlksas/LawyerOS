@@ -16,6 +16,12 @@ The owner assigned this follow-up directly to Codex. The implementation starts f
 ## Verification scope
 
 - Local verification uses isolated synthetic databases and a production build. The 232 unit tests and 264 PostgreSQL integration tests passed across two runs, including three dedicated startup-process cases. Integration covers authorization for all 16 T06 Server Actions. The POA fixture verifies that retained older claims replay and new commands distinguish an omitted status from an explicit reset.
-- Chromium verification passed 60 identity, 46 Arabic shell, 21 Party and 66 Matter cases on desktop, tablet and mobile. The Matter total combines 63 passes from the full run with three focused rechecks after correcting the reference command label in the assertion. The suite covers a real 51-row pagination fixture and guarded shell navigation. Same-document traversal via the browser's Back or Forward controls can still leave the form without its in-memory draft or retry key.
+- The audit remediation baseline passed 60 Identity, 46 Arabic shell, 21 Party and 66 Matter Chromium cases. The Matter total combined 63 passes from the full run with three focused rechecks after correcting the reference command label in the assertion.
 - The metadata migration targets the active database. Retained backups follow the existing recovery policy. Retain the Party idempotency signing secret with those backups. Historical unkeyed claims are upgraded as they are replayed.
 - This is a correction candidate in draft PR #14. The finance-scope planning decision lives on its existing branch pending integration. Production migration and PR acceptance require the project's separate release and review steps.
+
+## Browser history follow-up
+
+The private shell retains Matter, Proceeding and Power of Attorney drafts across same-document Back and Forward navigation. Each draft is scoped to the authorized owner and the form URL in the current tab. A pending write preserves the exact request body and retry key before the first network request. Reopening the form can retry that operation and leaves background responses outside the active page's navigation. Dirty edits retain their original record version. A confirmed form cancellation discards the draft.
+
+The browser checks traverse real history, exercise a response lost after commit and compare the retained database claim and record after retry. They also cover a Proceeding save whose committed response is still in flight when the user leaves, explicit cancellation and isolation from a second tab. Drafts use the shell's JavaScript memory and last for the lifetime of the private application document.

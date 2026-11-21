@@ -19,10 +19,11 @@ import { CommunicationNotesSection } from './communication-notes-section';
 import { PoaSection } from './poa-section';
 
 interface PartyProfileClientProps {
+  ownerId: string;
   party: ClientProfileDTO;
 }
 
-export function PartyProfileClient({ party }: PartyProfileClientProps) {
+export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) {
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
@@ -343,7 +344,7 @@ export function PartyProfileClient({ party }: PartyProfileClientProps) {
       <CommunicationNotesSection partyId={party.id} initialNotes={party.communicationNotes} />
 
       {/* 4. Powers of Attorney Section */}
-      <PoaSection partyId={party.id} initialPoas={party.powersOfAttorney} />
+      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} />
 
       {/* 5. Linked Matters Section */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
