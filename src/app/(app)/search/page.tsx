@@ -47,27 +47,33 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     throw error;
   }
 
-  const rawType = Array.isArray(params.type) ? params.type[0] : params.type;
-  const rawPage = Array.isArray(params.page) ? params.page[0] : params.page;
-  const rawLimit = Array.isArray(params.limit) ? params.limit[0] : params.limit;
-  const rawQuery = Array.isArray(params.query) ? params.query[0] : params.query;
-  const rawIncArch = Array.isArray(params.includeArchived) ? params.includeArchived[0] : params.includeArchived;
+  const getSingleParam = (val: unknown): string | undefined => {
+    if (typeof val === 'string') return val;
+    if (Array.isArray(val) && typeof val[0] === 'string') return val[0];
+    return undefined;
+  };
+
+  const rawType = getSingleParam(params.type);
+  const rawPage = getSingleParam(params.page);
+  const rawLimit = getSingleParam(params.limit);
+  const rawQuery = getSingleParam(params.query);
+  const rawIncArch = getSingleParam(params.includeArchived);
 
   const validType: UnifiedSearchType =
     rawType && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(rawType)
       ? (rawType as UnifiedSearchType)
       : 'ALL';
 
-  const page = Math.max(1, parseInt(rawPage || '1', 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(rawLimit || '20', 10) || 20));
+  const requestedPage = Math.min(1000, Math.max(1, parseInt(rawPage || '1', 10) || 1));
+  const effectiveLimit = Math.min(50, Math.max(1, parseInt(rawLimit || '20', 10) || 20));
   const includeArchived = rawIncArch === 'true';
 
   let initialResult: UnifiedSearchResult = {
     query: rawQuery || '',
     type: validType,
     includeArchived,
-    page,
-    limit,
+    page: requestedPage,
+    limit: effectiveLimit,
     total: 0,
     totalPages: 1,
     items: [],
@@ -86,21 +92,22 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         query: rawQuery,
         type: validType,
         includeArchived,
-        page,
-        limit,
+        page: requestedPage,
+        limit: effectiveLimit,
       },
       actor
     );
 
     // Initial page recovery: if requested page is beyond totalPages but valid records exist, refetch the last valid page
-    if (page > initialResult.totalPages && initialResult.total > 0) {
+    const totalPages = initialResult.totalPages ?? 1;
+    if (requestedPage > totalPages && initialResult.total > 0) {
       initialResult = await unifiedSearch(
         {
           query: rawQuery,
           type: validType,
           includeArchived,
-          page: initialResult.totalPages,
-          limit,
+          page: totalPages,
+          limit: effectiveLimit,
         },
         actor
       );
@@ -118,11 +125,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     <div className="max-w-5xl mx-auto space-y-6">
       <UnifiedSearchClient
         initialResult={initialResult}
-        initialQuery={params.query || ''}
+        initialQuery={rawQuery || ''}
         initialType={validType}
         initialIncludeArchived={includeArchived}
-        initialPage={page}
+        initialPage={initialResult.page ?? requestedPage}
+        initialLimit={effectiveLimit}
         initialError={initialError}
+        sessionId={actor.sessionId}
       />
     </div>
   );

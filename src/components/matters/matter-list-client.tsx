@@ -7,6 +7,7 @@ import {
   createNavigationKey,
   setPrivateSearchState,
   getPrivateSearchState,
+  bindSearchSession,
 } from '@/lib/search-session-store';
 import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
 import {
@@ -37,6 +38,7 @@ interface MatterListClientProps {
   initialError?: string;
   courts?: { id: string; name: string }[];
   clients?: { id: string; name: string }[];
+  sessionId?: string;
 }
 
 export function MatterListClient({
@@ -55,14 +57,21 @@ export function MatterListClient({
   initialError,
   courts = [],
   clients = [],
+  sessionId,
 }: MatterListClientProps) {
+  useEffect(() => {
+    if (sessionId) {
+      bindSearchSession(sessionId);
+    }
+  }, [sessionId]);
+
   const [query, setQuery] = useState(() => {
     if (typeof window !== 'undefined') {
-      const urlQ = new URLSearchParams(window.location.search).get('query');
-      if (urlQ) return urlQ;
       const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
       const entry = getPrivateSearchState(navKey);
       if (entry?.query) return entry.query;
+      const urlQ = new URLSearchParams(window.location.search).get('query');
+      if (urlQ) return urlQ;
     }
     return initialQuery;
   });
@@ -89,13 +98,18 @@ export function MatterListClient({
   });
   const [selectedClientId, setSelectedClientId] = useState<string | undefined>(() => {
     if (typeof window !== 'undefined') {
-      const urlClient = new URLSearchParams(window.location.search).get('clientId');
-      if (urlClient) return urlClient;
       const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
       const entry = getPrivateSearchState(navKey);
       if (entry?.clientId) return entry.clientId;
     }
     return initialClientId;
+  });
+  const [knownClientsMap, setKnownClientsMap] = useState<Map<string, { id: string; name: string }>>(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const c of clients) {
+      map.set(c.id, c);
+    }
+    return map;
   });
   const [clientsList, setClientsList] = useState<Array<{ id: string; name: string }>>(clients);
   const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
@@ -151,36 +165,47 @@ export function MatterListClient({
   const fetchMattersRef = useRef<FetchMattersFn | null>(null);
 
   const searchClientsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const clientSearchGenRef = useRef(0);
 
-  const fetchClientOptions = useCallback(async (searchQ: string, pageNum: number = 1) => {
-    setIsSearchingClients(true);
-    setClientSearchError(null);
-    try {
-      const res = await searchMatterClientsAction({
-        query: searchQ.trim() || undefined,
-        page: pageNum,
-        limit: 10,
-      });
-      if (res.success) {
-        setClientsList((prev) => {
-          const existingMap = new Map(prev.map((c) => [c.id, c]));
-          for (const c of res.data.clients) {
-            existingMap.set(c.id, c);
-          }
-          return Array.from(existingMap.values());
+  const fetchClientOptions = useCallback(
+    async (searchQ: string, pageNum: number = 1) => {
+      const currentGen = ++clientSearchGenRef.current;
+      setIsSearchingClients(true);
+      setClientSearchError(null);
+      try {
+        const res = await searchMatterClientsAction({
+          query: searchQ.trim() || undefined,
+          includeArchived,
+          page: pageNum,
+          limit: 10,
         });
-        setClientPickerPage(res.data.page);
-        setClientPickerTotalPages(res.data.totalPages);
-        setClientPickerTotalCount(res.data.total);
-      } else {
-        setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
+        if (currentGen !== clientSearchGenRef.current) return;
+        if (res.success) {
+          setClientsList(res.data.clients);
+          setKnownClientsMap((prev) => {
+            const next = new Map(prev);
+            for (const c of res.data.clients) {
+              next.set(c.id, c);
+            }
+            return next;
+          });
+          setClientPickerPage(res.data.page);
+          setClientPickerTotalPages(res.data.totalPages);
+          setClientPickerTotalCount(res.data.total);
+        } else {
+          setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
+        }
+      } catch {
+        if (currentGen !== clientSearchGenRef.current) return;
+        setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
+      } finally {
+        if (currentGen === clientSearchGenRef.current) {
+          setIsSearchingClients(false);
+        }
       }
-    } catch {
-      setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
-    } finally {
-      setIsSearchingClients(false);
-    }
-  }, []);
+    },
+    [includeArchived]
+  );
 
   const handleClientPickerQueryChange = (val: string) => {
     setClientPickerQuery(val);
@@ -216,11 +241,10 @@ export function MatterListClient({
     ) => {
       if (typeof window === 'undefined') return;
       const params = new URLSearchParams();
-      // Omit `query` from the URL string completely so no private names or numbers appear in browser history or URLs
+      // Omit `query` and `clientId` from the URL string completely so no private names or numbers appear in browser history or URLs
       if (k) params.set('kind', k);
       if (s) params.set('status', s);
       if (court) params.set('courtId', court);
-      if (client) params.set('clientId', client);
       if (incData) params.set('incompleteData', 'true');
       if (incArch) params.set('includeArchived', 'true');
       if (p && p > 1) params.set('page', String(p));
@@ -231,10 +255,10 @@ export function MatterListClient({
       if (!navKey) {
         navKey = createNavigationKey();
       }
-      setPrivateSearchState(navKey, q, client);
+      setPrivateSearchState(navKey, q, client, sessionId);
       window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
     },
-    []
+    [sessionId]
   );
 
   const fetchMatters = useCallback(
@@ -407,7 +431,7 @@ export function MatterListClient({
         (window.history.state?.navKey as string | undefined);
       const entry = getPrivateSearchState(navKey);
       const restoredQuery = entry?.query ?? '';
-      const restoredClient = urlClient ?? entry?.clientId ?? undefined;
+      const restoredClient = entry?.clientId ?? urlClient ?? undefined;
 
       setQuery(restoredQuery);
       setSelectedKind(urlKind);
@@ -621,7 +645,7 @@ export function MatterListClient({
                 className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل الموكلين</option>
-                {clientsList.map((cl) => (
+                {Array.from(knownClientsMap.values()).map((cl) => (
                   <option key={cl.id} value={cl.id}>{cl.name}</option>
                 ))}
               </select>

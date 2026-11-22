@@ -783,6 +783,31 @@ export const findSimilarProceedingsSchema = z
   })
   .strict();
 
+export const searchMatterClientsParamsSchema = z
+  .object({
+    query: z
+      .string()
+      .trim()
+      .max(100, 'نص البحث يجب ألا يتجاوز 100 حرف')
+      .optional(),
+    includeArchived: z.boolean().optional().default(false),
+    page: z
+      .number()
+      .int('رقم الصفحة يجب أن يكون عدداً صحيحاً')
+      .min(1, 'رقم الصفحة يجب ألا يقل عن 1')
+      .max(1000, 'رقم الصفحة لا يمكن أن يتجاوز 1000')
+      .optional()
+      .default(1),
+    limit: z
+      .number()
+      .int('عدد النتائج يجب أن يكون عدداً صحيحاً')
+      .min(1, 'عدد النتائج يجب ألا يقل عن 1')
+      .max(100, 'عدد النتائج لا يمكن أن يتجاوز 100')
+      .optional()
+      .default(20),
+  })
+  .strict();
+
 // ==========================================
 // Error Classes
 // ==========================================

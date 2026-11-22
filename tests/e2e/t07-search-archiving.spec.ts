@@ -468,9 +468,59 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page.getByTestId('party-archived-banner')).toBeVisible();
     await expect(page.getByTestId('party-archived-badge')).toBeVisible();
     await expect(page.getByTestId('edit-party-button')).toBeHidden();
+    await expect(page.getByTestId('reveal-identity-button')).toBeHidden();
     await expect(page.getByTestId('add-note-button')).toBeHidden();
     await expect(page.getByTestId('add-poa-button')).toBeHidden();
     await expect(page.locator('text=+ فتح ملف جديد')).toBeHidden();
+
+    // Verify direct navigation to edit archived party is blocked
+    await page.goto(`/parties/${archivedPartyId}/edit`);
+    await expect(page.locator('text=الطرف مؤرشف')).toBeVisible();
+    await expect(page.locator('input, select, textarea, button[type="submit"]')).toHaveCount(0);
+  });
+
+  test('verifies Unified Search pagination stability against debounce reset and back-navigation @t07 @search @pagination', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    await signInWithTotp(page, owner);
+
+    await page.goto('/search');
+    const searchInput = page.getByTestId('unified-search-input');
+    await searchInput.fill(`تصفح صفحات النظام ${pageRunId}`);
+    await page.getByTestId('search-submit-button').click();
+
+    const paginationControls = page.getByTestId('pagination-controls');
+    await expect(paginationControls).toBeVisible();
+    await expect(paginationControls).toContainText('صفحة 1 من 2');
+
+    // Click next page to go to Page 2
+    const nextButton = page.getByTestId('next-page-button');
+    await nextButton.click();
+    await expect(page).toHaveURL(/page=2/);
+    await expect(paginationControls).toContainText('صفحة 2 من 2');
+
+    // CRITICAL: Wait 500ms (exceeding 300ms debounce timer) to verify debounce effect does NOT reset to page 1
+    await page.waitForTimeout(500);
+    await expect(page).toHaveURL(/page=2/);
+    await expect(paginationControls).toContainText('صفحة 2 من 2');
+
+    // Deep link navigation
+    const resultItem = page.getByTestId('search-results-list').locator('article').first();
+    await expect(resultItem).toBeVisible();
+    const resultTitle = await resultItem.locator('h2').innerText();
+    const detailLink = resultItem.getByRole('link', { name: /عرض التفاصيل/ });
+    await detailLink.click();
+    await expect(page).toHaveURL(/\/matters\/[a-f0-9-]+$/);
+
+    // Back navigation to search preserves page 2 and stable item
+    await page.goBack();
+    await expect(page).toHaveURL(/page=2/);
+    await expect(paginationControls).toContainText('صفحة 2 من 2');
+    await expect(page.getByTestId('unified-search-input')).toHaveValue(`تصفح صفحات النظام ${pageRunId}`);
+    const restoredItem = page.getByTestId('search-results-list').locator('article').first();
+    await expect(restoredItem).toBeVisible();
+    expect(await restoredItem.locator('h2').innerText()).toBe(resultTitle);
   });
 
   // =========================================================================
@@ -713,7 +763,8 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     expect(await clientSelect.inputValue()).toBe(testPartyId);
 
     await page.getByTestId('matters-search-submit').click();
-    await expect(page).toHaveURL(new RegExp(`clientId=${testPartyId}`));
+    expect(page.url()).not.toContain('clientId=');
+    expect(page.url()).not.toContain(testPartyId);
     await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: `الأهرام ${runId}` }).first()).toBeVisible();
 
     // 3. Filter by Incomplete Data
@@ -754,9 +805,10 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
       const req = route.request();
       if (req.method() === 'POST' && !interceptedOnce) {
         interceptedOnce = true;
-        const postData = req.postDataJSON() as { idempotencyKey?: string } | null;
-        if (postData?.idempotencyKey) {
-          interceptedKey = postData.idempotencyKey;
+        const postData = req.postDataJSON() as unknown;
+        const payload = Array.isArray(postData) ? postData[0] : (postData as { idempotencyKey?: string } | null);
+        if (payload?.idempotencyKey) {
+          interceptedKey = payload.idempotencyKey;
         }
         // Let the request reach the server and commit in PostgreSQL!
         await route.fetch();
@@ -789,8 +841,9 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     });
     expect(matterInDbAfterCommit?.status).toBe('ARCHIVED');
     expect(matterInDbAfterCommit?.archivedAt).not.toBeNull();
+    expect(matterInDbAfterCommit?.version).toBe(2);
 
-    // Exactly 1 audit event and 1 completed claim exist
+    // Exactly 1 audit event exists
     const auditCountBeforeRetry = await prisma.auditEvent.count({
       where: { entityId: retryMatterId, action: 'ARCHIVE_MATTER' },
     });
@@ -800,17 +853,30 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await page.getByRole('button', { name: 'إلغاء' }).click();
     await expect(page.getByTestId('archive-matter-modal')).toBeHidden();
 
-    // Verify page-level unresolved lifecycle banner is displayed
+    // Verify page-level unresolved lifecycle banner is displayed with frozen key notice
     const unresolvedBanner = page.getByTestId('unresolved-lifecycle-banner');
     await expect(unresolvedBanner).toBeVisible();
+    await expect(unresolvedBanner).toContainText('العملية مجمّدة');
 
     // Reopen modal via unresolved lifecycle banner
     await page.getByTestId('reopen-unresolved-lifecycle-button').click();
     await expect(page.getByTestId('archive-matter-modal')).toBeVisible();
     await expect(page.getByTestId('archive-matter-reason-input')).toHaveAttribute('readonly', '');
 
-    // Remove route interception so retry can succeed
+    // Track retry request key
+    let retryInterceptedKey: string | null = null;
     await page.unroute('**/matters/**');
+    await page.route('**/matters/**', async (route) => {
+      const req = route.request();
+      if (req.method() === 'POST') {
+        const postData = req.postDataJSON() as unknown;
+        const payload = Array.isArray(postData) ? postData[0] : (postData as { idempotencyKey?: string } | null);
+        if (payload?.idempotencyKey) {
+          retryInterceptedKey = payload.idempotencyKey;
+        }
+      }
+      await route.continue();
+    });
 
     // Click retry with the frozen key
     await page.getByTestId('retry-archive-matter-button').click();
@@ -820,17 +886,26 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page.getByTestId('matter-archived-banner')).toBeVisible();
     await expect(page.getByTestId('matter-status-badge')).toContainText('مؤرشف');
 
-    // Verify in database: retry was idempotent! Still exactly 1 audit event row and no duplicate write!
+    // Verify retry resent identical idempotency key
+    expect(interceptedKey).toBeTruthy();
+    expect(retryInterceptedKey).toBe(interceptedKey);
+
+    // Verify in database: retry was idempotent! Still exactly 1 audit event row and version bump = 1!
     const auditCountAfterRetry = await prisma.auditEvent.count({
       where: { entityId: retryMatterId, action: 'ARCHIVE_MATTER' },
     });
     expect(auditCountAfterRetry).toBe(1);
 
-    if (interceptedKey) {
-      const claim = await prisma.idempotencyRecord.findFirst({
-        where: { key: interceptedKey },
-      });
-      expect(claim?.status).toBe('COMPLETED');
-    }
+    const finalMatter = await prisma.matter.findUniqueOrThrow({
+      where: { id: retryMatterId },
+      select: { version: true, status: true },
+    });
+    expect(finalMatter.version).toBe(2);
+    expect(finalMatter.status).toBe('ARCHIVED');
+
+    const claim = await prisma.idempotencyRecord.findFirstOrThrow({
+      where: { key: interceptedKey! },
+    });
+    expect(claim.status).toBe('COMPLETED');
   });
 });

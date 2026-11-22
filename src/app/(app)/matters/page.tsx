@@ -80,7 +80,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
   const validClientId = rawClientId && rawClientId.trim() ? rawClientId.trim() : undefined;
   const isIncompleteData = rawIncData === 'true';
 
-  const page = Math.max(1, parseInt(rawPage || '1', 10) || 1);
+  const page = Math.min(1000, Math.max(1, parseInt(rawPage || '1', 10) || 1));
   const limit = Math.min(100, Math.max(1, parseInt(rawLimit || '20', 10) || 20));
   const includeArchived = rawIncArch === 'true' || validStatus === 'ARCHIVED';
 
@@ -152,7 +152,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         initialPage={initialResult.page ?? page}
         initialTotalPages={initialResult.totalPages ?? 1}
         initialLimit={limit}
-        initialQuery={params.query || ''}
+        initialQuery={rawQuery || ''}
         initialKind={validKind}
         initialStatus={validStatus}
         initialCourtId={validCourtId}
@@ -162,6 +162,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
         initialError={initialError}
         courts={courts.map((c) => ({ id: c.id, name: c.name }))}
         clients={clients}
+        sessionId={actor.sessionId}
       />
     </div>
   );

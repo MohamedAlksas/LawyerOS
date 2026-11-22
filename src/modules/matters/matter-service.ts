@@ -70,6 +70,7 @@ import {
   reopenProceedingSchema,
   searchProceedingsParamsSchema,
   unifiedSearchParamsSchema,
+  searchMatterClientsParamsSchema,
   parseCalendarDateToUtc,
   UnauthorizedError,
   MatterValidationError,
@@ -2765,7 +2766,7 @@ export interface SearchMatterClientsResult {
 
 export async function searchMatterClients(
   actor: Actor,
-  rawParams: SearchMatterClientsParams = {},
+  rawParams: unknown = {},
   options: ServiceExecutionOptions = {}
 ): Promise<SearchMatterClientsResult> {
   if (!actor || !actor.id) {
@@ -2773,8 +2774,18 @@ export async function searchMatterClients(
   }
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
 
-  const page = Math.max(1, rawParams.page ?? 1);
-  const limit = Math.min(100, Math.max(1, rawParams.limit ?? 20));
+  let params: z.infer<typeof searchMatterClientsParamsSchema>;
+  try {
+    params = searchMatterClientsParamsSchema.parse(rawParams ?? {});
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const { page, limit, includeArchived, query } = params;
   const skip = (page - 1) * limit;
 
   const prisma = options.prismaOverride ?? getPrismaClient();
@@ -2783,16 +2794,16 @@ export async function searchMatterClients(
     matterParties: {
       some: {
         role: 'CLIENT',
-        ...(rawParams.includeArchived ? {} : { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }),
+        ...(includeArchived ? {} : { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }),
       },
     },
   };
 
-  if (!rawParams.includeArchived) {
+  if (!includeArchived) {
     where.archivedAt = null;
   }
 
-  const rawQuery = rawParams.query?.trim();
+  const rawQuery = query?.trim();
   if (rawQuery) {
     const textNorm = normalizeArabicText(rawQuery);
     const phoneNorm = normalizePhone(rawQuery);

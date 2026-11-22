@@ -1098,7 +1098,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       });
 
       if (!res.success) {
-        if (
+        if (isAuthRecoveryCode(res.code)) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
+        } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
@@ -1184,7 +1188,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       });
 
       if (!res.success) {
-        if (
+        if (isAuthRecoveryCode(res.code)) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
+        } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
@@ -1270,7 +1278,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       });
 
       if (!res.success) {
-        if (
+        if (isAuthRecoveryCode(res.code)) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
+        } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
@@ -1365,7 +1377,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       });
 
       if (!res.success) {
-        if (
+        if (isAuthRecoveryCode(res.code)) {
+          pendingLifecycleOpRef.current = op;
+          setPendingLifecycleOp(op);
+          setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
+        } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||

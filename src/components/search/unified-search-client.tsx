@@ -18,6 +18,7 @@ import {
   createNavigationKey,
   setPrivateSearchState,
   getPrivateSearchState,
+  bindSearchSession,
 } from '@/lib/search-session-store';
 
 interface UnifiedSearchClientProps {
@@ -26,7 +27,9 @@ interface UnifiedSearchClientProps {
   initialType?: UnifiedSearchType;
   initialIncludeArchived?: boolean;
   initialPage?: number;
+  initialLimit?: number;
   initialError?: string;
+  sessionId?: string;
 }
 
 const ENTITY_TYPE_CONFIG: Record<
@@ -56,16 +59,24 @@ export function UnifiedSearchClient({
   initialType = 'ALL',
   initialIncludeArchived = false,
   initialPage = 1,
+  initialLimit = 20,
   initialError,
+  sessionId,
 }: UnifiedSearchClientProps) {
+  useEffect(() => {
+    if (sessionId) {
+      bindSearchSession(sessionId);
+    }
+  }, [sessionId]);
+
   const isRestoringRef = useRef(false);
   const [query, setQuery] = useState(() => {
     if (typeof window !== 'undefined') {
-      const urlQ = new URLSearchParams(window.location.search).get('query');
-      if (urlQ) return urlQ;
       const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
       const entry = getPrivateSearchState(navKey);
       if (entry?.query) return entry.query;
+      const urlQ = new URLSearchParams(window.location.search).get('query');
+      if (urlQ) return urlQ;
     }
     return initialQuery;
   });
@@ -97,7 +108,7 @@ export function UnifiedSearchClient({
       type: initialType,
       includeArchived: initialIncludeArchived,
       page: initialPage,
-      limit: 20,
+      limit: initialLimit,
       total: 0,
       totalPages: 1,
       items: [],
@@ -115,6 +126,7 @@ export function UnifiedSearchClient({
 
   const isInitialMount = useRef(true);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const prevQueryRef = useRef(query);
   const requestGenRef = useRef(0);
   const requestedPageRef = useRef<number>(initialPage);
 
@@ -139,10 +151,10 @@ export function UnifiedSearchClient({
       const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
       const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
       const navKey = currentState.navKey || createNavigationKey();
-      setPrivateSearchState(navKey, q);
+      setPrivateSearchState(navKey, q, undefined, sessionId);
       window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
     },
-    []
+    [sessionId]
   );
 
   const executeSearch = useCallback(
@@ -204,8 +216,9 @@ export function UnifiedSearchClient({
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
+      prevQueryRef.current = query;
       // If query was restored on mount, fetch the matching results once asynchronously
-      if (query) {
+      if (query && query !== initialQuery) {
         setTimeout(() => {
           executeSearchRef.current?.(query, searchType, includeArchived, page);
         }, 0);
@@ -215,8 +228,16 @@ export function UnifiedSearchClient({
 
     if (isRestoringRef.current) {
       isRestoringRef.current = false;
+      prevQueryRef.current = query;
       return;
     }
+
+    // Isolate debounce strictly to query text changes
+    if (prevQueryRef.current === query) {
+      return;
+    }
+
+    prevQueryRef.current = query;
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -232,7 +253,7 @@ export function UnifiedSearchClient({
         clearTimeout(debounceTimerRef.current);
       }
     };
-  }, [query, searchType, includeArchived, executeSearch, page]);
+  }, [query, searchType, includeArchived, executeSearch, initialQuery, page]);
 
   // Clean URL on initial mount if coming with query in searchParams
   useEffect(() => {
@@ -258,6 +279,7 @@ export function UnifiedSearchClient({
         clearTimeout(debounceTimerRef.current);
       }
       isRestoringRef.current = true;
+      prevQueryRef.current = restoredQuery;
       setQuery(restoredQuery);
       setSearchType(urlType);
       setIncludeArchived(urlIncArch);

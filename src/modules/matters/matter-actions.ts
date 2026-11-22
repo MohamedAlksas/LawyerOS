@@ -1,7 +1,7 @@
 'use server';
 
 import { requireActor } from '@/modules/identity/require-actor';
-import { AuthenticationError, AuthorizationError, Actor } from '@/modules/identity/types';
+import { AuthenticationError, AuthorizationError, Actor, Permission } from '@/modules/identity/types';
 import { getTrustedOrigins } from '@/lib/auth';
 import {
   openMatter,
@@ -26,7 +26,6 @@ import {
   searchProceedings,
   unifiedSearch,
   searchMatterClients,
-  type SearchMatterClientsParams,
   type SearchMatterClientsResult,
 } from './matter-service';
 import {
@@ -236,7 +235,7 @@ function handleActionError(error: unknown): ActionResult<never> {
   };
 }
 
-async function verifyActionSecurity(): Promise<Actor> {
+async function verifyActionSecurity(options: { requiredPermission?: Permission } = {}): Promise<Actor> {
   try {
     const { headers: nextHeaders } = await import('next/headers');
     const reqHeaders = await nextHeaders();
@@ -253,7 +252,7 @@ async function verifyActionSecurity(): Promise<Actor> {
     }
   }
 
-  return await requireActor();
+  return await requireActor(options);
 }
 
 export async function openMatterAction(
@@ -509,11 +508,11 @@ export async function unifiedSearchAction(
 }
 
 export async function searchMatterClientsAction(
-  params: SearchMatterClientsParams = {}
+  rawParams: unknown = {}
 ): Promise<ActionResult<SearchMatterClientsResult>> {
   try {
-    const actor = await verifyActionSecurity();
-    const data = await searchMatterClients(actor, params);
+    const actor = await verifyActionSecurity({ requiredPermission: 'READ_CLIENT_DATA' });
+    const data = await searchMatterClients(actor, rawParams);
     return { success: true, data };
   } catch (error) {
     return handleActionError(error);

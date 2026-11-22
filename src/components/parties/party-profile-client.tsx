@@ -315,28 +315,30 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                   </p>
                 </div>
 
-                <div>
-                  {!revealedNumber ? (
-                    <button
-                      type="button"
-                      data-testid="reveal-identity-button"
-                      onClick={handleRevealIdentity}
-                      disabled={isRevealing}
-                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
-                    >
-                      {isRevealing ? 'جارٍ كشف الهوية...' : 'عرض الرقم الكامل'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid="hide-identity-button"
-                      onClick={handleHideIdentity}
-                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
-                    >
-                      إخفاء الرقم
-                    </button>
-                  )}
-                </div>
+                {!isArchived && (
+                  <div>
+                    {!revealedNumber ? (
+                      <button
+                        type="button"
+                        data-testid="reveal-identity-button"
+                        onClick={handleRevealIdentity}
+                        disabled={isRevealing}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
+                      >
+                        {isRevealing ? 'جارٍ كشف الهوية...' : 'عرض الرقم الكامل'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="hide-identity-button"
+                        onClick={handleHideIdentity}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
+                      >
+                        إخفاء الرقم
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {revealError && (

@@ -85,6 +85,8 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     `);
   });
 
+  const allBenchmarkSamples: number[] = [];
+
   function calculatePercentiles(latencies: number[]) {
     latencies.sort((a, b) => a - b);
     const n = latencies.length;
@@ -109,7 +111,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
       const res = await searchParties(actor, { query: 'الفهد', limit: 10 });
       const t1 = performance.now();
       expect(res.parties.length).toBeGreaterThan(0);
-      samples.push(t1 - t0);
+      const diff = t1 - t0;
+      samples.push(diff);
+      allBenchmarkSamples.push(diff);
     }
 
     const stats = calculatePercentiles(samples);
@@ -119,7 +123,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
-  });
+  }, 60000);
 
   it('measures Matter Search latency distribution (P95 < 500ms)', async () => {
     // Warmup
@@ -131,7 +135,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
       const res = await searchMatters({ query: 'نزاع استثماري', limit: 10 }, actor);
       const t1 = performance.now();
       expect(res.matters.length).toBeGreaterThan(0);
-      samples.push(t1 - t0);
+      const diff = t1 - t0;
+      samples.push(diff);
+      allBenchmarkSamples.push(diff);
     }
 
     const stats = calculatePercentiles(samples);
@@ -141,7 +147,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
-  });
+  }, 60000);
 
   it('measures Proceeding Search latency distribution (P95 < 500ms)', async () => {
     // Warmup with Arabic digits
@@ -153,7 +159,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
       const res = await searchProceedings({ query: '١٠', limit: 10 }, actor);
       const t1 = performance.now();
       expect(res.proceedings.length).toBeGreaterThan(0);
-      samples.push(t1 - t0);
+      const diff = t1 - t0;
+      samples.push(diff);
+      allBenchmarkSamples.push(diff);
     }
 
     const stats = calculatePercentiles(samples);
@@ -163,7 +171,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
-  });
+  }, 60000);
 
   it('measures Unified Search latency distribution (P95 < 500ms)', async () => {
     // Warmup
@@ -175,7 +183,9 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
       const res = await unifiedSearch({ query: 'الفهد', limit: 15 }, actor);
       const t1 = performance.now();
       expect(res.items.length).toBeGreaterThan(0);
-      samples.push(t1 - t0);
+      const diff = t1 - t0;
+      samples.push(diff);
+      allBenchmarkSamples.push(diff);
     }
 
     const stats = calculatePercentiles(samples);
@@ -185,5 +195,14 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
     expect(stats.p50).toBeLessThan(2000);
     expect(stats.p90).toBeLessThan(2000);
     expect(stats.p95).toBeLessThan(500);
+  }, 60000);
+
+  it('verifies overall search latency distribution across all 120 benchmark executions', () => {
+    expect(allBenchmarkSamples.length).toBe(120);
+    const overall = calculatePercentiles(allBenchmarkSamples);
+    console.log(`[PERF BENCHMARK OVERALL] Total samples=${allBenchmarkSamples.length}: min=${overall.min.toFixed(1)}ms, avg=${overall.avg.toFixed(1)}ms, P50=${overall.p50.toFixed(1)}ms, P90=${overall.p90.toFixed(1)}ms, P95=${overall.p95.toFixed(1)}ms, P99=${overall.p99.toFixed(1)}ms, max=${overall.max.toFixed(1)}ms`);
+    expect(overall.p50).toBeLessThan(2000);
+    expect(overall.p90).toBeLessThan(2000);
+    expect(overall.p95).toBeLessThan(500);
   });
 });

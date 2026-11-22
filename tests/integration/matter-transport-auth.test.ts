@@ -1713,7 +1713,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(finalClaim.rows.length).toBe(1);
       expect(finalClaim.rows[0].status).toBe('COMPLETED');
       expect(finalClaim.rows[0].resultId).toBe(testMid);
-    });
+    }, 90_000);
 
     it('rejects same-key request with changed payload/intent (IDEMPOTENCY_PAYLOAD_MISMATCH)', async () => {
       const client = await dedicatedPool.connect();

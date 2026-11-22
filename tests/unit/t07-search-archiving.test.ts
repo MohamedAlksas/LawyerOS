@@ -7,6 +7,7 @@ import {
   reopenProceedingSchema,
   searchProceedingsParamsSchema,
   unifiedSearchParamsSchema,
+  searchMatterClientsParamsSchema,
   MatterArchivedError,
   ProceedingArchivedError,
   ActiveObligationError,
@@ -167,6 +168,62 @@ describe('T07 Search & Normalization Unit Tests', () => {
         extraField: true,
       });
       expect(unknownKeyRes.success).toBe(false);
+    });
+  });
+
+  describe('Search Matter Clients Params Schema', () => {
+    it('validates searchMatterClientsParamsSchema with default values', () => {
+      const res = searchMatterClientsParamsSchema.safeParse({});
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.page).toBe(1);
+        expect(res.data.limit).toBe(20);
+        expect(res.data.includeArchived).toBe(false);
+        expect(res.data.query).toBeUndefined();
+      }
+    });
+
+    it('validates searchMatterClientsParamsSchema with custom valid parameters', () => {
+      const res = searchMatterClientsParamsSchema.safeParse({
+        query: 'شركة النور',
+        includeArchived: true,
+        page: 5,
+        limit: 50,
+      });
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.data.query).toBe('شركة النور');
+        expect(res.data.includeArchived).toBe(true);
+        expect(res.data.page).toBe(5);
+        expect(res.data.limit).toBe(50);
+      }
+    });
+
+    it('rejects searchMatterClientsParamsSchema with query exceeding 100 characters', () => {
+      const longQuery = 'أ'.repeat(101);
+      const res = searchMatterClientsParamsSchema.safeParse({
+        query: longQuery,
+      });
+      expect(res.success).toBe(false);
+    });
+
+    it('rejects searchMatterClientsParamsSchema with invalid page (< 1 or > 1000)', () => {
+      expect(searchMatterClientsParamsSchema.safeParse({ page: 0 }).success).toBe(false);
+      expect(searchMatterClientsParamsSchema.safeParse({ page: -1 }).success).toBe(false);
+      expect(searchMatterClientsParamsSchema.safeParse({ page: 1001 }).success).toBe(false);
+    });
+
+    it('rejects searchMatterClientsParamsSchema with invalid limit (< 1 or > 100)', () => {
+      expect(searchMatterClientsParamsSchema.safeParse({ limit: 0 }).success).toBe(false);
+      expect(searchMatterClientsParamsSchema.safeParse({ limit: 101 }).success).toBe(false);
+    });
+
+    it('rejects searchMatterClientsParamsSchema with unknown extra keys (strict)', () => {
+      const res = searchMatterClientsParamsSchema.safeParse({
+        query: 'valid',
+        unauthorizedFilter: 'malicious',
+      });
+      expect(res.success).toBe(false);
     });
   });
 
