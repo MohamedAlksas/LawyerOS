@@ -937,6 +937,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       registerType: 'مدني كلي',
       numberText: '456/أ',
       yearLabel: '2026',
+      circuit: 'الدائرة الأولى ١',
       status: 'ACTIVE',
       idempotencyKey: `proc-existing-c18-${crypto.randomUUID()}`,
     });
@@ -946,10 +947,26 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       courtId: court1.id,
       numberText: '٤٥٦/أ',
       yearLabel: '2026',
+      registerType: 'مدني كلي',
+      circuit: 'الدائرة الاولى 1',
     });
     expect(matchRes.hasDirectMatch).toBe(true);
     expect(matchRes.candidates).toHaveLength(1);
     expect(matchRes.candidates[0].similarityReason).toContain('تطابق تام');
+
+    for (const changes of [{ registerType: 'تجاري' }, { circuit: 'الدائرة الثانية' }]) {
+      const similar = await findSimilarProceedings(actor, {
+        courtId: court1.id,
+        numberText: '456/أ',
+        yearLabel: '2026',
+        registerType: 'مدني كلي',
+        circuit: 'الدائرة الأولى ١',
+        ...changes,
+      });
+      expect(similar.hasDirectMatch).toBe(false);
+      expect(similar.candidates).toHaveLength(1);
+      expect(similar.candidates[0].similarityReason).not.toContain('تطابق تام');
+    }
 
     // 2. Partial match in same court but different year
     const diffYearRes = await findSimilarProceedings(actor, {
@@ -1191,6 +1208,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       registerType: 'مدني كلي',
       numberText: '888/ب',
       yearLabel: '2024',
+      circuit: 'الدائرة الثالثة',
       status: 'ACTIVE',
       idempotencyKey: `proc-s6-target-${crypto.randomUUID()}`,
     });
@@ -1226,6 +1244,8 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       courtId: court.id,
       numberText: '٨٨٨/ب',
       yearLabel: '2024',
+      registerType: 'مدني كلي',
+      circuit: 'الدائرة الثالثة',
     });
 
     // Assert that the older matching proceeding is returned as direct match despite 105 newer entries!

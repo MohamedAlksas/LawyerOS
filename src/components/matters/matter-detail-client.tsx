@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useFormDraft } from '@/components/navigation-guard';
 import {
   MatterDTO,
   MatterPartyRole,
@@ -42,10 +43,11 @@ import {
 } from './matter-ui-types';
 
 interface MatterDetailClientProps {
+  ownerId: string;
   initialMatter: MatterDTO;
 }
 
-export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
+export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClientProps) {
   const router = useRouter();
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
   // U8: router.refresh() supplies a newly confirmed aggregate. Replace the
@@ -149,8 +151,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
         description: string;
       };
 
-  const pendingLifecycleOpRef = useRef<LifecycleOp | null>(null);
-  const [pendingLifecycleOp, setPendingLifecycleOp] = useState<LifecycleOp | null>(null);
+  const lifecycleDraft = useFormDraft<LifecycleOp>(ownerId, `/matters/${initialMatter.id}`);
+  const pendingLifecycleOpRef = useRef<LifecycleOp | null>(lifecycleDraft.restored ?? null);
+  const [pendingLifecycleOp, setPendingLifecycleOp] = useState<LifecycleOp | null>(lifecycleDraft.restored ?? null);
+
+  function updatePendingLifecycleOp(operation: LifecycleOp | null) {
+    if (!lifecycleDraft.isCurrent()) return;
+    pendingLifecycleOpRef.current = operation;
+    if (operation) {
+      lifecycleDraft.keep(operation);
+    } else {
+      lifecycleDraft.clear();
+    }
+    setPendingLifecycleOp(operation);
+  }
 
   // Standards 5: Modal Focus Management
   const lastLifecycleTriggerRef = useRef<HTMLElement | null>(null);
@@ -1095,12 +1109,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       const res = await archiveMatterAction({
         ...op.payload,
         idempotencyKey: op.key,
-      });
+      }, ownerId);
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1109,23 +1122,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
-          pendingLifecycleOpRef.current = null;
-          setPendingLifecycleOp(null);
+          updatePendingLifecycleOp(null);
           setLifecycleError(res.error || 'تعذر أرشفة الملف.');
         }
         return;
       }
 
-      pendingLifecycleOpRef.current = null;
-      setPendingLifecycleOp(null);
+      updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         status: 'ARCHIVED',
@@ -1137,8 +1147,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت أرشفة ملف القضية بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      pendingLifecycleOpRef.current = op;
-      setPendingLifecycleOp(op);
+      updatePendingLifecycleOp(op);
       setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsLifecycleSubmitting(false);
@@ -1173,8 +1182,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       },
       description: 'أرشفة ملف القضية',
     };
-    pendingLifecycleOpRef.current = op;
-    setPendingLifecycleOp(op);
+    updatePendingLifecycleOp(op);
     await executeArchiveMatter(op);
   };
 
@@ -1185,12 +1193,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       const res = await reopenMatterAction({
         ...op.payload,
         idempotencyKey: op.key,
-      });
+      }, ownerId);
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1199,23 +1206,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
-          pendingLifecycleOpRef.current = null;
-          setPendingLifecycleOp(null);
+          updatePendingLifecycleOp(null);
           setLifecycleError(res.error || 'تعذر إعادة فتح الملف.');
         }
         return;
       }
 
-      pendingLifecycleOpRef.current = null;
-      setPendingLifecycleOp(null);
+      updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         status: (res.data.status as MatterStatus) || 'ACTIVE',
@@ -1227,8 +1231,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت إعادة فتح ملف القضية بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      pendingLifecycleOpRef.current = op;
-      setPendingLifecycleOp(op);
+      updatePendingLifecycleOp(op);
       setLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsLifecycleSubmitting(false);
@@ -1263,8 +1266,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       },
       description: 'إعادة فتح ملف القضية',
     };
-    pendingLifecycleOpRef.current = op;
-    setPendingLifecycleOp(op);
+    updatePendingLifecycleOp(op);
     await executeReopenMatter(op);
   };
 
@@ -1275,12 +1277,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       const res = await archiveProceedingAction({
         ...op.payload,
         idempotencyKey: op.key,
-      });
+      }, ownerId);
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1289,23 +1290,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setProceedingLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
-          pendingLifecycleOpRef.current = null;
-          setPendingLifecycleOp(null);
+          updatePendingLifecycleOp(null);
           setProceedingLifecycleError(res.error || 'تعذر أرشفة القيد القضائي.');
         }
         return;
       }
 
-      pendingLifecycleOpRef.current = null;
-      setPendingLifecycleOp(null);
+      updatePendingLifecycleOp(null);
       // NOTE (Spec 4): Closed Proceeding must not be presented as archived, and archiving keeps existing status
       setMatter((prev) => ({
         ...prev,
@@ -1321,8 +1319,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت أرشفة القيد القضائي بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      pendingLifecycleOpRef.current = op;
-      setPendingLifecycleOp(op);
+      updatePendingLifecycleOp(op);
       setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsProceedingLifecycleSubmitting(false);
@@ -1362,8 +1359,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       },
       description: 'أرشفة القيد القضائي',
     };
-    pendingLifecycleOpRef.current = op;
-    setPendingLifecycleOp(op);
+    updatePendingLifecycleOp(op);
     await executeArchiveProceeding(op);
   };
 
@@ -1374,12 +1370,11 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       const res = await reopenProceedingAction({
         ...op.payload,
         idempotencyKey: op.key,
-      });
+      }, ownerId);
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1388,23 +1383,20 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
           res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
-          pendingLifecycleOpRef.current = op;
-          setPendingLifecycleOp(op);
+          updatePendingLifecycleOp(op);
           setProceedingLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
-          pendingLifecycleOpRef.current = null;
-          setPendingLifecycleOp(null);
+          updatePendingLifecycleOp(null);
           setProceedingLifecycleError(res.error || 'تعذر إعادة فتح القيد القضائي.');
         }
         return;
       }
 
-      pendingLifecycleOpRef.current = null;
-      setPendingLifecycleOp(null);
+      updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
         proceedings: prev.proceedings?.map((p) =>
@@ -1419,8 +1411,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       setActionMessage('تمت إعادة فتح القيد القضائي بنجاح.');
       router.refresh();
     } catch (err: unknown) {
-      pendingLifecycleOpRef.current = op;
-      setPendingLifecycleOp(op);
+      updatePendingLifecycleOp(op);
       setProceedingLifecycleError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.');
     } finally {
       setIsProceedingLifecycleSubmitting(false);
@@ -1460,8 +1451,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
       },
       description: 'إعادة فتح القيد القضائي',
     };
-    pendingLifecycleOpRef.current = op;
-    setPendingLifecycleOp(op);
+    updatePendingLifecycleOp(op);
     await executeReopenProceeding(op);
   };
 
@@ -2774,7 +2764,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             </div>
 
             <p className="text-xs text-[#4D606A] leading-relaxed">
-              إعادة فتح الملف سيعيده إلى الحالة النشطة ويسمح باستئناف التعديل وإضافة القيود القضائية وربط التوكيلات.
+              بعد إلغاء الأرشفة، يعود الملف إلى الحالة النشطة إذا كان مرتبطًا بموكل، وإلا يعود إلى حالة مسودة. يمكنك بعدها استئناف التعديل.
             </p>
 
             {lifecycleError && (
@@ -2893,7 +2883,7 @@ export function MatterDetailClient({ initialMatter }: MatterDetailClientProps) {
             <p className="text-xs text-[#4D606A] leading-relaxed">
               {proceedingLifecycleAction === 'archive'
                 ? `هل ترغب في أرشفة القيد القضائي (${selectedProceedingForLifecycle.courtName})؟ سيتحول إلى قراءة فقط.`
-                : `إعادة فتح القيد القضائي (${selectedProceedingForLifecycle.courtName}) سيعيده للحالة النشطة ويسمح بالتعديل.`}
+                : `إلغاء أرشفة القيد القضائي (${selectedProceedingForLifecycle.courtName}) يبقي حالته «${PROCEEDING_STATUS_LABELS[selectedProceedingForLifecycle.status]}» ويتيح التعديل وفق هذه الحالة.`}
             </p>
 
             {proceedingLifecycleError && (

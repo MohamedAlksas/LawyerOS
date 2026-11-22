@@ -35,10 +35,13 @@ test('sign out revokes the session, clears the cookie and blocks re-entry @once'
     })
     .toBeGreaterThanOrEqual(1);
 
+  await page.getByTestId(T04_TEST_IDS.navSecurity).filter({ visible: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === T04_ROUTES.security);
+
   page.once('dialog', (dialog) => {
     void dialog.accept();
   });
-  await page.getByTestId(T04_TEST_IDS.navLogout).click();
+  await page.getByTestId(T04_TEST_IDS.navLogout).filter({ visible: true }).click();
 
   await expect(page).toHaveURL((url) => url.pathname === T04_ROUTES.login);
 
@@ -55,6 +58,12 @@ test('sign out revokes the session, clears the cookie and blocks re-entry @once'
     sessionCookies.map((cookie) => cookie.name),
     'Sign out left a session cookie in the browser'
   ).toEqual([]);
+
+  await page.goBack();
+  const visibleLogin = page.locator('#email:visible');
+  const lockedHistory = page.getByTestId('protected-view-lock');
+  await expect(visibleLogin.or(lockedHistory).first()).toBeVisible();
+  await expect(page.getByTestId(T04_TEST_IDS.mainContent)).toBeHidden();
 
   await page.goto(T04_ROUTES.home);
   await expect(page).toHaveURL((url) => url.pathname === T04_ROUTES.login);

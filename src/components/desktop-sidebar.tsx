@@ -2,13 +2,11 @@
 
 import React, { useState } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
-import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from '@/lib/auth-client';
-import { clearSearchSessionStore } from '@/lib/search-session-store';
+import { usePathname } from 'next/navigation';
+import { signOutAndReset } from '@/lib/auth-client';
 
 export function DesktopSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const canLeavePage = useCanLeavePage();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -22,14 +20,12 @@ export function DesktopSidebar() {
     setLogoutError(null);
 
     try {
-      const res = await signOut();
+      const res = await signOutAndReset();
       if (res?.error) {
         setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
         setIsLoggingOut(false);
         return;
       }
-      clearSearchSessionStore();
-      router.push('/login');
     } catch {
       setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
       setIsLoggingOut(false);

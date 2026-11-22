@@ -592,7 +592,11 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       method: 'POST',
       path: options.path || '/matters',
       headers,
-      body: JSON.stringify(args),
+      body: JSON.stringify(
+        /^(?:archive|reopen)(?:Matter|Proceeding)Action$/.test(actionName) && args.length === 1
+          ? [...args, ownerUserId]
+          : args
+      ),
     });
   }
 
@@ -1475,6 +1479,35 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(clientsRes.body).toContain('"success":true');
       expect(clientsRes.body).toContain('موكل نقل القضايا');
     });
+
+    it('validates and scopes the authorized Matter client picker response', async () => {
+      const partyId = crypto.randomUUID();
+      const matterId = crypto.randomUUID();
+      const name = 'موكل مرتبط بالملف المؤرشف فقط';
+      const phone = '01087659876';
+      await dedicatedPool.query(`
+        INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "primaryPhone", "primaryPhoneNormalized", "createdById", "updatedById", "createdAt", "updatedAt")
+        VALUES ($1, 'PERSON', $2, $2, $3, $3, $4, $4, now(), now())
+      `, [partyId, name, phone, ownerUserId]);
+      await dedicatedPool.query(`
+        INSERT INTO "matter" ("id", "fileCode", "title", "kind", "status", "archivedAt", "createdById", "updatedById", "createdAt", "updatedAt")
+        VALUES ($1, $2, 'ملف مؤرشف للاختبار', 'LITIGATION', 'ARCHIVED', now(), $3, $3, now(), now())
+      `, [matterId, `AUDIT-${matterId}`, ownerUserId]);
+      await dedicatedPool.query(`
+        INSERT INTO "matter_party" ("id", "matterId", "partyId", "role", "createdById", "updatedById", "createdAt", "updatedAt")
+        VALUES ($1, $2, $3, 'CLIENT', $4, $4, now(), now())
+      `, [crypto.randomUUID(), matterId, partyId, ownerUserId]);
+      const options = { cookie: verifiedSessionCookie };
+      const invalid = await postServerAction('searchMatterClientsAction', [{ page: 1001 }], options);
+      expect(invalid.body).toContain('VALIDATION_ERROR');
+      const active = await postServerAction('searchMatterClientsAction', [{ query: phone }], options);
+      expect(active.body).not.toContain(partyId);
+      const archived = await postServerAction('searchMatterClientsAction', [{ query: phone, includeArchived: true }], options);
+      expect(archived.body).toContain('"success":true');
+      expect(archived.body).toContain(partyId);
+      expect(archived.body).toContain(name);
+      expect(archived.body).not.toContain(phone);
+    });
   });
 
   describe('9. T07 Lifecycle Rollback and Competing-Transition Regressions', () => {
@@ -1738,6 +1771,14 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
 
       expect(res1.status).toBe(200);
       expect(res1.body).toContain('"success":true');
+
+      const otherActor = await postServerAction('archiveMatterAction', [{
+        matterId: testMid,
+        expectedVersion: 1,
+        reason: 'السبب الأصلي للأرشفة',
+        idempotencyKey: sharedKey,
+      }, crypto.randomUUID()], { cookie: verifiedSessionCookie });
+      expect(otherActor.body).toContain('FORBIDDEN');
 
       // 2. Replay with SAME key but CHANGED intent (different reason)
       const res2 = await postServerAction('archiveMatterAction', [{

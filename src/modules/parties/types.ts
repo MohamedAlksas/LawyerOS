@@ -90,7 +90,7 @@ export interface SearchPartiesParams {
 }
 
 export interface SearchPartiesResult {
-  parties: PartySummaryDTO[];
+  parties: Pick<PartySummaryDTO, 'id' | 'kind' | 'name' | 'primaryPhone' | 'createdAt' | 'identityMask'>[];
   totalCount: number;
   page: number;
   totalPages: number;

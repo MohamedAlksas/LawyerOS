@@ -13,23 +13,23 @@ import {
   ErrorContainer,
   EmptyStateContainer,
 } from '@/components/presentation-state';
-import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
+import { formatCairoDateOnly, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
+import { DEFAULT_SEARCH_LIMIT, readParam, unifiedSearchFilters } from '@/lib/search-params';
 import {
-  createNavigationKey,
-  setPrivateSearchState,
-  getPrivateSearchState,
   bindSearchSession,
+  clearSearchSessionStore,
+  readSearchHistory,
+  writeSearchHistory,
 } from '@/lib/search-session-store';
 
 interface UnifiedSearchClientProps {
   initialResult?: UnifiedSearchResult;
-  initialQuery?: string;
   initialType?: UnifiedSearchType;
   initialIncludeArchived?: boolean;
   initialPage?: number;
   initialLimit?: number;
   initialError?: string;
-  sessionId?: string;
+  sessionId: string;
 }
 
 const ENTITY_TYPE_CONFIG: Record<
@@ -55,288 +55,130 @@ const ENTITY_TYPE_CONFIG: Record<
 
 export function UnifiedSearchClient({
   initialResult,
-  initialQuery = '',
   initialType = 'ALL',
   initialIncludeArchived = false,
   initialPage = 1,
-  initialLimit = 20,
+  initialLimit = DEFAULT_SEARCH_LIMIT,
   initialError,
   sessionId,
 }: UnifiedSearchClientProps) {
-  useEffect(() => {
-    if (sessionId) {
-      bindSearchSession(sessionId);
-    }
+  const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState({
+    type: initialType,
+    includeArchived: initialIncludeArchived,
+    page: initialPage,
+    limit: initialLimit,
+  });
+  const { type: searchType, includeArchived, page } = filters;
+  const [searchResult, setSearchResult] = useState(initialResult);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(initialError ?? null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const requestGeneration = useRef(0);
+  const cancelSearch = useCallback(() => {
+    clearTimeout(debounceTimer.current);
+    requestGeneration.current++;
+  }, []);
+
+  const syncHistory = useCallback((text: string, view: ReturnType<typeof unifiedSearchFilters>) => {
+    const params = new URLSearchParams();
+    if (view.type !== 'ALL') params.set('type', view.type);
+    if (view.includeArchived) params.set('includeArchived', 'true');
+    if (view.page > 1) params.set('page', String(view.page));
+    if (view.limit !== DEFAULT_SEARCH_LIMIT) params.set('limit', String(view.limit));
+    writeSearchHistory(sessionId, { query: text }, params);
   }, [sessionId]);
 
-  const isRestoringRef = useRef(false);
-  const [query, setQuery] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
-      const entry = getPrivateSearchState(navKey);
-      if (entry?.query) return entry.query;
-      const urlQ = new URLSearchParams(window.location.search).get('query');
-      if (urlQ) return urlQ;
-    }
-    return initialQuery;
-  });
-  const [searchType, setSearchType] = useState<UnifiedSearchType>(() => {
-    if (typeof window !== 'undefined') {
-      const t = new URLSearchParams(window.location.search).get('type') as UnifiedSearchType;
-      if (t && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(t)) return t;
-    }
-    return initialType;
-  });
-  const [includeArchived, setIncludeArchived] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const urlInc = new URLSearchParams(window.location.search).get('includeArchived');
-      if (urlInc !== null) return urlInc === 'true';
-    }
-    return initialIncludeArchived;
-  });
-  const [page, setPage] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const p = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
-      if (p > 0) return p;
-    }
-    return initialPage;
-  });
+  const executeSearch = useCallback(async (text: string, view: ReturnType<typeof unifiedSearchFilters>) => {
+    clearTimeout(debounceTimer.current);
+    const request = ++requestGeneration.current;
+    setFilters(view);
+    setIsLoading(true);
+    setError(null);
 
-  const [searchResult, setSearchResult] = useState<UnifiedSearchResult | null>(
-    initialResult || {
-      query: initialQuery,
+    try {
+      const res = await unifiedSearchAction({ ...view, query: text.trim() || undefined });
+      if (request !== requestGeneration.current) return;
+      if (!res.success) {
+        if (isAuthRecoveryCode(res.code) || res.code === 'FORBIDDEN') {
+          clearSearchSessionStore();
+          setQuery('');
+          setSearchResult(undefined);
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
+        setError(res.error || 'تعذر استرجاع نتائج البحث.');
+        return;
+      }
+
+      const resolved = { ...view, page: res.data.page };
+      setFilters(resolved);
+      setSearchResult(res.data);
+      syncHistory(text, resolved);
+    } catch {
+      if (request === requestGeneration.current) {
+        setError('حدث خطأ في الاتصال أثناء البحث.');
+      }
+    } finally {
+      if (request === requestGeneration.current) setIsLoading(false);
+    }
+  }, [syncHistory]);
+
+  useEffect(() => {
+    bindSearchSession(sessionId);
+    const restore = (view: ReturnType<typeof unifiedSearchFilters>, text: string) => {
+      setQuery(text);
+      void executeSearch(text, view);
+    };
+    const initial = {
       type: initialType,
       includeArchived: initialIncludeArchived,
       page: initialPage,
       limit: initialLimit,
-      total: 0,
-      totalPages: 1,
-      items: [],
-      counts: {
-        all: 0,
-        parties: 0,
-        matters: 0,
-        proceedings: 0,
-      },
-    }
-  );
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(initialError || null);
-
-  const isInitialMount = useRef(true);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const prevQueryRef = useRef(query);
-  const requestGenRef = useRef(0);
-  const requestedPageRef = useRef<number>(initialPage);
-
-  type ExecuteSearchFn = (
-    q: string,
-    t: UnifiedSearchType,
-    incArch: boolean,
-    pageNum: number
-  ) => Promise<void>;
-
-  const executeSearchRef = useRef<ExecuteSearchFn | null>(null);
-
-  const syncUrl = useCallback(
-    (q: string, t: UnifiedSearchType, incArch: boolean, p: number) => {
-      if (typeof window === 'undefined') return;
-      const params = new URLSearchParams();
-      // Omit `query` from the URL string completely so no private names or numbers appear in browser history, address bar, or URLs
-      if (t !== 'ALL') params.set('type', t);
-      if (incArch) params.set('includeArchived', 'true');
-      if (p > 1) params.set('page', String(p));
-      const newQuery = params.toString();
-      const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-      const currentState = (window.history.state && typeof window.history.state === 'object') ? window.history.state : {};
-      const navKey = currentState.navKey || createNavigationKey();
-      setPrivateSearchState(navKey, q, undefined, sessionId);
-      window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
-    },
-    [sessionId]
-  );
-
-  const executeSearch = useCallback(
-    async (
-      q: string,
-      t: UnifiedSearchType,
-      incArch: boolean,
-      pageNum: number
-    ) => {
-      const currentGen = ++requestGenRef.current;
-      requestedPageRef.current = pageNum;
-      setIsLoading(true);
-      setError(null);
-      syncUrl(q, t, incArch, pageNum);
-
-      try {
-        const res = await unifiedSearchAction({
-          query: q.trim() || undefined,
-          type: t,
-          includeArchived: incArch,
-          page: pageNum,
-          limit: 20,
-        });
-
-        if (currentGen !== requestGenRef.current) return;
-
-        if (!res.success) {
-          setError(res.error || 'تعذر استرجاع نتائج البحث.');
-          setIsLoading(false);
-          return;
-        }
-
-        // When the result set shrinks, clamp and refetch the last valid page
-        if (res.data.items.length === 0 && pageNum > 1 && res.data.total > 0) {
-          const lastValidPage = Math.max(1, Math.ceil(res.data.total / 20));
-          if (lastValidPage !== pageNum) {
-            await executeSearchRef.current?.(q, t, incArch, lastValidPage);
-            return;
-          }
-        }
-
-        setSearchResult(res.data);
-        setPage(res.data.page);
-        setIsLoading(false);
-      } catch (err: unknown) {
-        if (currentGen !== requestGenRef.current) return;
-        setError(err instanceof Error ? err.message : 'حدث خطأ في الاتصال أثناء البحث.');
-        setIsLoading(false);
-      }
-    },
-    [syncUrl]
-  );
-
-  useEffect(() => {
-    executeSearchRef.current = executeSearch;
-  });
-
-  // Debounced input change (300ms) for direct typing only
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      prevQueryRef.current = query;
-      // If query was restored on mount, fetch the matching results once asynchronously
-      if (query && query !== initialQuery) {
-        setTimeout(() => {
-          executeSearchRef.current?.(query, searchType, includeArchived, page);
-        }, 0);
-      }
-      return;
-    }
-
-    if (isRestoringRef.current) {
-      isRestoringRef.current = false;
-      prevQueryRef.current = query;
-      return;
-    }
-
-    // Isolate debounce strictly to query text changes
-    if (prevQueryRef.current === query) {
-      return;
-    }
-
-    prevQueryRef.current = query;
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      setPage(1);
-      executeSearch(query, searchType, includeArchived, 1);
-    }, 300);
-
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
     };
-  }, [query, searchType, includeArchived, executeSearch, initialQuery, page]);
-
-  // Clean URL on initial mount if coming with query in searchParams
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlQuery = urlParams.get('query');
-    if (urlQuery) {
-      syncUrl(urlQuery, searchType, includeArchived, page);
-    }
-  }, [syncUrl, searchType, includeArchived, page]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const syncFromUrl = (event?: PopStateEvent) => {
+    const onHistory = () => {
+      if (window.location.pathname !== '/search') return;
       const params = new URLSearchParams(window.location.search);
-      const urlType = (params.get('type') as UnifiedSearchType) || 'ALL';
-      const urlIncArch = params.get('includeArchived') === 'true';
-      const urlPage = parseInt(params.get('page') || '1', 10) || 1;
-      const navKey = (event?.state as { navKey?: string } | null)?.navKey ?? (window.history.state as { navKey?: string } | null)?.navKey;
-      const restoredQuery = getPrivateSearchState(navKey)?.query ?? '';
-
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-      isRestoringRef.current = true;
-      prevQueryRef.current = restoredQuery;
-      setQuery(restoredQuery);
-      setSearchType(urlType);
-      setIncludeArchived(urlIncArch);
-      setPage(urlPage);
-      executeSearch(restoredQuery, urlType, urlIncArch, urlPage);
+      restore(unifiedSearchFilters((name) => readParam(params, name)), readSearchHistory(sessionId)?.query ?? '');
     };
-
-    window.addEventListener('popstate', syncFromUrl);
+    // Back navigation can reuse an earlier render's server props.
+    const saved = readSearchHistory(sessionId);
+    const firstRestore = saved ? setTimeout(onHistory, 0) : undefined;
+    if (!saved) syncHistory('', initial);
+    window.addEventListener('popstate', onHistory);
     return () => {
-      window.removeEventListener('popstate', syncFromUrl);
+      clearTimeout(firstRestore);
+      cancelSearch();
+      window.removeEventListener('popstate', onHistory);
     };
-  }, [executeSearch]);
+  }, [cancelSearch, executeSearch, initialIncludeArchived, initialLimit, initialPage, initialType, sessionId, syncHistory]);
 
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    setPage(1);
-    executeSearch(query, searchType, includeArchived, 1);
+  const handleQueryChange = (text: string) => {
+    setQuery(text);
+    cancelSearch();
+    setIsLoading(true);
+    debounceTimer.current = setTimeout(() => executeSearch(text, { ...filters, page: 1 }), 300);
+  };
+
+  const handleFormSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void executeSearch(query, { ...filters, page: 1 });
   };
 
   const handleClear = () => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
     setQuery('');
-    setSearchType('ALL');
-    setIncludeArchived(false);
-    setPage(1);
-    executeSearch('', 'ALL', false, 1);
+    void executeSearch('', { ...filters, type: 'ALL', includeArchived: false, page: 1 });
   };
 
-  const handleTypeChange = (newType: UnifiedSearchType) => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    setSearchType(newType);
-    setPage(1);
-    executeSearch(query, newType, includeArchived, 1);
+  const handleTypeChange = (type: UnifiedSearchType) => {
+    void executeSearch(query, { ...filters, type, page: 1 });
   };
 
-  const handleIncludeArchivedChange = (checked: boolean) => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    setIncludeArchived(checked);
-    setPage(1);
-    executeSearch(query, searchType, checked, 1);
+  const handleIncludeArchivedChange = (includeArchived: boolean) => {
+    void executeSearch(query, { ...filters, includeArchived, page: 1 });
   };
 
-  const handlePageChange = (newPage: number) => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-    setPage(newPage);
-    executeSearch(query, searchType, includeArchived, newPage);
+  const handlePageChange = (page: number) => {
+    void executeSearch(query, { ...filters, page });
   };
 
   const items = searchResult?.items || [];
@@ -364,7 +206,7 @@ export function UnifiedSearchClient({
             <input
               type="search"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="ابحث بالاسم، كود الملف، رقم الدعوى بالمحكمة، أو رقم الهاتف..."
               aria-label="البحث الموحد"
               data-testid="unified-search-input"
@@ -531,7 +373,7 @@ export function UnifiedSearchClient({
         <ErrorContainer
           title="تعذر استرجاع نتائج البحث"
           message={error}
-          onRetry={() => executeSearch(query, searchType, includeArchived, requestedPageRef.current)}
+          onRetry={() => executeSearch(query, filters)}
         />
       ) : items.length === 0 ? (
         hasActiveFilters ? (

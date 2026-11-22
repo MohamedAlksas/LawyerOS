@@ -586,12 +586,32 @@ export async function searchParties(
       skip,
       take: limit,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      include: { identities: true },
+      select: {
+        id: true,
+        kind: true,
+        name: true,
+        primaryPhone: true,
+        createdAt: true,
+        identities: {
+          take: 1,
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { identificationType: true, ciphertext: true, lastFour: true },
+        },
+      },
     }),
   ]);
 
   return {
-    parties: records.map(mapPartySummary),
+    parties: records.map(({ id, kind, name, primaryPhone, createdAt, identities: [identity] }) => ({
+      id,
+      kind,
+      name,
+      primaryPhone,
+      createdAt: createdAt.toISOString(),
+      identityMask: identity
+        ? { identificationType: identity.identificationType, lastFour: getIdentityMaskSuffix(identity) }
+        : null,
+    })),
     totalCount,
     page,
     totalPages: Math.ceil(totalCount / limit) || 1,
@@ -1059,10 +1079,3 @@ export async function revealPartyIdentity(
     number: decryptedNumber,
   };
 }
-
-export {
-  searchMatterClients,
-  type SearchMatterClientsParams,
-  type SearchMatterClientsResult,
-} from '@/modules/matters/matter-service';
-

@@ -12,8 +12,8 @@ export const metadata = {
 
 interface PartiesPageProps {
   searchParams?: Promise<{
-    query?: string;
-    kind?: string;
+    query?: string | string[];
+    kind?: string | string[];
   }>;
 }
 
@@ -21,7 +21,7 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
   const params = searchParams ? await searchParams : {};
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -45,23 +45,27 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
       ? params.kind
       : undefined;
 
+  if (params.query !== undefined) {
+    redirect(validKind ? `/parties?kind=${validKind}` : '/parties');
+  }
+
   let initialResult = null;
+  let initialError: string | undefined;
   try {
     initialResult = await searchParties(actor, {
-      query: params.query,
       kind: validKind,
       page: 1,
       limit: 20,
     });
   } catch {
-    // Graceful fallback to client loading if query parsing errors
+    initialError = 'تعذر تحميل بيانات الأطراف. يرجى إعادة المحاولة.';
   }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <PartyListClient
         initialResult={initialResult}
-        initialQuery={params.query || ''}
+        initialError={initialError}
         initialKind={validKind}
       />
     </div>

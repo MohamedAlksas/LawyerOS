@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from '@/components/navigation-guard';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -10,8 +10,9 @@ export const metadata = {
 };
 
 export default async function NewPartyPage() {
+  let actor;
   try {
-    await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -50,7 +51,7 @@ export default async function NewPartyPage() {
       </div>
 
       {/* Main Party Form */}
-      <PartyForm />
+      <PartyForm ownerId={actor.id} />
     </div>
   );
 }

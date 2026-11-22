@@ -269,6 +269,13 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
       where: { entityType: 'Matter', entityId: opened.matter.id, action: 'REOPEN_MATTER' },
     });
     expect(reopenAudits.length).toBe(1);
+    const archiveAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityType: 'Matter', entityId: opened.matter.id, action: 'ARCHIVE_MATTER' },
+    });
+    expect(archiveAudit.changedFields).toMatchObject({
+      archiveReason: 'أرشفة مؤقتة',
+      archivedAt: arch.archivedAt,
+    });
 
     // Mutations succeed now
     const updated = await updateMatter(actor, {
@@ -324,7 +331,8 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
       instance: 'FIRST_INSTANCE',
       numberText: '١٥٠',
       yearLabel: '٢٠٢٤',
-      status: 'DRAFT',
+      registerType: 'مدني',
+      status: 'CLOSED',
       idempotencyKey: `add-proc-${crypto.randomUUID()}`,
     });
 
@@ -360,7 +368,7 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
 
     // Archive the parent matter as well
     const freshMatter = await getMatter(opened.matter.id, actor);
-    await archiveMatter(actor, {
+    const archivedMatter = await archiveMatter(actor, {
       matterId: opened.matter.id,
       expectedVersion: freshMatter.version,
       reason: 'أرشفة الملف بالكامل',
@@ -377,6 +385,29 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
         idempotencyKey: `reopen-proc-blocked-${crypto.randomUUID()}`,
       })
     ).rejects.toThrow(MatterArchivedError);
+
+    await reopenMatter(actor, {
+      matterId: opened.matter.id,
+      expectedVersion: archivedMatter.version,
+      reason: 'متابعة الملف بعد انتهاء المراجعة',
+      idempotencyKey: `reopen-parent-m-${crypto.randomUUID()}`,
+    });
+    const reopened = await reopenProceeding(actor, {
+      proceedingId: proc.id,
+      matterId: opened.matter.id,
+      expectedVersion: archProc.version,
+      reason: 'إتاحة القيد المغلق للمراجعة',
+      idempotencyKey: `reopen-proc-${crypto.randomUUID()}`,
+    });
+    expect(reopened.status).toBe('CLOSED');
+    expect(reopened.archivedAt).toBeNull();
+    const archiveAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityType: 'Proceeding', entityId: proc.id, action: 'ARCHIVE_PROCEEDING' },
+    });
+    expect(archiveAudit.changedFields).toMatchObject({
+      archiveReason: 'صدور حكم قطعي في الدرجة الابتدائية',
+      archivedAt: archProc.archivedAt,
+    });
   });
 
   it('T07-07: Pagination bounds limit, page calculation, and stable tie-breaker ordering', async () => {

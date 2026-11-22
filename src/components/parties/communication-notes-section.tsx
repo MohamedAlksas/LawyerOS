@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
+import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { addCommunicationNoteAction } from '@/modules/parties/actions';
 import {
   CommunicationChannel,
@@ -16,106 +18,104 @@ import {
 } from './party-types';
 
 interface CommunicationNotesSectionProps {
+  ownerId: string;
   partyId: string;
   initialNotes: CommunicationNoteSummaryDTO[];
   readOnly?: boolean;
 }
 
+type PendingNote = { wallTime: string; payload: AddCommunicationNoteInput };
+
 export function CommunicationNotesSection({
+  ownerId,
   partyId,
   initialNotes,
   readOnly = false,
 }: CommunicationNotesSectionProps) {
+  const draft = useFormDraft<PendingNote>(`${ownerId}:communication`, `/parties/${partyId}`);
+  const restored = readOnly ? undefined : draft.restored;
+  const [pending, setPending] = useState<PendingNote | null>(restored ?? null);
   const [notes, setNotes] = useState<CommunicationNoteSummaryDTO[]>(initialNotes);
-  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(Boolean(restored));
 
   // Form inputs — initialized to current Cairo office wall-clock time
   const [communicationAt, setCommunicationAt] = useState<string>(() => {
-    return getCairoCurrentWallTime();
+    return restored?.wallTime ?? getCairoCurrentWallTime();
   });
-  const [channel, setChannel] = useState<CommunicationChannel>('PHONE');
-  const [summary, setSummary] = useState('');
-  const [followUpRequired, setFollowUpRequired] = useState(false);
-  const [followUpDate, setFollowUpDate] = useState('');
+  const [channel, setChannel] = useState<CommunicationChannel>(restored?.payload.channel ?? 'PHONE');
+  const [summary, setSummary] = useState(restored?.payload.summary ?? '');
+  const [followUpRequired, setFollowUpRequired] = useState(restored?.payload.followUpRequired ?? false);
+  const [followUpDate, setFollowUpDate] = useState(restored?.payload.followUpDate ?? '');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const idempotencyKeyRef = useRef<string | null>(null);
-
-  const getIdempotencyKey = (): string => {
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `note-idemp-${Date.now()}`;
-    }
-    return idempotencyKeyRef.current;
-  };
+  const savingRef = useRef(false);
+  useLeaveGuard(false, isSubmitting || Boolean(pending));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingRef.current || !draft.isCurrent()) return;
     setError(null);
 
-    if (!summary.trim()) {
-      setError('ملخص التواصل مطلوب.');
-      return;
+    let operation = pending;
+    if (!operation) {
+      if (!summary.trim() || !communicationAt) {
+        setError(summary.trim() ? 'تاريخ وتوقيت التواصل مطلوب.' : 'ملخص التواصل مطلوب.');
+        return;
+      }
+      try {
+        operation = {
+          wallTime: communicationAt,
+          payload: {
+            partyId,
+            communicationAt: cairoWallTimeToUtcIso(communicationAt),
+            channel,
+            summary: summary.trim(),
+            followUpRequired,
+            followUpDate: followUpRequired && followUpDate ? followUpDate : null,
+            idempotencyKey: generateClientRequestId('note'),
+          },
+        };
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'صيغة تاريخ أو وقت التواصل غير صالحة.');
+        return;
+      }
     }
 
-    if (!communicationAt) {
-      setError('تاريخ وتوقيت التواصل مطلوب.');
-      return;
-    }
-
+    savingRef.current = true;
     setIsSubmitting(true);
-
-    let isoInstant: string;
+    setPending(operation);
+    draft.keep(operation);
     try {
-      // Explicitly convert Cairo wall-clock time to UTC ISO instant
-      isoInstant = cairoWallTimeToUtcIso(communicationAt);
-    } catch (err: unknown) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'صيغة تاريخ أو وقت التواصل غير صالحة.'
-      );
-      setIsSubmitting(false);
-      return;
-    }
-
-    const payload: AddCommunicationNoteInput = {
-      partyId,
-      communicationAt: isoInstant,
-      channel,
-      summary: summary.trim(),
-      followUpRequired,
-      followUpDate: followUpRequired && followUpDate ? followUpDate : null,
-      idempotencyKey: getIdempotencyKey(),
-    };
-
-    try {
-      const result = await addCommunicationNoteAction(payload);
+      const result = await addCommunicationNoteAction(operation.payload);
+      if (!draft.isCurrent()) return;
 
       if (!result.success) {
-        setError(result.error || 'تعذر حفظ ملاحظة التواصل.');
-        setIsSubmitting(false);
+        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN'].includes(result.code ?? '')) {
+          setPending(null);
+          draft.clear();
+        }
+        setError(isAuthRecoveryCode(result.code)
+          ? 'انتهت الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد محاولة الحفظ الأصلي.'
+          : result.error || 'تعذر حفظ ملاحظة التواصل.');
         return;
       }
 
-      // Prepend to notes list
-      setNotes((prev) => [result.data, ...prev]);
+      setNotes((prev) => [result.data, ...prev.filter((note) => note.id !== result.data.id)]);
 
-      // Reset form and clear idempotency key for next note
       setCommunicationAt(getCairoCurrentWallTime());
       setSummary('');
       setFollowUpRequired(false);
       setFollowUpDate('');
       setIsFormOpen(false);
-      idempotencyKeyRef.current = null;
-      setIsSubmitting(false);
+      setPending(null);
+      draft.clear();
     } catch {
-      setError('حدث خطأ في الاتصال أثناء حفظ الملاحظة.');
-      setIsSubmitting(false);
+      if (draft.isCurrent()) setError('تعذر تأكيد الحفظ. يمكنك إعادة محاولة الحفظ الأصلي.');
+    } finally {
+      savingRef.current = false;
+      if (draft.isCurrent()) setIsSubmitting(false);
     }
   };
 
@@ -139,6 +139,7 @@ export function CommunicationNotesSection({
           <button
             type="button"
             data-testid="add-note-button"
+            disabled={isSubmitting || Boolean(pending)}
             onClick={() => {
               setIsFormOpen((prev) => {
                 if (!prev) {
@@ -173,6 +174,7 @@ export function CommunicationNotesSection({
             </div>
           )}
 
+          <fieldset disabled={isSubmitting || Boolean(pending)} className="min-w-0 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="communicationAt" className="block text-xs font-semibold text-[#172A35] mb-1">
@@ -256,11 +258,13 @@ export function CommunicationNotesSection({
               </div>
             )}
           </div>
+          </fieldset>
 
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
               onClick={() => setIsFormOpen(false)}
+              disabled={isSubmitting || Boolean(pending)}
               className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px]"
             >
               إلغاء
@@ -271,7 +275,7 @@ export function CommunicationNotesSection({
               disabled={isSubmitting}
               className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded min-h-[44px]"
             >
-              {isSubmitting ? 'جارٍ الحفظ...' : 'حفظ الملاحظة'}
+              {isSubmitting ? 'جارٍ الحفظ...' : pending ? 'إعادة محاولة الحفظ الأصلي' : 'حفظ الملاحظة'}
             </button>
           </div>
         </form>

@@ -14,17 +14,21 @@ import {
 
 import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from '@/modules/identity/session-limits';
 
-async function auditSignInMfa(userId: string, accepted: boolean) {
+async function auditIdentityOutcome(userId: string, action: string) {
   try {
     await recordAuditEvent(getPrismaClient(), {
       userId,
-      action: accepted ? 'VERIFY_SIGN_IN_MFA' : 'REJECT_SIGN_IN_MFA',
+      action,
       entityType: 'User',
       entityId: userId,
     });
   } catch {
-    console.error('[Identity Audit] Failed to persist MFA outcome');
+    console.error('[Identity Audit] Failed to persist authentication outcome');
   }
+}
+
+function auditSignInMfa(userId: string, accepted: boolean) {
+  return auditIdentityOutcome(userId, accepted ? 'VERIFY_SIGN_IN_MFA' : 'REJECT_SIGN_IN_MFA');
 }
 
 function extractRawTokens(cookiePart: string): {
@@ -417,6 +421,7 @@ export async function POST(request: NextRequest) {
               );
               errRes.cookies.delete('better-auth.two_factor');
               errRes.cookies.delete('__Secure-better-auth.two_factor');
+              await auditSignInMfa(targetUserId, false);
               return errRes;
             }
           }
@@ -427,8 +432,11 @@ export async function POST(request: NextRequest) {
 
   // R10-01: Change password pre-handler: ensure Better Auth receives revokeOtherSessions flag
   let reqToExecute = request;
+  let passwordChangeActorId: string | undefined;
 
   if (pathname.includes('/change-password')) {
+    const actor = await requireActor({ headers: request.headers, touchSession: false }).catch(() => null);
+    passwordChangeActorId = actor?.id;
     try {
       const body = await request.clone().json();
       body.revokeOtherSessions = true;
@@ -443,6 +451,9 @@ export async function POST(request: NextRequest) {
   }
 
   const response = await auth.handler(reqToExecute);
+  if (passwordChangeActorId && !response.ok) {
+    await auditIdentityOutcome(passwordChangeActorId, 'REJECT_PASSWORD_CHANGE');
+  }
 
   // R11-01 & R12-01: In POST /api/auth/sign-in/email:
   // When Better Auth issues a 2FA challenge cookie, stamp companion record in verification:

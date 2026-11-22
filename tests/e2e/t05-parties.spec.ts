@@ -59,11 +59,34 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     const syntheticIdNumber = '29001011234567';
     await page.getByTestId('identity-number-input').fill(syntheticIdNumber);
 
-    // Submit form
+    let firstSave: unknown;
+    let retriedSave: unknown;
+    await page.route('**/parties/new', async (route) => {
+      const request = route.request();
+      if (request.method() === 'POST') {
+        const args = request.postDataJSON() as unknown[];
+        if (args[0] && typeof args[0] === 'object' && 'idempotencyKey' in args[0]) {
+          if (!firstSave) {
+            firstSave = args;
+            await route.fetch();
+            await route.abort('failed');
+            return;
+          }
+          retriedSave = args;
+        }
+      }
+      await route.continue();
+    });
+    await page.getByTestId('submit-party-button').click();
+    await expect(page.getByTestId('party-name-input')).toBeDisabled();
+    await expect(page.getByTestId('submit-party-button')).toBeEnabled();
     await page.getByTestId('submit-party-button').click();
 
     // 5. Land on Party Profile (/parties/[id])
     await expect(page).toHaveURL(/\/parties\/[a-f0-9-]+$/);
+    expect(firstSave).toBeDefined();
+    expect(retriedSave).toEqual(firstSave);
+    await page.unroute('**/parties/new');
     const partyUrl = page.url();
     const partyId = partyUrl.split('/').pop()!;
     createdPartyIds.push(partyId);
@@ -96,6 +119,25 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await page.getByTestId('note-summary-input').fill(noteSummaryText);
     await page.getByTestId('note-follow-up-checkbox').check();
     await page.getByTestId('note-follow-up-date-input').fill('2026-11-30');
+    let firstNote: unknown;
+    let retriedNote: unknown;
+    await page.route(`**/parties/${partyId}`, async (route) => {
+      if (route.request().method() === 'POST') {
+        const args = route.request().postDataJSON();
+        if (!firstNote) {
+          firstNote = args;
+          await route.fetch();
+          await route.abort('failed');
+          return;
+        }
+        retriedNote = args;
+      }
+      await route.continue();
+    });
+    await page.getByTestId('save-note-button').click();
+    await expect(page.getByTestId('note-form-error')).toBeVisible();
+    await expect(page.getByTestId('add-note-button')).toBeDisabled();
+    await expect(page.getByTestId('note-summary-input')).toBeDisabled();
     await page.getByTestId('save-note-button').click();
 
     // Verify Note in timeline
@@ -103,6 +145,10 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     await expect(noteItem).toBeVisible();
     await expect(noteItem).toContainText(noteSummaryText);
     await expect(noteItem.getByTestId('note-cairo-timestamp')).toBeVisible();
+    expect(firstNote).toBeDefined();
+    expect(retriedNote).toEqual(firstNote);
+    expect(await prisma.communicationNote.count({ where: { partyId, summary: noteSummaryText } })).toBe(1);
+    await page.unroute(`**/parties/${partyId}`);
 
     // 8. Add Power of Attorney (R05-09)
     await page.getByTestId('add-poa-button').click();

@@ -67,6 +67,17 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
         archivedAt: new Date(),
         createdById: owner.id,
         updatedById: owner.id,
+        identities: {
+          create: {
+            identificationType: 'NATIONAL_ID',
+            ciphertext: Buffer.alloc(16).toString('base64'),
+            iv: Buffer.alloc(12).toString('base64'),
+            authTag: Buffer.alloc(16).toString('base64'),
+            keyId: 'synthetic-test-envelope',
+            lastFour: '0123',
+            createdById: owner.id,
+          },
+        },
       },
     });
     archivedPartyId = archivedParty.id;
@@ -316,8 +327,17 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     test.setTimeout(90_000);
     await signInWithTotp(page, owner);
 
+    const total = await prisma.matter.count({ where: { archivedAt: null, status: { not: 'ARCHIVED' } } });
+    const last = Math.ceil(total / 6);
+    await page.goto('/matters?limit=6&page=1000');
+    await expect(page.getByTestId('pagination-controls')).toContainText(`صفحة ${last} من ${last}`);
+    await expect(page).toHaveURL(new RegExp(`[?&]page=${last}(?:&|$)`));
+    await expect(page).toHaveURL(/limit=6/);
+
     // Search specifically for our 22 seeded pagination matters using isolated pageRunId
-    await page.goto(`/matters?query=${encodeURIComponent(`تصفح صفحات النظام ${pageRunId}`)}`);
+    await page.goto('/matters');
+    await page.getByTestId('matters-search-input').fill(`تصفح صفحات النظام ${pageRunId}`);
+    await page.getByTestId('matters-search-submit').click();
 
     // Verify pagination controls are visible (22 items / 20 per page = 2 pages)
     const paginationControls = page.getByTestId('pagination-controls');
@@ -485,7 +505,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     test.setTimeout(90_000);
     await signInWithTotp(page, owner);
 
-    await page.goto('/search');
+    await page.goto('/search?type=MATTER&includeArchived=true&limit=15');
     const searchInput = page.getByTestId('unified-search-input');
     await searchInput.fill(`تصفح صفحات النظام ${pageRunId}`);
     await page.getByTestId('search-submit-button').click();
@@ -506,10 +526,13 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(paginationControls).toContainText('صفحة 2 من 2');
 
     // Deep link navigation
-    const resultItem = page.getByTestId('search-results-list').locator('article').first();
+    const resultItems = page.getByTestId('search-results-list').locator('article');
+    await expect(resultItems).toHaveCount(7);
+    const resultIds = await resultItems.evaluateAll((items) => items.map((item) => item.getAttribute('data-testid')));
+    const resultItem = resultItems.first();
     await expect(resultItem).toBeVisible();
-    const resultTitle = await resultItem.locator('h2').innerText();
     const detailLink = resultItem.getByRole('link', { name: /عرض التفاصيل/ });
+    const detailHref = await detailLink.getAttribute('href');
     await detailLink.click();
     await expect(page).toHaveURL(/\/matters\/[a-f0-9-]+$/);
 
@@ -518,9 +541,14 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page).toHaveURL(/page=2/);
     await expect(paginationControls).toContainText('صفحة 2 من 2');
     await expect(page.getByTestId('unified-search-input')).toHaveValue(`تصفح صفحات النظام ${pageRunId}`);
-    const restoredItem = page.getByTestId('search-results-list').locator('article').first();
-    await expect(restoredItem).toBeVisible();
-    expect(await restoredItem.locator('h2').innerText()).toBe(resultTitle);
+    const restoredFilters = new URL(page.url()).searchParams;
+    expect(restoredFilters.get('type')).toBe('MATTER');
+    expect(restoredFilters.get('includeArchived')).toBe('true');
+    expect(restoredFilters.get('limit')).toBe('15');
+    await expect.poll(() => resultItems.evaluateAll((items) => items.map((item) => item.getAttribute('data-testid'))))
+      .toEqual(resultIds);
+    await page.goForward();
+    expect(new URL(page.url()).pathname).toBe(detailHref);
   });
 
   // =========================================================================
@@ -553,7 +581,9 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page.getByTestId(`reopen-proceeding-${lifecycleProcId}`)).toBeVisible();
 
     // Verify proceeding detail page reflects archived read-only state
-    await page.goto(`/matters/${lifecycleMatterId}/proceedings/${lifecycleProcId}`);
+    const proceedingPath = `/matters/${lifecycleMatterId}/proceedings/${lifecycleProcId}`;
+    await page.goto(`${proceedingPath}/edit`);
+    await expect(page).toHaveURL((url) => url.pathname === proceedingPath);
     await expect(page.getByTestId('proceeding-archived-banner')).toBeVisible();
     await expect(page.getByTestId('proceeding-archived-badge')).toBeVisible();
     await expect(page.getByTestId('edit-proceeding-button')).toBeHidden();
@@ -582,6 +612,13 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page.getByTestId('archive-matter-button')).toBeHidden();
     await expect(page.getByTestId('edit-matter-button')).toBeHidden();
     await expect(page.getByTestId('add-proceeding-button')).toBeHidden();
+
+    const archivedMatterPath = `/matters/${lifecycleMatterId}`;
+    for (const writePath of [`${archivedMatterPath}/edit`, `${archivedMatterPath}/proceedings/new`]) {
+      await page.goto(writePath);
+      await expect(page).toHaveURL((url) => url.pathname === archivedMatterPath);
+      await expect(archivedBanner).toBeVisible();
+    }
 
     // Reopen button must be available
     const reopenMatterBtn = page.getByTestId('reopen-matter-button');
@@ -621,7 +658,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
   // =========================================================================
   test('verifies Arabic RTL layout, 1440px desktop, 768px tablet, 390px mobile, and 320px reflow @t07 @a11y @responsive', async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(90_000);
     await signInWithTotp(page, owner);
 
@@ -667,6 +704,36 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
       return document.documentElement.scrollWidth > document.documentElement.clientWidth;
     });
     expect(hasHorizontalOverflow).toBe(false);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await expect(page.getByTestId('unified-search-input')).toBeVisible();
+    const labels = page.getByTestId('mobile-bottom-nav').locator('a > span:last-child, button > span:last-child');
+    const labelBoxes = await labels.evaluateAll((elements) => elements.map((element) => {
+      const { left, right, top, bottom } = element.getBoundingClientRect();
+      return { left, right, top, bottom };
+    }));
+    expect(labelBoxes).toHaveLength(6);
+    for (const [index, box] of labelBoxes.entries()) {
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(390);
+      expect(labelBoxes.slice(index + 1).some((other) =>
+        box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top
+      )).toBe(false);
+    }
+    const wordmark = page.getByTestId('office-wordmark');
+    await expect(wordmark).toContainText('مكتب المحامي');
+    expect(await wordmark.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const enlargedSubmitButton = page.getByTestId('search-submit-button');
+    await enlargedSubmitButton.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await enlargedSubmitButton.click({ trial: true });
+    const enlargedSubmit = await enlargedSubmitButton.boundingBox();
+    expect(enlargedSubmit).not.toBeNull();
+    expect(enlargedSubmit!.x).toBeGreaterThanOrEqual(0);
+    expect(enlargedSubmit!.x + enlargedSubmit!.width).toBeLessThanOrEqual(390);
+    const screenshot = testInfo.outputPath('arabic-search-200-percent.png');
+    await page.screenshot({ path: screenshot });
+    await testInfo.attach('arabic-search-200-percent', { path: screenshot, contentType: 'image/png' });
   });
 
   // =========================================================================
@@ -753,6 +820,9 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page.getByTestId('client-picker-popover')).toBeVisible();
 
     const clientSearchInput = page.getByTestId('filter-client-search-input');
+    await clientSearchInput.fill(`لا يوجد اسم مطابق ${runId}`);
+    await expect(page.getByRole('status', { name: '' }).filter({ hasText: 'لا يوجد موكلين مطابقين' })).toBeVisible();
+    await expect(page.locator('[data-testid^="filter-client-option-"]')).toHaveCount(0);
     await clientSearchInput.fill(runId);
     const clientOption = page.getByTestId(`filter-client-option-${testPartyId}`);
     await expect(clientOption).toBeVisible();
@@ -766,6 +836,10 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     expect(page.url()).not.toContain('clientId=');
     expect(page.url()).not.toContain(testPartyId);
     await expect(page.locator('tbody tr, [data-testid^="matter-card-"]').filter({ hasText: `الأهرام ${runId}` }).first()).toBeVisible();
+    await page.locator('tbody tr a').first().click();
+    await expect(page).toHaveURL(/\/matters\/[a-f0-9-]+$/);
+    await page.goBack();
+    await expect(clientSelect).toHaveValue(testPartyId);
 
     // 3. Filter by Incomplete Data
     await page.getByTestId('matters-clear-filters').click();
@@ -801,11 +875,13 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     // Intercept POST request: allow server commit via route.fetch(), then abort delivery to browser
     let interceptedOnce = false;
     let interceptedKey: string | null = null;
+    let originalRequest: unknown;
     await page.route('**/matters/**', async (route) => {
       const req = route.request();
       if (req.method() === 'POST' && !interceptedOnce) {
         interceptedOnce = true;
         const postData = req.postDataJSON() as unknown;
+        originalRequest = postData;
         const payload = Array.isArray(postData) ? postData[0] : (postData as { idempotencyKey?: string } | null);
         if (payload?.idempotencyKey) {
           interceptedKey = payload.idempotencyKey;
@@ -858,6 +934,22 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(unresolvedBanner).toBeVisible();
     await expect(unresolvedBanner).toContainText('العملية مجمّدة');
 
+    // The unresolved request remains reachable after leaving and returning to the detail.
+    await page.getByTestId('nav-link-search').click();
+    await expect(page).toHaveURL(/\/search$/);
+    await page.goBack();
+    await expect(unresolvedBanner).toBeVisible();
+
+    await page.context().clearCookies();
+    await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    await expect(page.getByTestId('protected-view-lock')).toContainText('انتهت الجلسة');
+    const reauth = await page.context().newPage();
+    await signInWithTotp(reauth, owner);
+    await reauth.close();
+    await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    await expect(unresolvedBanner).toBeVisible();
+    await expect(page.getByTestId('reopen-matter-button')).toBeDisabled();
+
     // Reopen modal via unresolved lifecycle banner
     await page.getByTestId('reopen-unresolved-lifecycle-button').click();
     await expect(page.getByTestId('archive-matter-modal')).toBeVisible();
@@ -865,11 +957,13 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
 
     // Track retry request key
     let retryInterceptedKey: string | null = null;
+    let retryRequest: unknown;
     await page.unroute('**/matters/**');
     await page.route('**/matters/**', async (route) => {
       const req = route.request();
       if (req.method() === 'POST') {
         const postData = req.postDataJSON() as unknown;
+        retryRequest = postData;
         const payload = Array.isArray(postData) ? postData[0] : (postData as { idempotencyKey?: string } | null);
         if (payload?.idempotencyKey) {
           retryInterceptedKey = payload.idempotencyKey;
@@ -889,6 +983,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     // Verify retry resent identical idempotency key
     expect(interceptedKey).toBeTruthy();
     expect(retryInterceptedKey).toBe(interceptedKey);
+    expect(retryRequest).toEqual(originalRequest);
 
     // Verify in database: retry was idempotent! Still exactly 1 audit event row and version bump = 1!
     const auditCountAfterRetry = await prisma.auditEvent.count({
@@ -907,5 +1002,8 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
       where: { key: interceptedKey! },
     });
     expect(claim.status).toBe('COMPLETED');
+    expect(await prisma.idempotencyRecord.count({
+      where: { commandType: 'archiveMatter', resultId: retryMatterId },
+    })).toBe(1);
   });
 });

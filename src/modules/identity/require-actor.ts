@@ -6,6 +6,7 @@ export interface RequireActorOptions {
   headers?: Headers | null;
   allowIncompleteMfa?: boolean;
   requiredPermission?: Permission;
+  touchSession?: boolean;
 }
 
 import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from './session-limits';
@@ -155,10 +156,12 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
   }
 
   // Update session updatedAt to slide the inactivity window ONLY after all checks pass
-  await prisma.session.update({
-    where: { id: session.id },
-    data: { updatedAt: new Date() },
-  }).catch(() => {});
+  if (options.touchSession !== false) {
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { updatedAt: new Date() },
+    }).catch(() => {});
+  }
 
   const actor: Actor = {
     id: user.id,

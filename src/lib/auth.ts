@@ -65,6 +65,8 @@ function createAuthInstance() {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: Array.from(getTrustedOrigins()),
+    // Session revocation is exposed through the application's audited security actions.
+    disabledPaths: ['/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
     emailAndPassword: {
       enabled: true,
       disableSignUp: true, // Public self-registration is strictly forbidden

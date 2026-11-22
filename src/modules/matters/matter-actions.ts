@@ -435,11 +435,20 @@ export async function findSimilarProceedingsAction(
   }
 }
 
+async function verifyLifecycleActor(originatingActorId: string): Promise<Actor> {
+  const actor = await verifyActionSecurity({ requiredPermission: 'WRITE_CLIENT_DATA' });
+  if (actor.id !== originatingActorId) {
+    throw new AuthorizationError();
+  }
+  return actor;
+}
+
 export async function archiveMatterAction(
-  input: ArchiveMatterInput
+  input: ArchiveMatterInput,
+  originatingActorId: string
 ): Promise<ActionResult<LifecycleCommandResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyLifecycleActor(originatingActorId);
     const data = await archiveMatter(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -448,10 +457,11 @@ export async function archiveMatterAction(
 }
 
 export async function reopenMatterAction(
-  input: ReopenMatterInput
+  input: ReopenMatterInput,
+  originatingActorId: string
 ): Promise<ActionResult<LifecycleCommandResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyLifecycleActor(originatingActorId);
     const data = await reopenMatter(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -460,10 +470,11 @@ export async function reopenMatterAction(
 }
 
 export async function archiveProceedingAction(
-  input: ArchiveProceedingInput
+  input: ArchiveProceedingInput,
+  originatingActorId: string
 ): Promise<ActionResult<LifecycleCommandResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyLifecycleActor(originatingActorId);
     const data = await archiveProceeding(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -472,10 +483,11 @@ export async function archiveProceedingAction(
 }
 
 export async function reopenProceedingAction(
-  input: ReopenProceedingInput
+  input: ReopenProceedingInput,
+  originatingActorId: string
 ): Promise<ActionResult<LifecycleCommandResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyLifecycleActor(originatingActorId);
     const data = await reopenProceeding(actor, input);
     return { success: true, data };
   } catch (error) {

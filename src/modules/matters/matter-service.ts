@@ -4,6 +4,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
+import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import { normalizeArabicDigits, normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import {
   claimIdempotencyKey,
@@ -283,54 +284,80 @@ function resolveDefaultCapacityText(capacityText?: string | null, legalCapacity?
   }
 }
 
-/**
- * Advisory check for similar court registration identities.
- * Does not block creation or updates.
- */
+async function querySimilarProceedingRows(tx: Prisma.TransactionClient, params: FindSimilarProceedingsParams) {
+  const normNumber = normalizeArabicDigits(params.numberText.trim());
+  const normYear = normalizeArabicDigits(params.yearLabel?.trim() ?? '');
+  const registerType = params.registerType?.trim().toLowerCase() ?? '';
+  const normCircuit = normalizeArabicText(params.circuit ?? '');
+  const normalizedYear = Prisma.sql`COALESCE(p."yearNormalized", trim(translate(p."yearLabel", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')), '')`;
+  const yearMatches = normYear ? Prisma.sql`${normalizedYear} = ${normYear}` : Prisma.sql`FALSE`;
+  const directMatch = normYear && registerType && normCircuit
+    ? Prisma.sql`(${yearMatches}
+        AND lower(btrim(coalesce(p."registerType", ''))) = ${registerType}
+        AND btrim(lower(regexp_replace(
+          translate(regexp_replace(coalesce(p."circuit", ''), '[ً-ٰٟـ]', '', 'g'),
+            '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱةىئؤ', '01234567890123456789ااااهييو'),
+          '[[:space:]]+', ' ', 'g'
+        ))) = ${normCircuit})`
+    : Prisma.sql`FALSE`;
+  const exclude = params.excludeProceedingId
+    ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
+    : Prisma.empty;
+
+  return tx.$queryRaw<Array<{
+    id: string;
+    matterId: string;
+    courtId: string;
+    instance: SimilarProceedingCandidateDTO['instance'];
+    numberText: string;
+    yearLabel: string | null;
+    status: SimilarProceedingCandidateDTO['status'];
+    matterFileCode: string;
+    matterTitle: string;
+    courtName: string;
+    directMatch: boolean;
+    yearMatches: boolean;
+  }>>`
+    SELECT p."id", p."matterId", p."courtId", p."instance", p."numberText", p."yearLabel", p."status",
+      m."fileCode" AS "matterFileCode", m."title" AS "matterTitle", c."name" AS "courtName",
+      ${directMatch} AS "directMatch", ${yearMatches} AS "yearMatches"
+    FROM "proceeding" p
+    JOIN "matter" m ON m."id" = p."matterId"
+    JOIN "court" c ON c."id" = p."courtId"
+    WHERE p."courtId" = ${params.courtId}
+      AND (
+        p."numberNormalized" = ${normNumber}
+        OR (p."numberNormalized" IS NULL AND
+            trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber})
+      )
+      ${exclude}
+    ORDER BY "directMatch" DESC, "yearMatches" DESC, p."createdAt" DESC, p."id" ASC
+    LIMIT ${params.limit ?? 10}
+  `;
+}
+
 async function checkProceedingCourtDuplicate(
   tx: Prisma.TransactionClient,
-  matterId: string,
-  courtId: string,
-  registerType?: string | null,
-  numberText?: string | null,
-  yearLabel?: string | null,
-  excludeProceedingId?: string
+  input: Pick<AddProceedingInput, 'courtId' | 'numberText' | 'yearLabel' | 'registerType' | 'circuit'>,
+  excludeProceedingId?: string,
 ): Promise<DuplicateCourtWarningDTO | null> {
-  if (!courtId || !numberText || !yearLabel) return null;
-
-  const normNumber = normalizeArabicDigits(numberText.trim());
-  const normYear = normalizeArabicDigits(yearLabel.trim());
-
-  const candidates = await tx.proceeding.findMany({
-    where: {
-      courtId,
-      ...(excludeProceedingId ? { id: { not: excludeProceedingId } } : {}),
-    },
-    select: {
-      id: true,
-      matterId: true,
-      registerType: true,
-      numberText: true,
-      yearLabel: true,
-    },
+  if (!input.numberText?.trim()) return null;
+  const [candidate] = await querySimilarProceedingRows(tx, {
+    ...input,
+    numberText: input.numberText,
+    excludeProceedingId,
+    limit: 1,
   });
-
-  for (const c of candidates) {
-    if (c.numberText && c.yearLabel) {
-      const cNumber = normalizeArabicDigits(c.numberText.trim());
-      const cYear = normalizeArabicDigits(c.yearLabel.trim());
-      if (cNumber === normNumber && cYear === normYear) {
-        return {
-          detected: true,
-          message: `تنبيه: يوجد قيد قضائي آخر بنفس الرقم (${c.numberText}/${c.yearLabel}) في نفس المحكمة.`,
-          existingProceedingId: c.id,
-          existingNumberText: c.numberText,
-          existingYearLabel: c.yearLabel,
-        };
-      }
-    }
-  }
-  return null;
+  if (!candidate) return null;
+  return {
+    detected: true,
+    message: candidate.directMatch
+      ? 'تنبيه: يوجد قيد آخر مطابق في المحكمة والرقم والسنة ونوع القيد والدائرة.'
+      : 'تنبيه: يوجد قيد مشابه في نفس المحكمة. راجع سنة القيد ونوعه ودائرته.',
+    existingProceedingId: candidate.id,
+    existingNumberText: candidate.numberText,
+    existingYearLabel: candidate.yearLabel ?? '',
+  };
 }
 
 type MatterWithRelations = Prisma.MatterGetPayload<{
@@ -1598,14 +1625,7 @@ export async function addProceeding(
       );
 
       // Check advisory duplicate
-      const duplicateWarning = await checkProceedingCourtDuplicate(
-        tx,
-        input.matterId,
-        input.courtId,
-        input.registerType,
-        input.numberText,
-        input.yearLabel
-      );
+      const duplicateWarning = await checkProceedingCourtDuplicate(tx, input);
 
       const filingDateVal = parseCalendarDateToUtc(input.filingDate);
 
@@ -1823,15 +1843,7 @@ export async function updateProceeding(
       );
 
       // Check advisory duplicate
-      const duplicateWarning = await checkProceedingCourtDuplicate(
-        tx,
-        input.matterId,
-        input.courtId,
-        input.registerType,
-        input.numberText,
-        input.yearLabel,
-        input.id
-      );
+      const duplicateWarning = await checkProceedingCourtDuplicate(tx, input, input.id);
 
       const filingDateVal = parseCalendarDateToUtc(input.filingDate);
 
@@ -2697,11 +2709,13 @@ export async function searchMatters(
   }
 
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
-  const page = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const requestedPage = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const total = await prisma.matter.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
   const skip = (page - 1) * limit;
 
-  const [matters, total] = await Promise.all([
-    prisma.matter.findMany({
+  const matters = await prisma.matter.findMany({
       where,
       select: {
         id: true,
@@ -2724,9 +2738,7 @@ export async function searchMatters(
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
       skip,
-    }),
-    prisma.matter.count({ where }),
-  ]);
+  });
 
   return {
     matters: matters.map((matter) => ({
@@ -2744,7 +2756,7 @@ export async function searchMatters(
     })),
     total,
     page,
-    totalPages: Math.ceil(total / limit) || 1,
+    totalPages,
     limit,
   };
 }
@@ -2757,7 +2769,7 @@ export interface SearchMatterClientsParams {
 }
 
 export interface SearchMatterClientsResult {
-  clients: Array<{ id: string; name: string; primaryPhone: string | null }>;
+  clients: Array<{ id: string; name: string }>;
   total: number;
   page: number;
   totalPages: number;
@@ -2776,7 +2788,7 @@ export async function searchMatterClients(
 
   let params: z.infer<typeof searchMatterClientsParamsSchema>;
   try {
-    params = searchMatterClientsParamsSchema.parse(rawParams ?? {});
+    params = searchMatterClientsParamsSchema.parse(rawParams);
   } catch (err) {
     if (err instanceof z.ZodError) {
       const { message, fieldErrors } = formatZodError(err);
@@ -2785,8 +2797,7 @@ export async function searchMatterClients(
     throw err;
   }
 
-  const { page, limit, includeArchived, query } = params;
-  const skip = (page - 1) * limit;
+  const { page: requestedPage, limit, includeArchived, query } = params;
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
@@ -2819,22 +2830,16 @@ export async function searchMatterClients(
     }
   }
 
-  const [total, records] = await Promise.all([
-    prisma.party.count({ where }),
-    prisma.party.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [{ name: 'asc' }, { id: 'asc' }],
-      select: {
-        id: true,
-        name: true,
-        primaryPhone: true,
-      },
-    }),
-  ]);
-
-  const totalPages = Math.ceil(total / limit) || 1;
+  const total = await prisma.party.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
+  const records = await prisma.party.findMany({
+    where,
+    skip: (page - 1) * limit,
+    take: limit,
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    select: { id: true, name: true },
+  });
 
   return {
     clients: records,
@@ -2927,96 +2932,16 @@ export async function findSimilarProceedings(
     throw err;
   }
 
-  const prisma = getPrismaClient();
-
-  const normNumber = normalizeArabicDigits(params.numberText.trim());
-  const normYear = params.yearLabel ? normalizeArabicDigits(params.yearLabel.trim()) : null;
-
-  // Filter the normalized docket identity in SQL before the result limit. A
-  // fixed "latest 100 rows, then filter in memory" window hides older matches
-  // whenever the court has enough newer unrelated proceedings.
-  const excludeClause = params.excludeProceedingId
-    ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
-    : Prisma.empty;
-
-  // S6: prioritize exact year match in SQL before LIMIT 100 so older exact matches
-  // are never hidden by 100+ newer entries in the same court with the same number but different years.
-  const yearPriorityClause = normYear
-    ? Prisma.sql`CASE WHEN trim(translate(COALESCE(p."yearLabel", ''), '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normYear} THEN 0 ELSE 1 END ASC,`
-    : Prisma.empty;
-
-  const proceedings = await prisma.$queryRaw<Array<{
-    id: string;
-    matterId: string;
-    courtId: string;
-    instance: string;
-    numberText: string | null;
-    yearLabel: string | null;
-    status: string;
-    fileCode: string;
-    title: string;
-    courtName: string;
-  }>>`
-    SELECT
-      p."id", p."matterId", p."courtId", p."instance", p."numberText",
-      p."yearLabel", p."status", m."fileCode", m."title", c."name" AS "courtName"
-    FROM "proceeding" p
-    JOIN "matter" m ON m."id" = p."matterId"
-    JOIN "court" c ON c."id" = p."courtId"
-    WHERE p."courtId" = ${params.courtId}
-      AND p."numberText" IS NOT NULL
-      AND trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber}
-      ${excludeClause}
-    ORDER BY
-      ${yearPriorityClause}
-      p."createdAt" DESC
-    LIMIT 100
-  `;
-
-  const candidates: SimilarProceedingCandidateDTO[] = [];
-  let hasDirectMatch = false;
-
-  for (const proc of proceedings) {
-    if (!proc.numberText) continue;
-    const procNormYear = proc.yearLabel ? normalizeArabicDigits(proc.yearLabel.trim()) : null;
-
-    let reason: string | null = null;
-    if (normYear && procNormYear === normYear) {
-      reason = 'تطابق تام في رقم الدعوى وسنة القيد في نفس المحكمة';
-      hasDirectMatch = true;
-    } else {
-      reason = 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)';
-    }
-
-    candidates.push({
-      id: proc.id,
-      matterId: proc.matterId,
-      matterFileCode: proc.fileCode,
-      matterTitle: proc.title,
-      courtId: proc.courtId,
-      courtName: proc.courtName,
-      instance: proc.instance as SimilarProceedingCandidateDTO['instance'],
-      numberText: proc.numberText,
-      yearLabel: proc.yearLabel,
-      status: proc.status as SimilarProceedingCandidateDTO['status'],
-      similarityReason: reason,
-    });
-  }
-
-  // Sort direct matches first
-  candidates.sort((a, b) => {
-    const aDirect = a.similarityReason.startsWith('تطابق تام');
-    const bDirect = b.similarityReason.startsWith('تطابق تام');
-    if (aDirect && !bDirect) return -1;
-    if (!aDirect && bDirect) return 1;
-    return 0;
-  });
-
-  const limit = params.limit ?? 10;
-  return {
-    candidates: candidates.slice(0, limit),
-    hasDirectMatch,
-  };
+  const rows = await querySimilarProceedingRows(getPrismaClient(), params);
+  const candidates = rows.map(({ directMatch, yearMatches, ...candidate }): SimilarProceedingCandidateDTO => ({
+    ...candidate,
+    similarityReason: directMatch
+      ? 'تطابق تام في المحكمة ورقم الدعوى وسنة القيد ونوعه ودائرته'
+      : yearMatches
+        ? 'تطابق في المحكمة والرقم والسنة (نوع القيد أو الدائرة مختلفان أو غير محددين)'
+        : 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)',
+  }));
+  return { candidates, hasDirectMatch: rows.some((row) => row.directMatch) };
 }
 
 export async function archiveMatter(
@@ -4102,8 +4027,8 @@ export async function unifiedSearch(
   else if (searchType === 'PROCEEDING') total = proceedingsCount;
   else total = totalAll;
 
-  const totalPages = Math.ceil(total / limit) || 1;
-  const page = Math.max(params.page ?? 1, 1);
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(params.page ?? 1, totalPages);
   const skip = (page - 1) * limit;
 
   let items: UnifiedSearchResultItem[] = [];

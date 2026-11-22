@@ -22,7 +22,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
       role="navigation"
       aria-label="التنقل السفلي"
       data-testid="mobile-bottom-nav"
-      className="sm:hidden fixed bottom-0 inset-x-0 h-16 bg-white border-t border-[#D5DFE3] z-30 flex items-center justify-around px-2 shadow-lg"
+      className="sm:hidden fixed bottom-0 inset-x-0 min-h-16 bg-white border-t border-[#D5DFE3] z-30 flex flex-wrap items-stretch px-[8px] shadow-lg"
     >
       {/* Home Link */}
       <Link
@@ -30,7 +30,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         data-testid="nav-link-home"
         aria-label="الرئيسية"
         aria-current={isHomeActive ? 'page' : undefined}
-        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isHomeActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
         }`}
       >
@@ -44,7 +44,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         data-testid="nav-link-search-mobile"
         aria-label="البحث"
         aria-current={isSearchActive ? 'page' : undefined}
-        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isSearchActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
         }`}
       >
@@ -58,7 +58,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         data-testid="nav-link-matters"
         aria-label="الملفات القضائية"
         aria-current={isMattersActive ? 'page' : undefined}
-        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isMattersActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
         }`}
       >
@@ -72,7 +72,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         data-testid="nav-link-parties"
         aria-label="الأطراف"
         aria-current={isPartiesActive ? 'page' : undefined}
-        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isPartiesActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
         }`}
       >
@@ -86,7 +86,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
         data-testid="nav-link-security"
         aria-label="إعدادات الأمان"
         aria-current={isSecurityActive ? 'page' : undefined}
-        className={`flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
           isSecurityActive ? 'text-[#14566B] font-bold' : 'text-[#4D606A] hover:text-[#172A35]'
         }`}
       >
@@ -97,10 +97,10 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
       {/* Menu / Drawer Toggle */}
       <button
         type="button"
-        aria-label="فتح القائمة الكاملة"
+        aria-label="المزيد: فتح القائمة الكاملة"
         data-testid="mobile-nav-menu"
         onClick={(event) => onOpenDrawer(event.currentTarget)}
-        className="flex flex-col items-center justify-center flex-1 py-1 min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+        className="flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
       >
         <span aria-hidden="true" className="text-lg">☰</span>
         <span className="text-xs leading-tight mt-0.5">المزيد</span>

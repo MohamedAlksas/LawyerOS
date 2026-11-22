@@ -3,9 +3,9 @@ import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { unifiedSearch } from '@/modules/matters/matter-service';
+import { readParam, unifiedSearchFilters } from '@/lib/search-params';
 import {
   UnifiedSearchResult,
-  UnifiedSearchType,
   MatterValidationError,
 } from '@/modules/matters/matter-types';
 import { UnifiedSearchClient } from '@/components/search/unified-search-client';
@@ -15,13 +15,7 @@ export const metadata = {
 };
 
 interface SearchPageProps {
-  searchParams?: Promise<{
-    query?: string;
-    type?: string;
-    includeArchived?: string;
-    page?: string;
-    limit?: string;
-  }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
@@ -47,71 +41,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     throw error;
   }
 
-  const getSingleParam = (val: unknown): string | undefined => {
-    if (typeof val === 'string') return val;
-    if (Array.isArray(val) && typeof val[0] === 'string') return val[0];
-    return undefined;
-  };
-
-  const rawType = getSingleParam(params.type);
-  const rawPage = getSingleParam(params.page);
-  const rawLimit = getSingleParam(params.limit);
-  const rawQuery = getSingleParam(params.query);
-  const rawIncArch = getSingleParam(params.includeArchived);
-
-  const validType: UnifiedSearchType =
-    rawType && ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'].includes(rawType)
-      ? (rawType as UnifiedSearchType)
-      : 'ALL';
-
-  const requestedPage = Math.min(1000, Math.max(1, parseInt(rawPage || '1', 10) || 1));
-  const effectiveLimit = Math.min(50, Math.max(1, parseInt(rawLimit || '20', 10) || 20));
-  const includeArchived = rawIncArch === 'true';
-
-  let initialResult: UnifiedSearchResult = {
-    query: rawQuery || '',
-    type: validType,
-    includeArchived,
-    page: requestedPage,
-    limit: effectiveLimit,
-    total: 0,
-    totalPages: 1,
-    items: [],
-    counts: {
-      all: 0,
-      parties: 0,
-      matters: 0,
-      proceedings: 0,
-    },
-  };
+  const filters = unifiedSearchFilters((name) => readParam(params, name));
+  let initialResult: UnifiedSearchResult | undefined;
   let initialError: string | undefined = undefined;
 
   try {
-    initialResult = await unifiedSearch(
-      {
-        query: rawQuery,
-        type: validType,
-        includeArchived,
-        page: requestedPage,
-        limit: effectiveLimit,
-      },
-      actor
-    );
-
-    // Initial page recovery: if requested page is beyond totalPages but valid records exist, refetch the last valid page
-    const totalPages = initialResult.totalPages ?? 1;
-    if (requestedPage > totalPages && initialResult.total > 0) {
-      initialResult = await unifiedSearch(
-        {
-          query: rawQuery,
-          type: validType,
-          includeArchived,
-          page: totalPages,
-          limit: effectiveLimit,
-        },
-        actor
-      );
-    }
+    initialResult = await unifiedSearch(filters, actor);
   } catch (error) {
     if (error instanceof MatterValidationError) {
       initialError = error.message;
@@ -124,12 +59,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <UnifiedSearchClient
+        key={actor.sessionId}
         initialResult={initialResult}
-        initialQuery={rawQuery || ''}
-        initialType={validType}
-        initialIncludeArchived={includeArchived}
-        initialPage={initialResult.page ?? requestedPage}
-        initialLimit={effectiveLimit}
+        initialType={filters.type}
+        initialIncludeArchived={filters.includeArchived}
+        initialPage={initialResult?.page ?? filters.page}
+        initialLimit={filters.limit}
         initialError={initialError}
         sessionId={actor.sessionId}
       />

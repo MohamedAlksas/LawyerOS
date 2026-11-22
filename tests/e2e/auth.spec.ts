@@ -182,13 +182,16 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await expect(pageA.locator('h1')).toContainText('الأمان وإدارة الجلسات');
 
     const terminateOthersBtn = pageA.locator('button:has-text("إنهاء جميع الجلسات الأخرى")');
-    if (await terminateOthersBtn.isVisible()) {
-      pageA.once('dialog', (dialog) => dialog.accept());
-      await terminateOthersBtn.click();
-      await expect(pageA.locator('text=تم إنهاء')).toBeVisible();
-    }
+    await expect(terminateOthersBtn).toBeVisible();
+    pageA.once('dialog', (dialog) => dialog.accept());
+    await terminateOthersBtn.click();
+    await expect(pageA.locator('text=تم إنهاء')).toBeVisible();
 
-    // Now reload pageB in Context B: session was revoked, must redirect to /login
+    await pageB.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    await expect(pageB.getByTestId('protected-view-lock')).toContainText('انتهت الجلسة');
+    await expect(pageB.getByTestId('main-content')).toBeHidden();
+
+    // Reloading the revoked context also requires a new sign-in.
     await pageB.reload();
     await pageB.waitForURL('**/login*');
     await expect(pageB.locator('h1')).toContainText('تسجيل الدخول');

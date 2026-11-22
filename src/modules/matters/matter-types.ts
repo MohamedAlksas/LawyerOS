@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import {
   MatterKind,
   MatterStatus,
@@ -438,6 +439,8 @@ export interface FindSimilarProceedingsParams {
   courtId: string;
   numberText: string;
   yearLabel?: string | null;
+  registerType?: string | null;
+  circuit?: string | null;
   excludeProceedingId?: string | null;
   limit?: number;
 }
@@ -695,7 +698,7 @@ export const searchMattersParamsSchema = z
     courtId: z.string().uuid().optional(),
     practiceAreaId: z.string().uuid().optional(),
     includeArchived: z.boolean().optional(),
-    page: z.number().int().min(1).optional(),
+    page: z.number().int().min(1).max(MAX_SEARCH_PAGE).optional(),
     limit: z.number().int().min(1).max(100).optional(),
     offset: z.number().int().min(0).optional(),
     incompleteData: z.boolean().optional(),
@@ -759,7 +762,7 @@ export const unifiedSearchParamsSchema = z
     query: z.string().max(200).optional(),
     type: z.enum(['ALL', 'PARTY', 'MATTER', 'PROCEEDING']).optional(),
     includeArchived: z.boolean().optional(),
-    page: z.number().int().min(1).optional(),
+    page: z.number().int().min(1).max(MAX_SEARCH_PAGE).optional(),
     limit: z.number().int().min(1).max(50).optional(),
   })
   .strict();
@@ -778,6 +781,8 @@ export const findSimilarProceedingsSchema = z
     courtId: z.string().uuid('معرف المحكمة مطلوب'),
     numberText: z.string().trim().min(1, 'رقم الدعوى مطلوب').max(100),
     yearLabel: z.string().trim().max(20).nullable().optional(),
+    registerType: z.string().trim().max(100).nullable().optional(),
+    circuit: z.string().trim().max(100).nullable().optional(),
     excludeProceedingId: z.string().uuid().nullable().optional(),
     limit: z.number().int().min(1).max(20).optional(),
   })
@@ -795,7 +800,7 @@ export const searchMatterClientsParamsSchema = z
       .number()
       .int('رقم الصفحة يجب أن يكون عدداً صحيحاً')
       .min(1, 'رقم الصفحة يجب ألا يقل عن 1')
-      .max(1000, 'رقم الصفحة لا يمكن أن يتجاوز 1000')
+      .max(MAX_SEARCH_PAGE, 'رقم الصفحة لا يمكن أن يتجاوز 1000')
       .optional()
       .default(1),
     limit: z

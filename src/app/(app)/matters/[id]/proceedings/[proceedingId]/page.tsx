@@ -24,7 +24,7 @@ interface ProceedingDetailPageProps {
 export async function generateMetadata({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
     const matter = await getMatter(id, actor);
     const proceeding = (matter.proceedings || []).find((p) => p.id === proceedingId);
     if (!proceeding) {
@@ -49,7 +49,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   const { id, proceedingId } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {

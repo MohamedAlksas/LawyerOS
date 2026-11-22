@@ -4,17 +4,19 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { searchMattersAction, searchMatterClientsAction } from '@/modules/matters/matter-actions';
 import {
-  createNavigationKey,
-  setPrivateSearchState,
-  getPrivateSearchState,
   bindSearchSession,
+  clearSearchSessionStore,
+  readSearchHistory,
+  writeSearchHistory,
 } from '@/lib/search-session-store';
+import { DEFAULT_SEARCH_LIMIT, matterSearchFilters, readParam } from '@/lib/search-params';
 import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
 import {
   MATTER_KIND_LABELS,
   MATTER_STATUS_LABELS,
   MATTER_STATUS_CLASSES,
   formatCairoDateOnly,
+  isAuthRecoveryCode,
 } from './matter-ui-types';
 import {
   LoadingIndicator,
@@ -28,17 +30,22 @@ interface MatterListClientProps {
   initialPage?: number;
   initialTotalPages?: number;
   initialLimit?: number;
-  initialQuery?: string;
   initialKind?: MatterKind;
   initialStatus?: MatterStatus;
   initialCourtId?: string;
-  initialClientId?: string;
   initialIncompleteData?: boolean;
   initialIncludeArchived?: boolean;
   initialError?: string;
   courts?: { id: string; name: string }[];
   clients?: { id: string; name: string }[];
-  sessionId?: string;
+  sessionId: string;
+}
+
+type MatterView = ReturnType<typeof matterSearchFilters>;
+type ClientOption = { id: string; name: string };
+
+function includesArchivedClients(view: MatterView) {
+  return view.includeArchived || view.status === 'ARCHIVED';
 }
 
 export function MatterListClient({
@@ -46,12 +53,10 @@ export function MatterListClient({
   initialTotal = 0,
   initialPage = 1,
   initialTotalPages = 1,
-  initialLimit = 20,
-  initialQuery = '',
+  initialLimit = DEFAULT_SEARCH_LIMIT,
   initialKind,
   initialStatus,
   initialCourtId,
-  initialClientId,
   initialIncompleteData = false,
   initialIncludeArchived = false,
   initialError,
@@ -59,59 +64,30 @@ export function MatterListClient({
   clients = [],
   sessionId,
 }: MatterListClientProps) {
-  useEffect(() => {
-    if (sessionId) {
-      bindSearchSession(sessionId);
-    }
-  }, [sessionId]);
+  const [query, setQuery] = useState('');
+  const [selectedClient, setSelectedClient] = useState<ClientOption>();
+  const selectedClientId = selectedClient?.id;
+  const [view, setView] = useState<MatterView>({
+    kind: initialKind,
+    status: initialStatus,
+    courtId: initialCourtId,
+    incompleteData: initialIncompleteData,
+    includeArchived: initialIncludeArchived,
+    page: initialPage,
+    limit: initialLimit,
+  });
+  const { kind: selectedKind, status: selectedStatus, courtId: selectedCourtId, incompleteData, includeArchived, page } = view;
+  const [totalPages, setTotalPages] = useState(initialTotalPages);
+  const [matters, setMatters] = useState(initialMatters);
+  const [totalCount, setTotalCount] = useState(initialTotal);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(initialError ?? null);
+  const requestGenRef = useRef(0);
+  const cancelMatterSearch = useCallback(() => {
+    requestGenRef.current++;
+  }, []);
 
-  const [query, setQuery] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
-      const entry = getPrivateSearchState(navKey);
-      if (entry?.query) return entry.query;
-      const urlQ = new URLSearchParams(window.location.search).get('query');
-      if (urlQ) return urlQ;
-    }
-    return initialQuery;
-  });
-  const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(() => {
-    if (typeof window !== 'undefined') {
-      const k = new URLSearchParams(window.location.search).get('kind') as MatterKind;
-      if (k) return k;
-    }
-    return initialKind;
-  });
-  const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(() => {
-    if (typeof window !== 'undefined') {
-      const s = new URLSearchParams(window.location.search).get('status') as MatterStatus;
-      if (s) return s;
-    }
-    return initialStatus;
-  });
-  const [selectedCourtId, setSelectedCourtId] = useState<string | undefined>(() => {
-    if (typeof window !== 'undefined') {
-      const c = new URLSearchParams(window.location.search).get('courtId');
-      if (c) return c;
-    }
-    return initialCourtId;
-  });
-  const [selectedClientId, setSelectedClientId] = useState<string | undefined>(() => {
-    if (typeof window !== 'undefined') {
-      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
-      const entry = getPrivateSearchState(navKey);
-      if (entry?.clientId) return entry.clientId;
-    }
-    return initialClientId;
-  });
-  const [knownClientsMap, setKnownClientsMap] = useState<Map<string, { id: string; name: string }>>(() => {
-    const map = new Map<string, { id: string; name: string }>();
-    for (const c of clients) {
-      map.set(c.id, c);
-    }
-    return map;
-  });
-  const [clientsList, setClientsList] = useState<Array<{ id: string; name: string }>>(clients);
+  const [clientsList, setClientsList] = useState(clients);
   const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
   const [clientPickerQuery, setClientPickerQuery] = useState('');
   const [isSearchingClients, setIsSearchingClients] = useState(false);
@@ -120,337 +96,211 @@ export function MatterListClient({
   const [clientPickerTotalPages, setClientPickerTotalPages] = useState(1);
   const [clientPickerTotalCount, setClientPickerTotalCount] = useState(clients.length);
   const clientPickerRef = useRef<HTMLDivElement>(null);
-  const [incompleteData, setIncompleteData] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const inc = new URLSearchParams(window.location.search).get('incompleteData');
-      if (inc !== null) return inc === 'true';
-    }
-    return initialIncompleteData;
-  });
-  const [includeArchived, setIncludeArchived] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const arch = new URLSearchParams(window.location.search).get('includeArchived');
-      if (arch !== null) return arch === 'true';
-    }
-    return initialIncludeArchived;
-  });
-  const [page, setPage] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const urlP = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
-      if (!isNaN(urlP) && urlP > 0) return urlP;
-    }
-    return initialPage;
-  });
-  const [totalPages, setTotalPages] = useState<number>(initialTotalPages);
-  const [limit] = useState<number>(initialLimit);
-  const [matters, setMatters] = useState<MatterListItemDTO[]>(initialMatters);
-  const [totalCount, setTotalCount] = useState<number>(initialTotal);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(initialError || null);
-
-  const requestGenRef = useRef(0);
-  const requestedPageRef = useRef<number>(initialPage);
-
-  type FetchMattersFn = (
-    searchQuery: string,
-    kind?: MatterKind,
-    status?: MatterStatus,
-    incArch?: boolean,
-    pageNum?: number,
-    court?: string,
-    client?: string,
-    incData?: boolean
-  ) => Promise<void>;
-
-  const fetchMattersRef = useRef<FetchMattersFn | null>(null);
-
-  const searchClientsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchClientsTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const clientSearchGenRef = useRef(0);
 
-  const fetchClientOptions = useCallback(
-    async (searchQ: string, pageNum: number = 1) => {
-      const currentGen = ++clientSearchGenRef.current;
-      setIsSearchingClients(true);
-      setClientSearchError(null);
-      try {
-        const res = await searchMatterClientsAction({
-          query: searchQ.trim() || undefined,
-          includeArchived,
-          page: pageNum,
-          limit: 10,
-        });
-        if (currentGen !== clientSearchGenRef.current) return;
-        if (res.success) {
-          setClientsList(res.data.clients);
-          setKnownClientsMap((prev) => {
-            const next = new Map(prev);
-            for (const c of res.data.clients) {
-              next.set(c.id, c);
-            }
-            return next;
-          });
-          setClientPickerPage(res.data.page);
-          setClientPickerTotalPages(res.data.totalPages);
-          setClientPickerTotalCount(res.data.total);
-        } else {
-          setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
-        }
-      } catch {
-        if (currentGen !== clientSearchGenRef.current) return;
-        setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
-      } finally {
-        if (currentGen === clientSearchGenRef.current) {
-          setIsSearchingClients(false);
-        }
-      }
-    },
-    [includeArchived]
-  );
+  const clientSelectOptions = selectedClient && !clientsList.some(({ id }) => id === selectedClient.id)
+    ? [selectedClient, ...clientsList]
+    : clientsList;
 
-  const handleClientPickerQueryChange = (val: string) => {
-    setClientPickerQuery(val);
-    if (searchClientsTimeoutRef.current) {
-      clearTimeout(searchClientsTimeoutRef.current);
+  const cancelClientSearch = useCallback(() => {
+    clearTimeout(searchClientsTimeoutRef.current);
+    clientSearchGenRef.current++;
+  }, []);
+
+  const closeClientPicker = useCallback(() => {
+    cancelClientSearch();
+    setIsClientPickerOpen(false);
+    setIsSearchingClients(false);
+  }, [cancelClientSearch]);
+
+  const hidePrivateResults = useCallback(() => {
+    clearSearchSessionStore();
+    cancelMatterSearch();
+    setQuery('');
+    setSelectedClient(undefined);
+    setClientsList([]);
+    setClientPickerQuery('');
+    setMatters([]);
+    setTotalCount(0);
+    setIsLoading(false);
+    closeClientPicker();
+    window.dispatchEvent(new Event('lawoffice:recheck-session'));
+  }, [cancelMatterSearch, closeClientPicker]);
+
+  const fetchClientOptions = useCallback(async (text: string, page: number, includeArchived: boolean) => {
+    const request = ++clientSearchGenRef.current;
+    setIsSearchingClients(true);
+    setClientSearchError(null);
+    try {
+      const res = await searchMatterClientsAction({
+        query: text.trim() || undefined,
+        includeArchived,
+        page,
+        limit: 10,
+      });
+      if (request !== clientSearchGenRef.current) return;
+      if (res.success) {
+        setClientsList(res.data.clients);
+        setClientPickerPage(res.data.page);
+        setClientPickerTotalPages(res.data.totalPages);
+        setClientPickerTotalCount(res.data.total);
+      } else {
+        if (isAuthRecoveryCode(res.code) || res.code === 'FORBIDDEN') hidePrivateResults();
+        setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
+      }
+    } catch {
+      if (request === clientSearchGenRef.current) setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
+    } finally {
+      if (request === clientSearchGenRef.current) setIsSearchingClients(false);
     }
-    searchClientsTimeoutRef.current = setTimeout(() => {
-      fetchClientOptions(val, 1);
-    }, 300);
+  }, [hidePrivateResults]);
+
+  const handleClientPickerQueryChange = (text: string) => {
+    setClientPickerQuery(text);
+    cancelClientSearch();
+    setClientsList([]);
+    setClientPickerTotalPages(1);
+    setIsSearchingClients(true);
+    searchClientsTimeoutRef.current = setTimeout(
+      () => fetchClientOptions(text, 1, includesArchivedClients(view)),
+      300,
+    );
   };
 
   useEffect(() => {
     if (!isClientPickerOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (clientPickerRef.current && !clientPickerRef.current.contains(e.target as Node)) {
-        setIsClientPickerOpen(false);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientPickerRef.current && !clientPickerRef.current.contains(event.target as Node)) {
+        closeClientPicker();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isClientPickerOpen]);
+  }, [closeClientPicker, isClientPickerOpen]);
 
-  const syncUrl = useCallback(
-    (
-      q: string,
-      k?: MatterKind,
-      s?: MatterStatus,
-      incArch?: boolean,
-      p?: number,
-      court?: string,
-      client?: string,
-      incData?: boolean
-    ) => {
-      if (typeof window === 'undefined') return;
-      const params = new URLSearchParams();
-      // Omit `query` and `clientId` from the URL string completely so no private names or numbers appear in browser history or URLs
-      if (k) params.set('kind', k);
-      if (s) params.set('status', s);
-      if (court) params.set('courtId', court);
-      if (incData) params.set('incompleteData', 'true');
-      if (incArch) params.set('includeArchived', 'true');
-      if (p && p > 1) params.set('page', String(p));
-      const newQuery = params.toString();
-      const cleanUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
-      const currentState = (window.history.state && typeof window.history.state === 'object') ? (window.history.state as Record<string, unknown>) : {};
-      let navKey = typeof currentState.navKey === 'string' ? currentState.navKey : undefined;
-      if (!navKey) {
-        navKey = createNavigationKey();
+  const syncHistory = useCallback((text: string, filters: MatterView, client?: ClientOption) => {
+    const params = new URLSearchParams();
+    if (filters.kind) params.set('kind', filters.kind);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.courtId) params.set('courtId', filters.courtId);
+    if (filters.incompleteData) params.set('incompleteData', 'true');
+    if (filters.includeArchived) params.set('includeArchived', 'true');
+    if (filters.page > 1) params.set('page', String(filters.page));
+    if (filters.limit !== DEFAULT_SEARCH_LIMIT) params.set('limit', String(filters.limit));
+    writeSearchHistory(sessionId, { query: text, client }, params);
+  }, [sessionId]);
+
+  const fetchMatters = useCallback(async (text: string, filters: MatterView, client?: ClientOption) => {
+    const request = ++requestGenRef.current;
+    setView(filters);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await searchMattersAction({ ...filters, query: text.trim() || undefined, clientId: client?.id });
+      if (request !== requestGenRef.current) return;
+      if (!res.success) {
+        if (isAuthRecoveryCode(res.code) || res.code === 'FORBIDDEN') hidePrivateResults();
+        setError(res.error || 'تعذر تحميل ملفات القضايا.');
+        return;
       }
-      setPrivateSearchState(navKey, q, client, sessionId);
-      window.history.replaceState({ ...currentState, navKey }, '', cleanUrl);
-    },
-    [sessionId]
-  );
-
-  const fetchMatters = useCallback(
-    async (
-      searchQuery: string,
-      kind?: MatterKind,
-      status?: MatterStatus,
-      incArch: boolean = false,
-      pageNum: number = 1,
-      court?: string,
-      client?: string,
-      incData: boolean = false
-    ) => {
-      const currentGen = ++requestGenRef.current;
-      requestedPageRef.current = pageNum;
-      setIsLoading(true);
-      setError(null);
-      syncUrl(searchQuery, kind, status, incArch, pageNum, court, client, incData);
-
-      try {
-        const res = await searchMattersAction({
-          query: searchQuery.trim() || undefined,
-          kind,
-          status,
-          courtId: court,
-          clientId: client,
-          incompleteData: incData,
-          includeArchived: incArch,
-          page: pageNum,
-          limit,
-        });
-
-        if (currentGen !== requestGenRef.current) return;
-
-        if (!res.success) {
-          setError(res.error || 'تعذر تحميل ملفات القضايا.');
-          setIsLoading(false);
-          return;
-        }
-
-        // When the result set shrinks, clamp and refetch the last valid page
-        if (res.data.matters.length === 0 && pageNum > 1 && res.data.total > 0) {
-          const lastValidPage = Math.max(1, Math.ceil(res.data.total / limit));
-          if (lastValidPage !== pageNum) {
-            await fetchMattersRef.current?.(searchQuery, kind, status, incArch, lastValidPage, court, client, incData);
-            return;
-          }
-        }
-
-        setMatters(res.data.matters);
-        setTotalCount(res.data.total);
-        setPage(res.data.page ?? pageNum);
-        setTotalPages(res.data.totalPages ?? 1);
-        setIsLoading(false);
-      } catch (err: unknown) {
-        if (currentGen !== requestGenRef.current) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'حدث خطأ في الاتصال أثناء تحميل ملفات القضايا.'
-        );
-        setIsLoading(false);
-      }
-    },
-    [limit, syncUrl]
-  );
+      const resolved = { ...filters, page: res.data.page ?? filters.page };
+      setView(resolved);
+      setMatters(res.data.matters);
+      setTotalCount(res.data.total);
+      setTotalPages(res.data.totalPages ?? 1);
+      syncHistory(text, resolved, client);
+    } catch {
+      if (request === requestGenRef.current) setError('حدث خطأ في الاتصال أثناء تحميل ملفات القضايا.');
+    } finally {
+      if (request === requestGenRef.current) setIsLoading(false);
+    }
+  }, [hidePrivateResults, syncHistory]);
 
   useEffect(() => {
-    fetchMattersRef.current = fetchMatters;
-  });
+    bindSearchSession(sessionId);
+    const restore = (filters: MatterView) => {
+      const saved = readSearchHistory(sessionId);
+      setQuery(saved?.query ?? '');
+      setSelectedClient(saved?.client);
+      void fetchMatters(saved?.query ?? '', filters, saved?.client);
+    };
+    const initial = {
+      kind: initialKind,
+      status: initialStatus,
+      courtId: initialCourtId,
+      incompleteData: initialIncompleteData,
+      includeArchived: initialIncludeArchived,
+      page: initialPage,
+      limit: initialLimit,
+    };
+    const onHistory = () => {
+      if (window.location.pathname !== '/matters') return;
+      const params = new URLSearchParams(window.location.search);
+      const filters = matterSearchFilters((name) => readParam(params, name));
+      closeClientPicker();
+      setClientsList([]);
+      void fetchClientOptions('', 1, includesArchivedClients(filters));
+      restore(filters);
+    };
+    // Back navigation can reuse an earlier render's server props.
+    const saved = readSearchHistory(sessionId);
+    const firstRestore = saved ? setTimeout(onHistory, 0) : undefined;
+    if (!saved) syncHistory('', initial);
+    window.addEventListener('popstate', onHistory);
+    return () => {
+      clearTimeout(firstRestore);
+      cancelClientSearch();
+      cancelMatterSearch();
+      window.removeEventListener('popstate', onHistory);
+    };
+  }, [cancelClientSearch, cancelMatterSearch, closeClientPicker, fetchClientOptions, fetchMatters, initialCourtId, initialIncludeArchived,
+    initialIncompleteData, initialKind, initialLimit, initialPage, initialStatus, sessionId, syncHistory]);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void fetchMatters(query, { ...view, page: 1 }, selectedClient);
   };
 
-  const handleKindChange = (kind?: MatterKind) => {
-    setSelectedKind(kind);
-    setPage(1);
-    fetchMatters(query, kind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
+  const applyFilters = (filters: MatterView) => {
+    const previousScope = includesArchivedClients(view);
+    const nextScope = includesArchivedClients(filters);
+    let client = selectedClient;
+    if (previousScope !== nextScope) {
+      closeClientPicker();
+      setClientsList([]);
+      if (!nextScope) {
+        client = undefined;
+        setSelectedClient(undefined);
+      }
+      void fetchClientOptions('', 1, nextScope);
+    }
+    void fetchMatters(query, { ...filters, page: 1 }, client);
   };
 
-  const handleStatusChange = (status?: MatterStatus) => {
-    setSelectedStatus(status);
-    setPage(1);
-    fetchMatters(query, selectedKind, status, includeArchived, 1, selectedCourtId, selectedClientId, incompleteData);
-  };
+  const handleKindChange = (kind?: MatterKind) => applyFilters({ ...view, kind });
+  const handleStatusChange = (status?: MatterStatus) => applyFilters({ ...view, status });
+  const handleCourtChange = (courtId?: string) => applyFilters({ ...view, courtId });
+  const handleIncompleteDataChange = (incompleteData: boolean) => applyFilters({ ...view, incompleteData });
+  const handleIncludeArchivedChange = (includeArchived: boolean) => applyFilters({ ...view, includeArchived });
 
-  const handleCourtChange = (courtId?: string) => {
-    setSelectedCourtId(courtId);
-    setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, courtId, selectedClientId, incompleteData);
-  };
-
-  const handleClientChange = (clientId?: string) => {
-    setSelectedClientId(clientId);
-    setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, clientId, incompleteData);
-  };
-
-  const handleIncompleteDataChange = (checked: boolean) => {
-    setIncompleteData(checked);
-    setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, 1, selectedCourtId, selectedClientId, checked);
-  };
-
-  const handleIncludeArchivedChange = (checked: boolean) => {
-    setIncludeArchived(checked);
-    setPage(1);
-    fetchMatters(query, selectedKind, selectedStatus, checked, 1, selectedCourtId, selectedClientId, incompleteData);
+  const handleClientChange = (client?: ClientOption) => {
+    setSelectedClient(client);
+    void fetchMatters(query, { ...view, page: 1 }, client);
   };
 
   const handleClearFilters = () => {
     setQuery('');
-    setSelectedKind(undefined);
-    setSelectedStatus(undefined);
-    setSelectedCourtId(undefined);
-    setSelectedClientId(undefined);
-    setIncompleteData(false);
-    setIncludeArchived(false);
-    setPage(1);
-    fetchMatters('', undefined, undefined, false, 1, undefined, undefined, false);
+    setSelectedClient(undefined);
+    closeClientPicker();
+    setClientsList([]);
+    void fetchClientOptions('', 1, false);
+    void fetchMatters('', { ...matterSearchFilters(() => undefined), limit: view.limit });
   };
 
-  const handlePageChange = (newPage: number) => {
-    setPage(newPage);
-    fetchMatters(query, selectedKind, selectedStatus, includeArchived, newPage, selectedCourtId, selectedClientId, incompleteData);
+  const handlePageChange = (page: number) => {
+    void fetchMatters(query, { ...view, page }, selectedClient);
   };
-
-  const hasRestoredOnMountRef = useRef(false);
-
-  // Clean URL on initial mount if coming with query in searchParams, or restore from private store
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlQuery = urlParams.get('query');
-    if (urlQuery) {
-      syncUrl(urlQuery, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData);
-      return;
-    }
-
-    if (!hasRestoredOnMountRef.current) {
-      hasRestoredOnMountRef.current = true;
-      const navKey = (window.history.state as { navKey?: string } | null)?.navKey;
-      const entry = getPrivateSearchState(navKey);
-      if (entry && (entry.query || entry.clientId)) {
-        const q = entry.query ?? '';
-        const cl = entry.clientId ?? selectedClientId;
-        setTimeout(() => {
-          fetchMattersRef.current?.(q, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, cl, incompleteData);
-        }, 0);
-      }
-    }
-  }, [syncUrl, selectedKind, selectedStatus, includeArchived, page, selectedCourtId, selectedClientId, incompleteData]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const syncFromUrl = (event?: PopStateEvent | PageTransitionEvent) => {
-      const params = new URLSearchParams(window.location.search);
-      const urlPage = parseInt(params.get('page') || '1', 10) || 1;
-      const urlKind = (params.get('kind') as MatterKind) || undefined;
-      const urlStatus = (params.get('status') as MatterStatus) || undefined;
-      const urlCourt = params.get('courtId') || undefined;
-      const urlClient = params.get('clientId') || undefined;
-      const urlIncData = params.get('incompleteData') === 'true';
-      const urlIncArch = params.get('includeArchived') === 'true';
-      const navKey =
-        ((event as PopStateEvent)?.state?.navKey as string | undefined) ??
-        (window.history.state?.navKey as string | undefined);
-      const entry = getPrivateSearchState(navKey);
-      const restoredQuery = entry?.query ?? '';
-      const restoredClient = entry?.clientId ?? urlClient ?? undefined;
-
-      setQuery(restoredQuery);
-      setSelectedKind(urlKind);
-      setSelectedStatus(urlStatus);
-      setSelectedCourtId(urlCourt);
-      setSelectedClientId(restoredClient);
-      setIncompleteData(urlIncData);
-      setIncludeArchived(urlIncArch);
-      setPage(urlPage);
-      fetchMatters(restoredQuery, urlKind, urlStatus, urlIncArch, urlPage, urlCourt, restoredClient, urlIncData);
-    };
-
-    window.addEventListener('popstate', syncFromUrl);
-    window.addEventListener('pageshow', syncFromUrl);
-    return () => {
-      window.removeEventListener('popstate', syncFromUrl);
-      window.removeEventListener('pageshow', syncFromUrl);
-    };
-  }, [fetchMatters]);
 
   const hasActiveFilters = Boolean(
     query.trim() ||
@@ -641,11 +491,11 @@ export function MatterListClient({
                 id="filter-client"
                 data-testid="filter-client-select"
                 value={selectedClientId || ''}
-                onChange={(e) => handleClientChange(e.target.value || undefined)}
+                onChange={(e) => handleClientChange(clientSelectOptions.find(({ id }) => id === e.target.value))}
                 className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل الموكلين</option>
-                {Array.from(knownClientsMap.values()).map((cl) => (
+                {clientSelectOptions.map((cl) => (
                   <option key={cl.id} value={cl.id}>{cl.name}</option>
                 ))}
               </select>
@@ -653,11 +503,14 @@ export function MatterListClient({
               <button
                 type="button"
                 data-testid="open-client-picker-button"
+                aria-expanded={isClientPickerOpen}
+                aria-controls={isClientPickerOpen ? 'matter-client-picker' : undefined}
                 onClick={() => {
-                  const nextState = !isClientPickerOpen;
-                  setIsClientPickerOpen(nextState);
-                  if (nextState && clientPickerQuery === '') {
-                    fetchClientOptions('', 1);
+                  if (isClientPickerOpen) {
+                    closeClientPicker();
+                  } else {
+                    setIsClientPickerOpen(true);
+                    void fetchClientOptions(clientPickerQuery, 1, includesArchivedClients(view));
                   }
                 }}
                 className="px-2 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -668,7 +521,14 @@ export function MatterListClient({
 
               {isClientPickerOpen && (
                 <div
+                  id="matter-client-picker"
                   data-testid="client-picker-popover"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      closeClientPicker();
+                      clientPickerRef.current?.querySelector('button')?.focus();
+                    }
+                  }}
                   className="absolute top-full mt-1.5 right-0 z-30 w-72 bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
                 >
                   <div className="flex items-center justify-between pb-1 border-b border-[#E8EEF1]">
@@ -676,7 +536,7 @@ export function MatterListClient({
                     <button
                       type="button"
                       data-testid="close-client-picker-button"
-                      onClick={() => setIsClientPickerOpen(false)}
+                      onClick={closeClientPicker}
                       className="text-[#4D606A] hover:text-[#172A35] text-sm p-1"
                     >
                       ✕
@@ -686,6 +546,7 @@ export function MatterListClient({
                   <input
                     type="search"
                     data-testid="filter-client-search-input"
+                    aria-label="ابحث عن موكل بالاسم أو الهاتف"
                     value={clientPickerQuery}
                     onChange={(e) => handleClientPickerQueryChange(e.target.value)}
                     placeholder="ابحث بالاسم أو الهاتف..."
@@ -693,15 +554,15 @@ export function MatterListClient({
                   />
 
                   {isSearchingClients ? (
-                    <div className="py-3 text-center text-[#4D606A]" data-testid="client-picker-loading">
+                    <div role="status" className="py-3 text-center text-[#4D606A]" data-testid="client-picker-loading">
                       جارٍ البحث في الموكلين...
                     </div>
                   ) : clientSearchError ? (
-                    <div className="py-2 text-center text-[#B3261E]" data-testid="client-picker-error">
+                    <div role="alert" className="py-2 text-center text-[#B3261E]" data-testid="client-picker-error">
                       {clientSearchError}
                     </div>
                   ) : clientsList.length === 0 ? (
-                    <div className="py-3 text-center text-[#4D606A]">لا يوجد موكلين مطابقين</div>
+                    <div role="status" className="py-3 text-center text-[#4D606A]">لا يوجد موكلين مطابقين</div>
                   ) : (
                     <div className="max-h-48 overflow-y-auto divide-y divide-[#E8EEF1] border border-[#E8EEF1] rounded-[4px]">
                       <button
@@ -709,7 +570,7 @@ export function MatterListClient({
                         data-testid="filter-client-option-all"
                         onClick={() => {
                           handleClientChange(undefined);
-                          setIsClientPickerOpen(false);
+                          closeClientPicker();
                         }}
                         className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium block"
                       >
@@ -721,8 +582,8 @@ export function MatterListClient({
                           type="button"
                           data-testid={`filter-client-option-${cl.id}`}
                           onClick={() => {
-                            handleClientChange(cl.id);
-                            setIsClientPickerOpen(false);
+                            handleClientChange(cl);
+                            closeClientPicker();
                           }}
                           className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] block transition-colors ${
                             selectedClientId === cl.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : 'text-[#172A35]'
@@ -746,7 +607,7 @@ export function MatterListClient({
                           disabled={clientPickerPage <= 1}
                           onClick={() => {
                             const p = clientPickerPage - 1;
-                            fetchClientOptions(clientPickerQuery, p);
+                            void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
                           }}
                           className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
                         >
@@ -758,7 +619,7 @@ export function MatterListClient({
                           disabled={clientPickerPage >= clientPickerTotalPages}
                           onClick={() => {
                             const p = clientPickerPage + 1;
-                            fetchClientOptions(clientPickerQuery, p);
+                            void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
                           }}
                           className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
                         >
@@ -793,18 +654,7 @@ export function MatterListClient({
         <ErrorContainer
           title="تعذر تحميل ملفات القضايا"
           message={error}
-          onRetry={() =>
-            fetchMatters(
-              query,
-              selectedKind,
-              selectedStatus,
-              includeArchived,
-              requestedPageRef.current,
-              selectedCourtId,
-              selectedClientId,
-              incompleteData
-            )
-          }
+          onRetry={() => fetchMatters(query, view, selectedClient)}
         />
       ) : matters.length === 0 ? (
         hasActiveFilters ? (

@@ -377,7 +377,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       </div>
 
       {/* 3. Communication Notes Timeline */}
-      <CommunicationNotesSection partyId={party.id} initialNotes={party.communicationNotes} readOnly={isArchived} />
+      <CommunicationNotesSection ownerId={ownerId} partyId={party.id} initialNotes={party.communicationNotes} readOnly={isArchived} />
 
       {/* 4. Powers of Attorney Section */}
       <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} readOnly={isArchived} />

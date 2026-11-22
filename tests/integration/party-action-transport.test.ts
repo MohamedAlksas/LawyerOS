@@ -753,6 +753,9 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
         kind: 'PERSON',
         name: 'عميل ناجح عبر النقل الشبكي الحقيقي',
         primaryPhone: '01012341234',
+        email: 'directory-private@example.test',
+        address: 'synthetic-private-address',
+        notes: 'synthetic-private-note',
         idempotencyKey: partyKey,
       }], { cookie: verifiedSessionCookie });
 
@@ -768,6 +771,9 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
       expect(searchRes.status).toBe(200);
       expect(searchRes.body).toContain('"success":true');
       expect(searchRes.body).toContain('عميل ناجح عبر النقل الشبكي الحقيقي');
+      expect(searchRes.body).not.toContain('directory-private@example.test');
+      expect(searchRes.body).not.toContain('synthetic-private-address');
+      expect(searchRes.body).not.toContain('synthetic-private-note');
 
       // 3. Add communication note over HTTP
       const noteKey = `owner-http-note-${crypto.randomUUID()}`;

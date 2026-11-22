@@ -1,6 +1,6 @@
 # LawOffice OS
 
-Implementation plan for a private system serving the project owner's father's law office in Egypt: one lawyer, varied legal work, a paper-based workflow today, and desktop/mobile use. Current status: **planning documents only**. No application has been built or deployed, and no operational acceptance tests have passed.
+Private desktop and mobile casework application for one law office in Egypt. The application implements identity and MFA, the Arabic shell, parties, matters, proceedings, and reference settings. The T07 search and archiving work is in review. Production deployment and the office pilot remain separate milestones.
 
 ## Start here
 
@@ -9,7 +9,7 @@ Implementation plan for a private system serving the project owner's father's la
 3. For implementation: [ARCHITECTURE](docs/ARCHITECTURE.md), [DATA_MODEL](docs/DATA_MODEL.md), and [WORKFLOWS](docs/WORKFLOWS.md).
 4. For operations: [SECURITY_OPERATIONS](docs/SECURITY_OPERATIONS.md), [DATA_LIFECYCLE](docs/DATA_LIFECYCLE.md), and [MIGRATION](docs/MIGRATION.md).
 5. For delivery management: [ROADMAP](docs/ROADMAP.md) and [REVIEW_PROTOCOL](docs/REVIEW_PROTOCOL.md).
-6. Open this workspace in Antigravity, read [the skill setup](docs/ANTIGRAVITY.md), then give the implementer **only [T01](docs/tasks/T01.md)**. [PROMPTS](docs/PROMPTS.md) indexes all 23 task-specific cards; each names its required local skills.
+6. Read [the Antigravity skill setup](docs/ANTIGRAVITY.md) before handing off a task. [PROMPTS](docs/PROMPTS.md) indexes the task cards and required local skills.
 
 Codex plans and reviews; Gemini 3.8 Flash implements, using the model name requested by the project owner. No automatic integration between the tools is assumed. Production environment, budget, and device decisions remain open; they do not prevent starting with synthetic data.
 
@@ -79,9 +79,9 @@ Follow these steps to run LawOffice OS locally for development and testing:
    ```
    From a terminal with a TTY, run `node --env-file=.env.local --import tsx src/cli/provision-owner.ts` once for the development database. Enter the owner credentials at the prompt and complete the authenticator enrollment. Keep the recovery codes in a separate secure location.
 
-   Apply migrations to the isolated test database before running integration or browser checks. The subprocess below uses the configured test URL only.
+   Apply migrations to the isolated test database before running integration or browser checks. This command validates the test destination against the development destination before starting Prisma.
    ```powershell
-   node --env-file=.env.local -e "const {spawnSync}=require('node:child_process');const url=process.env.TEST_DATABASE_URL;if(!url || url===process.env.DATABASE_URL || !new URL(url).pathname.endsWith('_test'))process.exit(1);process.exit(spawnSync(process.execPath,['node_modules/prisma/build/index.js','migrate','deploy'],{stdio:'inherit',env:{...process.env,DATABASE_URL:url}}).status ?? 1)"
+   node --env-file=.env.local --import tsx scripts/Deploy-TestMigrations.ts
    ```
 
 5. **Run tests & quality checks**:
@@ -92,7 +92,7 @@ Follow these steps to run LawOffice OS locally for development and testing:
    npm run test:integration # Real PostgreSQL readiness probe & failure mode checks
    npm run build            # Production compilation
    ```
-   Install Playwright Chromium with `npx playwright install chromium`, then run `npm run test:e2e` after building. The `test:e2e:t03` through `test:e2e:t06` scripts run individual suites.
+   Install Playwright Chromium with `npx playwright install chromium`, then run `npm run test:e2e` after building. The `test:e2e:t03` through `test:e2e:t07` scripts run individual suites.
    The startup-process integration suite requires an explicit isolated `TEST_DATABASE_URL`, validates it against the original operational URL before spawning any process, and always builds the current checkout before its HTTP checks. Readiness must return HTTP 200 with the expected body and no-store headers; an unavailable database fails the test. It reports the fresh build ID and uses Turbopack by default. For environments with the documented local Turbopack CSS-worker failure, set `$env:STARTUP_TEST_BUNDLER='webpack'` explicitly to perform a fresh webpack test build; this does not change the application's default build command. Remove that environment variable to return to the default. No cached `.next` directory is accepted as build provenance.
 
 6. **Start development server**:
@@ -135,6 +135,6 @@ pwsh -File scripts/Validate-AgencyAgentRouting.ps1
 pwsh -File scripts/Build-PlanningKit.ps1
 ```
 
-The planning validation GitHub Actions workflow checks the instructions and generated text deliverables; application CI is implemented later in T02. `work/`, credentials, and runtime client files are excluded from Git. Project skills and generated planning deliverables are tracked.
+GitHub Actions runs planning validation and separate application checks for lint, types, tests, and build. `work/`, credentials, and runtime client files are excluded from Git. Project skills and generated planning deliverables are tracked.
 
 Locally, `pwsh -File scripts/Validate-AgencyAgentRouting.ps1 -VerifyInstalled` additionally checks the named global profile files/frontmatter/hashes. CI runs portable checks only; a successful portable check does not prove Antigravity loaded a profile. Global Agency installations are not modified or copied by this package.

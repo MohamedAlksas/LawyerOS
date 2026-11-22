@@ -2,9 +2,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
-import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from '@/lib/auth-client';
-import { clearSearchSessionStore } from '@/lib/search-session-store';
+import { usePathname } from 'next/navigation';
+import { signOutAndReset } from '@/lib/auth-client';
 
 interface TabletDrawerProps {
   isOpen: boolean;
@@ -14,7 +13,6 @@ interface TabletDrawerProps {
 
 export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const canLeavePage = useCanLeavePage();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -113,15 +111,12 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     setLogoutError(null);
 
     try {
-      const res = await signOut();
+      const res = await signOutAndReset();
       if (res?.error) {
         setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
         setIsLoggingOut(false);
         return;
       }
-      clearSearchSessionStore();
-      onClose();
-      router.push('/login');
     } catch {
       setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
       setIsLoggingOut(false);
