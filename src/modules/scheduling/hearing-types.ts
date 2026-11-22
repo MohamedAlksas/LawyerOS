@@ -99,6 +99,8 @@ export interface HearingDTO {
   cancellationReason?: string | null;
   supersedesHearingId?: string | null;
   duplicateDateWarning?: boolean;
+  nextHearing?: { id: string; hearingDate: string; hearingTime: string | null };
+  followUpTasks?: TaskDTO[];
   latestResult?: HearingResultSummaryDTO | null;
   createdAt: string;
   updatedAt: string;
@@ -221,6 +223,7 @@ export interface RescheduleHearingInput {
   circuit?: string | null;
   purpose?: string | null;
   rollNumber?: string | null;
+  taskChanges?: { taskId: string; expectedVersion: number; dueDate: string | null }[];
   idempotencyKey?: string;
 }
 
@@ -271,7 +274,7 @@ export const scheduleHearingSchema = z.object({
   rollNumber: z.string().trim().max(50, 'رقم الرول لا يتجاوز 50 حرف').nullable().optional(),
   courtName: z.string().nullable().optional(),
   circuit: z.string().nullable().optional(),
-  idempotencyKey: z.string().trim().max(100).optional(),
+  idempotencyKey: z.string().trim().min(1).max(100),
 }).strict();
 
 export const recordHearingResultTaskSchema = z.object({
@@ -306,9 +309,8 @@ export const recordHearingResultSchema = z.object({
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),
   tasks: z.array(recordHearingResultTaskSchema).optional(),
-  decisionDocumentId: z.string().uuid().nullable().optional(),
-  proceedingStatusUpdate: z.nativeEnum(ProceedingStatus).nullable().optional(),
-  idempotencyKey: z.string().trim().max(100).optional(),
+  proceedingStatusUpdate: z.null().optional(),
+  idempotencyKey: z.string().trim().min(1).max(100),
 }).strict().refine(data => {
   const dec = (data.decision || data.decisionText || data.courtDecision || '').trim();
   return dec.length > 0;
@@ -329,14 +331,15 @@ export const rescheduleHearingSchema = z.object({
   circuit: z.string().nullable().optional(),
   purpose: z.string().trim().max(200).nullable().optional(),
   rollNumber: z.string().trim().max(50).nullable().optional(),
-  idempotencyKey: z.string().trim().max(100).optional(),
+  taskChanges: z.array(z.object({ taskId: z.uuid(), expectedVersion: z.number().int().min(1), dueDate: strictDateSchema.nullable() }).strict()).max(50).optional(),
+  idempotencyKey: z.string().trim().min(1).max(100),
 }).strict();
 
 export const cancelHearingSchema = z.object({
   hearingId: z.string().uuid('معرف الجلسة غير صالح'),
   expectedVersion: z.number().int().min(1, 'رقم الإصدار غير صالح'),
   reason: z.string().trim().min(1, 'سبب الإلغاء مطلوب').max(500, 'السبب لا يتجاوز 500 حرف'),
-  idempotencyKey: z.string().trim().max(100).optional(),
+  idempotencyKey: z.string().trim().min(1).max(100),
 }).strict();
 
 export const correctHearingResultSchema = z.object({
@@ -354,8 +357,11 @@ export const correctHearingResultSchema = z.object({
   nextDateDisposition: z.nativeEnum(NextDateDisposition).optional(),
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),
-  idempotencyKey: z.string().trim().max(100).optional(),
+  idempotencyKey: z.string().trim().min(1).max(100),
 }).strict()
+.refine(data => data.expectedVersion !== undefined || Boolean(data.currentResultId), {
+  message: 'يلزم تحديد إصدار النتيجة المعروضة قبل التصحيح', path: ['expectedVersion'],
+})
 .refine(data => {
   const reason = (data.reason || data.correctionReason || '').trim();
   return reason.length > 0;

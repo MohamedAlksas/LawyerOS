@@ -13,20 +13,7 @@ interface PartyEditPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: PartyEditPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
-    const party = await getClientProfile(actor, id);
-    return {
-      title: `تعديل: ${party.name} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'تعديل بيانات الطرف — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'تعديل بيانات الطرف — LawOffice OS' };
 
 export default async function PartyEditPage({ params }: PartyEditPageProps) {
   const { id } = await params;

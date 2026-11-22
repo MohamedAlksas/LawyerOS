@@ -390,6 +390,7 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       'addProceedingAction',
       'updateProceedingAction',
       'linkMatterAuthorizationAction',
+      'listMatterAuthorizationOptionsAction',
       'unlinkMatterAuthorizationAction',
       'createReferenceItemAction',
       'updateReferenceItemAction',
@@ -404,7 +405,12 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       'unifiedSearchAction',
       'searchMatterClientsAction',
     ];
-    expect([...exposedT06Actions].sort()).toEqual([...requiredActionNames].sort());
+    const optionalBundlerExports = [
+      'getMatterAction', 'searchProceedingsAction', 'listReferenceItemsAction',
+      'linkProceedingPartyAction', 'unlinkProceedingPartyAction',
+    ];
+    const expectedExports = [...requiredActionNames, ...optionalBundlerExports.filter((name) => actionIds[name])];
+    expect([...exposedT06Actions].sort()).toEqual(expectedExports.sort());
     for (const name of requiredActionNames) {
       expect(actionIds[name], `Missing actionId for ${name}`).toBeDefined();
     }
@@ -843,6 +849,10 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       },
       // 5. Matter Authorizations (POA)
       {
+        name: 'listMatterAuthorizationOptionsAction',
+        args: [existingMatterId],
+      },
+      {
         name: 'linkMatterAuthorizationAction',
         args: [{
           matterId: existingMatterId,
@@ -963,9 +973,15 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
       expect(actionIds[item.name]).toBeDefined();
     }
     const exposed = candidates.filter((item) => Boolean(actionIds[item.name]));
-    expect(exposed.length).toBe(22);
     expect(exposed.length).toBe(candidates.length);
-    return exposed;
+    const extraExports = [
+      { name: 'getMatterAction', args: [existingMatterId] },
+      { name: 'searchProceedingsAction', args: [{ query: 'فحص' }] },
+      { name: 'listReferenceItemsAction', args: ['COURT'] },
+      { name: 'linkProceedingPartyAction', args: [{ proceedingId: existingProcId, matterPartyId: existingMatterPartyId }] },
+      { name: 'unlinkProceedingPartyAction', args: [{ proceedingId: existingProcId, matterPartyId: existingMatterPartyId }] },
+    ].filter(({ name }) => actionIds[name]);
+    return [...exposed, ...extraExports];
   }
 
   describe('1. Unauthenticated Transport (Missing Session Cookie)', () => {
@@ -1323,6 +1339,15 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
 
       const authDb = await dedicatedPool.query('SELECT id FROM "matter_authorization" WHERE "matterId" = $1 AND "powerOfAttorneyId" = $2', [createdMatterId, existingPoaId]);
       const createdAuthId = authDb.rows[0].id;
+
+      const poaOptions = await postServerAction('listMatterAuthorizationOptionsAction', [createdMatterId], { cookie: verifiedSessionCookie });
+      expect(poaOptions.status).toBe(200);
+      expect(poaOptions.body).toContain('"success":true');
+      expect(poaOptions.body).toContain(unlinkedPoaId);
+      expect(poaOptions.body).toContain('5567/ق');
+      expect(poaOptions.body).not.toContain(existingPoaId);
+      expect(poaOptions.body).not.toContain('01099998888');
+      expect(poaOptions.body).not.toMatch(/"primaryPhone"|"additionalPhones"|"communicationNotes"|"identityMask"|"notes"/);
 
       // 11. Unlink Matter Authorization (POA)
       const unlinkPoaKey = `owner-http-unlink-poa-${crypto.randomUUID()}`;

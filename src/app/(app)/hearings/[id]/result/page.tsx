@@ -11,28 +11,14 @@ interface HearingResultPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: HearingResultPageProps) {
-  const { id } = await params;
-  const prisma = getPrismaClient();
-  const hearing = await prisma.hearing.findUnique({
-    where: { id },
-  });
-
-  if (!hearing) {
-    return { title: 'تسجيل نتيجة الجلسة — LawOffice OS' };
-  }
-
-  const dateStr = hearing.hearingDate.toISOString().slice(0, 10);
-  return {
-    title: `تسجيل نتيجة جلسة ${dateStr} — LawOffice OS`,
-  };
-}
+export const metadata = { title: 'تسجيل نتيجة الجلسة — LawOffice OS' };
 
 export default async function HearingResultPage({ params }: HearingResultPageProps) {
   const { id } = await params;
 
+  let actor;
   try {
-    await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -64,11 +50,15 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       results: {
         orderBy: { revision: 'desc' },
       },
+      linksFrom: { where: { relation: 'ADJOURNED_TO' }, select: { toHearing: { select: { id: true, hearingDate: true } } } },
     },
   });
 
   if (!hearing) {
     notFound();
+  }
+  if (hearing.proceeding.archivedAt || hearing.proceeding.matter.archivedAt || hearing.proceeding.matter.status === 'ARCHIVED') {
+    redirect(`/hearings/${id}`);
   }
 
   const latestResult = hearing.results[0] || null;
@@ -76,6 +66,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
 
   return (
     <HearingResultClient
+      actorId={actor.id}
       hearingId={hearing.id}
       initialVersion={hearing.version}
       hearingDate={dateIso}
@@ -87,6 +78,8 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       matterId={hearing.proceeding.matterId}
       matterFileCode={hearing.proceeding.matter.fileCode}
       proceedingId={hearing.proceedingId}
+      history={hearing.results.map(({ revision, decisionText, correctionReason }) => ({ revision, decisionText, correctionReason }))}
+      nextHearing={hearing.linksFrom.map(({ toHearing }) => ({ id: toHearing.id, date: toHearing.hearingDate.toISOString().slice(0, 10) }))[0]}
       latestResult={
         latestResult
           ? {

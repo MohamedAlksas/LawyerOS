@@ -164,6 +164,10 @@ describe('T08 Integration Tests: Hearing Rescheduling, Cancellation & Archive Gu
         sourceId: hearingA.id,
       },
     });
+    expect(oldJobs).toHaveLength(1);
+    expect(await prisma.jobRun.count({
+      where: { sourceType: 'Hearing', sourceId: rescheduled.replacementHearing.id, status: 'PENDING' },
+    })).toBe(1);
     for (const job of oldJobs) {
       expect(job.status).toBe('CANCELLED');
     }
@@ -206,6 +210,7 @@ describe('T08 Integration Tests: Hearing Rescheduling, Cancellation & Archive Gu
         sourceId: hearingB.id,
       },
     });
+    expect(jobs).toHaveLength(1);
     for (const job of jobs) {
       expect(job.status).toBe('CANCELLED');
     }
@@ -254,6 +259,49 @@ describe('T08 Integration Tests: Hearing Rescheduling, Cancellation & Archive Gu
       reason: 'إنهاء الجلسة لاختبار نجاح الأرشفة اللاحقة',
       idempotencyKey: `cancel_h_c_${crypto.randomUUID()}`,
     });
+  });
+
+  it.each(['Matter', 'Proceeding'] as const)('serializes scheduling against %s archive', async (entityType) => {
+    const opened = await openMatter(actor, {
+      title: 'ملف تجريبي لتزامن الجدولة والأرشفة', kind: 'LITIGATION',
+      initialClientId: createdPartyIds[0], idempotencyKey: crypto.randomUUID(),
+    });
+    const matterId = opened.matter.id;
+    createdMatterIds.push(matterId);
+    const proceeding = await addProceeding(actor, {
+      matterId, courtId: testCourtId, instance: 'FIRST_INSTANCE', status: 'DRAFT',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const matter = await prisma.matter.findUniqueOrThrow({ where: { id: matterId } });
+    const reason = 'أرشفة لاختبار التزامن';
+    const archiveKey = crypto.randomUUID();
+    const scheduleKey = crypto.randomUUID();
+    const [scheduling, archiving] = await Promise.allSettled([
+      scheduleHearing(actor, { proceedingId: proceeding.id, hearingDate: '2027-12-11', idempotencyKey: scheduleKey }),
+      entityType === 'Matter'
+        ? archiveMatter(actor, { matterId, expectedVersion: matter.version, reason, idempotencyKey: archiveKey })
+        : archiveProceeding(actor, { proceedingId: proceeding.id, matterId, expectedVersion: proceeding.version, reason, idempotencyKey: archiveKey }),
+    ]);
+
+    const hearings = await prisma.hearing.findMany({ where: { proceedingId: proceeding.id } });
+    const claims = await prisma.idempotencyRecord.findMany({ where: { actorId: actor.id, key: { in: [scheduleKey, archiveKey] } } });
+    const archiveAudit = await prisma.auditEvent.count({
+      where: { entityType, entityId: entityType === 'Matter' ? matterId : proceeding.id, action: entityType === 'Matter' ? 'ARCHIVE_MATTER' : 'ARCHIVE_PROCEEDING' },
+    });
+    expect(claims).toHaveLength(1);
+    if (scheduling.status === 'fulfilled') {
+      expect(archiving.status === 'rejected' && archiving.reason).toBeInstanceOf(ActiveObligationError);
+      expect(archiveAudit).toBe(0);
+      expect(hearings.map(({ id }) => id)).toEqual([scheduling.value.id]);
+      expect(await prisma.jobRun.count({ where: { sourceId: scheduling.value.id, status: 'PENDING' } })).toBe(1);
+      expect(claims[0].key).toBe(scheduleKey);
+    } else {
+      expect(scheduling.reason).toBeInstanceOf(entityType === 'Matter' ? MatterArchivedError : ProceedingArchivedError);
+      expect(archiving.status).toBe('fulfilled');
+      expect(hearings).toHaveLength(0);
+      expect(archiveAudit).toBe(1);
+      expect(claims[0].key).toBe(archiveKey);
+    }
   });
 
   it('T08-TC-06 Part 4: Prohibit scheduling a hearing on an archived Matter or Proceeding', async () => {

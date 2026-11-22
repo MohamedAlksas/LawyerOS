@@ -16,27 +16,7 @@ interface HearingDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: HearingDetailPageProps) {
-  const { id } = await params;
-  const prisma = getPrismaClient();
-  const hearing = await prisma.hearing.findUnique({
-    where: { id },
-    include: {
-      proceeding: {
-        include: { court: true },
-      },
-    },
-  });
-
-  if (!hearing) {
-    return { title: 'تفاصيل الجلسة — LawOffice OS' };
-  }
-
-  const dateStr = hearing.hearingDate.toISOString().slice(0, 10);
-  return {
-    title: `جلسة ${dateStr} — ${hearing.proceeding.court.name} — LawOffice OS`,
-  };
-}
+export const metadata = { title: 'تفاصيل الجلسة — LawOffice OS' };
 
 export default async function HearingDetailPage({ params }: HearingDetailPageProps) {
   const { id } = await params;

@@ -2,10 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { cancelHearingAction } from '@/modules/scheduling/hearing-actions';
+import type { CancelHearingInput } from '@/modules/scheduling/hearing-types';
+import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { hearingDraftOwner, isUncertainHearingOutcome } from './hearing-recovery';
 import { HearingDTO, formatHearingDateDisplay } from './hearing-ui-types';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
 
 interface CancelHearingModalProps {
+  actorId: string;
+  proceedingId: string;
   isOpen: boolean;
   onClose: () => void;
   hearing: HearingDTO;
@@ -13,6 +18,8 @@ interface CancelHearingModalProps {
 }
 
 export function CancelHearingModal({
+  actorId,
+  proceedingId,
   isOpen,
   onClose,
   hearing,
@@ -21,18 +28,21 @@ export function CancelHearingModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const [idempotencyKey] = useState(() => generateClientRequestId('cancel'));
-  const [reason, setReason] = useState('');
+  const draft = useFormDraft<CancelHearingInput>(hearingDraftOwner(actorId, 'cancel', hearing.id), `/matters/${hearing.matterId}/proceedings/${proceedingId}`);
+  const pending = useRef(draft.restored);
+  const [reason, setReason] = useState(() => draft.restored?.reason ?? '');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [isFrozenRetry, setIsFrozenRetry] = useState(false);
+  const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
+  useLeaveGuard(false, isSubmitting);
 
   useEffect(() => {
     if (isOpen) {
       requestAnimationFrame(() => {
-        firstInputRef.current?.focus();
+        if (pending.current) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
+        else firstInputRef.current?.focus();
       });
     }
   }, [isOpen]);
@@ -81,7 +91,7 @@ export function CancelHearingModal({
     e.preventDefault();
     if (isSubmitting) return;
 
-    if (!reason.trim()) {
+    if (!pending.current && !reason.trim()) {
       setFieldErrors({ reason: 'سبب إلغاء الجلسة مطلوب للتوثيق القضائي والإداري' });
       return;
     }
@@ -91,16 +101,21 @@ export function CancelHearingModal({
     setIsSubmitting(true);
 
     try {
-      const res = await cancelHearingAction({
+      const input = pending.current ?? {
         hearingId: hearing.id,
         expectedVersion: hearing.version,
         reason: reason.trim(),
-        idempotencyKey,
-      });
+        idempotencyKey: generateClientRequestId('cancel'),
+      };
+      pending.current = input;
+      draft.keep(input);
+      const res = await cancelHearingAction(input);
 
       if (!res.success) {
         setIsSubmitting(false);
-        setIsFrozenRetry(true);
+        const uncertain = isUncertainHearingOutcome(res.code);
+        setIsFrozenRetry(uncertain);
+        if (!uncertain) { pending.current = undefined; draft.clear(); }
         setError(res.error || 'تعذر إلغاء الجلسة.');
         if (res.fieldErrors) {
           setFieldErrors(res.fieldErrors);
@@ -109,16 +124,14 @@ export function CancelHearingModal({
       }
 
       setIsSubmitting(false);
+      pending.current = undefined;
+      draft.clear();
       onSuccess(res.data);
       onClose();
-    } catch (err: unknown) {
+    } catch {
       setIsSubmitting(false);
       setIsFrozenRetry(true);
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'انقطع الاتصال بالخادم. مدخلاتك محفوظة في الذاكرة ويمكنك إعادة المحاولة بأمان.'
-      );
+      setError('تعذر تأكيد الحفظ. يمكنك إعادة محاولة نفس الطلب.');
     }
   };
 
@@ -210,7 +223,7 @@ export function CancelHearingModal({
               placeholder="مثال: شطب الدعوى، ترك الخصومة، أو تسوية النزاع ودياً..."
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isFrozenRetry}
               data-testid="cancel-hearing-reason-input"
               className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-red-500 ${
                 fieldErrors.reason ? 'border-red-500' : 'border-[#D5DFE3]'

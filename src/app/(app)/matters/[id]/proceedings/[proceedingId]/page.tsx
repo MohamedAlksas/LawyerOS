@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
+import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { NotFoundError } from '@/modules/matters/matter-types';
 import { EmptyStateContainer } from '@/components/presentation-state';
 import {
@@ -24,29 +25,7 @@ interface ProceedingDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: ProceedingDetailPageProps) {
-  const { id, proceedingId } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    const proceeding = (matter.proceedings || []).find((p) => p.id === proceedingId);
-    if (!proceeding) {
-      return {
-        title: 'القيد القضائي — LawOffice OS',
-      };
-    }
-    const docket = proceeding.numberText && proceeding.yearLabel
-      ? `${proceeding.numberText}/${proceeding.yearLabel}`
-      : 'مسودة';
-    return {
-      title: `قيد قضائي ${docket} — ${matter.fileCode} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'القيد القضائي — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'القيد القضائي — LawOffice OS' };
 
 export default async function ProceedingDetailPage({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
@@ -118,17 +97,12 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     );
   }
 
-  const isDraft = !proceeding.numberText || !proceeding.yearLabel;
+  const isDraft = !hasCompleteProceedingRegistration(proceeding);
   const isProcArchived = Boolean(proceeding.archivedAt);
   const isParentMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
   const isReadOnly = isProcArchived || isParentMatterArchived;
 
-  let hearings: HearingDTO[] = [];
-  try {
-    hearings = await listHearingsForProceeding(actor, proceedingId);
-  } catch {
-    hearings = [];
-  }
+  const hearings: HearingDTO[] = await listHearingsForProceeding(actor, proceedingId);
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
@@ -375,6 +349,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       {/* Hearings & Court Calendar Section (S05 & S06) */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs">
         <HearingList
+          actorId={actor.id}
           proceedingId={proceeding.id}
           matterId={matter.id}
           initialHearings={hearings}

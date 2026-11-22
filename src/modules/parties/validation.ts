@@ -202,8 +202,7 @@ export const savePartySchema = z
             message: 'رقم الهاتف الإضافي غير صالح (يقبل الأرقام العربية واللاتينية من 7 إلى 20 رقماً).',
           })
       )
-      .optional()
-      .default([]),
+      .optional(),
     email: z
       .string()
       .trim()

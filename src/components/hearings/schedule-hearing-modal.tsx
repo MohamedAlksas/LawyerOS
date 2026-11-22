@@ -2,22 +2,29 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { scheduleHearingAction } from '@/modules/scheduling/hearing-actions';
+import type { ScheduleHearingInput } from '@/modules/scheduling/hearing-types';
+import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { isUncertainHearingOutcome } from './hearing-recovery';
 import { HearingDTO } from './hearing-ui-types';
 import { generateClientRequestId, getCairoTodayDate } from '@/components/matters/matter-ui-types';
 
 interface ScheduleHearingModalProps {
+  actorId: string;
   isOpen: boolean;
   onClose: () => void;
   proceedingId: string;
+  matterId: string;
   defaultCourtName?: string | null;
   defaultCircuit?: string | null;
   onSuccess: (hearing: HearingDTO) => void;
 }
 
 export function ScheduleHearingModal({
+  actorId,
   isOpen,
   onClose,
   proceedingId,
+  matterId,
   defaultCourtName,
   defaultCircuit,
   onSuccess,
@@ -25,24 +32,27 @@ export function ScheduleHearingModal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
 
-  const [idempotencyKey] = useState(() => generateClientRequestId('sched'));
-  const [hearingDate, setHearingDate] = useState(() => getCairoTodayDate());
-  const [hasSpecificTime, setHasSpecificTime] = useState(false);
-  const [hearingTime, setHearingTime] = useState('');
-  const [locationRoom, setLocationRoom] = useState('');
-  const [rollNumber, setRollNumber] = useState('');
-  const [purpose, setPurpose] = useState('');
+  const draft = useFormDraft<ScheduleHearingInput>(`${actorId}:schedule-hearing`, `/matters/${matterId}/proceedings/${proceedingId}`);
+  const pending = useRef(draft.restored);
+  const [hearingDate, setHearingDate] = useState(() => draft.restored?.hearingDate ?? getCairoTodayDate());
+  const [hasSpecificTime, setHasSpecificTime] = useState(() => Boolean(draft.restored?.hearingTime));
+  const [hearingTime, setHearingTime] = useState(() => draft.restored?.hearingTime ?? '');
+  const [locationRoom, setLocationRoom] = useState(() => draft.restored?.locationRoom ?? '');
+  const [rollNumber, setRollNumber] = useState(() => draft.restored?.rollNumber ?? '');
+  const [purpose, setPurpose] = useState(() => draft.restored?.purpose ?? '');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [isFrozenRetry, setIsFrozenRetry] = useState(false);
+  const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
+  useLeaveGuard(false, isSubmitting);
 
   // Auto-focus first input on open
   useEffect(() => {
     if (isOpen) {
       requestAnimationFrame(() => {
-        firstInputRef.current?.focus();
+        if (pending.current) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
+        else firstInputRef.current?.focus();
       });
     }
   }, [isOpen]);
@@ -97,19 +107,24 @@ export function ScheduleHearingModal({
     setIsSubmitting(true);
 
     try {
-      const res = await scheduleHearingAction({
+      const input = pending.current ?? {
         proceedingId,
         hearingDate,
         hearingTime: hasSpecificTime && hearingTime.trim() ? hearingTime.trim() : null,
         locationRoom: locationRoom.trim() || null,
         rollNumber: rollNumber.trim() || null,
         purpose: purpose.trim() || null,
-        idempotencyKey,
-      });
+        idempotencyKey: generateClientRequestId('schedule'),
+      };
+      pending.current = input;
+      draft.keep(input);
+      const res = await scheduleHearingAction(input);
 
       if (!res.success) {
         setIsSubmitting(false);
-        setIsFrozenRetry(true);
+        const uncertain = isUncertainHearingOutcome(res.code);
+        setIsFrozenRetry(uncertain);
+        if (!uncertain) { pending.current = undefined; draft.clear(); }
         setError(res.error || 'تعذر جدولة الجلسة.');
         if (res.fieldErrors) {
           setFieldErrors(res.fieldErrors);
@@ -118,13 +133,15 @@ export function ScheduleHearingModal({
       }
 
       setIsSubmitting(false);
+      pending.current = undefined;
+      draft.clear();
       onSuccess(res.data);
       onClose();
-    } catch (err: unknown) {
+    } catch {
       // Network timeout / unexpected crash: retain input in memory, keep key, enable frozen retry
       setIsSubmitting(false);
       setIsFrozenRetry(true);
-      setError(err instanceof Error ? err.message : 'انقطع الاتصال بالخادم. البيانات محفوظة في الذاكرة ويمكنك إعادة المحاولة.');
+      setError('تعذر تأكيد الحفظ. يمكنك إعادة محاولة نفس الطلب.');
     }
   };
 
@@ -215,7 +232,7 @@ export function ScheduleHearingModal({
               required
               value={hearingDate}
               onChange={(e) => setHearingDate(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isFrozenRetry}
               data-testid="schedule-hearing-date-input"
               className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
                 fieldErrors.hearingDate ? 'border-red-500' : 'border-[#D5DFE3]'
@@ -240,7 +257,7 @@ export function ScheduleHearingModal({
                     setHasSpecificTime(e.target.checked);
                     if (!e.target.checked) setHearingTime('');
                   }}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isFrozenRetry}
                   data-testid="schedule-hearing-time-toggle"
                   className="rounded text-[#14566B] focus:ring-[#14566B]"
                 />
@@ -256,7 +273,7 @@ export function ScheduleHearingModal({
                   type="time"
                   value={hearingTime}
                   onChange={(e) => setHearingTime(e.target.value)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isFrozenRetry}
                   data-testid="schedule-hearing-time-input"
                   className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
@@ -285,7 +302,7 @@ export function ScheduleHearingModal({
                 placeholder="مثال: قاعة 4 بالدور الثاني"
                 value={locationRoom}
                 onChange={(e) => setLocationRoom(e.target.value)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isFrozenRetry}
                 data-testid="schedule-hearing-room-input"
                 className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
@@ -302,7 +319,7 @@ export function ScheduleHearingModal({
                 placeholder="مثال: رول 12"
                 value={rollNumber}
                 onChange={(e) => setRollNumber(e.target.value)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isFrozenRetry}
                 data-testid="schedule-hearing-roll-input"
                 className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
@@ -321,7 +338,7 @@ export function ScheduleHearingModal({
               placeholder="مثال: مرافعة وتقديم أصل الصحيفة والمستندات"
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isFrozenRetry}
               data-testid="schedule-hearing-purpose-input"
               className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
             />

@@ -26,7 +26,8 @@ import {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   getMatterAction,
 } from '@/modules/matters/matter-actions';
-import { searchPartiesAction, getClientProfileAction } from '@/modules/parties/actions';
+import { searchPartiesAction } from '@/modules/parties/actions';
+import { listMatterAuthorizationOptionsAction } from '@/modules/matters/matter-actions';
 import {
   MATTER_KIND_LABELS,
   MATTER_STATUS_LABELS,
@@ -841,38 +842,11 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
     setShowAddPoaModal(true);
     setIsLoadingPoas(true);
     setPoaActionError(null);
-    const poaList: { id: string; poaNumberText: string; poaYearLabel: string; notarizationOffice: string; partyName: string }[] = [];
-
     try {
-      let failedClients = 0;
-      for (const client of clients) {
-        const res = await getClientProfileAction(client.partyId);
-        if (gen !== poaLoadGenRef.current) return;
-        if (res.success && res.data.powersOfAttorney) {
-          for (const poa of res.data.powersOfAttorney) {
-            if (!authorizations.some((a) => a.powerOfAttorneyId === poa.id)) {
-              poaList.push({
-                id: poa.id,
-                poaNumberText: poa.poaNumberText,
-                poaYearLabel: poa.poaYearLabel,
-                notarizationOffice: poa.notarizationOffice,
-                partyName: client.partyName,
-              });
-            }
-          }
-        } else if (!res.success) {
-          failedClients++;
-        }
-      }
+      const res = await listMatterAuthorizationOptionsAction(matter.id);
       if (gen !== poaLoadGenRef.current) return;
-      setAvailablePoas(poaList);
-      // U8: a partial failure is not an empty result. Report both the confirmed
-      // list and the clients whose POAs could not be read.
-      if (failedClients > 0) {
-        setPoaActionError(
-          `تعذر تحميل توكيلات ${failedClients} من الموكلين. المعروض ${poaList.length} توكيلاً فقط وليس قائمة كاملة؛ يمكنك إعادة المحاولة.`
-        );
-      }
+      if (res.success) setAvailablePoas(res.data);
+      else setPoaActionError(res.error || 'تعذر تحميل التوكيلات. يمكنك إعادة المحاولة.');
       setIsLoadingPoas(false);
     } catch {
       if (gen !== poaLoadGenRef.current) return;
@@ -2599,6 +2573,19 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               </p>
             ) : (
               <p className="text-xs text-[#4D606A] italic">لا توجد ملاحظات داخلية مدونة.</p>
+            )}
+            {Boolean(matter.noteRevisions?.length) && (
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer font-semibold">سجل تعديل الملاحظات</summary>
+                <ol className="mt-2 space-y-2">
+                  {matter.noteRevisions?.map((revision) => (
+                    <li key={revision.version} className="rounded border border-[#E8EEF1] p-2">
+                      <time dateTime={revision.createdAt}>{formatCairoDateOnly(revision.createdAt)}</time>
+                      <p className="whitespace-pre-wrap">{revision.notes ?? 'تم حذف الملاحظة.'}</p>
+                    </li>
+                  ))}
+                </ol>
+              </details>
             )}
           </div>
         </div>

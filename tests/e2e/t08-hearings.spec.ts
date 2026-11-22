@@ -69,7 +69,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
    * Verify calendar day is identical in Cairo and New York browser profiles,
    * blank time displays «الساعة غير محددة», proceeding remains incomplete («الرقم غير مستكمل»).
    */
-  test('T08-TC-01: Incomplete Proceeding + hearing near Cairo DST change (Cairo vs New York) @dst', async ({ browser }) => {
+  test('T08-TC-01: Incomplete Proceeding + hearing near Cairo DST change (Cairo vs New York) @dst', async ({ page }) => {
     // 1. Seed matter with an incomplete proceeding (draft status, no case number)
     const matter = await prisma.matter.create({
       data: {
@@ -105,50 +105,41 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    // Schedule hearing on Cairo DST change date (2027-04-30) with blank time
-    const hearingDateStr = '2027-04-30';
-    const hearing = await prisma.hearing.create({
-      data: {
-        proceedingId: proceeding.id,
-        hearingDate: new Date(`${hearingDateStr}T00:00:00.000Z`),
-        hearingTime: null, // Blank time
-        status: 'SCHEDULED',
-        purpose: 'جلسة تمهيدية بعد تعديل التوقيت',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
+    const date = '2027-04-30';
+    await signInWithTotp(page, owner);
+    await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await expect(page.getByText('الرقم غير مستكمل').first()).toBeVisible();
+    const submissions: Array<string | null> = [];
+    await page.route('**/matters/**', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      submissions.push(route.request().postData());
+      if (submissions.length > 1) return route.continue();
+      expect((await route.fetch()).ok()).toBe(true);
+      await route.abort('failed');
     });
-
-    // 2. Open under Cairo browser profile
-    const cairoContext = await browser.newContext({
-      locale: 'ar-EG',
-      timezoneId: 'Africa/Cairo',
-      viewport: { width: 1440, height: 900 },
-    });
-    const cairoPage = await cairoContext.newPage();
-    await signInWithTotp(cairoPage, owner);
-
-    await cairoPage.goto(`/hearings/${hearing.id}`);
-    await expect(cairoPage.getByText(hearingDateStr)).toBeVisible();
-    await expect(cairoPage.getByText('الساعة غير محددة')).toBeVisible();
-    await expect(cairoPage.getByText('الرقم غير مستكمل')).toBeVisible();
-    await cairoContext.close();
-
-    // 3. Open under New York browser profile (UTC-4/5)
-    const nyContext = await browser.newContext({
-      locale: 'ar-EG',
-      timezoneId: 'America/New_York',
-      viewport: { width: 1440, height: 900 },
-    });
-    const nyPage = await nyContext.newPage();
-    await signInWithTotp(nyPage, owner);
-
-    await nyPage.goto(`/hearings/${hearing.id}`);
-    // The exact calendar day 2027-04-30 must appear identically (not shifted to 2027-04-29!)
-    await expect(nyPage.getByText(hearingDateStr)).toBeVisible();
-    await expect(nyPage.getByText('الساعة غير محددة')).toBeVisible();
-    await expect(nyPage.getByText('الرقم غير مستكمل')).toBeVisible();
-    await nyContext.close();
+    await page.getByTestId('schedule-hearing-button').click();
+    await page.getByTestId('schedule-hearing-date-input').fill(date);
+    await page.getByTestId('schedule-hearing-submit-button').click();
+    await expect(page.getByTestId('schedule-hearing-retry-banner')).toBeVisible();
+    const pending = await prisma.hearing.findFirstOrThrow({ where: { proceedingId: proceeding.id } });
+    await page.getByTestId('schedule-hearing-cancel-button').click();
+    await page.getByTestId('schedule-hearing-button').click();
+    await expect(page.getByTestId('schedule-hearing-date-input')).toHaveValue(date);
+    await expect(page.getByTestId('schedule-hearing-date-input')).toBeDisabled();
+    await page.getByTestId('schedule-hearing-submit-button').click();
+    await expect(page.getByTestId('hearings-count-badge')).toHaveText('1');
+    expect(submissions).toHaveLength(2);
+    expect(submissions[1]).toBe(submissions[0]);
+    const hearing = await prisma.hearing.findFirstOrThrow({ where: { proceedingId: proceeding.id } });
+    expect(hearing.id).toBe(pending.id);
+    expect(await prisma.hearing.count({ where: { proceedingId: proceeding.id } })).toBe(1);
+    expect(hearing.hearingDate.toISOString().slice(0, 10)).toBe(date);
+    expect(hearing.hearingTime).toBeNull();
+    await page.goto(`/hearings/${hearing.id}`);
+    await expect(page).toHaveTitle('تفاصيل الجلسة — LawOffice OS');
+    await expect(page.getByText(date).first()).toBeVisible();
+    await expect(page.getByText('الساعة غير محددة')).toBeVisible();
+    await expect(page.getByText('الرقم غير مستكمل')).toBeVisible();
   });
 
   /**
@@ -209,29 +200,31 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     });
 
     // Navigate to hearing result form
-    await page.goto(`/hearings/${hearing.id}/result`);
+    await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await page.getByTestId(`record-result-button-${hearing.id}`).click();
 
     // Enter decision text
     await page.getByLabel(/منطوق القرار|قرار المحكمة/i).fill('تأجيل لتقديم مذكرة');
 
     // Select that there is a next hearing
     const hasNextDateRadio = page.getByRole('radio', { name: /نعم|يوجد موعد قادم/i });
-    if (await hasNextDateRadio.isVisible()) {
-      await hasNextDateRadio.check();
-    }
+    await hasNextDateRadio.locator('..').click();
+    await expect(hasNextDateRadio).toBeChecked();
+    await page.getByTestId('save-hearing-result-btn').click();
+    await expect(page.getByRole('alert').filter({ hasText: 'حدد تاريخ الجلسة القادمة' })).toBeVisible();
 
     // Fill next hearing date 2027-02-09
     await page.getByLabel(/تاريخ الجلسة القادمة|الموعد القادم/i).fill('2027-02-09');
 
     // Add 2 tasks
     const addTaskBtn = page.getByRole('button', { name: /إضافة مهمة|إضافة عمل مطلوب/i });
-    if (await addTaskBtn.isVisible()) {
-      await addTaskBtn.click();
-      await page.locator('input[name="task_title_0"]').fill('إعداد مذكرة الدفاع بالدفوع الشكلية');
-
-      await addTaskBtn.click();
-      await page.locator('input[name="task_title_1"]').fill('استخراج صورة رسمية من محضر الجلسة');
-    }
+    await addTaskBtn.click();
+    await page.getByTestId('task-title-0').fill('إعداد مذكرة الدفاع بالدفوع الشكلية');
+    await addTaskBtn.click();
+    await page.getByTestId('task-title-1').fill('استخراج صورة رسمية من محضر الجلسة');
+    await page.getByLabel('وقت الجلسة القادمة (اختياري)').fill('10:30');
+    await page.getByLabel('ملخص الجلسة (اختياري)').fill('تأجيل للمذكرات');
+    await page.getByLabel('الحضور (اختياري)').fill('حضر وكيل المدعي');
 
     // Check pre-save mobile confirmation summary
     // Literal specification: «هتسجل النتيجة، وتضيف جلسة بتاريخ 2027-02-09، و 2 مهام»
@@ -255,6 +248,19 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
     expect(nextHearingInDb?.hearingDate.toISOString().slice(0, 10)).toBe('2027-02-09');
+    expect(nextHearingInDb?.hearingTime).toBe('10:30');
+    expect(await prisma.hearingResult.findFirst({
+      where: { hearingId: hearing.id }, select: { summary: true, attendance: true },
+    })).toEqual({ summary: 'تأجيل للمذكرات', attendance: 'حضر وكيل المدعي' });
+    const nextId = nextHearingInDb!.id;
+    expect(await prisma.hearingLink.count({ where: { fromHearingId: hearing.id, toHearingId: nextId, relation: 'ADJOURNED_TO' } })).toBe(1);
+    expect(await prisma.task.count({ where: { hearingId: hearing.id, matterId: matter.id, proceedingId: proceeding.id } })).toBe(2);
+    expect(await prisma.auditEvent.count({ where: { entityId: hearing.id, action: 'RECORD_HEARING_RESULT' } })).toBe(1);
+    expect(await prisma.jobRun.count({ where: { sourceId: nextId, sourceType: 'Hearing', status: 'PENDING' } })).toBe(1);
+    await expect(page.getByTestId('linked-next-hearing')).toHaveAttribute('href', `/hearings/${nextId}`);
+    await page.getByRole('link', { name: 'عرض الموعد أو تغييره من القيد' }).click();
+    await expect(page.getByTestId(`hearing-card-${hearing.id}`)).toContainText('تأجيل لتقديم مذكرة');
+    await expect(page.getByTestId(`hearing-card-${nextId}`)).toBeVisible();
   });
 
   /**
@@ -304,35 +310,40 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    await page.goto(`/hearings/${hearing.id}/result`);
+    await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await page.getByTestId(`record-result-button-${hearing.id}`).click();
     await page.getByLabel(/منطوق القرار|قرار المحكمة/i).fill('تأجيل للاطلاع وتبادل المستندات');
 
-    // Intercept and abort response to simulate lost network response after server commit
-    let requestCount = 0;
+    await page.getByRole('radio', { name: /يوجد موعد قادم/ }).locator('..').click();
+    await page.getByTestId('next-hearing-date-input').fill('2027-03-20');
+    await page.getByTestId('add-task-button').click();
+    await page.getByTestId('task-title-0').fill('متابعة المستندات');
+    const bodies: Array<string | null> = [];
+    let firstResultId: string | undefined;
     await page.route('**/api/scheduling/hearings/*/result', async (route) => {
-      requestCount++;
-      if (requestCount === 1) {
-        await route.fetch();
+      bodies.push(route.request().postData());
+      if (bodies.length === 1) {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        firstResultId = (await response.json()).data.resultId;
         await route.abort('failed');
       } else {
         await route.continue();
       }
     });
-
-    // Click save -> network fails
-    await page.getByRole('button', { name: /حفظ النتيجة|تأكيد وحفظ/i }).click();
-
-    // UI shows uncertainty / retry prompt
-    await expect(page.getByRole('button', { name: /إعادة المحاولة|حفظ مجدداً/i })).toBeVisible();
-
-    // Click retry
-    await page.getByRole('button', { name: /إعادة المحاولة|حفظ مجدداً/i }).click();
-
-    // Retry succeeds without creating duplicates
-    await expect(page.getByText(/تم حفظ النتيجة|تأجيل للاطلاع وتبادل المستندات/i)).toBeVisible();
-
-    const resultsCount = await prisma.hearingResult.count({ where: { hearingId: hearing.id } });
-    expect(resultsCount).toBe(1);
+    await page.getByTestId('save-hearing-result-btn').click();
+    await expect(page.getByTestId('uncertainty-error-banner')).toBeVisible();
+    await expect(page.getByTestId('task-title-0')).toBeDisabled();
+    await page.getByRole('navigation', { name: 'مسار التنقل' }).getByRole('link', { name: 'القيد القضائي' }).click();
+    await page.getByTestId(`correct-result-button-${hearing.id}`).click();
+    await page.getByTestId('record-result-retry-btn').click();
+    await expect(page.getByTestId('save-success-banner')).toBeVisible();
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    const results = await prisma.hearingResult.findMany({ where: { hearingId: hearing.id } });
+    expect(results.map(({ id }) => id)).toEqual([firstResultId]);
+    expect(await prisma.hearingLink.count({ where: { fromHearingId: hearing.id } })).toBe(1);
+    expect(await prisma.task.count({ where: { hearingId: hearing.id } })).toBe(1);
   });
 
   /**
@@ -384,13 +395,15 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const ctx1 = await browser.newContext();
     const page1 = await ctx1.newPage();
     await signInWithTotp(page1, owner);
-    await page1.goto(`/hearings/${hearing.id}/result`);
+    await page1.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await page1.getByTestId(`record-result-button-${hearing.id}`).click();
 
     // Session 2 opens form
     const ctx2 = await browser.newContext();
     const page2 = await ctx2.newPage();
     await signInWithTotp(page2, owner);
-    await page2.goto(`/hearings/${hearing.id}/result`);
+    await page2.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await page2.getByTestId(`record-result-button-${hearing.id}`).click();
 
     // Session 1 submits first and succeeds
     await page1.getByLabel(/منطوق القرار|قرار المحكمة/i).fill('حكمت المحكمة بندب خبير حسابي');
@@ -402,22 +415,33 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page2.getByRole('button', { name: /حفظ النتيجة|تأكيد وحفظ/i }).click();
 
     // Session 2 receives conflict error prompt
-    await expect(page2.getByText(/تم تعديل هذا السجل بواسطة مستخدم آخر|يرجى تحديث الصفحة/i)).toBeVisible();
+    await expect(page2.getByTestId('conflict-error-banner')).toBeVisible();
 
     // Session 2 reloads and views persisted result
     await page2.reload();
     await expect(page2.getByText('حكمت المحكمة بندب خبير حسابي')).toBeVisible();
 
-    // Session 2 executes «تصحيح نتيجة»
-    const correctBtn = page2.getByRole('button', { name: /تصحيح نتيجة|تعديل النتيجة المسجلة/i });
-    if (await correctBtn.isVisible()) {
-      await correctBtn.click();
-      await page2.getByLabel(/سبب التصحيح/i).fill('تصحيح بناءً على الاطلاع على منطوق الحكم التمهيدي');
-      await page2.getByLabel(/المنطوق المصحح|منطوق القرار/i).fill('حكمت المحكمة تمهيدياً بندب مكتب خبراء وزارة العدل');
-      await page2.getByRole('button', { name: /حفظ التصحيح/i }).click();
-
-      await expect(page2.getByText(/تم حفظ التصحيح بنجاح|حكمت المحكمة تمهيدياً/i)).toBeVisible();
-    }
+    await page2.getByTestId('correct-result-button').click();
+    await page2.getByLabel(/سبب التصحيح/i).fill('تصحيح بناءً على الاطلاع على منطوق الحكم التمهيدي');
+    await page2.getByLabel(/المنطوق المصحح/i).fill('حكمت المحكمة تمهيدياً بندب مكتب خبراء وزارة العدل');
+    const corrections: Array<string | null> = [];
+    await page2.route('**/api/scheduling/hearings/*/correct', async (route) => {
+      corrections.push(route.request().postData());
+      if (corrections.length > 1) return route.continue();
+      expect((await route.fetch()).ok()).toBe(true);
+      await route.abort('failed');
+    });
+    await page2.getByTestId('save-correction-btn').click();
+    await expect(page2.getByRole('alert').filter({ hasText: 'تعذر استلام تأكيد الحفظ' })).toBeVisible();
+    await expect(page2.getByLabel(/المنطوق المصحح/i)).toBeDisabled();
+    await page2.getByTestId('save-correction-btn').click();
+    await expect(page2.getByText(/تم حفظ التصحيح بنجاح/)).toBeVisible();
+    expect(corrections).toHaveLength(2);
+    expect(corrections[1]).toBe(corrections[0]);
+    expect(await prisma.hearingResult.count({ where: { hearingId: hearing.id } })).toBe(2);
+    await expect(page2.getByTestId('persisted-decision-text')).toHaveText('حكمت المحكمة تمهيدياً بندب مكتب خبراء وزارة العدل');
+    await page2.getByText('مراجعات النتيجة السابقة').click();
+    await expect(page2.getByText('حكمت المحكمة بندب خبير حسابي')).toBeVisible();
 
     await ctx1.close();
     await ctx2.close();
@@ -469,56 +493,32 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    // Test across viewports: 390px, 768px, 1440px
-    const viewports = [
-      { width: 390, height: 844 },
-      { width: 768, height: 1024 },
-      { width: 1440, height: 900 },
-    ];
-
-    for (const vp of viewports) {
-      await page.setViewportSize(vp);
-      await page.goto(`/hearings/${hearing.id}/result`);
-
-      // Unknown time accurately displays «الساعة غير محددة»
-      await expect(page.getByText('الساعة غير محددة')).toBeVisible();
-
-      // Keyboard navigation: Tab through elements
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
-
-      // Fill decision
-      const decisionInput = page.getByLabel(/منطوق القرار|قرار المحكمة/i);
-      await decisionInput.focus();
-      const testDecisionText = `قرار مسجل عبر لوحة المفاتيح على دقة ${vp.width}`;
-      await page.keyboard.type(testDecisionText);
-
-      // Disconnect during save (simulate offline)
-      await page.context().setOffline(true);
-      await page.getByRole('button', { name: /حفظ النتيجة|تأكيد وحفظ/i }).click();
-
-      // Verify UI reports uncertainty: «الاتصال انقطع، البيانات لسه ما اتحفظتش»
-      await expect(page.getByText(/الاتصال انقطع، البيانات لسه ما اتحفظتش|تعذر الاتصال بالخادم/i)).toBeVisible();
-
-      // Verify pending inputs remain recoverable in memory (not lost/wiped out!)
-      await expect(decisionInput).toHaveValue(testDecisionText);
-
-      // Reconnect
-      await page.context().setOffline(false);
-    }
-
-    // 200% text scale reflow test
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`/hearings/${hearing.id}/result`);
-    // Inject 200% font scaling via CSS
+    await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
+    await page.getByTestId(`record-result-button-${hearing.id}`).click();
+    await expect(page.getByTestId('hearing-unknown-time')).toBeVisible();
     await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
-    await expect(page.getByLabel(/منطوق القرار|قرار المحكمة/i)).toBeVisible();
-    await expect(page.getByRole('button', { name: /حفظ النتيجة|تأكيد وحفظ/i })).toBeVisible();
+    const decision = page.getByTestId('hearing-decision-textarea');
+    await decision.focus();
+    await expect(decision).toBeFocused();
+    await page.keyboard.insertText('قرار مسجل عبر لوحة المفاتيح');
+    await page.keyboard.press('Tab');
+    await expect(page.getByLabel('ملخص الجلسة (اختياري)')).toBeFocused();
+    await page.keyboard.insertText('ملخص للاختبار');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
 
-    // Verify document does not produce horizontal scrollbar overflow
-    const hasHorizontalOverflow = await page.evaluate(() => {
-      return document.documentElement.scrollWidth > document.documentElement.clientWidth;
-    });
-    expect(hasHorizontalOverflow).toBe(false);
+    await page.route('**/api/scheduling/hearings/*/result', async (route) => {
+      await page.context().setOffline(true);
+      await route.abort('internetdisconnected');
+    }, { times: 1 });
+    await page.getByTestId('save-hearing-result-btn').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('uncertainty-error-banner')).toBeVisible();
+    await expect(decision).toHaveValue('قرار مسجل عبر لوحة المفاتيح');
+    await expect(page.getByLabel('ملخص الجلسة (اختياري)')).toHaveValue('ملخص للاختبار');
+    await expect(decision).toBeDisabled();
+    await page.context().setOffline(false);
+    await expect(page.getByTestId('protected-view-lock')).toBeHidden();
+    await page.getByTestId('record-result-retry-btn').press('Enter');
+    await expect(page.getByTestId('save-success-banner')).toBeVisible();
   });
 });

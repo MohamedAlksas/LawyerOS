@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
+import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
 import {
   HearingStatus,
   NextDateDisposition,
@@ -18,6 +21,9 @@ interface FollowUpTaskItem {
 }
 
 interface HearingResultClientProps {
+  actorId: string;
+  history: { revision: number; decisionText: string; correctionReason: string | null }[];
+  nextHearing?: { id: string; date: string };
   hearingId: string;
   initialVersion: number;
   hearingDate: string; // YYYY-MM-DD
@@ -38,7 +44,20 @@ interface HearingResultClientProps {
   } | null;
 }
 
+async function saveHearing<T>(url: string, payload: unknown): Promise<ActionResult<T>> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15_000),
+  });
+  return response.json();
+}
+
 export function HearingResultClient({
+  actorId,
+  history,
+  nextHearing,
   hearingId,
   initialVersion,
   hearingDate,
@@ -52,34 +71,54 @@ export function HearingResultClient({
   proceedingId,
   latestResult: initialLatestResult,
 }: HearingResultClientProps) {
+  const router = useRouter();
+  const path = `/hearings/${hearingId}/result`;
+  const endpoint = `/api/scheduling/hearings/${hearingId}`;
+  const resultDraft = useFormDraft<RecordHearingResultInput>(`${actorId}:hearing-result`, path);
+  const correctionDraft = useFormDraft<CorrectHearingResultInput>(`${actorId}:hearing-correction`, path);
+  const pendingResult = useRef(resultDraft.restored);
+  const pendingCorrection = useRef(correctionDraft.restored);
+  const [linkedNext, setLinkedNext] = useState(nextHearing);
   const [currentStatus, setCurrentStatus] = useState<HearingStatus>(initialStatus);
   const [latestResult, setLatestResult] = useState(initialLatestResult);
 
   // Form state
-  const [decision, setDecision] = useState('');
-  const [nextDateDisposition, setNextDateDisposition] = useState<NextDateDisposition>('KNOWN');
-  const [nextHearingDate, setNextHearingDate] = useState('');
-  const [tasks, setTasks] = useState<FollowUpTaskItem[]>([]);
-
-  // Persistent idempotency key across retries
-  const idempotencyKeyRef = useRef(generateClientRequestId('res'));
+  const [decision, setDecision] = useState(resultDraft.restored?.decision ?? '');
+  const [summary, setSummary] = useState(resultDraft.restored?.summary ?? '');
+  const [attendance, setAttendance] = useState(resultDraft.restored?.attendance ?? '');
+  const [nextDateDisposition, setNextDateDisposition] = useState<NextDateDisposition>(resultDraft.restored?.nextDateDisposition ?? 'UNDETERMINED');
+  const [nextHearingDate, setNextHearingDate] = useState(resultDraft.restored?.nextHearing?.hearingDate ?? '');
+  const [nextHearingTime, setNextHearingTime] = useState(resultDraft.restored?.nextHearing?.hearingTime ?? '');
+  const [tasks, setTasks] = useState<FollowUpTaskItem[]>(() =>
+    (resultDraft.restored?.tasks ?? []).map((task, index) => ({
+      id: String(index), title: task.title, dueDate: task.dueDate ?? '', priority: task.priority ?? 'NORMAL',
+    })),
+  );
 
   // Execution states
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isFrozenRetry, setIsFrozenRetry] = useState(false);
-  const [uncertaintyError, setUncertaintyError] = useState<string | null>(null);
+  const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(resultDraft.restored));
+  const unknownOutcome = 'تعذر استلام تأكيد الحفظ. يمكنك إعادة محاولة نفس الطلب.';
+  const [uncertaintyError, setUncertaintyError] = useState<string | null>(resultDraft.restored ? unknownOutcome : null);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [savedDecision, setSavedDecision] = useState('');
 
   // Correction Mode states
-  const [isCorrecting, setIsCorrecting] = useState(false);
-  const [correctionReason, setCorrectionReason] = useState('');
-  const [correctedDecision, setCorrectedDecision] = useState('');
+  const [isCorrecting, setIsCorrecting] = useState(Boolean(correctionDraft.restored));
+  const [correctionReason, setCorrectionReason] = useState(correctionDraft.restored?.reason ?? '');
+  const [correctedDecision, setCorrectedDecision] = useState(correctionDraft.restored?.decision ?? '');
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
-  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [correctionFrozen, setCorrectionFrozen] = useState(Boolean(correctionDraft.restored));
+  const [correctionError, setCorrectionError] = useState<string | null>(correctionDraft.restored ? unknownOutcome : null);
   const [correctionSuccess, setCorrectionSuccess] = useState(false);
+
+  const resultFieldsDisabled = isSubmitting || isFrozenRetry;
+  const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
+  const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
+    Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
+  useLeaveGuard(resultDirty || (isCorrecting && !correctionFrozen), isSubmitting || correctionSubmitting);
 
   const handleAddTask = () => {
     const newTask: FollowUpTaskItem = {
@@ -105,146 +144,112 @@ export function HearingResultClient({
 
   const handleSaveResult = async () => {
     if (isSubmitting) return;
-
-    if (!decision.trim()) {
-      setValidationError('منطوق القرار أو نتيجة الجلسة مطلوب');
-      return;
+    if (!pendingResult.current) {
+      if (!decision.trim()) {
+        setValidationError('منطوق القرار أو نتيجة الجلسة مطلوب');
+        return;
+      }
+      if (nextDateDisposition === 'KNOWN' && (!nextHearingDate || nextHearingDate < hearingDate)) {
+        setValidationError('حدد تاريخ الجلسة القادمة بحيث لا يسبق تاريخ الجلسة الحالية');
+        return;
+      }
+      if (tasks.some((task) => !task.title.trim())) {
+        setValidationError('أدخل عنوانًا لكل مهمة متابعة أو احذف المهمة الفارغة');
+        return;
+      }
+      pendingResult.current = {
+        hearingId,
+        expectedVersion: initialVersion,
+        decision: decision.trim(),
+        summary: summary.trim() || null,
+        attendance: attendance.trim() || null,
+        nextDateDisposition,
+        nextHearing: nextDateDisposition === 'KNOWN'
+          ? { hearingDate: nextHearingDate, hearingTime: nextHearingTime || null, courtName, circuit }
+          : null,
+        tasks: tasks.map(({ title, dueDate, priority }) => ({ title: title.trim(), dueDate: dueDate || null, priority })),
+        idempotencyKey: generateClientRequestId('res'),
+      };
+      resultDraft.keep(pendingResult.current);
     }
-
     setValidationError(null);
     setUncertaintyError(null);
     setConflictError(null);
     setIsSubmitting(true);
-
-    const effectiveDisposition: NextDateDisposition =
-      nextDateDisposition === 'NONE'
-        ? 'NONE'
-        : nextHearingDate.trim()
-        ? 'KNOWN'
-        : 'UNDETERMINED';
-
-    const payload = {
-      hearingId,
-      expectedVersion: initialVersion,
-      decision: decision.trim(),
-      decisionText: decision.trim(),
-      nextDateDisposition: effectiveDisposition,
-      nextHearing:
-        effectiveDisposition === 'KNOWN' && nextHearingDate.trim()
-          ? {
-              hearingDate: nextHearingDate.trim(),
-              courtName,
-              circuit,
-            }
-          : null,
-      tasks: tasks
-        .filter((t) => t.title.trim().length > 0)
-        .map((t) => ({
-          title: t.title.trim(),
-          dueDate: t.dueDate.trim() || null,
-          priority: t.priority,
-        })),
-      idempotencyKey: idempotencyKeyRef.current,
-    };
-
     try {
-      const res = await fetch(`/api/scheduling/hearings/${hearingId}/result`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.status === 409) {
-        const data = await res.json().catch(() => ({}));
-        setIsSubmitting(false);
-        setConflictError(
-          data.error || 'تم تعديل هذا السجل بواسطة مستخدم آخر، يرجى تحديث الصفحة'
-        );
+      const response = await saveHearing<RecordHearingResultResult>(`${endpoint}/result`, pendingResult.current);
+      if (!response.success) {
+        if (isUncertainHearingOutcome(response.code)) throw new Error(unknownOutcome);
+        pendingResult.current = undefined;
+        resultDraft.clear();
+        setIsFrozenRetry(false);
+        if (response.code === 'CONCURRENCY_CONFLICT' || response.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH') {
+          setConflictError(response.error);
+        } else {
+          setValidationError(response.error);
+        }
         return;
       }
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setIsSubmitting(false);
-        setIsFrozenRetry(true);
-        setUncertaintyError(
-          data.error || 'تعذر الاتصال بالخادم. الاتصال انقطع، البيانات لسه ما اتحفظتش.'
-        );
-        return;
-      }
-
-      const data = await res.json();
-      setIsSubmitting(false);
+      const { hearing, result, nextHearing: savedNext } = response.data;
+      pendingResult.current = undefined;
+      resultDraft.clear();
+      setIsFrozenRetry(false);
       setSavedSuccess(true);
-      setSavedDecision(decision.trim());
-      setCurrentStatus('COMPLETED');
-      setLatestResult({
-        id: data.data?.result?.id || 'res-saved',
-        decisionText: decision.trim(),
-        revision: data.data?.result?.revision || 1,
-        correctionReason: null,
-        recordedAt: new Date().toISOString(),
-      });
+      setSavedDecision(result.decisionText);
+      setCurrentStatus(hearing.status);
+      setLatestResult({ ...result, correctionReason: result.correctionReason ?? null });
+      if (savedNext) setLinkedNext({ id: savedNext.id, date: savedNext.hearingDate });
+      router.refresh();
     } catch {
-      // Disconnection / Offline / Fetch Abort
-      setIsSubmitting(false);
       setIsFrozenRetry(true);
-      setUncertaintyError(
-        'الاتصال انقطع، البيانات لسه ما اتحفظتش. مدخلاتك محفوظة في الذاكرة بالكامل.'
-      );
+      setUncertaintyError(unknownOutcome);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleSaveCorrection = async () => {
     if (correctionSubmitting) return;
-
-    if (!correctionReason.trim()) {
-      setCorrectionError('سبب التصحيح مطلوب');
-      return;
-    }
-    if (!correctedDecision.trim()) {
-      setCorrectionError('المنطوق المصحح مطلوب');
-      return;
-    }
-
-    setCorrectionError(null);
-    setCorrectionSubmitting(true);
-
-    try {
-      const res = await fetch(`/api/scheduling/hearings/${hearingId}/correct`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          hearingId,
-          decision: correctedDecision.trim(),
-          reason: correctionReason.trim(),
-          idempotencyKey: generateClientRequestId('corr'),
-        }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        setCorrectionSubmitting(false);
-        setCorrectionError(errData.error || 'تعذر حفظ التصحيح');
+    if (!pendingCorrection.current) {
+      if (!latestResult || !correctionReason.trim() || !correctedDecision.trim()) {
+        setCorrectionError('سبب التصحيح والمنطوق المصحح مطلوبان');
         return;
       }
-
-      const data = await res.json();
-      setCorrectionSubmitting(false);
+      pendingCorrection.current = {
+        hearingId,
+        expectedVersion: latestResult.revision,
+        currentResultId: latestResult.id,
+        decision: correctedDecision.trim(),
+        reason: correctionReason.trim(),
+        idempotencyKey: generateClientRequestId('corr'),
+      };
+      correctionDraft.keep(pendingCorrection.current);
+    }
+    setCorrectionError(null);
+    setCorrectionSubmitting(true);
+    try {
+      const response = await saveHearing<HearingResultDTO>(`${endpoint}/correct`, pendingCorrection.current);
+      if (!response.success) {
+        if (isUncertainHearingOutcome(response.code)) throw new Error(unknownOutcome);
+        pendingCorrection.current = undefined;
+        correctionDraft.clear();
+        setCorrectionFrozen(false);
+        setCorrectionError(response.error);
+        if (response.code === 'CONCURRENCY_CONFLICT') setConflictError(response.error);
+        return;
+      }
+      pendingCorrection.current = undefined;
+      correctionDraft.clear();
+      setCorrectionFrozen(false);
       setCorrectionSuccess(true);
       setIsCorrecting(false);
-      setLatestResult({
-        id: data.data?.id || 'res-corrected',
-        decisionText: correctedDecision.trim(),
-        revision: (latestResult?.revision || 1) + 1,
-        correctionReason: correctionReason.trim(),
-        recordedAt: new Date().toISOString(),
-      });
+      setLatestResult({ ...response.data, correctionReason: response.data.correctionReason ?? null });
+      router.refresh();
     } catch {
+      setCorrectionFrozen(true);
+      setCorrectionError(unknownOutcome);
+    } finally {
       setCorrectionSubmitting(false);
-      setCorrectionError('انقطع الاتصال أثناء حفظ التصحيح.');
     }
   };
 
@@ -384,6 +389,17 @@ export function HearingResultClient({
           </div>
         </div>
       )}
+      {linkedNext && (
+        <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm">
+          <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline">
+            الجلسة القادمة {linkedNext.date}
+          </Link>
+          {' · '}
+          <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline">
+            عرض الموعد أو تغييره من القيد
+          </Link>
+        </div>
+      )}
 
       {/* Correction Success Banner */}
       {correctionSuccess && (
@@ -408,7 +424,7 @@ export function HearingResultClient({
                 المراجعة #{latestResult?.revision || 1}
               </span>
             </div>
-            {!isCorrecting && (
+            {!isCorrecting && !isFrozenRetry && latestResult && (
               <button
                 type="button"
                 onClick={() => {
@@ -433,6 +449,18 @@ export function HearingResultClient({
             </p>
           </div>
 
+          {history.some((result) => result.revision < (latestResult?.revision ?? 0)) && (
+            <details className="rounded-[6px] border border-[#D5DFE3] p-3 text-xs">
+              <summary className="cursor-pointer font-bold">مراجعات النتيجة السابقة</summary>
+              {history.filter((result) => result.revision < (latestResult?.revision ?? 0)).map((result) => (
+                <div key={result.revision} className="border-t border-[#E8EEF1] py-2">
+                  <p className="font-semibold">مراجعة {result.revision}</p>
+                  <p className="whitespace-pre-wrap">{result.decisionText}</p>
+                  {result.correctionReason && <p>{result.correctionReason}</p>}
+                </div>
+              ))}
+            </details>
+          )}
           {latestResult?.correctionReason && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
               <span className="font-bold">سبب التصحيح السابق: </span>
@@ -445,7 +473,7 @@ export function HearingResultClient({
             <div className="pt-4 border-t border-[#E8EEF1] space-y-4">
               <h3 className="font-bold text-sm text-[#172A35]">إجراء تصحيح رسمي على النتيجة</h3>
               {correctionError && (
-                <p className="text-xs text-red-600 font-semibold">{correctionError}</p>
+                <p role="alert" className="text-xs text-red-600 font-semibold">{correctionError}</p>
               )}
               <div className="space-y-1 text-xs">
                 <label htmlFor="correction-reason" className="block font-bold text-[#172A35]">
@@ -459,7 +487,7 @@ export function HearingResultClient({
                   placeholder="أدخل سبب تصحيح نتيجة الجلسة (إلزامي للتوثيق)"
                   value={correctionReason}
                   onChange={(e) => setCorrectionReason(e.target.value)}
-                  disabled={correctionSubmitting}
+                  disabled={correctionFieldsDisabled}
                   className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
@@ -476,7 +504,7 @@ export function HearingResultClient({
                   placeholder="أدخل منطوق القرار أو النتيجة المصححة"
                   value={correctedDecision}
                   onChange={(e) => setCorrectedDecision(e.target.value)}
-                  disabled={correctionSubmitting}
+                  disabled={correctionFieldsDisabled}
                   className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
@@ -485,7 +513,7 @@ export function HearingResultClient({
                 <button
                   type="button"
                   onClick={() => setIsCorrecting(false)}
-                  disabled={correctionSubmitting}
+                  disabled={correctionFieldsDisabled}
                   className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-semibold rounded-[6px] min-h-[44px]"
                 >
                   إلغاء
@@ -497,7 +525,7 @@ export function HearingResultClient({
                   data-testid="save-correction-btn"
                   className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
                 >
-                  {correctionSubmitting ? 'جارٍ حفظ التصحيح...' : 'حفظ التصحيح'}
+                  {correctionSubmitting ? 'جارٍ حفظ التصحيح...' : correctionFrozen ? 'إعادة محاولة حفظ التصحيح' : 'حفظ التصحيح'}
                 </button>
               </div>
             </div>
@@ -506,10 +534,10 @@ export function HearingResultClient({
       )}
 
       {/* Main Result Entry Form (When not yet completed or submitting) */}
-      {!savedSuccess && currentStatus !== 'COMPLETED' && !latestResult && (
+      {!savedSuccess && (currentStatus === 'SCHEDULED' || isFrozenRetry) && (
         <div className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-5">
           {validationError && (
-            <div className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-xs text-red-900 font-semibold">
+            <div role="alert" className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-xs text-red-900 font-semibold">
               {validationError}
             </div>
           )}
@@ -527,12 +555,22 @@ export function HearingResultClient({
               placeholder="مثال: تأجيل لتقديم مذكرة ومستندات، أو حجز للحكم لجلسة..."
               value={decision}
               onChange={(e) => setDecision(e.target.value)}
-              disabled={isSubmitting}
+              disabled={resultFieldsDisabled}
               data-testid="hearing-decision-textarea"
               className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] leading-relaxed"
             />
           </div>
 
+          <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+            <label className="space-y-1 font-semibold">
+              <span>ملخص الجلسة (اختياري)</span>
+              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+            </label>
+            <label className="space-y-1 font-semibold">
+              <span>الحضور (اختياري)</span>
+              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+            </label>
+          </div>
           {/* Next Date Radio Group */}
           <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
             <span className="block font-bold text-[#172A35]">
@@ -551,6 +589,7 @@ export function HearingResultClient({
                   name="nextDateDisposition"
                   value="KNOWN"
                   checked={nextDateDisposition === 'KNOWN'}
+                  disabled={resultFieldsDisabled}
                   onChange={() => setNextDateDisposition('KNOWN')}
                   className="sr-only"
                 />
@@ -569,6 +608,7 @@ export function HearingResultClient({
                   name="nextDateDisposition"
                   value="UNDETERMINED"
                   checked={nextDateDisposition === 'UNDETERMINED'}
+                  disabled={resultFieldsDisabled}
                   onChange={() => setNextDateDisposition('UNDETERMINED')}
                   className="sr-only"
                 />
@@ -587,6 +627,7 @@ export function HearingResultClient({
                   name="nextDateDisposition"
                   value="NONE"
                   checked={nextDateDisposition === 'NONE'}
+                  disabled={resultFieldsDisabled}
                   onChange={() => setNextDateDisposition('NONE')}
                   className="sr-only"
                 />
@@ -607,10 +648,15 @@ export function HearingResultClient({
                   required
                   value={nextHearingDate}
                   onChange={(e) => setNextHearingDate(e.target.value)}
-                  disabled={isSubmitting}
+                  disabled={resultFieldsDisabled}
+                  min={hearingDate}
                   data-testid="next-hearing-date-input"
                   className="w-full sm:w-64 p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
+                <label className="mt-2 block font-bold text-[#172A35]">
+                  وقت الجلسة القادمة (اختياري)
+                  <input type="time" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64" />
+                </label>
               </div>
             )}
           </div>
@@ -627,7 +673,7 @@ export function HearingResultClient({
               <button
                 type="button"
                 onClick={handleAddTask}
-                disabled={isSubmitting}
+                disabled={resultFieldsDisabled}
                 data-testid="add-task-button"
                 className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] transition-colors min-h-[36px] flex items-center gap-1"
               >
@@ -649,7 +695,7 @@ export function HearingResultClient({
                       <button
                         type="button"
                         onClick={() => handleRemoveTask(task.id)}
-                        disabled={isSubmitting}
+                        disabled={resultFieldsDisabled}
                         className="text-red-600 hover:text-red-800 text-xs font-semibold p-1 min-h-[32px] flex items-center"
                       >
                         ✕ حذف
@@ -668,7 +714,7 @@ export function HearingResultClient({
                           placeholder="مثال: إعداد مذكرة الدفاع بالدفوع الشكلية"
                           value={task.title}
                           onChange={(e) => handleUpdateTaskTitle(task.id, e.target.value)}
-                          disabled={isSubmitting}
+                          disabled={resultFieldsDisabled}
                           data-testid={`task-title-${idx}`}
                           className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[40px]"
                         />
@@ -683,7 +729,7 @@ export function HearingResultClient({
                           name={`task_due_${idx}`}
                           value={task.dueDate}
                           onChange={(e) => handleUpdateTaskDue(task.id, e.target.value)}
-                          disabled={isSubmitting}
+                          disabled={resultFieldsDisabled}
                           data-testid={`task-due-${idx}`}
                           className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[40px]"
                         />
@@ -724,7 +770,7 @@ export function HearingResultClient({
             <button
               type="button"
               onClick={handleSaveResult}
-              disabled={isSubmitting}
+              disabled={resultFieldsDisabled}
               data-testid="save-hearing-result-btn"
               className="px-6 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:bg-gray-400 text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] flex items-center gap-2"
             >

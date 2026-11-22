@@ -77,6 +77,41 @@ describe('T05-01: Basic Party Records & Contacts Persistence (Integration)', () 
     expect(profile.notes).toBe('شركة مقاولات قطاع خاص، قيد التأسيس من ٢٠١٠');
   });
 
+  it('preserves omitted phones and distinguishes clearing from replacing them', async () => {
+    const initial = await saveParty(actor, {
+      kind: 'PERSON',
+      name: 'موكل اختبار حفظ الهاتف',
+      primaryPhone: '01000123456',
+      additionalPhones: ['01100123456'],
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const id = initial.party.id;
+    createdPartyIds.push(id);
+    const rename = await saveParty(actor, {
+      id, expectedVersion: initial.party.version, kind: 'PERSON', name: 'موكل اختبار تعديل الاسم',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(rename.party.primaryPhone).toBe('01000123456');
+    expect(rename.party.additionalPhones).toEqual(['01100123456']);
+    expect((await prisma.party.findUniqueOrThrow({ where: { id } })).primaryPhoneNormalized).toBe('01000123456');
+
+    const cleared = await saveParty(actor, {
+      id, expectedVersion: rename.party.version, kind: 'PERSON', name: rename.party.name,
+      primaryPhone: null, additionalPhones: [], idempotencyKey: crypto.randomUUID(),
+    });
+    expect(cleared.party.primaryPhone).toBeNull();
+    expect(cleared.party.additionalPhones).toEqual([]);
+    expect((await prisma.party.findUniqueOrThrow({ where: { id } })).primaryPhoneNormalized).toBeNull();
+
+    const replaced = await saveParty(actor, {
+      id, expectedVersion: cleared.party.version, kind: 'PERSON', name: cleared.party.name,
+      primaryPhone: '٠١٢٠٠١٢٣٤٥٦', additionalPhones: ['٠١٥٠٠١٢٣٤٥٦'], idempotencyKey: crypto.randomUUID(),
+    });
+    expect(replaced.party.primaryPhone).toBe('٠١٢٠٠١٢٣٤٥٦');
+    expect(replaced.party.additionalPhones).toEqual(['٠١٥٠٠١٢٣٤٥٦']);
+    expect((await prisma.party.findUniqueOrThrow({ where: { id } })).primaryPhoneNormalized).toBe('01200123456');
+  });
+
   it('preserves exact Arabic typography, leading zeros, and mixed text round-trip', async () => {
     const specialName = 'د. أحمد سمير (المستشار القانوني) - 007';
     const result = await saveParty(actor, {

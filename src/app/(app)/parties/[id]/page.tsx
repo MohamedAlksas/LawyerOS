@@ -13,20 +13,7 @@ interface PartyDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: PartyDetailPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const party = await getClientProfile(actor, id);
-    return {
-      title: `${party.name} — ملف الطرف — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'ملف الطرف — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'ملف الطرف — LawOffice OS' };
 
 export default async function PartyDetailPage({ params }: PartyDetailPageProps) {
   const { id } = await params;

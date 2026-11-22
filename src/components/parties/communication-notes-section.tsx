@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useLayoutEffect, useState, useRef } from 'react';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { addCommunicationNoteAction } from '@/modules/parties/actions';
@@ -33,8 +33,9 @@ export function CommunicationNotesSection({
   readOnly = false,
 }: CommunicationNotesSectionProps) {
   const draft = useFormDraft<PendingNote>(`${ownerId}:communication`, `/parties/${partyId}`);
-  const restored = readOnly ? undefined : draft.restored;
-  const [pending, setPending] = useState<PendingNote | null>(restored ?? null);
+  const editable = useFormDraft<PendingNote>(`${ownerId}:communication-editable`, `/parties/${partyId}`);
+  const restored = readOnly ? undefined : draft.restored ?? editable.restored;
+  const [pending, setPending] = useState<PendingNote | null>((readOnly ? undefined : draft.restored) ?? null);
   const [notes, setNotes] = useState<CommunicationNoteSummaryDTO[]>(initialNotes);
   const [isFormOpen, setIsFormOpen] = useState(Boolean(restored));
 
@@ -51,7 +52,27 @@ export function CommunicationNotesSection({
   const [error, setError] = useState<string | null>(null);
 
   const savingRef = useRef(false);
-  useLeaveGuard(false, isSubmitting || Boolean(pending));
+  const [communicationAtEdited, setCommunicationAtEdited] = useState(Boolean(editable.restored));
+  const dirty = !readOnly && isFormOpen && Boolean(communicationAtEdited || summary || followUpRequired || followUpDate || channel !== 'PHONE');
+  useLeaveGuard(dirty, isSubmitting || Boolean(pending));
+  useLayoutEffect(() => {
+    if (!dirty) editable.clear();
+    else if (!pending) editable.keep({ wallTime: communicationAt, payload: {
+      partyId, communicationAt: '', channel, summary, followUpRequired, followUpDate, idempotencyKey: '',
+    } });
+  });
+
+  const closeForm = () => {
+    if (dirty && !window.confirm('هل تريد تجاهل الملاحظة غير المحفوظة؟')) return;
+    setSummary('');
+    setChannel('PHONE');
+    setFollowUpRequired(false);
+    setFollowUpDate('');
+    setCommunicationAtEdited(false);
+    setError(null);
+    setIsFormOpen(false);
+    editable.clear();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +126,9 @@ export function CommunicationNotesSection({
       setNotes((prev) => [result.data, ...prev.filter((note) => note.id !== result.data.id)]);
 
       setCommunicationAt(getCairoCurrentWallTime());
+      setCommunicationAtEdited(false);
       setSummary('');
+      setChannel('PHONE');
       setFollowUpRequired(false);
       setFollowUpDate('');
       setIsFormOpen(false);
@@ -141,12 +164,12 @@ export function CommunicationNotesSection({
             data-testid="add-note-button"
             disabled={isSubmitting || Boolean(pending)}
             onClick={() => {
-              setIsFormOpen((prev) => {
-                if (!prev) {
-                  setCommunicationAt(getCairoCurrentWallTime());
-                }
-                return !prev;
-              });
+              if (isFormOpen) {
+                closeForm();
+              } else {
+                setCommunicationAt(getCairoCurrentWallTime());
+                setIsFormOpen(true);
+              }
             }}
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
           >
@@ -186,7 +209,10 @@ export function CommunicationNotesSection({
                 type="datetime-local"
                 required
                 value={communicationAt}
-                onChange={(e) => setCommunicationAt(e.target.value)}
+                onChange={(e) => {
+                  setCommunicationAt(e.target.value);
+                  setCommunicationAtEdited(true);
+                }}
                 className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
@@ -263,7 +289,7 @@ export function CommunicationNotesSection({
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => setIsFormOpen(false)}
+              onClick={closeForm}
               disabled={isSubmitting || Boolean(pending)}
               className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px]"
             >

@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { GuardedLink as Link } from './navigation-guard';
-import { getSession } from '@/lib/auth-client';
 
 interface UserInfo {
   name?: string;
@@ -13,16 +12,12 @@ export function UserIdentityBadge() {
   const [user, setUser] = useState<UserInfo | null>(null);
 
   useEffect(() => {
-    getSession().then((res) => {
-      if (res?.data?.user) {
-        setUser({
-          name: res.data.user.name,
-          email: res.data.user.email,
-        });
-      }
-    }).catch(() => {
-      // Ignored
-    });
+    const request = new AbortController();
+    fetch('/api/auth/view-session', { cache: 'no-store', signal: request.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((identity: UserInfo | null) => setUser(identity))
+      .catch(() => {});
+    return () => request.abort();
   }, []);
 
   const name = user?.name || 'الأستاذ المحامي';

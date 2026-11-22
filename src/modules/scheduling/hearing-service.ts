@@ -1,8 +1,9 @@
 import { getPrismaClient } from '@/lib/auth';
+import type { Prisma } from '@prisma/client';
 import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
-import { claimIdempotencyKey, completeIdempotencyKey } from '@/lib/idempotency';
+import { claimIdempotencyKey, completeIdempotencyKey, isIdempotencyUniqueConflict, resolveConcurrentIdempotency } from '@/lib/idempotency';
 import {
   HearingDTO,
   HearingResultDTO,
@@ -198,6 +199,88 @@ function mapTaskToDTO(raw: TaskRecord): TaskDTO {
   };
 }
 
+async function lockHearingParents(tx: Prisma.TransactionClient, proceedingId: string) {
+  const proceeding = await tx.proceeding.findUnique({ where: { id: proceedingId }, select: { matterId: true } });
+  if (!proceeding) throw new NotFoundError('القيد القضائي المطلوب غير موجود.');
+  const [matter] = await tx.$queryRaw<{ status: string; archivedAt: Date | null }[]>`
+    SELECT "status", "archivedAt" FROM "matter" WHERE "id" = ${proceeding.matterId} FOR UPDATE
+  `;
+  const [parent] = await tx.$queryRaw<{ archivedAt: Date | null }[]>`
+    SELECT "archivedAt" FROM "proceeding" WHERE "id" = ${proceedingId} FOR UPDATE
+  `;
+  if (!matter || !parent) throw new NotFoundError('القيد القضائي المطلوب غير موجود.');
+  if (matter.archivedAt || matter.status === 'ARCHIVED') throw new MatterArchivedError('ملف القضية مؤرشف.');
+  if (parent.archivedAt) throw new ProceedingArchivedError('القيد القضائي مؤرشف.');
+}
+
+async function lockHearing(tx: Prisma.TransactionClient, id: string) {
+  const hearing = await tx.hearing.findUnique({ where: { id }, select: { proceedingId: true } });
+  if (!hearing) throw new NotFoundError('الجلسة المطلوبة غير موجودة.');
+  await lockHearingParents(tx, hearing.proceedingId);
+}
+
+function hearingAcknowledgment(hearing: HearingDTO) {
+  const { id, version, status, updatedAt, duplicateDateWarning } = hearing;
+  return { id, version, status, updatedAt, duplicateDateWarning };
+}
+
+type HearingAcknowledgment = ReturnType<typeof hearingAcknowledgment>;
+
+async function replayHearing(tx: Prisma.TransactionClient, ack: HearingAcknowledgment, resultId?: string) {
+  const record = await tx.hearing.findUniqueOrThrow({
+    where: { id: ack.id },
+    include: { proceeding: { include: { court: true } }, results: { where: { id: resultId ?? '' } } },
+  });
+  return mapHearingToDTO({
+    ...record, version: ack.version, status: ack.status, updatedAt: new Date(ack.updatedAt),
+    rescheduleReason: ack.status === 'RESCHEDULED' ? record.rescheduleReason : null,
+    cancellationReason: ack.status === 'CANCELLED' ? record.cancellationReason : null,
+  }, ack.duplicateDateWarning);
+}
+
+function resultAcknowledgment(value: RecordHearingResultResult) {
+  return {
+    resultId: value.resultId,
+    hearing: hearingAcknowledgment(value.hearing),
+    next: value.nextHearing ? hearingAcknowledgment(value.nextHearing) : null,
+    tasks: value.tasks?.map(({ id, hearingId, dueDate, status, version, updatedAt }) => ({ id, hearingId, dueDate, status, version, updatedAt })) ?? [],
+  };
+}
+
+async function replayResult(tx: Prisma.TransactionClient, raw: unknown): Promise<RecordHearingResultResult> {
+  const ack = raw as ReturnType<typeof resultAcknowledgment>;
+  const result = mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({ where: { id: ack.resultId } }));
+  const hearing = await replayHearing(tx, ack.hearing, ack.resultId);
+  const nextHearing = ack.next ? await replayHearing(tx, ack.next) : null;
+  const tasks = await Promise.all(ack.tasks.map(async (snapshot) => ({
+    ...mapTaskToDTO(await tx.task.findUniqueOrThrow({ where: { id: snapshot.id } })), ...snapshot,
+  })));
+  return { resultId: result.id, result, hearing, nextHearing, tasks, taskIds: tasks.map((task) => task.id) };
+}
+
+async function hearingCommand<T>(
+  actor: Actor, commandType: string, key: string, payload: unknown,
+  write: (tx: Prisma.TransactionClient) => Promise<{ value: T; resultId: string; acknowledgment: unknown }>,
+  replay: (tx: Prisma.TransactionClient, payload: unknown, resultId: string) => Promise<T>,
+): Promise<T> {
+  const params = { actorId: actor.id, commandType, key, payload };
+  const execute = () => prisma.$transaction(async (tx) => {
+    const claim = await claimIdempotencyKey(tx, params);
+    if (claim.isReplay && claim.resultId) return replay(tx, claim.resultPayload, claim.resultId);
+    const { value, resultId, acknowledgment } = await write(tx);
+    await completeIdempotencyKey(tx, { ...params, resultType: 'HearingOperation', resultId, resultPayload: acknowledgment });
+    return value;
+  });
+  try {
+    return await execute();
+  } catch (error) {
+    if (!isIdempotencyUniqueConflict(error)) throw error;
+    const claim = await resolveConcurrentIdempotency(prisma, params);
+    if (!claim?.resultId) return execute();
+    return prisma.$transaction((tx) => replay(tx, claim.resultPayload, claim.resultId!));
+  }
+}
+
 export async function scheduleHearing(
   actor: Actor,
   rawInput: ScheduleHearingInput
@@ -224,27 +307,8 @@ export async function scheduleHearing(
   const purpose = input.purpose || input.hearingPurpose || null;
   const courtHall = input.courtHall || input.locationRoom || null;
 
-  return await prisma.$transaction(async (tx) => {
-    // Check proceeding & parent matter status
-    const proceeding = await tx.proceeding.findUnique({
-      where: { id: input.proceedingId },
-      include: {
-        matter: true,
-        court: true,
-      },
-    });
-
-    if (!proceeding) {
-      throw new NotFoundError('القيد القضائي المطلوب غير موجود.');
-    }
-
-    if (proceeding.matter.archivedAt != null || proceeding.matter.status === 'ARCHIVED') {
-      throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إضافة جلسات إليه.');
-    }
-
-    if (proceeding.archivedAt != null) {
-      throw new ProceedingArchivedError('القيد القضائي مؤرشف ولا يمكن جدولة جلسات عليه.');
-    }
+  return hearingCommand(actor, 'scheduleHearing', input.idempotencyKey, input, async (tx) => {
+    await lockHearingParents(tx, input.proceedingId);
 
     // Check same-day scheduled conflict warning
     const existingSameDay = await tx.hearing.findFirst({
@@ -255,27 +319,6 @@ export async function scheduleHearing(
       },
     });
     const duplicateWarning = Boolean(existingSameDay);
-
-    // Idempotency check if key supplied
-    if (input.idempotencyKey) {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'scheduleHearing',
-        key: input.idempotencyKey,
-        payload: {
-          proceedingId: input.proceedingId,
-          hearingDate: input.hearingDate,
-          hearingTime: normTime,
-          purpose,
-          courtHall,
-          rollNumber: input.rollNumber ?? null,
-        },
-      });
-
-      if (claim.isReplay && claim.resultPayload) {
-        return claim.resultPayload as HearingDTO;
-      }
-    }
 
     // Create Hearing row
     const hearing = await tx.hearing.create({
@@ -335,19 +378,8 @@ export async function scheduleHearing(
 
     const dto = mapHearingToDTO(hearing, duplicateWarning);
 
-    if (input.idempotencyKey) {
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'scheduleHearing',
-        key: input.idempotencyKey,
-        resultType: 'Hearing',
-        resultId: hearing.id,
-        resultPayload: dto,
-      });
-    }
-
-    return dto;
-  });
+    return { value: dto, resultId: dto.id, acknowledgment: hearingAcknowledgment(dto) };
+  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment));
 }
 
 export async function recordHearingResult(
@@ -379,6 +411,10 @@ export async function recordHearingResult(
     throw new SchedulingValidationError('يجب تحديد موعد الجلسة القادمة عند اختيار موعد محدد.');
   }
 
+  if (input.nextDateDisposition !== 'KNOWN' && (nextDateStr || nextTimeStr)) {
+    throw new SchedulingValidationError('حدد موقف موعد الجلسة القادم بما يطابق البيانات.');
+  }
+
   // Validate tasks if present
   if (input.tasks) {
     for (const t of input.tasks) {
@@ -388,35 +424,8 @@ export async function recordHearingResult(
     }
   }
 
-  // Idempotency token check and processing
-  const idempotencyPayload = {
-    hearingId: input.hearingId,
-    expectedVersion: input.expectedVersion,
-    decision,
-    summary: input.summary ?? null,
-    attendance: input.attendance ?? null,
-    notes: input.notes ?? null,
-    nextDateDisposition: input.nextDateDisposition,
-    nextDateStr,
-    nextTimeStr,
-    tasks: input.tasks ?? [],
-    decisionDocumentId: input.decisionDocumentId ?? null,
-    proceedingStatusUpdate: input.proceedingStatusUpdate ?? null,
-  };
-
-  return await prisma.$transaction(async (tx) => {
-    if (input.idempotencyKey) {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'recordHearingResult',
-        key: input.idempotencyKey,
-        payload: idempotencyPayload,
-      });
-
-      if (claim.isReplay && claim.resultPayload) {
-        return claim.resultPayload as RecordHearingResultResult;
-      }
-    }
+  return hearingCommand(actor, 'recordHearingResult', input.idempotencyKey, input, async (tx) => {
+    await lockHearing(tx, input.hearingId);
 
     // 1. Lock and load original hearing
     const hearing = await tx.hearing.findUnique({
@@ -449,8 +458,11 @@ export async function recordHearingResult(
 
     // 2. Mark hearing COMPLETED
     const nextHearingVersion = hearing.version + 1;
-    await tx.hearing.update({
-      where: { id: hearing.id },
+    if (nextDateStr && nextDateStr < toDateString(hearing.hearingDate)) {
+      throw new SchedulingValidationError('تاريخ الجلسة التالية لا يمكن أن يسبق الجلسة الحالية.');
+    }
+    const completed = await tx.hearing.update({
+      where: { id: hearing.id, version: input.expectedVersion, status: 'SCHEDULED' },
       data: {
         status: 'COMPLETED',
         version: nextHearingVersion,
@@ -579,17 +591,6 @@ export async function recordHearingResult(
       }
     }
 
-    // 7. Optional proceeding status transition
-    if (input.proceedingStatusUpdate) {
-      await tx.proceeding.update({
-        where: { id: hearing.proceedingId },
-        data: {
-          status: input.proceedingStatusUpdate,
-          updatedById: actor.id,
-        },
-      });
-    }
-
     // 8. Record immutable Audit Event
     await recordAuditEvent(tx, {
       userId: actor.id,
@@ -607,8 +608,7 @@ export async function recordHearingResult(
     const resultDTO = mapHearingResultToDTO(hearingResult);
     const completedHearingDTO = mapHearingToDTO({
       ...hearing,
-      status: 'COMPLETED',
-      version: nextHearingVersion,
+      ...completed,
       results: [hearingResult],
     });
 
@@ -621,19 +621,8 @@ export async function recordHearingResult(
       tasks: createdTasksDTO,
     };
 
-    if (input.idempotencyKey) {
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'recordHearingResult',
-        key: input.idempotencyKey,
-        resultType: 'HearingResult',
-        resultId: resultDTO.id,
-        resultPayload: finalResult,
-      });
-    }
-
-    return finalResult;
-  });
+    return { value: finalResult, resultId: resultDTO.id, acknowledgment: resultAcknowledgment(finalResult) };
+  }, replayResult);
 }
 
 export async function correctHearingResult(
@@ -663,7 +652,8 @@ export async function correctHearingResult(
     throw new SchedulingValidationError('منطوق القرار المصحح مطلوب.');
   }
 
-  return await prisma.$transaction(async (tx) => {
+  return hearingCommand(actor, 'correctHearingResult', input.idempotencyKey, input, async (tx) => {
+    await lockHearing(tx, input.hearingId);
     // 1. Find latest result for hearing
     const latestResult = await tx.hearingResult.findFirst({
       where: { hearingId: input.hearingId },
@@ -682,22 +672,16 @@ export async function correctHearingResult(
       throw new ConcurrencyConflictError('معرف النتيجة المسجلة لا يطابق أحدث نتيجة.');
     }
 
-    // 2. Idempotency check if key provided
-    if (input.idempotencyKey) {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'correctHearingResult',
-        key: input.idempotencyKey,
-        payload: {
-          hearingId: input.hearingId,
-          decision,
-          reason,
-          revision: latestResult.revision + 1,
-        },
+    if (input.nextDateDisposition && input.nextDateDisposition !== latestResult.nextDateDisposition) {
+      throw new SchedulingValidationError('تغيير موعد الجلسة التالية يحتاج إجراءً منفصلاً.');
+    }
+    if (input.nextHearingDate || input.nextHearingTime) {
+      const link = await tx.hearingLink.findFirst({
+        where: { fromHearingId: input.hearingId, relation: 'ADJOURNED_TO' }, include: { toHearing: true },
       });
-
-      if (claim.isReplay && claim.resultPayload) {
-        return claim.resultPayload as HearingResultDTO;
+      if (!link || (input.nextHearingDate && input.nextHearingDate !== toDateString(link.toHearing.hearingDate)) ||
+          (input.nextHearingTime && validateAndNormalizeHearingTime(input.nextHearingTime) !== link.toHearing.hearingTime)) {
+        throw new SchedulingValidationError('تغيير موعد الجلسة التالية يحتاج إجراءً منفصلاً.');
       }
     }
 
@@ -711,7 +695,7 @@ export async function correctHearingResult(
         attendance: input.attendance !== undefined ? input.attendance?.trim() || null : latestResult.attendance,
         notes: input.notes !== undefined ? input.notes?.trim() || null : latestResult.notes,
         correctionReason: reason,
-        nextDateDisposition: input.nextDateDisposition ?? latestResult.nextDateDisposition,
+        nextDateDisposition: latestResult.nextDateDisposition,
         recordedAt: new Date(),
         revision: nextRevision,
         supersedesResultId: latestResult.id,
@@ -738,19 +722,8 @@ export async function correctHearingResult(
 
     const dto = mapHearingResultToDTO(newResult);
 
-    if (input.idempotencyKey) {
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'correctHearingResult',
-        key: input.idempotencyKey,
-        resultType: 'HearingResult',
-        resultId: newResult.id,
-        resultPayload: dto,
-      });
-    }
-
-    return dto;
-  });
+    return { value: dto, resultId: dto.id, acknowledgment: null };
+  }, async (tx, _ack, id) => mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({ where: { id } })));
 }
 
 export async function rescheduleHearing(
@@ -778,7 +751,8 @@ export async function rescheduleHearing(
   const normTime = validateAndNormalizeHearingTime(input.newHearingTime);
   const reason = input.reason.trim();
 
-  return await prisma.$transaction(async (tx) => {
+  return hearingCommand(actor, 'rescheduleHearing', input.idempotencyKey, input, async (tx) => {
+    await lockHearing(tx, input.hearingId);
     // 1. Load hearing
     const hearing = await tx.hearing.findUnique({
       where: { id: input.hearingId },
@@ -801,29 +775,9 @@ export async function rescheduleHearing(
       throw new UnsupportedTransitionError(`لا يمكن إعادة جدولة جلسة غير مجدولة (الحالة الحالية: ${hearing.status}).`);
     }
 
-    // Idempotency check
-    if (input.idempotencyKey) {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'rescheduleHearing',
-        key: input.idempotencyKey,
-        payload: {
-          hearingId: input.hearingId,
-          expectedVersion: input.expectedVersion,
-          newHearingDate: input.newHearingDate,
-          newHearingTime: normTime,
-          reason,
-        },
-      });
-
-      if (claim.isReplay && claim.resultPayload) {
-        return claim.resultPayload as RescheduleHearingResult;
-      }
-    }
-
     // 2. Mark original RESCHEDULED
     const updatedOriginal = await tx.hearing.update({
-      where: { id: hearing.id },
+      where: { id: hearing.id, version: input.expectedVersion, status: 'SCHEDULED' },
       data: {
         status: 'RESCHEDULED',
         version: hearing.version + 1,
@@ -872,6 +826,22 @@ export async function rescheduleHearing(
         createdById: actor.id,
       },
     });
+
+    const taskSources = [hearing.id];
+    if (input.taskChanges?.length) {
+      const adjournments = await tx.hearingLink.findMany({
+        where: { toHearingId: hearing.id, relation: 'ADJOURNED_TO' },
+        select: { fromHearingId: true },
+      });
+      taskSources.push(...adjournments.map(({ fromHearingId }) => fromHearingId));
+    }
+    for (const task of input.taskChanges ?? []) {
+      const updated = await tx.task.updateMany({
+        where: { id: task.taskId, proceedingId: hearing.proceedingId, hearingId: { in: taskSources }, status: 'OPEN', version: task.expectedVersion },
+        data: { hearingId: replacementHearing.id, dueDate: parseCalendarDateToUtc(task.dueDate), version: { increment: 1 }, updatedById: actor.id },
+      });
+      if (updated.count !== 1) throw new ConcurrencyConflictError('تم تغيير إحدى مهام الجلسة. أعد فتح النموذج.');
+    }
 
     // 5. Invalidate old reminders & create new for replacement
     await tx.jobRun.updateMany({
@@ -925,18 +895,14 @@ export async function rescheduleHearing(
       newHearing: replacementDTO,
     };
 
-    if (input.idempotencyKey) {
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'rescheduleHearing',
-        key: input.idempotencyKey,
-        resultType: 'Hearing',
-        resultId: replacementHearing.id,
-        resultPayload: result,
-      });
-    }
-
-    return result;
+    return { value: result, resultId: replacementHearing.id, acknowledgment: {
+      original: hearingAcknowledgment(originalDTO), replacement: hearingAcknowledgment(replacementDTO),
+    } };
+  }, async (tx, raw) => {
+    const ack = raw as { original: HearingAcknowledgment; replacement: HearingAcknowledgment };
+    const originalHearing = await replayHearing(tx, ack.original);
+    const replacementHearing = await replayHearing(tx, ack.replacement);
+    return { originalHearing, replacementHearing, newHearing: replacementHearing };
   });
 }
 
@@ -958,7 +924,8 @@ export async function cancelHearing(
   const input = parsed.data;
   const reason = input.reason.trim();
 
-  return await prisma.$transaction(async (tx) => {
+  return hearingCommand(actor, 'cancelHearing', input.idempotencyKey, input, async (tx) => {
+    await lockHearing(tx, input.hearingId);
     const hearing = await tx.hearing.findUnique({
       where: { id: input.hearingId },
       include: {
@@ -980,26 +947,9 @@ export async function cancelHearing(
       throw new UnsupportedTransitionError(`لا يمكن إلغاء جلسة غير مجدولة (الحالة الحالية: ${hearing.status}).`);
     }
 
-    if (input.idempotencyKey) {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'cancelHearing',
-        key: input.idempotencyKey,
-        payload: {
-          hearingId: input.hearingId,
-          expectedVersion: input.expectedVersion,
-          reason,
-        },
-      });
-
-      if (claim.isReplay && claim.resultPayload) {
-        return claim.resultPayload as HearingDTO;
-      }
-    }
-
     // Update hearing to CANCELLED
     const cancelled = await tx.hearing.update({
-      where: { id: hearing.id },
+      where: { id: hearing.id, version: input.expectedVersion, status: 'SCHEDULED' },
       data: {
         status: 'CANCELLED',
         version: hearing.version + 1,
@@ -1036,19 +986,8 @@ export async function cancelHearing(
 
     const dto = mapHearingToDTO(cancelled);
 
-    if (input.idempotencyKey) {
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'cancelHearing',
-        key: input.idempotencyKey,
-        resultType: 'Hearing',
-        resultId: hearing.id,
-        resultPayload: dto,
-      });
-    }
-
-    return dto;
-  });
+    return { value: dto, resultId: dto.id, acknowledgment: hearingAcknowledgment(dto) };
+  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment));
 }
 
 export async function getHearing(
@@ -1095,6 +1034,11 @@ export async function listHearingsForProceeding(
         orderBy: { revision: 'desc' },
         take: 1,
       },
+      tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } },
+      linksTo: {
+        where: { relation: 'ADJOURNED_TO' },
+        select: { fromHearing: { select: { tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } } } } },
+      },
     },
     orderBy: [
       { hearingDate: 'asc' },
@@ -1102,5 +1046,11 @@ export async function listHearingsForProceeding(
     ],
   });
 
-  return hearings.map((h) => mapHearingToDTO(h));
+  return hearings.map((hearing) => ({
+    ...mapHearingToDTO(hearing),
+    followUpTasks: [
+      ...hearing.tasks,
+      ...hearing.linksTo.flatMap(({ fromHearing }) => fromHearing.tasks),
+    ].map(mapTaskToDTO),
+  }));
 }

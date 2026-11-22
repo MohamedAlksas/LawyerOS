@@ -23,6 +23,7 @@ import {
   AddProceedingInput,
   UpdateProceedingInput,
   SimilarProceedingCandidateDTO,
+  hasCompleteProceedingRegistration,
 } from '@/modules/matters/matter-types';
 import {
   PROCEEDING_INSTANCE_LABELS,
@@ -248,7 +249,7 @@ export function ProceedingForm({
   }, [matter.proceedings, initialProceeding]);
 
   // Docket Incomplete Check
-  const isDocketIncomplete = !numberText.trim() || !yearLabel.trim() || !registerType.trim();
+  const isDocketIncomplete = !hasCompleteProceedingRegistration({ numberText, yearLabel, registerType, courtId });
 
   // Confirmation is scoped to the full docket identity and the displayed candidates.
   const [similarCandidates, setSimilarCandidates] = useState<SimilarProceedingCandidateDTO[]>([]);

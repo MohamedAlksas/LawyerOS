@@ -297,7 +297,7 @@ export async function saveParty(
         }
 
         const nameNormalized = normalizeArabicText(input.name);
-    const primaryPhoneNormalized = normalizePhone(input.primaryPhone);
+    const primaryPhoneNormalized = normalizePhone(input.primaryPhone) || null;
 
     let targetPartyId: string;
     let resultingParty: Prisma.PartyGetPayload<{ include: { identities: true } }>;
@@ -331,8 +331,8 @@ export async function saveParty(
           name: input.name,
           nameNormalized,
           primaryPhone: input.primaryPhone,
-          primaryPhoneNormalized,
-          additionalPhones: input.additionalPhones ?? [],
+          primaryPhoneNormalized: input.primaryPhone === undefined ? undefined : primaryPhoneNormalized,
+          additionalPhones: input.additionalPhones,
           email: input.email,
           address: input.address,
           notes: input.notes,

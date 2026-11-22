@@ -346,6 +346,7 @@ model Matter {
   proceedings     Proceeding[]
   authorizations  MatterAuthorization[]
   tasks           Task[]
+  noteRevisions   MatterNoteRevision[]
 
   @@index([status])
   @@index([status, updatedAt])
@@ -355,6 +356,19 @@ model Matter {
   @@index([paperLocationId])
   @@index([titleNormalized])
   @@map("matter")
+}
+
+model MatterNoteRevision {
+  id          String   @id @default(uuid())
+  matterId    String
+  version     Int
+  notes       String?
+  changedById String
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  matter      Matter   @relation(fields: [matterId], references: [id], onDelete: Cascade)
+
+  @@unique([matterId, version])
+  @@map("matter_note_revision")
 }
 
 model MatterParty {
@@ -629,7 +643,7 @@ model HearingResult {
   supersedesResult     HearingResult?      @relation("HearingResultSupersedes", fields: [supersedesResultId], references: [id])
 
   @@index([hearingId])
-  @@index([hearingId, revision])
+  @@unique([hearingId, revision])
   @@map("hearing_result")
 }
 

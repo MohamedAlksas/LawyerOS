@@ -180,10 +180,25 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
   return null;
 }
 
+async function privateAuthResponse(response: Response): Promise<Response> {
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', 'no-store');
+  if (!response.body || !headers.get('content-type')?.includes('application/json')) {
+    return new Response(response.body, { status: response.status, headers });
+  }
+  const data: unknown = await response.json();
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+  return new Response(JSON.stringify(data, (key, value) => key === 'token' ? undefined : value), {
+    status: response.status,
+    headers,
+  });
+}
+
 export async function GET(request: NextRequest) {
   const blocked = await handleAuthSecurityGuards(request);
   if (blocked) return blocked;
-  return auth.handler(request);
+  return privateAuthResponse(await auth.handler(request));
 }
 
 export async function POST(request: NextRequest) {
@@ -660,6 +675,6 @@ export async function POST(request: NextRequest) {
   if (targetUserId && /(verify-totp|verify-backup-code)$/.test(pathname)) {
     await auditSignInMfa(targetUserId, response.ok);
   }
-  return response;
+  return privateAuthResponse(response);
 }
 

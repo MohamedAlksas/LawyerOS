@@ -87,6 +87,7 @@ import {
   MatterArchivedError,
   ProceedingArchivedError,
   ActiveObligationError,
+  hasCompleteProceedingRegistration,
 } from './matter-types';
 
 function extractOperationVersion(payload: unknown, fallback: number): number {
@@ -246,9 +247,6 @@ async function validateProceedingHierarchy(
   }
 }
 
-/**
- * Validates that an ACTIVE proceeding has all mandatory registration details.
- */
 function validateProceedingCompleteness(
   status: string | undefined,
   numberText?: string | null,
@@ -256,17 +254,10 @@ function validateProceedingCompleteness(
   registerType?: string | null,
   courtId?: string | null
 ): void {
-  if (status === 'ACTIVE') {
-    const hasNumber = Boolean(numberText && numberText.trim().length > 0);
-    const hasYear = Boolean(yearLabel && yearLabel.trim().length > 0);
-    const hasRegister = Boolean(registerType && registerType.trim().length > 0);
-    const hasCourt = Boolean(courtId && courtId.trim().length > 0);
-
-    if (!hasNumber || !hasYear || !hasRegister || !hasCourt) {
-      throw new MatterValidationError(
-        'لا يمكن تفعيل القيد القضائي بدون استكمال رقم الدعوى وسنة القيد ونوع الجدول والمحكمة.'
-      );
-    }
+  if (status && status !== 'DRAFT' && !hasCompleteProceedingRegistration({ numberText, yearLabel, registerType, courtId })) {
+    throw new MatterValidationError(
+      'لا يمكن تفعيل القيد القضائي بدون استكمال رقم الدعوى وسنة القيد ونوع الجدول والمحكمة.'
+    );
   }
 }
 
@@ -723,7 +714,14 @@ export async function openMatter(
         },
       });
 
-      // 6. Link initial client if provided
+    if (matter.notes) {
+      await tx.matterNoteRevision.create({ data: {
+        matterId: matter.id, version: matter.version, notes: matter.notes,
+        changedById: actor.id, createdAt: matter.createdAt,
+      } });
+    }
+
+    // 6. Link initial client if provided
       if (input.initialClientId) {
         await tx.matterParty.create({
           data: {
@@ -858,8 +856,11 @@ export async function updateMatter(
         archivedAt: Date | null;
         practiceAreaId: string | null;
         paperLocationId: string | null;
+        notes: string | null;
+        updatedAt: Date;
+        updatedById: string;
       }>>`
-        SELECT "id", "version", "status", "archivedAt", "practiceAreaId", "paperLocationId"
+        SELECT "id", "version", "status", "archivedAt", "practiceAreaId", "paperLocationId", "notes", "updatedAt", "updatedById"
         FROM "matter"
         WHERE "id" = ${input.id}
         FOR UPDATE;
@@ -895,6 +896,21 @@ export async function updateMatter(
       const closingDateVal = parseCalendarDateToUtc(input.closingDate);
 
       const nextVersion = existing.version + 1;
+      const notes = input.notes === undefined ? existing.notes : input.notes?.trim() || null;
+      const notesChanged = notes !== (existing.notes || null);
+      const paperLocationId = input.paperLocationId === undefined ? existing.paperLocationId : input.paperLocationId;
+      if (notesChanged) {
+        const hasHistory = await tx.matterNoteRevision.count({ where: { matterId: input.id } });
+        if (!hasHistory && existing.notes) {
+          await tx.matterNoteRevision.create({ data: {
+            matterId: input.id, version: existing.version, notes: existing.notes,
+            changedById: existing.updatedById, createdAt: existing.updatedAt,
+          } });
+        }
+        await tx.matterNoteRevision.create({ data: {
+          matterId: input.id, version: nextVersion, notes, changedById: actor.id,
+        } });
+      }
 
       await tx.matter.update({
         where: { id: input.id },
@@ -907,8 +923,8 @@ export async function updateMatter(
           openingDate: openingDateVal,
           closingDate: closingDateVal,
           summary: input.summary?.trim() ?? null,
-          notes: input.notes?.trim() ?? null,
-          paperLocationId: input.paperLocationId ?? null,
+          notes,
+          paperLocationId,
           version: nextVersion,
           updatedById: actor.id,
         },
@@ -919,7 +935,11 @@ export async function updateMatter(
         action: 'UPDATE_MATTER',
         entityType: 'Matter',
         entityId: input.id,
-        changedFields: { title: input.title, status: input.status, kind: input.kind },
+        changedFields: {
+          title: input.title, status: input.status, kind: input.kind,
+          ...(notesChanged ? { noteRevision: nextVersion } : {}),
+          ...(paperLocationId !== existing.paperLocationId ? { paperLocationId: { from: existing.paperLocationId, to: paperLocationId } } : {}),
+        },
       });
 
       const matterDTO = await getMatterInternal(tx, input.id);
@@ -2580,7 +2600,7 @@ export async function unlinkMatterAuthorization(
   }
 }
 
-export async function getMatter(matterId: string, actor?: Actor): Promise<MatterDTO> {
+export async function getMatter(matterId: string, actor?: Actor, includeNoteHistory = false): Promise<MatterDTO> {
   if (!actor || !actor.id) {
     throw new UnauthorizedError('المستخدم غير مصرح له.');
   }
@@ -2616,7 +2636,46 @@ export async function getMatter(matterId: string, actor?: Actor): Promise<Matter
     throw new NotFoundError('ملف القضية غير موجود.');
   }
 
-  return mapMatterToDTO(matter);
+  const dto = mapMatterToDTO(matter);
+  if (includeNoteHistory) {
+    const revisions = await prisma.matterNoteRevision.findMany({
+      where: { matterId }, orderBy: { version: 'desc' },
+      select: { version: true, notes: true, changedById: true, createdAt: true },
+    });
+    dto.noteRevisions = revisions.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+  }
+  return dto;
+}
+
+export async function listMatterAuthorizationOptions(matterId: string, actor: Actor) {
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  if (!z.uuid().safeParse(matterId).success) throw new MatterValidationError('معرف الملف غير صالح.');
+  const options = await getPrismaClient().powerOfAttorney.findMany({
+    where: {
+      party: { archivedAt: null, matterParties: { some: { matterId, role: 'CLIENT' } } },
+      matterAuthorizations: { none: { matterId } },
+    },
+    select: { id: true, poaNumberText: true, poaYearLabel: true, notarizationOffice: true, party: { select: { name: true } } },
+    orderBy: [{ party: { name: 'asc' } }, { createdAt: 'desc' }, { id: 'asc' }],
+  });
+  return options.map(({ party, ...option }) => ({ ...option, partyName: party.name }));
+}
+
+function linkedPartyName(query: string, includeArchived: boolean): Prisma.MatterWhereInput {
+  return { parties: { some: { party: {
+    ...(includeArchived ? {} : { archivedAt: null }),
+    nameNormalized: { contains: query, mode: 'insensitive' },
+  } } } };
+}
+
+function proceedingDocketPair(query: string): Prisma.ProceedingWhereInput[] {
+  const pair = /^([^/]+)\/([^/]+)$/.exec(normalizeArabicDigits(query));
+  const number = pair?.[1].trim();
+  const year = pair?.[2].trim();
+  return number && year ? [{
+    OR: [{ numberNormalized: { equals: number, mode: 'insensitive' } }, { numberText: { in: expandSearchVariants(number), mode: 'insensitive' } }],
+    AND: [{ OR: [{ yearNormalized: { equals: year, mode: 'insensitive' } }, { yearLabel: { in: expandSearchVariants(year), mode: 'insensitive' } }] }],
+  }] : [];
 }
 
 export async function searchMatters(
@@ -2684,6 +2743,7 @@ export async function searchMatters(
     const orClauses: Prisma.MatterWhereInput[] = [];
     if (normQuery) {
       orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+      orClauses.push(linkedPartyName(normQuery, Boolean(params.includeArchived || params.status === 'ARCHIVED')));
     }
     for (const v of queryVariants) {
       orClauses.push({ title: { contains: v, mode: 'insensitive' } });
@@ -3724,6 +3784,7 @@ export async function searchProceedings(
     const variants = expandSearchVariants(q);
 
     const orClauses: Prisma.ProceedingWhereInput[] = [
+      ...proceedingDocketPair(q),
       { numberText: { contains: q, mode: 'insensitive' } },
       { numberNormalized: { contains: normDigits, mode: 'insensitive' } },
       { yearLabel: { contains: q, mode: 'insensitive' } },
@@ -3959,6 +4020,7 @@ export async function unifiedSearch(
     const orClauses: Prisma.MatterWhereInput[] = [];
     if (normQuery) {
       orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+      orClauses.push(linkedPartyName(normQuery, includeArchived));
     }
     for (const v of queryVariants) {
       orClauses.push({ title: { contains: v, mode: 'insensitive' } });
@@ -3979,6 +4041,7 @@ export async function unifiedSearch(
     const variants = expandSearchVariants(query);
 
     const orClauses: Prisma.ProceedingWhereInput[] = [
+      ...proceedingDocketPair(query),
       { numberText: { contains: query, mode: 'insensitive' } },
       { numberNormalized: { contains: qDigits, mode: 'insensitive' } },
       { yearLabel: { contains: query, mode: 'insensitive' } },

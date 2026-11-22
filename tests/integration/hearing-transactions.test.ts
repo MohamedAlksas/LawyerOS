@@ -7,6 +7,8 @@ import {
   scheduleHearing,
   recordHearingResult,
   correctHearingResult,
+  rescheduleHearing,
+  listHearingsForProceeding,
   getHearing,
 } from '@/modules/scheduling';
 import {
@@ -177,6 +179,23 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
       },
     });
     expect(job).not.toBeNull();
+
+    const scheduled = result.nextHearing!;
+    const list = await listHearingsForProceeding(actor, testProceedingId);
+    const tasksForNext = list.find(({ id }) => id === scheduled.id)?.followUpTasks;
+    expect(tasksForNext?.map(({ id }) => id)).toEqual(expect.arrayContaining(createdTasks.map(({ id }) => id)));
+    const [selected, unchanged] = createdTasks;
+    const move = {
+      hearingId: scheduled.id, expectedVersion: scheduled.version, newHearingDate: '2027-02-19',
+      reason: 'تعديل موعد الجلسة وإحدى المهام', idempotencyKey: crypto.randomUUID(),
+      taskChanges: [{ taskId: selected.id, expectedVersion: selected.version, dueDate: '2027-02-17' }],
+    };
+    const moved = await rescheduleHearing(actor, move);
+    expect(await rescheduleHearing(actor, move)).toEqual(moved);
+    const updated = await prisma.task.findUniqueOrThrow({ where: { id: selected.id } });
+    expect(updated.hearingId).toBe(moved.replacementHearing.id);
+    expect(updated.dueDate?.toISOString().slice(0, 10)).toBe('2027-02-17');
+    expect(await prisma.task.findUniqueOrThrow({ where: { id: unchanged.id } })).toEqual(unchanged);
   });
 
   it('T08-TC-03: Idempotent retry returns original result; payload drift under same key is rejected', async () => {
@@ -206,6 +225,10 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     const retryRes = await recordHearingResult(actor, initialPayload);
     expect(retryRes.resultId).toBe(firstRes.resultId);
     expect(retryRes.nextHearing?.id).toBe(firstRes.nextHearing?.id);
+    expect(retryRes).toEqual(firstRes);
+    const claim = await prisma.idempotencyRecord.findFirstOrThrow({ where: { actorId: actor.id, key: idemKey } });
+    expect(JSON.stringify(claim.resultPayload)).not.toContain(initialPayload.decisionText);
+    expect(JSON.stringify(claim.resultPayload)).not.toContain(initialPayload.tasks[0].title);
 
     // Verify NO duplicate hearings, results, or tasks were written
     const resultsCount = await prisma.hearingResult.count({ where: { hearingId: hearing.id } });
@@ -223,58 +246,60 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     await expect(recordHearingResult(actor, driftedPayload)).rejects.toThrow();
   });
 
-  it('T08-TC-04: Full rollback on injected failure (tasks / audit); retry succeeds after fix', async () => {
-    // 1. Setup hearing and record baseline counts
+  it.each(['task', 'audit_event'] as const)('T08-TC-04: Rolls back an injected %s write failure and retries unchanged', async (table) => {
     const hearing = await scheduleHearing(actor, {
       proceedingId: testProceedingId,
       hearingDate: '2027-03-20',
-      idempotencyKey: `sched_tc04_${crypto.randomUUID()}`,
+      idempotencyKey: crypto.randomUUID(),
     });
-
-    const initialHearingCount = await prisma.hearing.count();
-    const initialResultCount = await prisma.hearingResult.count();
-    const initialTaskCount = await prisma.task.count();
-    const initialJobCount = await prisma.jobRun.count();
-    const initialAuditCount = await prisma.auditEvent.count();
-
-    // 2. Inject failure at task creation (e.g. invalid task title violating length/content constraints)
-    const invalidTaskPayload = {
+    const payload = {
       hearingId: hearing.id,
       expectedVersion: hearing.version,
       decisionText: 'قرار تجريبي لفحص التراجع الكامل',
       nextDateDisposition: 'KNOWN' as const,
       nextHearingDate: '2027-04-20',
-      tasks: [{ title: '' }], // Empty title triggers validation failure inside transaction
-      idempotencyKey: `tx_fail_task_${crypto.randomUUID()}`,
+      tasks: [{ title: 'متابعة القرار التجريبي' }],
+      idempotencyKey: crypto.randomUUID(),
     };
-
-    await expect(recordHearingResult(actor, invalidTaskPayload)).rejects.toThrow();
-
-    // Verify status, result, linked hearings, tasks, outbox stay at pre-command values
-    expect(await prisma.hearing.count()).toBe(initialHearingCount);
-    expect(await prisma.hearingResult.count()).toBe(initialResultCount);
-    expect(await prisma.task.count()).toBe(initialTaskCount);
-    expect(await prisma.jobRun.count()).toBe(initialJobCount);
-    expect(await prisma.auditEvent.count()).toBe(initialAuditCount);
-
-    const untouchedHearing = await getHearing(actor, hearing.id);
-    expect(untouchedHearing.status).toBe('SCHEDULED');
-    expect(untouchedHearing.version).toBe(hearing.version);
-
-    // 3. Retry after removing failure succeeds cleanly
-    const validPayload = {
-      hearingId: hearing.id,
-      expectedVersion: hearing.version,
-      decisionText: 'قرار سليم بعد إزالة الخطأ المحقون',
-      nextDateDisposition: 'NONE' as const,
-      idempotencyKey: `tx_retry_success_${crypto.randomUUID()}`,
+    const snapshot = async () => {
+      const hearings = await prisma.hearing.findMany({ where: { proceedingId: testProceedingId }, orderBy: { id: 'asc' } });
+      const ids = hearings.map(({ id }) => id);
+      return {
+        hearings,
+        results: await prisma.hearingResult.count({ where: { hearingId: hearing.id } }),
+        links: await prisma.hearingLink.count({ where: { fromHearingId: hearing.id } }),
+        tasks: await prisma.task.count({ where: { proceedingId: testProceedingId } }),
+        jobs: await prisma.jobRun.findMany({ where: { sourceType: 'Hearing', sourceId: { in: ids } }, orderBy: { id: 'asc' } }),
+        audit: await prisma.auditEvent.count({ where: { entityId: hearing.id } }),
+        claims: await prisma.idempotencyRecord.count({ where: { actorId: actor.id, key: payload.idempotencyKey } }),
+      };
     };
+    const before = await snapshot();
+    expect(hearing.id).toMatch(/^[0-9a-f-]{36}$/);
+    const constraint = 't08_test_injected_write_failure';
+    const column = table === 'task' ? 'hearing_id' : '"entityId"';
+    // NOT VALID checks upcoming writes without scanning unrelated fixture rows.
+    await prisma.$executeRawUnsafe(
+      'ALTER TABLE ' + table + ' ADD CONSTRAINT ' + constraint + ' CHECK (' + column + " <> '" + hearing.id + "') NOT VALID",
+    );
+    try {
+      await expect(recordHearingResult(actor, payload)).rejects.toThrow(constraint);
+      expect(await snapshot()).toEqual(before);
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE ' + table + ' DROP CONSTRAINT ' + constraint);
+    }
 
-    const successRes = await recordHearingResult(actor, validPayload);
-    expect(successRes.resultId).toBeDefined();
-
-    const completedHearing = await getHearing(actor, hearing.id);
-    expect(completedHearing.status).toBe('COMPLETED');
+    const saved = await recordHearingResult(actor, payload);
+    expect(saved.nextHearing?.id).toBeDefined();
+    expect(saved.taskIds).toHaveLength(1);
+    const after = await snapshot();
+    expect(after.results).toBe(1);
+    expect(after.links).toBe(1);
+    expect(after.claims).toBe(1);
+    expect(after.tasks).toBe(before.tasks + 1);
+    expect(after.audit).toBe(before.audit + 1);
+    expect(after.jobs.length).toBeGreaterThan(before.jobs.length);
+    expect(after.hearings.find(({ id }) => id === hearing.id)?.status).toBe('COMPLETED');
   });
 
   it('T08-TC-05: Concurrency conflict rejection and result correction with history preservation', async () => {
@@ -286,27 +311,28 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     });
     expect(hearing.version).toBe(1);
 
-    // 2. Session 1 submits result with expectedVersion 1
-    const session1Res = await recordHearingResult(actor, {
+    const decisionText = 'حكمت المحكمة بندب خبير في الدعوى';
+    const payload = {
       hearingId: hearing.id,
       expectedVersion: 1,
-      decisionText: 'حكمت المحكمة بندب خبير في الدعوى',
-      nextDateDisposition: 'KNOWN',
+      decisionText,
+      nextDateDisposition: 'KNOWN' as const,
       nextHearingDate: '2027-06-15',
-      idempotencyKey: `s1_result_${crypto.randomUUID()}`,
-    });
-    expect(session1Res.resultId).toBeDefined();
-
-    // 3. Session 2 attempts concurrent submission with stale expectedVersion 1
-    await expect(
-      recordHearingResult(actor2, {
-        hearingId: hearing.id,
-        expectedVersion: 1, // Stale!
-        decisionText: 'محاولة تعديل متزامنة متضاربة',
-        nextDateDisposition: 'NONE',
-        idempotencyKey: `s2_result_${crypto.randomUUID()}`,
-      })
-    ).rejects.toThrow(ConcurrencyConflictError);
+      tasks: [{ title: 'متابعة الجلسة' }],
+    };
+    const submissions = await Promise.allSettled([
+      recordHearingResult(actor, { ...payload, idempotencyKey: crypto.randomUUID() }),
+      recordHearingResult(actor2, { ...payload, idempotencyKey: crypto.randomUUID() }),
+    ]);
+    const winners = submissions.flatMap((outcome) => outcome.status === 'fulfilled' ? [outcome.value] : []);
+    const losers = submissions.flatMap((outcome) => outcome.status === 'rejected' ? [outcome.reason] : []);
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(losers[0]).toBeInstanceOf(ConcurrencyConflictError);
+    const [session1Res] = winners;
+    expect(await prisma.hearingLink.count({ where: { fromHearingId: hearing.id } })).toBe(1);
+    expect(await prisma.task.count({ where: { hearingId: hearing.id } })).toBe(1);
+    expect(await prisma.auditEvent.count({ where: { entityId: hearing.id, action: 'RECORD_HEARING_RESULT' } })).toBe(1);
 
     // 4. Session 2 reloads and performs correction with reason
     const reloaded = await getHearing(actor2, hearing.id);
@@ -339,5 +365,8 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     expect(allResults[0].decisionText).toBe('حكمت المحكمة بندب خبير في الدعوى');
     expect(allResults[1].revision).toBe(2);
     expect(allResults[1].supersedesResultId).toBe(allResults[0].id);
+    const linked = await prisma.hearingLink.findFirstOrThrow({ where: { fromHearingId: hearing.id, relation: 'ADJOURNED_TO' }, include: { toHearing: true } });
+    expect(linked.toHearingId).toBe(session1Res.nextHearing?.id);
+    expect(linked.toHearing.hearingDate.toISOString().slice(0, 10)).toBe('2027-06-15');
   });
 });

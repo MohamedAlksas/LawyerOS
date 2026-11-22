@@ -15,20 +15,7 @@ interface MatterEditPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: MatterEditPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    return {
-      title: `تعديل الملف: ${matter.fileCode} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'تعديل الملف — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'تعديل الملف — LawOffice OS' };
 
 export default async function MatterEditPage({ params }: MatterEditPageProps) {
   const { id } = await params;

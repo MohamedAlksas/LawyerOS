@@ -16,20 +16,7 @@ interface EditProceedingPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: EditProceedingPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    return {
-      title: `تعديل القيد القضائي — ${matter.fileCode} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'تعديل القيد القضائي — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'تعديل القيد القضائي — LawOffice OS' };
 
 export default async function EditProceedingPage({ params }: EditProceedingPageProps) {
   const { id, proceedingId } = await params;

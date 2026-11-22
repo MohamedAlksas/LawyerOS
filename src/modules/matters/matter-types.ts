@@ -105,6 +105,7 @@ export interface MatterDTO {
   closingDate?: string | null;
   summary?: string | null;
   notes?: string | null;
+  noteRevisions?: { version: number; notes: string | null; changedById: string; createdAt: string }[];
   paperLocationId?: string | null;
   paperLocationName?: string | null;
   archivedAt?: string | null;
@@ -467,6 +468,16 @@ export interface FindSimilarProceedingsResult {
 // ==========================================
 // Strict Calendar Date Validation
 // ==========================================
+export function hasCompleteProceedingRegistration(proceeding: {
+  numberText?: string | null;
+  yearLabel?: string | null;
+  registerType?: string | null;
+  courtId?: string | null;
+}): boolean {
+  return [proceeding.numberText, proceeding.yearLabel, proceeding.registerType, proceeding.courtId]
+    .every((value) => Boolean(value?.trim()));
+}
+
 export function validateStrictCalendarDate(val: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(val)) {
     return false;

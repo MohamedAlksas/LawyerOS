@@ -59,6 +59,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
       const res = scheduleHearingSchema.safeParse({
         proceedingId,
         hearingDate: '2027-06-01',
+        idempotencyKey: 'schedule-request',
       });
       expect(res.success).toBe(true);
       if (res.success) {
@@ -67,7 +68,14 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
       }
     });
 
-    it('accepts optional time, court details, purpose, roll number, and idempotency key', () => {
+    it('requires a stable idempotency key', () => {
+      expect(scheduleHearingSchema.safeParse({
+        proceedingId: crypto.randomUUID(),
+        hearingDate: '2027-06-01',
+      }).success).toBe(false);
+    });
+
+    it('accepts optional time, court details, purpose and roll number', () => {
       const proceedingId = crypto.randomUUID();
       const res = scheduleHearingSchema.safeParse({
         proceedingId,
@@ -89,6 +97,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
       const res = scheduleHearingSchema.safeParse({
         proceedingId: crypto.randomUUID(),
         hearingDate: '2027-06-01',
+        idempotencyKey: 'schedule-request',
         unexpectedField: 'forbidden',
       });
       expect(res.success).toBe(false);
@@ -98,18 +107,30 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
       const res1 = scheduleHearingSchema.safeParse({
         proceedingId: '',
         hearingDate: '2027-06-01',
+        idempotencyKey: 'schedule-request',
       });
       expect(res1.success).toBe(false);
 
       const res2 = scheduleHearingSchema.safeParse({
         proceedingId: crypto.randomUUID(),
         hearingDate: 'invalid-date',
+        idempotencyKey: 'schedule-request',
       });
       expect(res2.success).toBe(false);
     });
   });
 
   describe('recordHearingResultSchema', () => {
+    it('rejects proceeding status changes and document linkage from a hearing result', () => {
+      const input = {
+        hearingId: crypto.randomUUID(), expectedVersion: 1, decision: 'حكم تمهيدي',
+        nextDateDisposition: 'NONE', idempotencyKey: crypto.randomUUID(),
+      };
+      expect(recordHearingResultSchema.safeParse(input).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...input, proceedingStatusUpdate: 'CLOSED' }).success).toBe(false);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success).toBe(false);
+    });
+
     it('accepts valid result recording with next date and tasks', () => {
       const hearingId = crypto.randomUUID();
       const res = recordHearingResultSchema.safeParse({
@@ -143,6 +164,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         expectedVersion: 1,
         courtDecision: '   ',
         nextDateDisposition: 'NONE',
+        idempotencyKey: 'result-request',
       });
       expect(res.success).toBe(false);
     });
@@ -153,6 +175,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         expectedVersion: 1,
         courtDecision: 'حكم تمهيدي',
         nextDateDisposition: 'MAYBE',
+        idempotencyKey: 'result-request',
       });
       expect(res.success).toBe(false);
     });
@@ -161,13 +184,16 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
   describe('correctHearingResultSchema', () => {
     it('requires a non-empty reason for corrections', () => {
       const hearingId = crypto.randomUUID();
-      const validRes = correctHearingResultSchema.safeParse({
+      const input = {
         hearingId,
         expectedVersion: 1,
         courtDecision: 'القرار المصوب: حجز الدعوى للحكم مع مذكرات في أسبوعين',
         reason: 'تصويب خطأ مادي في منطوق القرار المدون أولاً',
-      });
-      expect(validRes.success).toBe(true);
+        idempotencyKey: 'correction-request',
+      };
+      expect(correctHearingResultSchema.safeParse(input).success).toBe(true);
+      expect(correctHearingResultSchema.safeParse({ ...input, reason: ' ' }).success).toBe(false);
+      expect(correctHearingResultSchema.safeParse({ ...input, expectedVersion: undefined }).success).toBe(false);
     });
   });
 
@@ -178,6 +204,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         hearingId,
         expectedVersion: 1,
         newHearingDate: '2027-09-01',
+        idempotencyKey: 'reschedule-request',
         reason: 'تأجيل إداري لظروف طارئة بالمحكمة',
       });
       expect(res.success).toBe(true);
@@ -186,6 +213,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         hearingId,
         expectedVersion: 1,
         newHearingDate: '2027-09-01',
+        idempotencyKey: 'reschedule-request',
         reason: '',
       });
       expect(missingReason.success).toBe(false);
@@ -197,6 +225,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         hearingId,
         expectedVersion: 1,
         reason: 'شطب الدعوى لتخلف الخصوم عن الحضور',
+        idempotencyKey: 'cancel-request',
       });
       expect(res.success).toBe(true);
 
@@ -204,6 +233,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         hearingId,
         expectedVersion: 1,
         reason: '  ',
+        idempotencyKey: 'cancel-request',
       });
       expect(missingReason.success).toBe(false);
     });

@@ -43,18 +43,10 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
   }
 
   const auth = getAuth();
-  let sessionData;
-  try {
-    sessionData = await auth.api.getSession({
-      headers,
-      query: {
-        disableRefresh: true,
-        disableCookieCache: true,
-      },
-    });
-  } catch {
-    throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');
-  }
+  const sessionData = await auth.api.getSession({
+    headers,
+    query: { disableRefresh: true, disableCookieCache: true },
+  });
 
   if (!sessionData || !sessionData.session || !sessionData.user) {
     throw new AuthenticationError('UNAUTHENTICATED', 'جلسة غير صالحة أو تم إنهاؤها.');

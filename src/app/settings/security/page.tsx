@@ -53,6 +53,7 @@ export default async function SecuritySettingsPage() {
         </div>
 
         <SecurityClient
+          key={overview.sessions.find((session) => session.isCurrent)?.id}
           initialSessions={overview.sessions}
           actor={overview.actor}
         />

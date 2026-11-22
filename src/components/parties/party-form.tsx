@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useLayoutEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
@@ -26,8 +26,9 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
   const router = useRouter();
   const isEdit = Boolean(party);
   const draft = useFormDraft<SavePartyInput>(ownerId, party ? `/parties/${party.id}/edit` : '/parties/new');
-  const restored = draft.restored;
-  const [pending, setPending] = useState<SavePartyInput | null>(restored ?? null);
+  const editable = useFormDraft<SavePartyInput>(`${ownerId}:party-editable`, party ? `/parties/${party.id}/edit` : '/parties/new');
+  const restored = draft.restored ?? editable.restored;
+  const [pending, setPending] = useState<SavePartyInput | null>(draft.restored ?? null);
 
   // Form inputs kept strictly in component state (page memory)
   const [kind, setKind] = useState<PartyKind>((restored ?? party)?.kind ?? 'PERSON');
@@ -59,7 +60,18 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
   const [acknowledgedDuplicates, setAcknowledgedDuplicates] = useState(false);
 
   const savingRef = useRef(false);
-  useLeaveGuard(false, isSubmitting || Boolean(pending));
+  const dirty = name !== (party?.name ?? '') || kind !== (party?.kind ?? 'PERSON') ||
+    primaryPhone !== (party?.primaryPhone ?? '') || additionalPhones !== (party?.additionalPhones?.join(', ') ?? '') ||
+    email !== (party?.email ?? '') || address !== (party?.address ?? '') || notes !== (party?.notes ?? '') || hasIdentity;
+  useLeaveGuard(dirty && duplicateWarnings.length === 0, isSubmitting || Boolean(pending));
+  useLayoutEffect(() => {
+    if (!dirty) editable.clear();
+    else if (!pending) editable.keep({
+      id: party?.id, expectedVersion: editable.restored?.expectedVersion ?? party?.version,
+      kind, name, primaryPhone, additionalPhones: additionalPhones.split(',').map((phone) => phone.trim()), email, address, notes,
+      ...(hasIdentity ? { identity: { identificationType, number: identityNumber } } : {}), idempotencyKey: '',
+    });
+  });
 
   const validateClientSide = (): boolean => {
     const errors: Record<string, string> = {};
@@ -117,7 +129,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
       email: email.trim() || null,
       address: address.trim() || null,
       notes: notes.trim() || null,
-      expectedVersion: party ? party.version : undefined,
+      expectedVersion: editable.restored?.expectedVersion ?? party?.version,
       idempotencyKey: generateClientRequestId('party'),
       ...(!isEdit && hasIdentity && identityNumber.trim()
         ? { identity: { identificationType, number: identityNumber.trim() } }
@@ -153,6 +165,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
       }
 
       draft.clear();
+      editable.clear();
       setPending(null);
       const savedParty = result.data.party;
       router.push(`/parties/${savedParty.id}`);
@@ -211,6 +224,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
   };
 
   const handleReloadLatest = () => {
+    editable.clear();
     window.location.reload();
   };
 
@@ -640,6 +654,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
       <div className="flex items-center justify-between gap-4 pt-2">
         <Link
           href={party ? `/parties/${party.id}` : '/parties'}
+          onNavigate={editable.clear}
           data-testid="cancel-party-button"
           className="px-5 py-2.5 text-sm font-medium text-[#4D606A] hover:text-[#172A35] hover:bg-slate-200 rounded-[6px] transition-colors min-h-[44px] flex items-center justify-center"
         >

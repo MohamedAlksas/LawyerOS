@@ -102,6 +102,11 @@ export function AppShell({ children }: AppShellProps) {
       if (pending || document.visibilityState === 'hidden') return;
       const request = new AbortController();
       pending = request;
+      const timeout = window.setTimeout(() => {
+        if (pending !== request) return;
+        conceal();
+        setSessionStatus('unavailable');
+      }, 5_000);
 
       try {
         const response = await fetch('/api/auth/view-session', { cache: 'no-store', signal: request.signal });
@@ -138,6 +143,7 @@ export function AppShell({ children }: AppShellProps) {
         conceal();
         setSessionStatus('unavailable');
       } finally {
+        window.clearTimeout(timeout);
         if (pending === request) pending = undefined;
       }
     };
@@ -150,6 +156,7 @@ export function AppShell({ children }: AppShellProps) {
     void checkSession();
     const interval = window.setInterval(checkSession, 30_000);
     document.addEventListener('visibilitychange', resume);
+    window.addEventListener('online', resume);
     window.addEventListener('pagehide', conceal);
     window.addEventListener('pageshow', resume);
     window.addEventListener('popstate', resume, true);
@@ -159,6 +166,7 @@ export function AppShell({ children }: AppShellProps) {
       pending?.abort();
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('online', resume);
       window.removeEventListener('pagehide', conceal);
       window.removeEventListener('pageshow', resume);
       window.removeEventListener('popstate', resume, true);

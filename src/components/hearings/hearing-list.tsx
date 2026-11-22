@@ -2,6 +2,8 @@
 
 import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { GuardedLink as Link, useHasFormDraft } from '@/components/navigation-guard';
+import { hearingDraftOwner } from './hearing-recovery';
 import {
   HearingDTO,
   HEARING_STATUS_LABELS,
@@ -10,14 +12,13 @@ import {
   formatHearingTimeDisplay,
 } from './hearing-ui-types';
 import { ScheduleHearingModal } from './schedule-hearing-modal';
-import { RecordResultModal } from './record-result-modal';
 import { RescheduleHearingModal } from './reschedule-hearing-modal';
 import { CancelHearingModal } from './cancel-hearing-modal';
-import { CorrectResultModal } from './correct-result-modal';
 
 interface HearingListProps {
+  actorId: string;
   proceedingId: string;
-  matterId?: string;
+  matterId: string;
   initialHearings: HearingDTO[];
   courtName?: string | null;
   circuit?: string | null;
@@ -25,21 +26,23 @@ interface HearingListProps {
 }
 
 export function HearingList({
+  actorId,
   proceedingId,
+  matterId,
   initialHearings,
   courtName,
   circuit,
   isReadOnly = false,
 }: HearingListProps) {
   const router = useRouter();
-  const [hearings, setHearings] = useState<HearingDTO[]>(initialHearings);
+  const hearings = initialHearings;
+  const hasDraft = useHasFormDraft();
+  const path = `/matters/${matterId}/proceedings/${proceedingId}`;
 
   // Modal active states
   const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [selectedHearingForRecord, setSelectedHearingForRecord] = useState<HearingDTO | null>(null);
   const [selectedHearingForReschedule, setSelectedHearingForReschedule] = useState<HearingDTO | null>(null);
   const [selectedHearingForCancel, setSelectedHearingForCancel] = useState<HearingDTO | null>(null);
-  const [selectedHearingForCorrect, setSelectedHearingForCorrect] = useState<HearingDTO | null>(null);
 
   // Trigger element reference to restore focus on close
   const lastTriggerRef = useRef<HTMLElement | null>(null);
@@ -57,29 +60,7 @@ export function HearingList({
     }
   };
 
-  // Handlers for modal callbacks
-  const handleScheduleSuccess = (newHearing: HearingDTO) => {
-    setHearings((prev) => [...prev, newHearing]);
-    router.refresh();
-  };
-
-  const handleUpdateHearingSuccess = (updatedHearing: HearingDTO) => {
-    setHearings((prev) =>
-      prev.map((h) => (h.id === updatedHearing.id ? updatedHearing : h))
-    );
-    router.refresh();
-  };
-
-  const handleRescheduleSuccess = (newHearing: HearingDTO) => {
-    setHearings((prev) => {
-      // Mark the old hearing as RESCHEDULED if present
-      const updated = prev.map((h) =>
-        h.id === selectedHearingForReschedule?.id ? { ...h, status: 'RESCHEDULED' as const } : h
-      );
-      return [...updated, newHearing];
-    });
-    router.refresh();
-  };
+  const refreshHearings = () => router.refresh();
 
   return (
     <div className="space-y-4" data-testid="hearings-list-section">
@@ -158,6 +139,8 @@ export function HearingList({
             const isCompleted = hearing.status === 'COMPLETED';
             const isCancelled = hearing.status === 'CANCELLED';
             const isRescheduled = hearing.status === 'RESCHEDULED';
+            const pendingReschedule = hasDraft(hearingDraftOwner(actorId, 'reschedule', hearing.id), path);
+            const pendingCancel = hasDraft(hearingDraftOwner(actorId, 'cancel', hearing.id), path);
 
             const latestResult = hearing.latestResult;
             const timeDisplay = formatHearingTimeDisplay(hearing.hearingTime);
@@ -282,19 +265,16 @@ export function HearingList({
                 {!isReadOnly && (
                   <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#E8EEF1]">
                     {isScheduled && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            openWithFocus(e.currentTarget);
-                            setSelectedHearingForRecord(hearing);
-                          }}
+                        <Link
+                          href={`/hearings/${hearing.id}/result`}
                           data-testid={`record-result-button-${hearing.id}`}
                           className="px-3.5 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5"
                         >
                           <span>⚖️</span>
                           <span>تسجيل النتيجة</span>
-                        </button>
+                        </Link>
+                    )}
+                    {(isScheduled || pendingReschedule) && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -305,8 +285,10 @@ export function HearingList({
                           className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[38px] flex items-center gap-1"
                         >
                           <span>🔄</span>
-                          <span>تعديل الموعد</span>
+                          <span>{pendingReschedule ? 'إعادة محاولة تعديل الموعد' : 'تعديل الموعد'}</span>
                         </button>
+                    )}
+                    {(isScheduled || pendingCancel) && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -317,24 +299,19 @@ export function HearingList({
                           className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold rounded-[6px] border border-red-200 transition-colors min-h-[38px] flex items-center gap-1"
                         >
                           <span>🚫</span>
-                          <span>إلغاء</span>
+                          <span>{pendingCancel ? 'إعادة محاولة إلغاء الجلسة' : 'إلغاء'}</span>
                         </button>
-                      </>
                     )}
 
                     {isCompleted && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          openWithFocus(e.currentTarget);
-                          setSelectedHearingForCorrect(hearing);
-                        }}
+                      <Link
+                        href={`/hearings/${hearing.id}/result`}
                         data-testid={`correct-result-button-${hearing.id}`}
                         className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[38px] flex items-center gap-1"
                       >
                         <span>✏️</span>
                         <span>تصحيح منطوق القرار</span>
-                      </button>
+                      </Link>
                     )}
                   </div>
                 )}
@@ -347,50 +324,36 @@ export function HearingList({
       {/* Modals */}
       {showScheduleModal && (
         <ScheduleHearingModal
+          actorId={actorId}
+          matterId={matterId}
+          proceedingId={proceedingId}
           isOpen={showScheduleModal}
           onClose={() => closeAndRestoreFocus(() => setShowScheduleModal(false))}
-          proceedingId={proceedingId}
           defaultCourtName={courtName}
           defaultCircuit={circuit}
-          onSuccess={handleScheduleSuccess}
-        />
-      )}
-
-      {selectedHearingForRecord && (
-        <RecordResultModal
-          isOpen={Boolean(selectedHearingForRecord)}
-          onClose={() => closeAndRestoreFocus(() => setSelectedHearingForRecord(null))}
-          hearing={selectedHearingForRecord}
-          proceedingCourtName={courtName}
-          proceedingCircuit={circuit}
-          onSuccess={handleUpdateHearingSuccess}
+          onSuccess={refreshHearings}
         />
       )}
 
       {selectedHearingForReschedule && (
         <RescheduleHearingModal
+          actorId={actorId}
+          proceedingId={proceedingId}
           isOpen={Boolean(selectedHearingForReschedule)}
           onClose={() => closeAndRestoreFocus(() => setSelectedHearingForReschedule(null))}
           hearing={selectedHearingForReschedule}
-          onSuccess={handleRescheduleSuccess}
+          onSuccess={refreshHearings}
         />
       )}
 
       {selectedHearingForCancel && (
         <CancelHearingModal
+          actorId={actorId}
+          proceedingId={proceedingId}
           isOpen={Boolean(selectedHearingForCancel)}
           onClose={() => closeAndRestoreFocus(() => setSelectedHearingForCancel(null))}
           hearing={selectedHearingForCancel}
-          onSuccess={handleUpdateHearingSuccess}
-        />
-      )}
-
-      {selectedHearingForCorrect && (
-        <CorrectResultModal
-          isOpen={Boolean(selectedHearingForCorrect)}
-          onClose={() => closeAndRestoreFocus(() => setSelectedHearingForCorrect(null))}
-          hearing={selectedHearingForCorrect}
-          onSuccess={handleUpdateHearingSuccess}
+          onSuccess={refreshHearings}
         />
       )}
     </div>

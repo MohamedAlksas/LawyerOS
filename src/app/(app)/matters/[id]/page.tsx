@@ -14,20 +14,7 @@ interface MatterDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: MatterDetailPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    return {
-      title: `${matter.fileCode} — ${matter.title} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'ملف القضية — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'ملف القضية — LawOffice OS' };
 
 export default async function MatterDetailPage({ params }: MatterDetailPageProps) {
   const { id } = await params;
@@ -54,7 +41,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
 
   let matter;
   try {
-    matter = await getMatter(id, actor);
+    matter = await getMatter(id, actor, true);
   } catch (error) {
     if (error instanceof NotFoundError) {
       return (
