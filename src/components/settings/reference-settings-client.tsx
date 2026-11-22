@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import {
   OfficeSettingsDTO,
   ReferenceItemDTO,
@@ -22,6 +22,7 @@ import {
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface ReferenceSettingsClientProps {
+  ownerId: string;
   initialOfficeSettings: OfficeSettingsDTO;
   initialCourts: ReferenceItemDTO[];
   initialPracticeAreas: ReferenceItemDTO[];
@@ -29,7 +30,19 @@ interface ReferenceSettingsClientProps {
   initialLookupError?: boolean;
 }
 
+type ReferenceTab = 'office' | 'courts' | 'practice_areas' | 'storage_locations';
+type PendingSave<T> = { key: string; payload: T };
+type ReferenceDraft = {
+  tab: ReferenceTab;
+  office: PendingSave<UpdateOfficeSettingsInput> | null;
+  create: PendingSave<CreateReferenceItemInput> | null;
+  edit: PendingSave<UpdateReferenceItemInput> | null;
+  editItem: ReferenceItemDTO | null;
+  toggle: { item: ReferenceItemDTO; key: string } | null;
+};
+
 export function ReferenceSettingsClient({
+  ownerId,
   initialOfficeSettings,
   initialCourts,
   initialPracticeAreas,
@@ -37,22 +50,24 @@ export function ReferenceSettingsClient({
   initialLookupError,
 }: ReferenceSettingsClientProps) {
   const router = useRouter();
+  const draft = useFormDraft<ReferenceDraft>(ownerId, '/settings/reference');
+  const restored = draft.restored;
 
-  // Navigation tab: 'office' | 'courts' | 'practice_areas' | 'storage_locations'
-  const [activeTab, setActiveTab] = useState<'office' | 'courts' | 'practice_areas' | 'storage_locations'>('office');
+  const [activeTab, setActiveTab] = useState<ReferenceTab>(restored?.tab ?? 'office');
 
   // Office Settings State
   const [officeSettings, setOfficeSettings] = useState<OfficeSettingsDTO>(initialOfficeSettings);
-  const [officeName, setOfficeName] = useState(initialOfficeSettings.officeName);
-  const [lawyerName, setLawyerName] = useState(initialOfficeSettings.lawyerName || '');
-  const [phone, setPhone] = useState(initialOfficeSettings.phone || '');
-  const [email, setEmail] = useState(initialOfficeSettings.email || '');
-  const [address, setAddress] = useState(initialOfficeSettings.address || '');
-  const [taxNumber, setTaxNumber] = useState(initialOfficeSettings.taxNumber || '');
+  const restoredOffice = restored?.office?.payload ?? initialOfficeSettings;
+  const [officeName, setOfficeName] = useState(restoredOffice.officeName);
+  const [lawyerName, setLawyerName] = useState(restoredOffice.lawyerName || '');
+  const [phone, setPhone] = useState(restoredOffice.phone || '');
+  const [email, setEmail] = useState(restoredOffice.email || '');
+  const [address, setAddress] = useState(restoredOffice.address || '');
+  const [taxNumber, setTaxNumber] = useState(restoredOffice.taxNumber || '');
   const [isSavingOffice, setIsSavingOffice] = useState(false);
   const [officeMessage, setOfficeMessage] = useState<string | null>(null);
   const [officeError, setOfficeError] = useState<string | null>(null);
-  const [officePending, setOfficePending] = useState(false);
+  const [officePending, setOfficePending] = useState(Boolean(restored?.office));
   const [officeConflictPending, setOfficeConflictPending] = useState(false);
   const [reconcilePreview, setReconcilePreview] = useState<OfficeSettingsDTO | null>(null);
   const [isReconcilingOffice, setIsReconcilingOffice] = useState(false);
@@ -60,7 +75,7 @@ export function ReferenceSettingsClient({
   const [officeSessionExpired, setOfficeSessionExpired] = useState(false);
   const [officeDirty, setOfficeDirty] = useState(false);
   const [officeFieldErrors, setOfficeFieldErrors] = useState<Record<string, string>>({});
-  const officePendingRef = useRef<{ key: string; payload: UpdateOfficeSettingsInput } | null>(null);
+  const officePendingRef = useRef<ReferenceDraft['office']>(restored?.office ?? null);
 
   // Reference Items Lists
   const [courts, setCourts] = useState<ReferenceItemDTO[]>(initialCourts);
@@ -119,37 +134,37 @@ export function ReferenceSettingsClient({
   }
 
   // New Reference Item Input State
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemCode, setNewItemCode] = useState('');
-  const [newItemNotes, setNewItemNotes] = useState('');
+  const [newItemName, setNewItemName] = useState(restored?.create?.payload.name ?? '');
+  const [newItemCode, setNewItemCode] = useState(restored?.create?.payload.code ?? '');
+  const [newItemNotes, setNewItemNotes] = useState(restored?.create?.payload.notes ?? '');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
   const [itemError, setItemError] = useState<string | null>(null);
   const [itemSuccessMessage, setItemSuccessMessage] = useState<string | null>(null);
   const [itemFieldErrors, setItemFieldErrors] = useState<Record<string, string>>({});
-  const [itemPending, setItemPending] = useState(false);
+  const [itemPending, setItemPending] = useState(Boolean(restored?.create));
   const [itemSessionExpired, setItemSessionExpired] = useState(false);
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
-  const itemPendingRef = useRef<{ key: string; payload: CreateReferenceItemInput } | null>(null);
+  const itemPendingRef = useRef<ReferenceDraft['create']>(restored?.create ?? null);
 
   // Toggle Item State & Recovery Ref (P1 / U1 / U3)
-  const togglePendingRef = useRef<{ item: ReferenceItemDTO; key: string } | null>(null);
-  const [togglePending, setTogglePending] = useState(false);
-  const [togglePendingItem, setTogglePendingItem] = useState<ReferenceItemDTO | null>(null);
+  const togglePendingRef = useRef<ReferenceDraft['toggle']>(restored?.toggle ?? null);
+  const [togglePending, setTogglePending] = useState(Boolean(restored?.toggle));
+  const [togglePendingItem, setTogglePendingItem] = useState<ReferenceItemDTO | null>(restored?.toggle?.item ?? null);
   const [toggleSessionExpired, setToggleSessionExpired] = useState(false);
   const [isTogglingActive, setIsTogglingActive] = useState(false);
 
   // Edit Item Modal State (C19/U9)
-  const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(null);
-  const [editItemName, setEditItemName] = useState('');
-  const [editItemCode, setEditItemCode] = useState('');
-  const [editItemNotes, setEditItemNotes] = useState('');
-  const [editItemIsActive, setEditItemIsActive] = useState(true);
+  const [editingItem, setEditingItem] = useState<ReferenceItemDTO | null>(restored?.editItem ?? null);
+  const [editItemName, setEditItemName] = useState(restored?.edit?.payload.name ?? '');
+  const [editItemCode, setEditItemCode] = useState(restored?.edit?.payload.code ?? '');
+  const [editItemNotes, setEditItemNotes] = useState(restored?.edit?.payload.notes ?? '');
+  const [editItemIsActive, setEditItemIsActive] = useState(restored?.edit?.payload.isActive ?? true);
   const [isSavingEditItem, setIsSavingEditItem] = useState(false);
   const [editItemError, setEditItemError] = useState<string | null>(null);
   const [editItemFieldErrors, setEditItemFieldErrors] = useState<Record<string, string>>({});
-  const [editItemPending, setEditItemPending] = useState(false);
+  const [editItemPending, setEditItemPending] = useState(Boolean(restored?.edit));
   const [editItemSessionExpired, setEditItemSessionExpired] = useState(false);
-  const editPendingRef = useRef<{ key: string; payload: UpdateReferenceItemInput } | null>(null);
+  const editPendingRef = useRef<ReferenceDraft['edit']>(restored?.edit ?? null);
   const editDialogRef = useRef<HTMLDivElement>(null);
   const editNameInputRef = useRef<HTMLInputElement>(null);
   const lastFocusedOpenerRef = useRef<HTMLElement | null>(null);
@@ -163,6 +178,7 @@ export function ReferenceSettingsClient({
     editItemNotes,
     editItemIsActive,
     editItemPending,
+    isSavingEditItem,
   });
   useEffect(() => {
     editModalStateRef.current = {
@@ -172,6 +188,7 @@ export function ReferenceSettingsClient({
       editItemNotes,
       editItemIsActive,
       editItemPending,
+      isSavingEditItem,
     };
   });
 
@@ -185,25 +202,25 @@ export function ReferenceSettingsClient({
       editItemNotes !== (editingItem.notes || '') ||
       editItemIsActive !== editingItem.isActive);
 
-  const isAnyDirtyOrPending =
-    officeDirty ||
-    itemDraftDirty ||
-    isModalDirty ||
-    officePending ||
-    itemPending ||
-    editItemPending ||
-    togglePending;
+  useLeaveGuard(
+    officeDirty || itemDraftDirty || isModalDirty,
+    officePending || itemPending || editItemPending || togglePending ||
+      isSavingOffice || isCreatingItem || isSavingEditItem || isTogglingActive
+  );
 
-  // Dirty navigation guard (U10: covers office, new item draft, modal edits, and in-flight/pending operations)
-  useEffect(() => {
-    if (!isAnyDirtyOrPending || isSavingOffice || isCreatingItem || isSavingEditItem) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [isAnyDirtyOrPending, isSavingOffice, isCreatingItem, isSavingEditItem]);
+  const keepPendingOperations = () => {
+    if (!draft.isCurrent()) return;
+    const office = officePendingRef.current;
+    const create = itemPendingRef.current;
+    const edit = editPendingRef.current;
+    const toggle = togglePendingRef.current;
+    if (office || create || edit || toggle) {
+      draft.keep({ tab: activeTab, office, create, edit, editItem: edit ? editingItem : null, toggle });
+    } else {
+      draft.clear();
+    }
+  };
+  useLayoutEffect(keepPendingOperations);
 
   const handleCloseEditModal = useCallback(() => {
     const {
@@ -213,6 +230,7 @@ export function ReferenceSettingsClient({
       editItemNotes: notes,
       editItemIsActive: active,
       editItemPending: pending,
+      isSavingEditItem: saving,
     } = editModalStateRef.current;
 
     const modalDirty =
@@ -222,10 +240,8 @@ export function ReferenceSettingsClient({
         notes !== (item.notes || '') ||
         active !== item.isActive);
 
-    if (
-      (modalDirty || pending) &&
-      !window.confirm('لديك تعديلات غير محفوظة على هذا العنصر أو عملية حفظ معلّقة. هل تريد الإغلاق وفقدانها؟')
-    ) {
+    if (pending || saving) return;
+    if (modalDirty && !window.confirm('لديك تعديلات غير محفوظة على هذا العنصر. هل تريد الإغلاق وفقدانها؟')) {
       return;
     }
     setEditingItem(null);
@@ -315,11 +331,12 @@ export function ReferenceSettingsClient({
       };
       officePendingRef.current = op;
     }
+    keepPendingOperations();
 
     try {
       const res = await updateOfficeSettingsAction(op.payload);
 
-      if (requestId !== officeSaveRequestIdRef.current) return;
+      if (requestId !== officeSaveRequestIdRef.current || !draft.isCurrent()) return;
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -454,7 +471,7 @@ export function ReferenceSettingsClient({
   const [createItemKey, setCreateItemKey] = useState(() => generateClientRequestId('ritem'));
 
   const handleCreateItem = async (type: ReferenceItemType) => {
-    if (!newItemName.trim()) return;
+    if (isCreatingItem || !newItemName.trim()) return;
     setIsCreatingItem(true);
     setItemError(null);
     setItemSuccessMessage(null);
@@ -475,9 +492,11 @@ export function ReferenceSettingsClient({
       };
       itemPendingRef.current = op;
     }
+    keepPendingOperations();
 
     try {
       const res = await createReferenceItemAction(op.payload);
+      if (!draft.isCurrent()) return;
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -568,7 +587,7 @@ export function ReferenceSettingsClient({
   // Handle Save Edited Reference Item (C19/U1/U9)
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingItem || !editItemName.trim()) return;
+    if (isSavingEditItem || !editingItem || !editItemName.trim()) return;
     setIsSavingEditItem(true);
     setEditItemError(null);
     setEditItemFieldErrors({});
@@ -592,9 +611,11 @@ export function ReferenceSettingsClient({
       };
       editPendingRef.current = op;
     }
+    keepPendingOperations();
 
     try {
       const res = await updateReferenceItemAction(op.payload);
+      if (!draft.isCurrent()) return;
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -657,15 +678,6 @@ export function ReferenceSettingsClient({
     setEditItemError(null);
   };
 
-  const handleCancelNavigation = (event: React.MouseEvent<HTMLAnchorElement>) => {
-    if (
-      isAnyDirtyOrPending &&
-      !window.confirm('لديك تعديلات غير محفوظة أو عمليات معلقة. هل تريد المغادرة وفقدانها؟')
-    ) {
-      event.preventDefault();
-    }
-  };
-
   // Handle Toggle Active/Inactive (U1/U3: frozen key and recovery)
   const handleToggleActive = async (item: ReferenceItemDTO) => {
     if (isTogglingActive) return;
@@ -683,6 +695,7 @@ export function ReferenceSettingsClient({
       op = { item, key: generateClientRequestId('tog') };
       togglePendingRef.current = op;
     }
+    keepPendingOperations();
     setTogglePendingItem(op.item);
 
     setIsTogglingActive(true);
@@ -697,6 +710,7 @@ export function ReferenceSettingsClient({
         isActive: !op.item.isActive,
         idempotencyKey: op.key,
       });
+      if (!draft.isCurrent()) return;
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
@@ -761,7 +775,7 @@ export function ReferenceSettingsClient({
       <div className="pb-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1">
-            <Link href="/" onClick={handleCancelNavigation} className="hover:text-[#14566B] hover:underline">
+            <Link href="/" className="hover:text-[#14566B] hover:underline">
               الرئيسية
             </Link>
             <span aria-hidden="true" className="mx-1.5">/</span>
@@ -777,7 +791,6 @@ export function ReferenceSettingsClient({
 
         <Link
           href="/settings/security"
-          onClick={handleCancelNavigation}
           className="text-xs font-semibold text-[#14566B] hover:underline flex items-center gap-1"
         >
           <span>🛡️</span>
@@ -1360,7 +1373,7 @@ export function ReferenceSettingsClient({
                 : '+ إضافة مكان حفظ ورقي جديد'}
             </h3>
 
-            <fieldset disabled={itemPending} className="space-y-3 border-0 p-0 m-0 min-w-0">
+            <fieldset disabled={isCreatingItem || itemPending} className="space-y-3 border-0 p-0 m-0 min-w-0">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1 sm:col-span-2">
                   <label htmlFor="reference-item-name-input" className="block text-xs font-bold text-[#172A35]">
@@ -1638,7 +1651,7 @@ export function ReferenceSettingsClient({
             )}
 
             <form id="edit-reference-item-form" onSubmit={handleSaveEditItem} className="space-y-4">
-              <fieldset disabled={editItemPending} className="space-y-4 border-0 p-0 m-0 min-w-0">
+              <fieldset disabled={isSavingEditItem || editItemPending} className="space-y-4 border-0 p-0 m-0 min-w-0">
                 <div className="space-y-1">
                   <label htmlFor="edit-reference-name-input" className="block font-bold text-[#172A35]">
                     الاسم <span className="text-red-600">*</span>

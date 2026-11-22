@@ -16,7 +16,7 @@ interface PartyDetailPageProps {
 export async function generateMetadata({ params }: PartyDetailPageProps) {
   const { id } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
     const party = await getClientProfile(actor, id);
     return {
       title: `${party.name} — ملف الطرف — LawOffice OS`,
@@ -32,7 +32,7 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
   const { id } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {

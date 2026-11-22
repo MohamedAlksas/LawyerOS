@@ -430,7 +430,9 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
   test('security dialog error and success reflow at 200% with keyboard focus and Escape', async ({ page }, testInfo) => {
     await loginAndCompleteMfa(page);
     await page.goto('/settings/security');
-    await expect(page.locator('main')).toHaveAttribute('dir', 'rtl');
+    const securityMain = page.getByTestId('main-content');
+    await expect(securityMain).toBeVisible();
+    await expect(securityMain).toHaveAttribute('dir', 'rtl');
     await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
     await page.getByRole('button', { name: regenerateLabel, exact: true }).click();
     const dialog = page.getByRole('dialog');

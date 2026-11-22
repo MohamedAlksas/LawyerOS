@@ -57,6 +57,7 @@ export default async function ReferenceSettingsPage() {
   return (
     <div className="py-2">
       <ReferenceSettingsClient
+        ownerId={actor.id}
         initialOfficeSettings={officeSettings}
         initialCourts={courts}
         initialPracticeAreas={practiceAreas}

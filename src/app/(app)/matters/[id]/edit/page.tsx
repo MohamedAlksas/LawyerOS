@@ -18,7 +18,7 @@ interface MatterEditPageProps {
 export async function generateMetadata({ params }: MatterEditPageProps) {
   const { id } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
     const matter = await getMatter(id, actor);
     return {
       title: `تعديل الملف: ${matter.fileCode} — LawOffice OS`,
@@ -34,7 +34,7 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
   const { id } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -77,6 +77,10 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
       );
     }
     throw error;
+  }
+
+  if (matter.status === 'ARCHIVED' || matter.archivedAt) {
+    redirect(`/matters/${matter.id}`);
   }
 
   let practiceAreas: Awaited<ReturnType<typeof listReferenceItems>> = [];

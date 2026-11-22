@@ -250,16 +250,14 @@ export function ProceedingForm({
   // Docket Incomplete Check
   const isDocketIncomplete = !numberText.trim() || !yearLabel.trim() || !registerType.trim();
 
-  // Similarity preflight: call the authorized normalized lookup against the
-  // server (all matters in the same court, not just the loaded Matter's stale
-  // local list). Requests are generation-guarded and snapshot-keyed so confirmation
-  // is strictly bound to the exact court/number/year combination.
+  // Confirmation is scoped to the full docket identity and the displayed candidates.
   const [similarCandidates, setSimilarCandidates] = useState<SimilarProceedingCandidateDTO[]>([]);
+  const [hasDirectMatch, setHasDirectMatch] = useState(false);
   const [similarLookupError, setSimilarLookupError] = useState<string | null>(null);
   const [isLookingUpSimilar, setIsLookingUpSimilar] = useState(false);
   const [similarRetryNonce, setSimilarRetryNonce] = useState(0);
 
-  const currentSnapshotKey = `${courtId}:${numberText.trim()}:${yearLabel.trim()}`;
+  const currentSnapshotKey = JSON.stringify([courtId, numberText.trim(), yearLabel.trim(), registerType.trim(), circuit.trim()]);
   const [candidateSnapshotKey, setCandidateSnapshotKey] = useState<string | null>(null);
   const [confirmedSnapshotKey, setConfirmedSnapshotKey] = useState<string | null>(null);
   const [confirmedCandidateSetKey, setConfirmedCandidateSetKey] = useState<string | null>(null);
@@ -277,7 +275,7 @@ export function ProceedingForm({
   useEffect(() => {
     const trimmedNumber = numberText.trim();
     const gen = ++similarGenRef.current;
-    const targetSnapshot = `${courtId}:${trimmedNumber}:${yearLabel.trim()}`;
+    const targetSnapshot = currentSnapshotKey;
 
     const timer = window.setTimeout(async () => {
       if (gen !== similarGenRef.current) return;
@@ -295,12 +293,15 @@ export function ProceedingForm({
           courtId,
           numberText: trimmedNumber,
           yearLabel: yearLabel.trim() || null,
+          registerType: registerType.trim() || null,
+          circuit: circuit.trim() || null,
           excludeProceedingId: initialProceeding?.id ?? null,
           limit: 10,
         });
         if (gen !== similarGenRef.current) return;
         if (res.success) {
           setSimilarCandidates(res.data.candidates);
+          setHasDirectMatch(res.data.hasDirectMatch);
           setCandidateSnapshotKey(targetSnapshot);
           setSimilarLookupError(null);
         } else {
@@ -318,7 +319,7 @@ export function ProceedingForm({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [courtId, numberText, yearLabel, initialProceeding?.id, similarRetryNonce]);
+  }, [courtId, numberText, yearLabel, registerType, circuit, currentSnapshotKey, initialProceeding?.id, similarRetryNonce]);
 
   const togglePartyInclusion = (partyId: string, included: boolean) => {
     setIncludedPartyIds((prev) => {
@@ -345,8 +346,9 @@ export function ProceedingForm({
     if (!operation) {
       // U7: Resolve similarity lookup before creation decision so advisory cannot arrive after record creation
       if (!isEdit && courtId && numberText.trim()) {
-        const snapshotKey = `${courtId}:${numberText.trim()}:${yearLabel.trim()}`;
+        const snapshotKey = currentSnapshotKey;
         let currentCandidates = similarCandidates;
+        let directMatch = hasDirectMatch;
 
         // If lookup for this exact snapshot was never performed or is in-flight:
         if (candidateSnapshotKey !== snapshotKey || isLookingUpSimilar) {
@@ -357,6 +359,8 @@ export function ProceedingForm({
               courtId,
               numberText: numberText.trim(),
               yearLabel: yearLabel.trim() || null,
+              registerType: registerType.trim() || null,
+              circuit: circuit.trim() || null,
               excludeProceedingId: initialProceeding?.id ?? null,
               limit: 10,
             });
@@ -366,7 +370,9 @@ export function ProceedingForm({
             }
             if (simRes.success) {
               currentCandidates = simRes.data.candidates;
+              directMatch = simRes.data.hasDirectMatch;
               setSimilarCandidates(currentCandidates);
+              setHasDirectMatch(directMatch);
               setCandidateSnapshotKey(snapshotKey);
               setSimilarLookupError(null);
             } else {
@@ -398,8 +404,9 @@ export function ProceedingForm({
           confirmedCandidateSetKey === displayedCandidatesKey;
 
         if (currentCandidates.length > 0 && !isCurrentlyConfirmed) {
+          const match = directMatch ? 'مطابقة' : 'مشابهة';
           setGeneralError(
-            'عُثر على قيود قضائية مطابقة في نفس المحكمة. راجع القيود المطابقة أدناه للتأكد، أو اضغط "متابعة الحفظ كقيد منفصل" لتأكيد تسجيل قيد جديد.'
+            `عُثر على قيود قضائية ${match} في نفس المحكمة. راجع النتائج أدناه، أو اضغط "متابعة الحفظ كقيد منفصل" لتأكيد تسجيل قيد جديد.`
           );
           setIsSaving(false);
           return;
@@ -800,7 +807,7 @@ export function ProceedingForm({
         >
           <span className="font-bold block text-sm">⚠️ أرقام قيد متشابهة في نفس المحكمة</span>
           <p className="leading-relaxed">
-            عُثر على قيود قضائية مطابقة بعد التطبيع. راجعها قبل الحفظ؛ ويمكنك متابعة تسجيل قيد جديد
+            عُثر على قيود قضائية {hasDirectMatch ? 'مطابقة' : 'مشابهة'} بعد التطبيع. راجعها قبل الحفظ؛ ويمكنك متابعة تسجيل قيد جديد
             إذا كانت هذه دعوى منفصلة (مثل دعوى فرعية أو متقابلة).
           </p>
           <ul className="space-y-1.5">

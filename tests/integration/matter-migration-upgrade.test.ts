@@ -155,6 +155,39 @@ datasource db {
   }
 }
 
+function stageT06BaselineDirectory(targetDir: string) {
+  const migrationsDir = path.join(targetDir, 'migrations');
+  fs.mkdirSync(migrationsDir, { recursive: true });
+
+  const schemaContent = `
+datasource db {
+  provider = "postgresql"
+}
+`;
+  fs.writeFileSync(path.join(targetDir, 'schema.prisma'), schemaContent, 'utf8');
+
+  // Copy all 10 predecessor migrations leading up to T07 migration
+  const migrationDirs = [
+    '20261111000000_init_auth',
+    '20261114000000_credential_version',
+    '20261117000000_parties_communication_poa',
+    '20261117010000_party_temporal_types',
+    '20261118020000_party_temporal_utc_semantics',
+    '20261118150000_party_idempotency_privacy_cleanup',
+    '20261118160000_matters_proceedings_references',
+    '20261118210000_t06_status_capacity_corrections',
+    '20261119000000_t06_matter_title_normalized',
+    '20261121000000_redact_legacy_identity_metadata',
+  ];
+
+  for (const dirName of migrationDirs) {
+    const srcDir = path.resolve(process.cwd(), `prisma/migrations/${dirName}`);
+    const dstDir = path.join(migrationsDir, dirName);
+    fs.mkdirSync(dstDir, { recursive: true });
+    fs.copyFileSync(path.join(srcDir, 'migration.sql'), path.join(dstDir, 'migration.sql'));
+  }
+}
+
 describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
   beforeAll(() => {
     setupTestEncryptionKeys();
@@ -175,8 +208,8 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
       const client = await dedicated.pool.connect();
       try {
         const tablesRes = await client.query(`
-          SELECT table_name 
-          FROM information_schema.tables 
+          SELECT table_name
+          FROM information_schema.tables
           WHERE table_schema = 'public'
         `);
         const tableNames = tablesRes.rows.map((r) => r.table_name);
@@ -208,8 +241,8 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
         // Verify foreign key constraints
         const fkRes = await client.query(`
-          SELECT constraint_name 
-          FROM information_schema.table_constraints 
+          SELECT constraint_name
+          FROM information_schema.table_constraints
           WHERE constraint_type = 'FOREIGN KEY'
         `);
         const fkNames = fkRes.rows.map((r) => r.constraint_name);
@@ -396,7 +429,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         for (const tz of ['UTC', 'Africa/Cairo', 'America/New_York']) {
           await clientPre.query(`SET TIME ZONE '${tz}'`);
           const preNoteTz = await clientPre.query(`
-            SELECT 
+            SELECT
               to_char("followUpDate", 'YYYY-MM-DD') AS follow_up,
               to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS comm_utc
             FROM "communication_note" WHERE id = 'existing-note-t05'
@@ -498,12 +531,12 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
         // Verify Communication Note survived intact
         const noteRes = await clientAfter.query(`
-          SELECT 
-            id, 
-            summary, 
+          SELECT
+            id,
+            summary,
             to_char("followUpDate", 'YYYY-MM-DD') AS follow_up,
             to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS comm_utc
-          FROM "communication_note" 
+          FROM "communication_note"
           WHERE id = 'existing-note-t05'
         `);
         expect(noteRes.rows).toHaveLength(1);
@@ -548,7 +581,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
         // Verify join query across upgraded relationships
         const joinRes = await clientAfter.query(`
-          SELECT 
+          SELECT
             m.title AS matter_title,
             p.name AS party_name,
             poa."poaNumberText" AS poa_number,
@@ -582,7 +615,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
           // Pre-migration note check: date-only and timestamptz
           const preNoteRes = await clientAfter.query(`
-            SELECT 
+            SELECT
               to_char("followUpDate", 'YYYY-MM-DD') AS follow_up,
               to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS comm_utc
             FROM "communication_note" WHERE id = 'existing-note-t05'
@@ -599,7 +632,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
           // Post-migration Matter check: date-only and timestamptz
           const postMatterRes = await clientAfter.query(`
-            SELECT 
+            SELECT
               to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
               to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_utc
             FROM "matter" WHERE id = $1
@@ -648,7 +681,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
 
         // Query under UTC
         const utcRes = await client.query(`
-          SELECT 
+          SELECT
             to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
             to_char("closingDate", 'YYYY-MM-DD') AS closing_date,
             to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at_utc
@@ -661,7 +694,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         // Switch session to Africa/Cairo
         await client.query(`SET TIME ZONE 'Africa/Cairo'`);
         const cairoRes = await client.query(`
-          SELECT 
+          SELECT
             to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
             to_char("closingDate", 'YYYY-MM-DD') AS closing_date,
             to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at_utc
@@ -675,7 +708,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         // Switch session to America/New_York (UTC-5)
         await client.query(`SET TIME ZONE 'America/New_York'`);
         const nyRes = await client.query(`
-          SELECT 
+          SELECT
             to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
             to_char("closingDate", 'YYYY-MM-DD') AS closing_date,
             to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at_utc
@@ -858,7 +891,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         const clientAfter = await dedicated.pool.connect();
         try {
           const noteRes = await clientAfter.query(`
-            SELECT 
+            SELECT
               to_char("followUpDate", 'YYYY-MM-DD') AS follow_up,
               to_char("communicationAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS comm_utc
             FROM "communication_note" WHERE id = 'tz-test-note'
@@ -889,7 +922,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
           `);
 
           const matterRes = await clientAfter.query(`
-            SELECT 
+            SELECT
               to_char("openingDate", 'YYYY-MM-DD') AS opening_date,
               to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_utc
             FROM "matter" WHERE id = 'tz-new-matter'
@@ -902,6 +935,177 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
             FROM "proceeding" WHERE id = 'tz-new-proc'
           `);
           expect(procRes.rows[0].filing_date).toBe('2026-06-15');
+        } finally {
+          clientAfter.release();
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        await dedicated.pool.end().catch(() => {});
+        await dedicated.drop();
+      }
+    },
+    120000
+  );
+
+  it(
+    'upgrades cleanly from predecessor T06 migrations to T07, backfilling proceeding normalized numbers and archivedAt while preserving historical casework and links',
+    async () => {
+      const dedicated = await createDedicatedTestDatabase();
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 't06-t07-upgrade-'));
+      const tempSchemaPath = path.join(tempDir, 'schema.prisma');
+
+      try {
+        // 1. Stage predecessor T06 migrations and deploy
+        stageT06BaselineDirectory(tempDir);
+        const t06DeployRes = runPrismaMigrateDeployCustom(tempSchemaPath, dedicated.url);
+        expect(t06DeployRes.status).toBe(0);
+
+        // 2. Seed historical T06 data
+        const clientPre = await dedicated.pool.connect();
+        try {
+          await clientPre.query(`
+            INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+            VALUES ('t06-hist-user', 'مستخدم الترقية التاريخي', 't06hist@lawoffice.test', true, now(), now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "party" ("id", "kind", "name", "nameNormalized", "primaryPhone", "primaryPhoneNormalized", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-party', 'PERSON', 'الموكل التراثي القديم', 'الموكل التراثي القديم', '01011223344', '01011223344', 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "humanReviewStatus", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-poa', 't06-hist-party', '9988/ت', '2025', 'توثيق الأهرام', 'GENERAL', 'VALID', 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "court" ("id", "name", "code", "isActive", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-court', 'محكمة الجيزة الابتدائية', 'GIZA-01', true, 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          // Active matter
+          await clientPre.query(`
+            INSERT INTO "matter" ("id", "fileCode", "title", "titleNormalized", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-matter-active', '2026/0101', 'نزاع عقاري نشط', 'نزاع عقاري نشط', 'LITIGATION', 'ACTIVE', 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          // Pre-existing ARCHIVED matter (status = ARCHIVED, but archivedAt does not exist in T06 table schema)
+          await clientPre.query(`
+            INSERT INTO "matter" ("id", "fileCode", "title", "titleNormalized", "kind", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-matter-archived', '2026/0102', 'ملف مؤرشف مسبقاً بالتراث', 'ملف مؤرشف مسبقا بالتراث', 'CONSULTATION', 'ARCHIVED', 1, 't06-hist-user', 't06-hist-user', '2026-11-10T12:00:00Z', '2026-11-15T15:30:00Z');
+          `);
+
+          // Proceeding 1: with Eastern Arabic digits in numberText and yearLabel
+          await clientPre.query(`
+            INSERT INTO "proceeding" ("id", "matterId", "courtId", "instance", "numberText", "yearLabel", "registerType", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-proc-east', 't06-hist-matter-active', 't06-hist-court', 'FIRST_INSTANCE', '١٢٣٤/ق', '٢٠٢٥', 'مدني كلي', 'ACTIVE', 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          // Proceeding 2: with Western digits
+          await clientPre.query(`
+            INSERT INTO "proceeding" ("id", "matterId", "courtId", "instance", "numberText", "yearLabel", "registerType", "status", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-proc-west', 't06-hist-matter-active', 't06-hist-court', 'FIRST_INSTANCE', '5678', '2024', 'تجاري', 'ACTIVE', 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          // Links
+          await clientPre.query(`
+            INSERT INTO "matter_party" ("id", "matterId", "partyId", "role", "isPrimaryContact", "version", "createdById", "updatedById", "createdAt", "updatedAt")
+            VALUES ('t06-hist-mp', 't06-hist-matter-active', 't06-hist-party', 'CLIENT', true, 1, 't06-hist-user', 't06-hist-user', now(), now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "proceeding_party" ("id", "proceedingId", "matterPartyId", "capacityText", "legalCapacity", "createdById", "createdAt")
+            VALUES ('t06-hist-pp', 't06-hist-proc-east', 't06-hist-mp', 'مدعي أصلي', 'PLAINTIFF', 't06-hist-user', now());
+          `);
+
+          await clientPre.query(`
+            INSERT INTO "matter_authorization" ("id", "matterId", "powerOfAttorneyId", "createdById", "createdAt")
+            VALUES ('t06-hist-auth', 't06-hist-matter-active', 't06-hist-poa', 't06-hist-user', now());
+          `);
+        } finally {
+          clientPre.release();
+        }
+
+        // 3. Stage and deploy T07 migration 20261122000000_t07_archive_and_search_indexes
+        const t07SrcDir = path.resolve(process.cwd(), 'prisma/migrations/20261122000000_t07_archive_and_search_indexes');
+        const t07DstDir = path.join(tempDir, 'migrations/20261122000000_t07_archive_and_search_indexes');
+        fs.mkdirSync(t07DstDir, { recursive: true });
+        fs.copyFileSync(path.join(t07SrcDir, 'migration.sql'), path.join(t07DstDir, 'migration.sql'));
+
+        const t07DeployRes = runPrismaMigrateDeployCustom(tempSchemaPath, dedicated.url);
+        expect(t07DeployRes.status).toBe(0);
+
+        // 4. Assert schema, backfill, and data preservation
+        const clientAfter = await dedicated.pool.connect();
+        try {
+          // Check columns exist
+          const columnsRes = await clientAfter.query(`
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name IN ('matter', 'proceeding')
+          `);
+          const matterCols = columnsRes.rows.filter((r) => r.table_name === 'matter').map((r) => r.column_name);
+          const procCols = columnsRes.rows.filter((r) => r.table_name === 'proceeding').map((r) => r.column_name);
+
+          expect(matterCols).toContain('archivedAt');
+          expect(matterCols).toContain('archiveReason');
+          expect(procCols).toContain('archivedAt');
+          expect(procCols).toContain('archiveReason');
+          expect(procCols).toContain('numberNormalized');
+          expect(procCols).toContain('yearNormalized');
+
+          // Check backfill of archivedAt for historical archived matter
+          const archMatterRes = await clientAfter.query(`
+            SELECT status, "archivedAt", "updatedAt"
+            FROM "matter" WHERE id = 't06-hist-matter-archived'
+          `);
+          expect(archMatterRes.rows).toHaveLength(1);
+          expect(archMatterRes.rows[0].status).toBe('ARCHIVED');
+          expect(archMatterRes.rows[0].archivedAt).not.toBeNull();
+          expect(new Date(archMatterRes.rows[0].archivedAt).getTime()).toBe(new Date(archMatterRes.rows[0].updatedAt).getTime());
+
+          // Check active matter has null archivedAt
+          const actMatterRes = await clientAfter.query(`
+            SELECT status, "archivedAt"
+            FROM "matter" WHERE id = 't06-hist-matter-active'
+          `);
+          expect(actMatterRes.rows[0].status).toBe('ACTIVE');
+          expect(actMatterRes.rows[0].archivedAt).toBeNull();
+
+          // Check backfill of Eastern Arabic digits in proceeding
+          const procEastRes = await clientAfter.query(`
+            SELECT "numberText", "numberNormalized", "yearLabel", "yearNormalized"
+            FROM "proceeding" WHERE id = 't06-hist-proc-east'
+          `);
+          expect(procEastRes.rows).toHaveLength(1);
+          expect(procEastRes.rows[0].numberText).toBe('١٢٣٤/ق');
+          expect(procEastRes.rows[0].yearLabel).toBe('٢٠٢٥');
+          expect(procEastRes.rows[0].numberNormalized).toBe('1234/ق');
+          expect(procEastRes.rows[0].yearNormalized).toBe('2025');
+
+          // Check Western digits proceeding
+          const procWestRes = await clientAfter.query(`
+            SELECT "numberText", "numberNormalized", "yearLabel", "yearNormalized"
+            FROM "proceeding" WHERE id = 't06-hist-proc-west'
+          `);
+          expect(procWestRes.rows[0].numberNormalized).toBe('5678');
+          expect(procWestRes.rows[0].yearNormalized).toBe('2024');
+
+          // Check links preservation
+          const mpRes = await clientAfter.query(`SELECT id, "matterId", "partyId" FROM "matter_party" WHERE id = 't06-hist-mp'`);
+          expect(mpRes.rows).toHaveLength(1);
+
+          const ppRes = await clientAfter.query(`SELECT id, "proceedingId" FROM "proceeding_party" WHERE id = 't06-hist-pp'`);
+          expect(ppRes.rows).toHaveLength(1);
+
+          const authRes = await clientAfter.query(`SELECT id, "matterId" FROM "matter_authorization" WHERE id = 't06-hist-auth'`);
+          expect(authRes.rows).toHaveLength(1);
+
+          // Check search query matching using normalized indexes
+          const searchByWestern = await clientAfter.query(`
+            SELECT id FROM "proceeding" WHERE "numberNormalized" LIKE '%1234%'
+          `);
+          expect(searchByWestern.rows.map((r) => r.id)).toContain('t06-hist-proc-east');
         } finally {
           clientAfter.release();
         }

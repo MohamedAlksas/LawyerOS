@@ -931,6 +931,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
         instance: 'FIRST_INSTANCE',
         numberText: '7788',
         yearLabel: '2026',
+        registerType: 'مدني',
+        circuit: 'الدائرة الأولى',
         status: 'ACTIVE',
         createdById: owner.id,
         updatedById: owner.id,
@@ -945,6 +947,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
         instance: 'FIRST_INSTANCE',
         numberText: '7789',
         yearLabel: '2026',
+        registerType: 'مدني',
+        circuit: 'الدائرة الأولى',
         status: 'ACTIVE',
         createdById: owner.id,
         updatedById: owner.id,
@@ -972,6 +976,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.getByTestId('proceeding-court-select').selectOption(court.id);
     await page.getByTestId('proceeding-year-input').fill('2026');
     await page.getByTestId('proceeding-number-input').fill('7788');
+    await page.getByTestId('proceeding-register-type-input').fill('مدني');
+    await page.getByTestId('proceeding-circuit-input').fill('الدائرة الأولى');
 
     // Wait for similarity warning banner showing candidate A
     const similarityBanner = page.getByTestId('similarity-warning-banner');

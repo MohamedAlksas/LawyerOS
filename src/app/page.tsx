@@ -55,7 +55,6 @@ export default async function HomePage() {
         </div>
       </div>
 
-      {/* S02 Genuine Empty State & Asynchronous Status Handler (R04-04) */}
       <DashboardStatus actorEmail={actor.email} />
     </div>
   );

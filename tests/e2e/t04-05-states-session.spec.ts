@@ -6,13 +6,13 @@ import { expectHtmlResponse, findOfflineRoute } from '../helpers/t04-assets';
 import { sanitizeReturnTo } from '../../src/lib/sanitize-return-to';
 
 /**
- * T04-05 — genuine empty state, offline banner and server-side session expiry.
+ * T04-05 — office overview, offline banner and server-side session expiry.
  *
  * The expiry test deletes the real `session` rows for a fresh owner and then
  * performs a real server navigation; nothing is mocked at the HTTP layer.
  */
 
-test('authenticated home renders the genuine empty state @once', async ({ t04Page: page }) => {
+test('authenticated home renders the office overview @once', async ({ t04Page: page }) => {
   await page.goto(T04_ROUTES.home);
   await expectShellReady(page);
 
@@ -22,9 +22,8 @@ test('authenticated home renders the genuine empty state @once', async ({ t04Pag
   const emptyState = page.getByTestId(T04_TEST_IDS.emptyState);
   await expect(emptyState).toBeVisible();
 
-  const copy = await emptyState.innerText();
-  expect(copy).toMatch(/القضايا|الجلسات/);
-  expect(copy.length, 'The empty state must explain the current module status').toBeGreaterThan(20);
+  await expect(emptyState.getByRole('heading')).toHaveText('مساحة عمل المكتب');
+  await expect(emptyState).toContainText('أقسام النظام المتاحة لحسابك');
 
   const action = page.getByTestId(T04_TEST_IDS.emptyStateSecurityAction);
   await expect(action).toBeVisible();

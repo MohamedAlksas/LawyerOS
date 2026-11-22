@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
-import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from '@/lib/auth-client';
+import { usePathname } from 'next/navigation';
+import { signOutAndReset } from '@/lib/auth-client';
 
 interface TabletDrawerProps {
   isOpen: boolean;
@@ -13,7 +13,6 @@ interface TabletDrawerProps {
 
 export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const canLeavePage = useCanLeavePage();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -112,14 +111,12 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     setLogoutError(null);
 
     try {
-      const res = await signOut();
+      const res = await signOutAndReset();
       if (res?.error) {
         setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
         setIsLoggingOut(false);
         return;
       }
-      onClose();
-      router.push('/login');
     } catch {
       setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
       setIsLoggingOut(false);
@@ -127,6 +124,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   };
 
   const isHomeActive = pathname === '/';
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
@@ -237,6 +235,21 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             >
               <span aria-hidden="true" className="text-base">🛡️</span>
               <span>إعدادات الأمان</span>
+            </Link>
+
+            <Link
+              href="/search"
+              data-testid="nav-link-search"
+              aria-current={isSearchActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isSearchActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">🔍</span>
+              <span>البحث الموحد</span>
             </Link>
 
             <Link

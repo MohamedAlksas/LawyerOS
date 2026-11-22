@@ -8,11 +8,11 @@
   "nativeAgentDefinitions": 14,
   "bundledAgencyProfiles": 155,
   "agencyProfiles": 14,
-  "localLinksChecked": 269,
+  "localLinksChecked": 268,
   "brokenLinks": 0,
   "codeFences": "Balanced",
   "encoding": "UTF-8 checked",
-  "zipEntries": 343,
+  "zipEntries": 346,
   "zipSourceHashes": "All match",
   "outputs": [
     {
@@ -49,11 +49,11 @@
     },
     {
       "Name": "LawOffice-OS-Master-Plan.md",
-      "Length": 567568
+      "Length": 567164
     },
     {
       "Name": "LawOffice-OS-Planning-Kit.zip",
-      "Length": 1857008
+      "Length": 1866895
     },
     {
       "Name": "LawOffice-OS-Start-Here.md",

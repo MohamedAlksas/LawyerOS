@@ -4,7 +4,8 @@ import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
-import { normalizeArabicDigits, normalizeArabicText } from '@/lib/normalization';
+import { MAX_SEARCH_PAGE } from '@/lib/search-params';
+import { normalizeArabicDigits, normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -40,6 +41,16 @@ import {
   UnlinkMatterAuthorizationInput,
   SearchMattersParams,
   SearchMattersResult,
+  ArchiveMatterInput,
+  ReopenMatterInput,
+  ArchiveProceedingInput,
+  ReopenProceedingInput,
+  LifecycleCommandResult,
+  SearchProceedingsParams,
+  SearchProceedingsResult,
+  UnifiedSearchParams,
+  UnifiedSearchResult,
+  UnifiedSearchResultItem,
   openMatterSchema,
   updateMatterSchema,
   linkMatterPartySchema,
@@ -54,6 +65,13 @@ import {
   searchMattersParamsSchema,
   getPartyMatterAssociationsSchema,
   findSimilarProceedingsSchema,
+  archiveMatterSchema,
+  reopenMatterSchema,
+  archiveProceedingSchema,
+  reopenProceedingSchema,
+  searchProceedingsParamsSchema,
+  unifiedSearchParamsSchema,
+  searchMatterClientsParamsSchema,
   parseCalendarDateToUtc,
   UnauthorizedError,
   MatterValidationError,
@@ -66,6 +84,8 @@ import {
   ConcurrencyConflictError,
   NotFoundError,
   UnsupportedTransitionError,
+  MatterArchivedError,
+  ProceedingArchivedError,
 } from './matter-types';
 
 function extractOperationVersion(payload: unknown, fallback: number): number {
@@ -93,6 +113,23 @@ interface MinimalIdempotencyPayload {
 function extractResourceId(claim: { resultId?: string | null; resultPayload?: unknown }): string {
   const resourceId = claim.resultId || (claim.resultPayload as MinimalIdempotencyPayload | null)?.resourceId;
   return resourceId ?? '';
+}
+
+function extractLifecycleResult(claim: { resultId?: string | null; resultPayload?: unknown }): LifecycleCommandResult | null {
+  const payload = claim.resultPayload as Record<string, unknown> | null;
+  if (!payload) return null;
+  const id = (payload.id as string) || (payload.resourceId as string) || claim.resultId;
+  if (!id || payload.version === undefined || !payload.status || !payload.updatedAt) {
+    return null;
+  }
+  return {
+    id,
+    version: Number(payload.version),
+    status: String(payload.status),
+    archivedAt: (payload.archivedAt as string | null) ?? null,
+    updatedAt: String(payload.updatedAt),
+    operationVersion: Number(payload.operationVersion ?? payload.version),
+  };
 }
 
 function formatZodError(err: z.ZodError): { message: string; fieldErrors: Record<string, string> } {
@@ -247,54 +284,80 @@ function resolveDefaultCapacityText(capacityText?: string | null, legalCapacity?
   }
 }
 
-/**
- * Advisory check for similar court registration identities.
- * Does not block creation or updates.
- */
+async function querySimilarProceedingRows(tx: Prisma.TransactionClient, params: FindSimilarProceedingsParams) {
+  const normNumber = normalizeArabicDigits(params.numberText.trim());
+  const normYear = normalizeArabicDigits(params.yearLabel?.trim() ?? '');
+  const registerType = params.registerType?.trim().toLowerCase() ?? '';
+  const normCircuit = normalizeArabicText(params.circuit ?? '');
+  const normalizedYear = Prisma.sql`COALESCE(p."yearNormalized", trim(translate(p."yearLabel", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')), '')`;
+  const yearMatches = normYear ? Prisma.sql`${normalizedYear} = ${normYear}` : Prisma.sql`FALSE`;
+  const directMatch = normYear && registerType && normCircuit
+    ? Prisma.sql`(${yearMatches}
+        AND lower(btrim(coalesce(p."registerType", ''))) = ${registerType}
+        AND btrim(lower(regexp_replace(
+          translate(regexp_replace(coalesce(p."circuit", ''), '[ً-ٰٟـ]', '', 'g'),
+            '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹أإآٱةىئؤ', '01234567890123456789ااااهييو'),
+          '[[:space:]]+', ' ', 'g'
+        ))) = ${normCircuit})`
+    : Prisma.sql`FALSE`;
+  const exclude = params.excludeProceedingId
+    ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
+    : Prisma.empty;
+
+  return tx.$queryRaw<Array<{
+    id: string;
+    matterId: string;
+    courtId: string;
+    instance: SimilarProceedingCandidateDTO['instance'];
+    numberText: string;
+    yearLabel: string | null;
+    status: SimilarProceedingCandidateDTO['status'];
+    matterFileCode: string;
+    matterTitle: string;
+    courtName: string;
+    directMatch: boolean;
+    yearMatches: boolean;
+  }>>`
+    SELECT p."id", p."matterId", p."courtId", p."instance", p."numberText", p."yearLabel", p."status",
+      m."fileCode" AS "matterFileCode", m."title" AS "matterTitle", c."name" AS "courtName",
+      ${directMatch} AS "directMatch", ${yearMatches} AS "yearMatches"
+    FROM "proceeding" p
+    JOIN "matter" m ON m."id" = p."matterId"
+    JOIN "court" c ON c."id" = p."courtId"
+    WHERE p."courtId" = ${params.courtId}
+      AND (
+        p."numberNormalized" = ${normNumber}
+        OR (p."numberNormalized" IS NULL AND
+            trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber})
+      )
+      ${exclude}
+    ORDER BY "directMatch" DESC, "yearMatches" DESC, p."createdAt" DESC, p."id" ASC
+    LIMIT ${params.limit ?? 10}
+  `;
+}
+
 async function checkProceedingCourtDuplicate(
   tx: Prisma.TransactionClient,
-  matterId: string,
-  courtId: string,
-  registerType?: string | null,
-  numberText?: string | null,
-  yearLabel?: string | null,
-  excludeProceedingId?: string
+  input: Pick<AddProceedingInput, 'courtId' | 'numberText' | 'yearLabel' | 'registerType' | 'circuit'>,
+  excludeProceedingId?: string,
 ): Promise<DuplicateCourtWarningDTO | null> {
-  if (!courtId || !numberText || !yearLabel) return null;
-
-  const normNumber = normalizeArabicDigits(numberText.trim());
-  const normYear = normalizeArabicDigits(yearLabel.trim());
-
-  const candidates = await tx.proceeding.findMany({
-    where: {
-      courtId,
-      ...(excludeProceedingId ? { id: { not: excludeProceedingId } } : {}),
-    },
-    select: {
-      id: true,
-      matterId: true,
-      registerType: true,
-      numberText: true,
-      yearLabel: true,
-    },
+  if (!input.numberText?.trim()) return null;
+  const [candidate] = await querySimilarProceedingRows(tx, {
+    ...input,
+    numberText: input.numberText,
+    excludeProceedingId,
+    limit: 1,
   });
-
-  for (const c of candidates) {
-    if (c.numberText && c.yearLabel) {
-      const cNumber = normalizeArabicDigits(c.numberText.trim());
-      const cYear = normalizeArabicDigits(c.yearLabel.trim());
-      if (cNumber === normNumber && cYear === normYear) {
-        return {
-          detected: true,
-          message: `تنبيه: يوجد قيد قضائي آخر بنفس الرقم (${c.numberText}/${c.yearLabel}) في نفس المحكمة.`,
-          existingProceedingId: c.id,
-          existingNumberText: c.numberText,
-          existingYearLabel: c.yearLabel,
-        };
-      }
-    }
-  }
-  return null;
+  if (!candidate) return null;
+  return {
+    detected: true,
+    message: candidate.directMatch
+      ? 'تنبيه: يوجد قيد آخر مطابق في المحكمة والرقم والسنة ونوع القيد والدائرة.'
+      : 'تنبيه: يوجد قيد مشابه في نفس المحكمة. راجع سنة القيد ونوعه ودائرته.',
+    existingProceedingId: candidate.id,
+    existingNumberText: candidate.numberText,
+    existingYearLabel: candidate.yearLabel ?? '',
+  };
 }
 
 type MatterWithRelations = Prisma.MatterGetPayload<{
@@ -320,6 +383,8 @@ function mapMatterToDTO(raw: MatterWithRelations): MatterDTO {
     title: raw.title,
     kind: raw.kind,
     status: raw.status,
+    archivedAt: raw.archivedAt ? raw.archivedAt.toISOString() : null,
+    archiveReason: raw.archiveReason ?? null,
     practiceAreaId: raw.practiceAreaId ?? null,
     practiceAreaName: raw.practiceArea?.name ?? null,
     openingDate: raw.openingDate ? raw.openingDate.toISOString().slice(0, 10) : null,
@@ -357,9 +422,13 @@ function mapMatterToDTO(raw: MatterWithRelations): MatterDTO {
       circuit: pr.circuit ?? null,
       numberText: pr.numberText ?? null,
       yearLabel: pr.yearLabel ?? null,
+      numberNormalized: pr.numberNormalized ?? null,
+      yearNormalized: pr.yearNormalized ?? null,
       filingDate: pr.filingDate ? pr.filingDate.toISOString().slice(0, 10) : null,
       claimAmount: pr.claimAmount ?? null,
       status: pr.status,
+      archivedAt: pr.archivedAt ? pr.archivedAt.toISOString() : null,
+      archiveReason: pr.archiveReason ?? null,
       version: pr.version,
       createdAt: pr.createdAt.toISOString(),
       parties: pr.parties?.map((pp) => ({
@@ -493,9 +562,13 @@ async function getProceedingDTO(
     circuit: proceeding.circuit,
     numberText: proceeding.numberText,
     yearLabel: proceeding.yearLabel,
+    numberNormalized: proceeding.numberNormalized ?? null,
+    yearNormalized: proceeding.yearNormalized ?? null,
     filingDate: proceeding.filingDate ? proceeding.filingDate.toISOString().slice(0, 10) : null,
     claimAmount: proceeding.claimAmount,
     status: proceeding.status,
+    archivedAt: proceeding.archivedAt ? proceeding.archivedAt.toISOString() : null,
+    archiveReason: proceeding.archiveReason ?? null,
     version: proceeding.version,
     createdAt: proceeding.createdAt.toISOString(),
     parties: proceeding.parties.map((pp) => ({
@@ -781,10 +854,11 @@ export async function updateMatter(
         id: string;
         version: number;
         status: string;
+        archivedAt: Date | null;
         practiceAreaId: string | null;
         paperLocationId: string | null;
       }>>`
-        SELECT "id", "version", "status", "practiceAreaId", "paperLocationId"
+        SELECT "id", "version", "status", "archivedAt", "practiceAreaId", "paperLocationId"
         FROM "matter"
         WHERE "id" = ${input.id}
         FOR UPDATE;
@@ -792,6 +866,10 @@ export async function updateMatter(
 
       if (!existing) {
         throw new NotFoundError('ملف القضية غير موجود.');
+      }
+
+      if (existing.status === 'ARCHIVED' || existing.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديله. يرجى إلغاء الأرشفة أولاً.');
       }
 
       if (existing.version !== input.expectedVersion) {
@@ -940,10 +1018,14 @@ export async function linkMatterParty(
       }
 
       // Lock parent matter row
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إضافة أطراف إليه.');
+      }
 
       const party = await tx.party.findUnique({
         where: { id: input.partyId },
@@ -1122,10 +1204,14 @@ export async function updateMatterParty(
       }
 
       // Lock parent matter row
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string }>>`
-        SELECT "id", "version", "status" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديل أطرافه.');
+      }
 
       // Lock party row
       const [existing] = await tx.$queryRaw<Array<{
@@ -1313,10 +1399,14 @@ export async function unlinkMatterParty(
         return;
       }
 
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string }>>`
-        SELECT "id", "version", "status" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن حذف أطراف منه.');
+      }
 
       const [existing] = await tx.$queryRaw<Array<{
         id: string;
@@ -1376,13 +1466,24 @@ export async function unlinkMatterParty(
         ).sort();
 
         // Lock proceedings in deterministic order
-        await tx.$queryRaw`
-          SELECT "id", "version"
+        const lockedProceedings = await tx.$queryRaw<Array<{
+          id: string;
+          version: number;
+          archivedAt: Date | null;
+        }>>`
+          SELECT "id", "version", "archivedAt"
           FROM "proceeding"
           WHERE "id" IN (${Prisma.join(affectedProceedingIds)})
           ORDER BY "id" ASC
           FOR UPDATE;
         `;
+
+        const hasArchivedProceeding = lockedProceedings.some((p) => p.archivedAt !== null);
+        if (hasArchivedProceeding) {
+          throw new ProceedingArchivedError(
+            'لا يمكن إزالة طرف الملف لارتباطه بقيد قضائي مؤرشف. يجب إلغاء أرشفة القيد القضائي أولاً.'
+          );
+        }
 
         // Advance each affected proceeding's version
         await tx.$executeRaw`
@@ -1496,10 +1597,14 @@ export async function addProceeding(
       }
 
       // Lock parent matter row
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إضافة قيود قضائية عليه.');
+      }
 
       // Check active court under lock
       await validateActiveReferenceUnderLock(tx, 'COURT', input.courtId, null);
@@ -1520,16 +1625,12 @@ export async function addProceeding(
       );
 
       // Check advisory duplicate
-      const duplicateWarning = await checkProceedingCourtDuplicate(
-        tx,
-        input.matterId,
-        input.courtId,
-        input.registerType,
-        input.numberText,
-        input.yearLabel
-      );
+      const duplicateWarning = await checkProceedingCourtDuplicate(tx, input);
 
       const filingDateVal = parseCalendarDateToUtc(input.filingDate);
+
+      const normNumber = input.numberText?.trim() ? normalizeArabicDigits(input.numberText.trim()) : null;
+      const normYear = input.yearLabel?.trim() ? normalizeArabicDigits(input.yearLabel.trim()) : null;
 
       const proceeding = await tx.proceeding.create({
         data: {
@@ -1541,6 +1642,8 @@ export async function addProceeding(
           circuit: input.circuit?.trim() ?? null,
           numberText: input.numberText?.trim() ?? null,
           yearLabel: input.yearLabel?.trim() ?? null,
+          numberNormalized: normNumber,
+          yearNormalized: normYear,
           filingDate: filingDateVal,
           claimAmount: input.claimAmount?.trim() ?? null,
           status: proceedingStatus,
@@ -1687,10 +1790,14 @@ export async function updateProceeding(
       }
 
       // Lock parent matter row
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديل القيود القضائية التابعة له.');
+      }
 
       // Lock proceeding row
       const [existing] = await tx.$queryRaw<Array<{
@@ -1699,14 +1806,19 @@ export async function updateProceeding(
         courtId: string;
         version: number;
         status: string;
+        archivedAt: Date | null;
       }>>`
-        SELECT "id", "matterId", "courtId", "version", "status"
+        SELECT "id", "matterId", "courtId", "version", "status", "archivedAt"
         FROM "proceeding"
         WHERE "id" = ${input.id}
         FOR UPDATE;
       `;
       if (!existing || existing.matterId !== input.matterId) {
         throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      if (existing.archivedAt !== null) {
+        throw new ProceedingArchivedError('القيد القضائي مؤرشف ولا يمكن تعديله. يرجى إلغاء الأرشفة أولاً.');
       }
 
       if (existing.version !== input.expectedVersion) {
@@ -1731,17 +1843,12 @@ export async function updateProceeding(
       );
 
       // Check advisory duplicate
-      const duplicateWarning = await checkProceedingCourtDuplicate(
-        tx,
-        input.matterId,
-        input.courtId,
-        input.registerType,
-        input.numberText,
-        input.yearLabel,
-        input.id
-      );
+      const duplicateWarning = await checkProceedingCourtDuplicate(tx, input, input.id);
 
       const filingDateVal = parseCalendarDateToUtc(input.filingDate);
+
+      const normNumber = input.numberText?.trim() ? normalizeArabicDigits(input.numberText.trim()) : null;
+      const normYear = input.yearLabel?.trim() ? normalizeArabicDigits(input.yearLabel.trim()) : null;
 
       const nextVersion = existing.version + 1;
 
@@ -1755,6 +1862,8 @@ export async function updateProceeding(
           circuit: input.circuit?.trim() ?? null,
           numberText: input.numberText?.trim() ?? null,
           yearLabel: input.yearLabel?.trim() ?? null,
+          numberNormalized: normNumber,
+          yearNormalized: normYear,
           filingDate: filingDateVal,
           claimAmount: input.claimAmount?.trim() ?? null,
           status: input.status,
@@ -1960,17 +2069,25 @@ export async function linkProceedingParty(
       if (!procRef) throw new NotFoundError('القيد القضائي غير موجود.');
 
       // 2. Lock parent matter row FIRST
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
 
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديل القيود التابعة له.');
+      }
+
       // 3. Lock proceeding row SECOND
-      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number }>>`
-        SELECT "id", "matterId", "version" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
+      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number; archivedAt: Date | null }>>`
+        SELECT "id", "matterId", "version", "archivedAt" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
       `;
       if (!proceeding || proceeding.matterId !== procRef.matterId) {
         throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      if (proceeding.archivedAt !== null) {
+        throw new ProceedingArchivedError('القيد القضائي مؤرشف ولا يمكن إضافة صفات تقاضي إليه.');
       }
 
       // 4. Validate expectedVersion unconditionally (C01)
@@ -2139,17 +2256,25 @@ export async function unlinkProceedingParty(
       if (!procRef) throw new NotFoundError('القيد القضائي غير موجود.');
 
       // 2. Lock parent matter row FIRST
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${procRef.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
 
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديل القيود التابعة له.');
+      }
+
       // 3. Lock proceeding row SECOND
-      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number }>>`
-        SELECT "id", "matterId", "version" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
+      const [proceeding] = await tx.$queryRaw<Array<{ id: string; matterId: string; version: number; archivedAt: Date | null }>>`
+        SELECT "id", "matterId", "version", "archivedAt" FROM "proceeding" WHERE "id" = ${input.proceedingId} FOR UPDATE;
       `;
       if (!proceeding || proceeding.matterId !== procRef.matterId) {
         throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      if (proceeding.archivedAt !== null) {
+        throw new ProceedingArchivedError('القيد القضائي مؤرشف ولا يمكن حذف صفات تقاضي منه.');
       }
 
       // 4. Validate expectedVersion unconditionally (C01)
@@ -2258,10 +2383,14 @@ export async function linkMatterAuthorization(
       }
 
       // Lock parent matter row
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن ربط توكيلات به.');
+      }
 
       const poa = await tx.powerOfAttorney.findUnique({
         where: { id: input.powerOfAttorneyId },
@@ -2388,10 +2517,14 @@ export async function unlinkMatterAuthorization(
 
       if (claim.isReplay) return;
 
-      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-        SELECT "id", "version" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
+      const [matter] = await tx.$queryRaw<Array<{ id: string; version: number; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "version", "status", "archivedAt" FROM "matter" WHERE "id" = ${input.matterId} FOR UPDATE;
       `;
       if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إلغاء ربط توكيلات منه.');
+      }
 
       const existing = await tx.matterAuthorization.findUnique({
         where: { id: input.id },
@@ -2510,8 +2643,14 @@ export async function searchMatters(
   const where: Prisma.MatterWhereInput = {};
 
   if (params.kind) where.kind = params.kind;
-  if (params.status) where.status = params.status;
   if (params.practiceAreaId) where.practiceAreaId = params.practiceAreaId;
+
+  if (params.status) {
+    where.status = params.status;
+  } else if (!params.includeArchived) {
+    where.archivedAt = null;
+    where.status = { not: 'ARCHIVED' };
+  }
 
   if (params.partyId) {
     where.parties = {
@@ -2552,8 +2691,31 @@ export async function searchMatters(
     where.OR = orClauses;
   }
 
-  const [matters, total] = await Promise.all([
-    prisma.matter.findMany({
+  if (params.incompleteData) {
+    const incompleteClauses: Prisma.MatterWhereInput[] = [
+      { status: 'ACTIVE', paperLocationId: null },
+      { parties: { none: { role: 'CLIENT' } } },
+      { proceedings: { some: { status: 'DRAFT' } } },
+    ];
+    if (where.AND) {
+      if (Array.isArray(where.AND)) {
+        where.AND.push({ OR: incompleteClauses });
+      } else {
+        where.AND = [where.AND, { OR: incompleteClauses }];
+      }
+    } else {
+      where.AND = [{ OR: incompleteClauses }];
+    }
+  }
+
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+  const requestedPage = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const total = await prisma.matter.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
+  const skip = (page - 1) * limit;
+
+  const matters = await prisma.matter.findMany({
       where,
       select: {
         id: true,
@@ -2561,6 +2723,7 @@ export async function searchMatters(
         title: true,
         kind: true,
         status: true,
+        archivedAt: true,
         openingDate: true,
         practiceArea: { select: { name: true } },
         paperLocation: { select: { name: true } },
@@ -2573,11 +2736,9 @@ export async function searchMatters(
         _count: { select: { parties: { where: { role: 'CLIENT' } } } },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: params.limit ?? 50,
-      skip: params.offset ?? 0,
-    }),
-    prisma.matter.count({ where }),
-  ]);
+      take: limit,
+      skip,
+  });
 
   return {
     matters: matters.map((matter) => ({
@@ -2586,6 +2747,7 @@ export async function searchMatters(
       title: matter.title,
       kind: matter.kind,
       status: matter.status,
+      archivedAt: matter.archivedAt?.toISOString() ?? null,
       openingDate: matter.openingDate?.toISOString().slice(0, 10) ?? null,
       practiceAreaName: matter.practiceArea?.name ?? null,
       paperLocationName: matter.paperLocation?.name ?? null,
@@ -2593,6 +2755,98 @@ export async function searchMatters(
       clientCount: matter._count.parties,
     })),
     total,
+    page,
+    totalPages,
+    limit,
+  };
+}
+
+export interface SearchMatterClientsParams {
+  query?: string;
+  page?: number;
+  limit?: number;
+  includeArchived?: boolean;
+}
+
+export interface SearchMatterClientsResult {
+  clients: Array<{ id: string; name: string }>;
+  total: number;
+  page: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export async function searchMatterClients(
+  actor: Actor,
+  rawParams: unknown = {},
+  options: ServiceExecutionOptions = {}
+): Promise<SearchMatterClientsResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  let params: z.infer<typeof searchMatterClientsParamsSchema>;
+  try {
+    params = searchMatterClientsParamsSchema.parse(rawParams);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const { page: requestedPage, limit, includeArchived, query } = params;
+
+  const prisma = options.prismaOverride ?? getPrismaClient();
+
+  const where: Prisma.PartyWhereInput = {
+    matterParties: {
+      some: {
+        role: 'CLIENT',
+        ...(includeArchived ? {} : { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }),
+      },
+    },
+  };
+
+  if (!includeArchived) {
+    where.archivedAt = null;
+  }
+
+  const rawQuery = query?.trim();
+  if (rawQuery) {
+    const textNorm = normalizeArabicText(rawQuery);
+    const phoneNorm = normalizePhone(rawQuery);
+    const orClauses: Prisma.PartyWhereInput[] = [];
+    if (textNorm) {
+      orClauses.push({ nameNormalized: { contains: textNorm } });
+    }
+    if (phoneNorm) {
+      orClauses.push({ primaryPhoneNormalized: { contains: phoneNorm } });
+    }
+    if (orClauses.length > 0) {
+      where.OR = orClauses;
+    }
+  }
+
+  const total = await prisma.party.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
+  const records = await prisma.party.findMany({
+    where,
+    skip: (page - 1) * limit,
+    take: limit,
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    select: { id: true, name: true },
+  });
+
+  return {
+    clients: records,
+    total,
+    page,
+    totalPages,
+    hasMore: page < totalPages,
   };
 }
 
@@ -2678,94 +2932,1287 @@ export async function findSimilarProceedings(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const rows = await querySimilarProceedingRows(getPrismaClient(), params);
+  const candidates = rows.map(({ directMatch, yearMatches, ...candidate }): SimilarProceedingCandidateDTO => ({
+    ...candidate,
+    similarityReason: directMatch
+      ? 'تطابق تام في المحكمة ورقم الدعوى وسنة القيد ونوعه ودائرته'
+      : yearMatches
+        ? 'تطابق في المحكمة والرقم والسنة (نوع القيد أو الدائرة مختلفان أو غير محددين)'
+        : 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)',
+  }));
+  return { candidates, hasDirectMatch: rows.some((row) => row.directMatch) };
+}
 
-  const normNumber = normalizeArabicDigits(params.numberText.trim());
-  const normYear = params.yearLabel ? normalizeArabicDigits(params.yearLabel.trim()) : null;
+export async function archiveMatter(
+  actor: Actor,
+  rawInput: ArchiveMatterInput,
+  options: ServiceExecutionOptions = {}
+): Promise<LifecycleCommandResult> {
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
-  // Filter the normalized docket identity in SQL before the result limit. A
-  // fixed "latest 100 rows, then filter in memory" window hides older matches
-  // whenever the court has enough newer unrelated proceedings.
-  const excludeClause = params.excludeProceedingId
-    ? Prisma.sql`AND p."id" <> ${params.excludeProceedingId}`
-    : Prisma.empty;
-
-  // S6: prioritize exact year match in SQL before LIMIT 100 so older exact matches
-  // are never hidden by 100+ newer entries in the same court with the same number but different years.
-  const yearPriorityClause = normYear
-    ? Prisma.sql`CASE WHEN trim(translate(COALESCE(p."yearLabel", ''), '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normYear} THEN 0 ELSE 1 END ASC,`
-    : Prisma.empty;
-
-  const proceedings = await prisma.$queryRaw<Array<{
-    id: string;
-    matterId: string;
-    courtId: string;
-    instance: string;
-    numberText: string | null;
-    yearLabel: string | null;
-    status: string;
-    fileCode: string;
-    title: string;
-    courtName: string;
-  }>>`
-    SELECT
-      p."id", p."matterId", p."courtId", p."instance", p."numberText",
-      p."yearLabel", p."status", m."fileCode", m."title", c."name" AS "courtName"
-    FROM "proceeding" p
-    JOIN "matter" m ON m."id" = p."matterId"
-    JOIN "court" c ON c."id" = p."courtId"
-    WHERE p."courtId" = ${params.courtId}
-      AND p."numberText" IS NOT NULL
-      AND trim(translate(p."numberText", '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', '01234567890123456789')) = ${normNumber}
-      ${excludeClause}
-    ORDER BY
-      ${yearPriorityClause}
-      p."createdAt" DESC
-    LIMIT 100
-  `;
-
-  const candidates: SimilarProceedingCandidateDTO[] = [];
-  let hasDirectMatch = false;
-
-  for (const proc of proceedings) {
-    if (!proc.numberText) continue;
-    const procNormYear = proc.yearLabel ? normalizeArabicDigits(proc.yearLabel.trim()) : null;
-
-    let reason: string | null = null;
-    if (normYear && procNormYear === normYear) {
-      reason = 'تطابق تام في رقم الدعوى وسنة القيد في نفس المحكمة';
-      hasDirectMatch = true;
-    } else {
-      reason = 'تطابق في رقم الدعوى في نفس المحكمة (سنة مختلفة أو غير محددة)';
+  let input: ArchiveMatterInput;
+  try {
+    input = archiveMatterSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
     }
-
-    candidates.push({
-      id: proc.id,
-      matterId: proc.matterId,
-      matterFileCode: proc.fileCode,
-      matterTitle: proc.title,
-      courtId: proc.courtId,
-      courtName: proc.courtName,
-      instance: proc.instance as SimilarProceedingCandidateDTO['instance'],
-      numberText: proc.numberText,
-      yearLabel: proc.yearLabel,
-      status: proc.status as SimilarProceedingCandidateDTO['status'],
-      similarityReason: reason,
-    });
+    throw err;
   }
 
-  // Sort direct matches first
-  candidates.sort((a, b) => {
-    const aDirect = a.similarityReason.startsWith('تطابق تام');
-    const bDirect = b.similarityReason.startsWith('تطابق تام');
-    if (aDirect && !bDirect) return -1;
-    if (!aDirect && bDirect) return 1;
-    return 0;
-  });
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
-  const limit = params.limit ?? 10;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const claim = await claimIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'archiveMatter',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+
+      if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(claim);
+        const m = await tx.matter.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (!m) throw new NotFoundError('ملف القضية غير موجود.');
+        const opVersion = extractOperationVersion(claim.resultPayload, m.version);
+        return {
+          id: m.id,
+          version: m.version,
+          status: m.status,
+          archivedAt: m.archivedAt?.toISOString() ?? null,
+          updatedAt: m.updatedAt.toISOString(),
+          operationVersion: opVersion,
+        };
+      }
+
+      // Lock matter row
+      const [matter] = await tx.$queryRaw<Array<{
+        id: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "version", "status", "archivedAt"
+        FROM "matter"
+        WHERE "id" = ${input.matterId}
+        FOR UPDATE;
+      `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError();
+      }
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new UnsupportedTransitionError('ملف القضية مؤرشف بالفعل ولا يمكن إعادة أرشفته.');
+      }
+
+      // =========================================================================
+      // CRITICAL OBLIGATION EXTENSION POINT (T08 / T09)
+      // =========================================================================
+      // In accordance with WORKFLOWS.md Section 11:
+      // A SCHEDULED hearing or an open CONFIRMED legal deadline blocks archiving the matter.
+      // In T07, Hearing and Deadline tables do not exist yet in Prisma schema.
+      // When T08 introduces Hearing:
+      //   const scheduledHearings = await tx.hearing.count({
+      //     where: { proceeding: { matterId: input.matterId }, status: 'SCHEDULED' }
+      //   });
+      //   if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود جلسات مجدولة قائمة.');
+      // When T09 introduces Deadline:
+      //   const openDeadlines = await tx.deadline.count({
+      //     where: { matterId: input.matterId, status: 'CONFIRMED', completedAt: null }
+      //   });
+      //   if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود مواعيد قانونية مؤكدة غير مكتملة.');
+      // =========================================================================
+
+      const now = new Date();
+      const nextVersion = matter.version + 1;
+
+      const updated = await tx.matter.update({
+        where: { id: input.matterId },
+        data: {
+          status: 'ARCHIVED',
+          archivedAt: now,
+          archiveReason: input.reason.trim(),
+          version: nextVersion,
+          updatedById: actor.id,
+        },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'ARCHIVE_MATTER',
+        entityType: 'Matter',
+        entityId: updated.id,
+        changedFields: {
+          previousStatus: matter.status,
+          newStatus: 'ARCHIVED',
+          archiveReason: input.reason.trim(),
+          archivedAt: now.toISOString(),
+        },
+      });
+
+      await completeIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'archiveMatter',
+        key: input.idempotencyKey,
+        resultType: 'LifecycleCommandResult',
+        resultId: updated.id,
+        resultPayload: {
+          operation: 'ARCHIVE_MATTER',
+          id: updated.id,
+          resourceId: updated.id,
+          version: updated.version,
+          status: updated.status,
+          archivedAt: updated.archivedAt?.toISOString() ?? null,
+          updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
+        },
+      });
+
+      return {
+        id: updated.id,
+        version: updated.version,
+        status: updated.status,
+        archivedAt: updated.archivedAt?.toISOString() ?? null,
+        updatedAt: updated.updatedAt.toISOString(),
+        operationVersion: updated.version,
+      };
+    });
+  } catch (err) {
+    if (isIdempotencyUniqueConflict(err)) {
+      const resolved = await resolveConcurrentIdempotency(prisma, {
+        actorId: actor.id,
+        commandType: 'archiveMatter',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+      if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(resolved);
+        const m = await prisma.matter.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (m) {
+          return {
+            id: m.id,
+            version: m.version,
+            status: m.status,
+            archivedAt: m.archivedAt?.toISOString() ?? null,
+            updatedAt: m.updatedAt.toISOString(),
+            operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
+          };
+        }
+      }
+      return archiveMatter(actor, rawInput, options);
+    }
+    throw err;
+  }
+}
+
+export async function reopenMatter(
+  actor: Actor,
+  rawInput: ReopenMatterInput,
+  options: ServiceExecutionOptions = {}
+): Promise<LifecycleCommandResult> {
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
+
+  let input: ReopenMatterInput;
+  try {
+    input = reopenMatterSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = options.prismaOverride ?? getPrismaClient();
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const claim = await claimIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'reopenMatter',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+
+      if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(claim);
+        const m = await tx.matter.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (!m) throw new NotFoundError('ملف القضية غير موجود.');
+        const opVersion = extractOperationVersion(claim.resultPayload, m.version);
+        return {
+          id: m.id,
+          version: m.version,
+          status: m.status,
+          archivedAt: m.archivedAt?.toISOString() ?? null,
+          updatedAt: m.updatedAt.toISOString(),
+          operationVersion: opVersion,
+        };
+      }
+
+      // Lock matter row
+      const [matter] = await tx.$queryRaw<Array<{
+        id: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "version", "status", "archivedAt"
+        FROM "matter"
+        WHERE "id" = ${input.matterId}
+        FOR UPDATE;
+      `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError();
+      }
+
+      if (matter.status !== 'ARCHIVED' || matter.archivedAt === null) {
+        throw new UnsupportedTransitionError('لا يمكن إلغاء أرشفة ملف قضية غير مؤرشف.');
+      }
+
+      // Check client presence to determine target status (ACTIVE if client present, else DRAFT)
+      const clientCount = await tx.matterParty.count({
+        where: { matterId: input.matterId, role: 'CLIENT' },
+      });
+      const restoredStatus = clientCount > 0 ? 'ACTIVE' : 'DRAFT';
+
+      const nextVersion = matter.version + 1;
+
+      const updated = await tx.matter.update({
+        where: { id: input.matterId },
+        data: {
+          status: restoredStatus,
+          archivedAt: null,
+          archiveReason: null,
+          version: nextVersion,
+          updatedById: actor.id,
+        },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'REOPEN_MATTER',
+        entityType: 'Matter',
+        entityId: updated.id,
+        changedFields: {
+          previousStatus: matter.status,
+          newStatus: restoredStatus,
+          reopenReason: input.reason.trim(),
+        },
+      });
+
+      await completeIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'reopenMatter',
+        key: input.idempotencyKey,
+        resultType: 'LifecycleCommandResult',
+        resultId: updated.id,
+        resultPayload: {
+          operation: 'REOPEN_MATTER',
+          id: updated.id,
+          resourceId: updated.id,
+          version: updated.version,
+          status: updated.status,
+          archivedAt: null,
+          updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
+        },
+      });
+
+      return {
+        id: updated.id,
+        version: updated.version,
+        status: updated.status,
+        archivedAt: null,
+        updatedAt: updated.updatedAt.toISOString(),
+        operationVersion: updated.version,
+      };
+    });
+  } catch (err) {
+    if (isIdempotencyUniqueConflict(err)) {
+      const resolved = await resolveConcurrentIdempotency(prisma, {
+        actorId: actor.id,
+        commandType: 'reopenMatter',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+      if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(resolved);
+        const m = await prisma.matter.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (m) {
+          return {
+            id: m.id,
+            version: m.version,
+            status: m.status,
+            archivedAt: m.archivedAt?.toISOString() ?? null,
+            updatedAt: m.updatedAt.toISOString(),
+            operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
+          };
+        }
+      }
+      return reopenMatter(actor, rawInput, options);
+    }
+    throw err;
+  }
+}
+
+export async function archiveProceeding(
+  actor: Actor,
+  rawInput: ArchiveProceedingInput,
+  options: ServiceExecutionOptions = {}
+): Promise<LifecycleCommandResult> {
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
+
+  let input: ArchiveProceedingInput;
+  try {
+    input = archiveProceedingSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = options.prismaOverride ?? getPrismaClient();
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const claim = await claimIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'archiveProceeding',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+
+      if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(claim);
+        const p = await tx.proceeding.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (!p) throw new NotFoundError('القيد القضائي غير موجود.');
+        const opVersion = extractOperationVersion(claim.resultPayload, p.version);
+        return {
+          id: p.id,
+          version: p.version,
+          status: p.status,
+          archivedAt: p.archivedAt?.toISOString() ?? null,
+          updatedAt: p.updatedAt.toISOString(),
+          operationVersion: opVersion,
+        };
+      }
+
+      // Lock parent matter row FIRST
+      const [matter] = await tx.$queryRaw<Array<{
+        id: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "version", "status", "archivedAt"
+        FROM "matter"
+        WHERE "id" = ${input.matterId}
+        FOR UPDATE;
+      `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن تعديل قيوده بشكل منفرد.');
+      }
+
+      // Lock proceeding row SECOND
+      const [proceeding] = await tx.$queryRaw<Array<{
+        id: string;
+        matterId: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "matterId", "version", "status", "archivedAt"
+        FROM "proceeding"
+        WHERE "id" = ${input.proceedingId}
+        FOR UPDATE;
+      `;
+      if (!proceeding || proceeding.matterId !== input.matterId) {
+        throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      if (proceeding.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError();
+      }
+
+      if (proceeding.archivedAt !== null) {
+        throw new UnsupportedTransitionError('القيد القضائي مؤرشف بالفعل ولا يمكن إعادة أرشفته.');
+      }
+
+      // =========================================================================
+      // CRITICAL OBLIGATION EXTENSION POINT (T08 / T09)
+      // =========================================================================
+      // In accordance with WORKFLOWS.md Section 11:
+      // A SCHEDULED hearing or an open CONFIRMED legal deadline blocks archiving the proceeding.
+      // In T07, Hearing and Deadline tables do not exist yet in Prisma schema.
+      // When T08 introduces Hearing:
+      //   const scheduledHearings = await tx.hearing.count({
+      //     where: { proceedingId: input.proceedingId, status: 'SCHEDULED' }
+      //   });
+      //   if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود جلسات مجدولة قائمة.');
+      // When T09 introduces Deadline:
+      //   const openDeadlines = await tx.deadline.count({
+      //     where: { proceedingId: input.proceedingId, status: 'CONFIRMED', completedAt: null }
+      //   });
+      //   if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود مواعيد قانونية مؤكدة غير مكتملة.');
+      // =========================================================================
+
+      const now = new Date();
+      const nextProceedingVersion = proceeding.version + 1;
+
+      const updated = await tx.proceeding.update({
+        where: { id: input.proceedingId },
+        data: {
+          archivedAt: now,
+          archiveReason: input.reason.trim(),
+          version: nextProceedingVersion,
+          updatedById: actor.id,
+        },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+
+      // Increment parent matter version
+      await tx.$executeRaw`
+        UPDATE "matter"
+        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${input.matterId};
+      `;
+
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'ARCHIVE_PROCEEDING',
+        entityType: 'Proceeding',
+        entityId: updated.id,
+        changedFields: {
+          matterId: input.matterId,
+          archiveReason: input.reason.trim(),
+          archivedAt: now.toISOString(),
+        },
+      });
+
+      await completeIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'archiveProceeding',
+        key: input.idempotencyKey,
+        resultType: 'LifecycleCommandResult',
+        resultId: updated.id,
+        resultPayload: {
+          operation: 'ARCHIVE_PROCEEDING',
+          id: updated.id,
+          resourceId: updated.id,
+          version: updated.version,
+          status: updated.status,
+          archivedAt: updated.archivedAt?.toISOString() ?? null,
+          updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
+        },
+      });
+
+      return {
+        id: updated.id,
+        version: updated.version,
+        status: updated.status,
+        archivedAt: updated.archivedAt?.toISOString() ?? null,
+        updatedAt: updated.updatedAt.toISOString(),
+        operationVersion: updated.version,
+      };
+    });
+  } catch (err) {
+    if (isIdempotencyUniqueConflict(err)) {
+      const resolved = await resolveConcurrentIdempotency(prisma, {
+        actorId: actor.id,
+        commandType: 'archiveProceeding',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+      if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(resolved);
+        const p = await prisma.proceeding.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (p) {
+          return {
+            id: p.id,
+            version: p.version,
+            status: p.status,
+            archivedAt: p.archivedAt?.toISOString() ?? null,
+            updatedAt: p.updatedAt.toISOString(),
+            operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
+          };
+        }
+      }
+      return archiveProceeding(actor, rawInput, options);
+    }
+    throw err;
+  }
+}
+
+export async function reopenProceeding(
+  actor: Actor,
+  rawInput: ReopenProceedingInput,
+  options: ServiceExecutionOptions = {}
+): Promise<LifecycleCommandResult> {
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
+
+  let input: ReopenProceedingInput;
+  try {
+    input = reopenProceedingSchema.parse(rawInput);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = options.prismaOverride ?? getPrismaClient();
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const claim = await claimIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'reopenProceeding',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+
+      if (claim.isReplay) {
+        const replayResult = extractLifecycleResult(claim);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(claim);
+        const p = await tx.proceeding.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (!p) throw new NotFoundError('القيد القضائي غير موجود.');
+        const opVersion = extractOperationVersion(claim.resultPayload, p.version);
+        return {
+          id: p.id,
+          version: p.version,
+          status: p.status,
+          archivedAt: p.archivedAt?.toISOString() ?? null,
+          updatedAt: p.updatedAt.toISOString(),
+          operationVersion: opVersion,
+        };
+      }
+
+      // Lock parent matter row FIRST
+      const [matter] = await tx.$queryRaw<Array<{
+        id: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "version", "status", "archivedAt"
+        FROM "matter"
+        WHERE "id" = ${input.matterId}
+        FOR UPDATE;
+      `;
+      if (!matter) throw new NotFoundError('ملف القضية غير موجود.');
+
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError('لا يمكن إلغاء أرشفة قيد قضائي تابع لملف مؤرشف. يجب إلغاء أرشفة ملف القضية أولاً.');
+      }
+
+      // Lock proceeding row SECOND
+      const [proceeding] = await tx.$queryRaw<Array<{
+        id: string;
+        matterId: string;
+        version: number;
+        status: string;
+        archivedAt: Date | null;
+      }>>`
+        SELECT "id", "matterId", "version", "status", "archivedAt"
+        FROM "proceeding"
+        WHERE "id" = ${input.proceedingId}
+        FOR UPDATE;
+      `;
+      if (!proceeding || proceeding.matterId !== input.matterId) {
+        throw new NotFoundError('القيد القضائي غير موجود.');
+      }
+
+      if (proceeding.version !== input.expectedVersion) {
+        throw new ConcurrencyConflictError();
+      }
+
+      if (proceeding.archivedAt === null) {
+        throw new UnsupportedTransitionError('لا يمكن إلغاء أرشفة قيد قضائي غير مؤرشف.');
+      }
+
+      const nextProceedingVersion = proceeding.version + 1;
+
+      const updated = await tx.proceeding.update({
+        where: { id: input.proceedingId },
+        data: {
+          archivedAt: null,
+          archiveReason: null,
+          version: nextProceedingVersion,
+          updatedById: actor.id,
+        },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+
+      // Increment parent matter version
+      await tx.$executeRaw`
+        UPDATE "matter"
+        SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${input.matterId};
+      `;
+
+      await recordAuditEvent(tx, {
+        userId: actor.id,
+        action: 'REOPEN_PROCEEDING',
+        entityType: 'Proceeding',
+        entityId: updated.id,
+        changedFields: {
+          matterId: input.matterId,
+          reopenReason: input.reason.trim(),
+        },
+      });
+
+      await completeIdempotencyKey(tx, {
+        actorId: actor.id,
+        commandType: 'reopenProceeding',
+        key: input.idempotencyKey,
+        resultType: 'LifecycleCommandResult',
+        resultId: updated.id,
+        resultPayload: {
+          operation: 'REOPEN_PROCEEDING',
+          id: updated.id,
+          resourceId: updated.id,
+          version: updated.version,
+          status: updated.status,
+          archivedAt: null,
+          updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
+        },
+      });
+
+      return {
+        id: updated.id,
+        version: updated.version,
+        status: updated.status,
+        archivedAt: null,
+        updatedAt: updated.updatedAt.toISOString(),
+        operationVersion: updated.version,
+      };
+    });
+  } catch (err) {
+    if (isIdempotencyUniqueConflict(err)) {
+      const resolved = await resolveConcurrentIdempotency(prisma, {
+        actorId: actor.id,
+        commandType: 'reopenProceeding',
+        key: input.idempotencyKey,
+        payload: input,
+      });
+      if (resolved) {
+        const replayResult = extractLifecycleResult(resolved);
+        if (replayResult) {
+          return replayResult;
+        }
+        const resourceId = extractResourceId(resolved);
+        const p = await prisma.proceeding.findUnique({
+          where: { id: resourceId },
+          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+        });
+        if (p) {
+          return {
+            id: p.id,
+            version: p.version,
+            status: p.status,
+            archivedAt: p.archivedAt?.toISOString() ?? null,
+            updatedAt: p.updatedAt.toISOString(),
+            operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
+          };
+        }
+      }
+      return reopenProceeding(actor, rawInput, options);
+    }
+    throw err;
+  }
+}
+
+export async function searchProceedings(
+  rawParams: SearchProceedingsParams = {},
+  actor?: Actor
+): Promise<SearchProceedingsResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  let params: SearchProceedingsParams;
+  try {
+    params = searchProceedingsParamsSchema.parse(rawParams);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = getPrismaClient();
+
+  const where: Prisma.ProceedingWhereInput = {};
+
+  if (params.courtId) where.courtId = params.courtId;
+  if (params.matterId) where.matterId = params.matterId;
+  if (params.status) where.status = params.status;
+  if (params.instance) where.instance = params.instance;
+
+  if (!params.includeArchived) {
+    where.archivedAt = null;
+    where.matter = { archivedAt: null, status: { not: 'ARCHIVED' } };
+  }
+
+  if (params.query && params.query.trim().length > 0) {
+    const q = params.query.trim();
+    const normDigits = normalizeArabicDigits(q);
+    const normText = normalizeArabicText(q);
+    const variants = expandSearchVariants(q);
+
+    const orClauses: Prisma.ProceedingWhereInput[] = [
+      { numberText: { contains: q, mode: 'insensitive' } },
+      { numberNormalized: { contains: normDigits, mode: 'insensitive' } },
+      { yearLabel: { contains: q, mode: 'insensitive' } },
+      { yearNormalized: { contains: normDigits, mode: 'insensitive' } },
+      { circuit: { contains: q, mode: 'insensitive' } },
+      { registerType: { contains: q, mode: 'insensitive' } },
+      { court: { name: { contains: q, mode: 'insensitive' } } },
+      { matter: { title: { contains: q, mode: 'insensitive' } } },
+      { matter: { fileCode: { contains: q, mode: 'insensitive' } } },
+    ];
+
+    if (normText) {
+      orClauses.push({ court: { name: { contains: normText, mode: 'insensitive' } } });
+      orClauses.push({ matter: { titleNormalized: { contains: normText, mode: 'insensitive' } } });
+    }
+
+    for (const v of variants) {
+      orClauses.push({ numberText: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ circuit: { contains: v, mode: 'insensitive' } });
+    }
+
+    where.OR = orClauses;
+  }
+
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+  const page = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const skip = (page - 1) * limit;
+
+  const [proceedings, total] = await Promise.all([
+    prisma.proceeding.findMany({
+      where,
+      select: {
+        id: true,
+        matterId: true,
+        courtId: true,
+        instance: true,
+        registerType: true,
+        circuit: true,
+        numberText: true,
+        yearLabel: true,
+        status: true,
+        archivedAt: true,
+        updatedAt: true,
+        court: { select: { name: true } },
+        matter: { select: { title: true, fileCode: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      skip,
+    }),
+    prisma.proceeding.count({ where }),
+  ]);
+
   return {
-    candidates: candidates.slice(0, limit),
-    hasDirectMatch,
+    proceedings: proceedings.map((p) => ({
+      id: p.id,
+      matterId: p.matterId,
+      matterTitle: p.matter.title,
+      matterFileCode: p.matter.fileCode,
+      courtId: p.courtId,
+      courtName: p.court.name,
+      instance: p.instance,
+      registerType: p.registerType,
+      circuit: p.circuit,
+      numberText: p.numberText,
+      yearLabel: p.yearLabel,
+      status: p.status,
+      archivedAt: p.archivedAt?.toISOString() ?? null,
+      updatedAt: p.updatedAt.toISOString(),
+    })),
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+    limit,
+  };
+}
+
+function mapPartyToUnifiedItem(p: {
+  id: string;
+  name: string;
+  kind: string;
+  primaryPhone: string | null;
+  archivedAt: Date | null;
+  updatedAt: Date;
+}): UnifiedSearchResultItem {
+  const subtitle = p.primaryPhone ? p.primaryPhone : (p.kind === 'PERSON' ? 'شخص طبيعي' : 'جهة اعتبارية / منشأة');
+  return {
+    id: p.id,
+    entityType: 'PARTY',
+    title: p.name,
+    subtitle: subtitle || 'طرف',
+    badge: p.kind === 'PERSON' ? 'فرد' : 'جهة',
+    href: `/parties/${p.id}`,
+    isArchived: Boolean(p.archivedAt),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
+const UNIFIED_MATTER_STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'مسودة',
+  ACTIVE: 'نشط',
+  ON_HOLD: 'معلق مؤقتاً',
+  CLOSED: 'منتهي ومغلق',
+  ARCHIVED: 'مؤرشف',
+};
+
+const UNIFIED_PROCEEDING_STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'مسودة قيد',
+  ACTIVE: 'متداول بالجلسات',
+  AWAITING_JUDGMENT: 'حجز للحكم',
+  DECIDED: 'محكوم فيه',
+  CLOSED: 'منتهي ومغلق',
+};
+
+function mapMatterToUnifiedItem(m: {
+  id: string;
+  fileCode: string;
+  title: string;
+  kind: string;
+  status: string;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  parties?: Array<{ party: { name: string } }>;
+}): UnifiedSearchResultItem {
+  const primaryClient = m.parties?.[0]?.party.name;
+  const isArchived = Boolean(m.archivedAt) || m.status === 'ARCHIVED';
+  return {
+    id: m.id,
+    entityType: 'MATTER',
+    title: m.title,
+    subtitle: `${m.fileCode}${primaryClient ? ` • ${primaryClient}` : ''}`,
+    code: m.fileCode,
+    badge: isArchived ? 'مؤرشف' : (UNIFIED_MATTER_STATUS_LABELS[m.status] ?? m.status),
+    href: `/matters/${m.id}`,
+    isArchived,
+    updatedAt: m.updatedAt.toISOString(),
+  };
+}
+
+function mapProceedingToUnifiedItem(p: {
+  id: string;
+  matterId: string;
+  courtId: string;
+  instance: string;
+  registerType: string | null;
+  circuit: string | null;
+  numberText: string | null;
+  yearLabel: string | null;
+  status: string;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  court: { name: string };
+  matter: { title: string; fileCode: string; archivedAt?: Date | null };
+}): UnifiedSearchResultItem {
+  const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
+  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt);
+  const badge = isArchived
+    ? 'مؤرشف'
+    : (UNIFIED_PROCEEDING_STATUS_LABELS[p.status] ?? p.status);
+  return {
+    id: p.id,
+    entityType: 'PROCEEDING',
+    title: `${p.court.name} - ${docket}`,
+    subtitle: `${p.matter.fileCode} • ${p.matter.title}`,
+    badge,
+    href: `/matters/${p.matterId}/proceedings/${p.id}`,
+    isArchived,
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
+export async function unifiedSearch(
+  rawParams: UnifiedSearchParams = {},
+  actor?: Actor
+): Promise<UnifiedSearchResult> {
+  if (!actor || !actor.id) {
+    throw new UnauthorizedError('المستخدم غير مصرح له.');
+  }
+  assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+
+  let params: UnifiedSearchParams;
+  try {
+    params = unifiedSearchParamsSchema.parse(rawParams);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const { message, fieldErrors } = formatZodError(err);
+      throw new MatterValidationError(message, fieldErrors);
+    }
+    throw err;
+  }
+
+  const prisma = getPrismaClient();
+  const query = params.query?.trim() ?? '';
+  const searchType = params.type ?? 'ALL';
+  const includeArchived = params.includeArchived ?? false;
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 50);
+
+  // 1. Party where clause
+  const partyWhere: Prisma.PartyWhereInput = {};
+  if (!includeArchived) {
+    partyWhere.archivedAt = null;
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const qText = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
+
+    const orClauses: Prisma.PartyWhereInput[] = [
+      { name: { contains: query, mode: 'insensitive' } },
+      { primaryPhone: { contains: query, mode: 'insensitive' } },
+      { primaryPhone: { contains: qDigits, mode: 'insensitive' } },
+      { primaryPhoneNormalized: { contains: qDigits, mode: 'insensitive' } },
+    ];
+    if (qText) {
+      orClauses.push({ nameNormalized: { contains: qText, mode: 'insensitive' } });
+    }
+    for (const v of variants) {
+      orClauses.push({ name: { contains: v, mode: 'insensitive' } });
+    }
+    partyWhere.OR = orClauses;
+  }
+
+  // 2. Matter where clause
+  const matterWhere: Prisma.MatterWhereInput = {};
+  if (!includeArchived) {
+    matterWhere.archivedAt = null;
+    matterWhere.status = { not: 'ARCHIVED' };
+  }
+  if (query) {
+    const queryVariants = expandSearchVariants(query);
+    const normQuery = normalizeArabicText(query);
+
+    const orClauses: Prisma.MatterWhereInput[] = [];
+    if (normQuery) {
+      orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+    }
+    for (const v of queryVariants) {
+      orClauses.push({ title: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ fileCode: { contains: v, mode: 'insensitive' } });
+    }
+    matterWhere.OR = orClauses;
+  }
+
+  // 3. Proceeding where clause
+  const procWhere: Prisma.ProceedingWhereInput = {};
+  if (!includeArchived) {
+    procWhere.archivedAt = null;
+    procWhere.matter = { archivedAt: null, status: { not: 'ARCHIVED' } };
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const normText = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
+
+    const orClauses: Prisma.ProceedingWhereInput[] = [
+      { numberText: { contains: query, mode: 'insensitive' } },
+      { numberNormalized: { contains: qDigits, mode: 'insensitive' } },
+      { yearLabel: { contains: query, mode: 'insensitive' } },
+      { yearNormalized: { contains: qDigits, mode: 'insensitive' } },
+      { circuit: { contains: query, mode: 'insensitive' } },
+      { registerType: { contains: query, mode: 'insensitive' } },
+      { court: { name: { contains: query, mode: 'insensitive' } } },
+      { matter: { title: { contains: query, mode: 'insensitive' } } },
+      { matter: { fileCode: { contains: query, mode: 'insensitive' } } },
+    ];
+
+    if (normText) {
+      orClauses.push({ court: { name: { contains: normText, mode: 'insensitive' } } });
+      orClauses.push({ matter: { titleNormalized: { contains: normText, mode: 'insensitive' } } });
+    }
+
+    for (const v of variants) {
+      orClauses.push({ numberText: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ circuit: { contains: v, mode: 'insensitive' } });
+    }
+
+    procWhere.OR = orClauses;
+  }
+
+  // Always compute accurate counts for all categories regardless of active tab
+  const [partiesCount, mattersCount, proceedingsCount] = await Promise.all([
+    prisma.party.count({ where: partyWhere }),
+    prisma.matter.count({ where: matterWhere }),
+    prisma.proceeding.count({ where: procWhere }),
+  ]);
+  const totalAll = mattersCount + proceedingsCount + partiesCount;
+
+  const counts = {
+    all: totalAll,
+    parties: partiesCount,
+    matters: mattersCount,
+    proceedings: proceedingsCount,
+  };
+
+  let total: number;
+  if (searchType === 'PARTY') total = partiesCount;
+  else if (searchType === 'MATTER') total = mattersCount;
+  else if (searchType === 'PROCEEDING') total = proceedingsCount;
+  else total = totalAll;
+
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(params.page ?? 1, totalPages);
+  const skip = (page - 1) * limit;
+
+  let items: UnifiedSearchResultItem[] = [];
+
+  if (searchType === 'PARTY') {
+    if (skip < partiesCount) {
+      const parties = await prisma.party.findMany({
+        where: partyWhere,
+        select: {
+          id: true,
+          name: true,
+          kind: true,
+          primaryPhone: true,
+          archivedAt: true,
+          updatedAt: true,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = parties.map(mapPartyToUnifiedItem);
+    }
+  } else if (searchType === 'MATTER') {
+    if (skip < mattersCount) {
+      const matters = await prisma.matter.findMany({
+        where: matterWhere,
+        select: {
+          id: true,
+          fileCode: true,
+          title: true,
+          kind: true,
+          status: true,
+          archivedAt: true,
+          updatedAt: true,
+          parties: {
+            where: { role: 'CLIENT' },
+            orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+            take: 1,
+            select: { party: { select: { name: true } } },
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = matters.map(mapMatterToUnifiedItem);
+    }
+  } else if (searchType === 'PROCEEDING') {
+    if (skip < proceedingsCount) {
+      const proceedings = await prisma.proceeding.findMany({
+        where: procWhere,
+        select: {
+          id: true,
+          matterId: true,
+          courtId: true,
+          instance: true,
+          registerType: true,
+          circuit: true,
+          numberText: true,
+          yearLabel: true,
+          status: true,
+          archivedAt: true,
+          updatedAt: true,
+          court: { select: { name: true } },
+          matter: { select: { title: true, fileCode: true, archivedAt: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = proceedings.map(mapProceedingToUnifiedItem);
+    }
+  } else {
+    // searchType === 'ALL'
+    if (skip < totalAll) {
+      const s1 = mattersCount;
+      const s2 = proceedingsCount;
+      const s3 = partiesCount;
+
+      let take1 = 0;
+      let skip1 = 0;
+      if (skip < s1) {
+        skip1 = skip;
+        take1 = Math.min(limit, s1 - skip1);
+      }
+
+      let take2 = 0;
+      let skip2 = 0;
+      const rem1 = limit - take1;
+      if (rem1 > 0 && skip < s1 + s2) {
+        skip2 = Math.max(0, skip - s1);
+        take2 = Math.min(rem1, s2 - skip2);
+      }
+
+      let take3 = 0;
+      let skip3 = 0;
+      const rem2 = rem1 - take2;
+      if (rem2 > 0 && skip < s1 + s2 + s3) {
+        skip3 = Math.max(0, skip - (s1 + s2));
+        take3 = Math.min(rem2, s3 - skip3);
+      }
+
+      const [matters, proceedings, parties] = await Promise.all([
+        take1 > 0
+          ? prisma.matter.findMany({
+              where: matterWhere,
+              select: {
+                id: true,
+                fileCode: true,
+                title: true,
+                kind: true,
+                status: true,
+                archivedAt: true,
+                updatedAt: true,
+                parties: {
+                  where: { role: 'CLIENT' },
+                  orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+                  take: 1,
+                  select: { party: { select: { name: true } } },
+                },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip1,
+              take: take1,
+            })
+          : [],
+        take2 > 0
+          ? prisma.proceeding.findMany({
+              where: procWhere,
+              select: {
+                id: true,
+                matterId: true,
+                courtId: true,
+                instance: true,
+                registerType: true,
+                circuit: true,
+                numberText: true,
+                yearLabel: true,
+                status: true,
+                archivedAt: true,
+                updatedAt: true,
+                court: { select: { name: true } },
+                matter: { select: { title: true, fileCode: true, archivedAt: true } },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip2,
+              take: take2,
+            })
+          : [],
+        take3 > 0
+          ? prisma.party.findMany({
+              where: partyWhere,
+              select: {
+                id: true,
+                name: true,
+                kind: true,
+                primaryPhone: true,
+                archivedAt: true,
+                updatedAt: true,
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip3,
+              take: take3,
+            })
+          : [],
+      ]);
+
+      items = [
+        ...matters.map(mapMatterToUnifiedItem),
+        ...proceedings.map(mapProceedingToUnifiedItem),
+        ...parties.map(mapPartyToUnifiedItem),
+      ];
+    }
+  }
+
+  return {
+    query,
+    type: searchType,
+    includeArchived,
+    page,
+    limit,
+    total,
+    totalPages,
+    items,
+    counts,
   };
 }

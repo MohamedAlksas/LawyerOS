@@ -2,8 +2,10 @@ import React from 'react';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
-import { searchMatters } from '@/modules/matters/matter-service';
-import { MatterKind, MatterStatus, MatterValidationError, SearchMattersResult } from '@/modules/matters/matter-types';
+import { searchMatters, searchMatterClients } from '@/modules/matters/matter-service';
+import { listReferenceItems } from '@/modules/settings/reference-service';
+import { matterSearchFilters, readParam } from '@/lib/search-params';
+import { MatterValidationError, SearchMattersResult } from '@/modules/matters/matter-types';
 import { MatterListClient } from '@/components/matters/matter-list-client';
 
 export const metadata = {
@@ -11,11 +13,7 @@ export const metadata = {
 };
 
 interface MattersPageProps {
-  searchParams?: Promise<{
-    query?: string;
-    kind?: string;
-    status?: string;
-  }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export default async function MattersPage({ searchParams }: MattersPageProps) {
@@ -41,30 +39,17 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
     throw error;
   }
 
-  const validKind: MatterKind | undefined =
-    params.kind && ['LITIGATION', 'CONSULTATION', 'CONTRACT', 'OTHER'].includes(params.kind)
-      ? (params.kind as MatterKind)
-      : undefined;
+  const filters = matterSearchFilters((name) => readParam(params, name));
+  const includeArchived = filters.includeArchived || filters.status === 'ARCHIVED';
+  const [courts, clients] = await Promise.all([
+    listReferenceItems('COURT', false, actor).catch(() => []),
+    searchMatterClients(actor, { limit: 10, includeArchived }).then((result) => result.clients).catch(() => []),
+  ]);
 
-  const rawStatus = params.status === 'SUSPENDED' ? 'ON_HOLD' : params.status;
-  const validStatus: MatterStatus | undefined =
-    rawStatus && ['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'].includes(rawStatus)
-      ? (rawStatus as MatterStatus)
-      : undefined;
-
-  let initialResult: SearchMattersResult = { matters: [], total: 0 };
+  let initialResult: SearchMattersResult | undefined;
   let initialError: string | undefined = undefined;
   try {
-    initialResult = await searchMatters(
-      {
-        query: params.query,
-        kind: validKind,
-        status: validStatus,
-        limit: 50,
-        offset: 0,
-      },
-      actor
-    );
+    initialResult = await searchMatters(filters, actor);
   } catch (error) {
     if (error instanceof MatterValidationError) {
       initialError = error.message;
@@ -77,12 +62,21 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <MatterListClient
-        initialMatters={initialResult.matters}
-        initialTotal={initialResult.total}
-        initialQuery={params.query || ''}
-        initialKind={validKind}
-        initialStatus={validStatus}
+        key={actor.sessionId}
+        initialMatters={initialResult?.matters}
+        initialTotal={initialResult?.total}
+        initialPage={initialResult?.page ?? filters.page}
+        initialTotalPages={initialResult?.totalPages}
+        initialLimit={filters.limit}
+        initialKind={filters.kind}
+        initialStatus={filters.status}
+        initialCourtId={filters.courtId}
+        initialIncompleteData={filters.incompleteData}
+        initialIncludeArchived={filters.includeArchived}
         initialError={initialError}
+        courts={courts.map((c) => ({ id: c.id, name: c.name }))}
+        clients={clients}
+        sessionId={actor.sessionId}
       />
     </div>
   );

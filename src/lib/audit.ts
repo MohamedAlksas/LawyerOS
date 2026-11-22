@@ -34,7 +34,8 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
       lowerKey.includes('encryptionkey') ||
       lowerKey.includes('ciphertext') ||
       lowerKey.includes('authtag') ||
-      lowerKey.includes('iv')
+      lowerKey === 'iv' ||
+      lowerKey === 'initializationvector'
     ) {
       sanitized[key] = '[REDACTED_SECRET]';
       continue;
