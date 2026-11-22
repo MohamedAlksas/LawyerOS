@@ -17,16 +17,16 @@ import {
 
 interface PartyListClientProps {
   initialResult?: SearchPartiesResult | null;
-  initialQuery?: string;
+  initialError?: string;
   initialKind?: PartyKind;
 }
 
 export function PartyListClient({
   initialResult,
-  initialQuery = '',
+  initialError,
   initialKind,
 }: PartyListClientProps) {
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState('');
   const [selectedKind, setSelectedKind] = useState<PartyKind | undefined>(initialKind);
   const [page, setPage] = useState(1);
 
@@ -39,7 +39,7 @@ export function PartyListClient({
     }
   );
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const requestGenRef = useRef(0);
 
   const fetchParties = useCallback(
@@ -69,15 +69,11 @@ export function PartyListClient({
 
         setPartiesResult(res.data);
         setIsLoading(false);
-      } catch (err: unknown) {
+      } catch {
         if (currentGen !== requestGenRef.current) {
           return;
         }
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'حدث خطأ في الاتصال أثناء تحميل بيانات الأطراف.'
-        );
+        setError('حدث خطأ في الاتصال أثناء تحميل بيانات الأطراف.');
         setIsLoading(false);
       }
     },

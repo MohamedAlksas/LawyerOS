@@ -30,6 +30,7 @@ export const T04_TEST_IDS = {
   navParties: 'nav-link-parties',
   navReference: 'nav-link-reference',
   navSecurity: 'nav-link-security',
+  navSearch: 'nav-link-search',
   navLogout: 'nav-button-logout',
 } as const;
 
@@ -43,12 +44,13 @@ export const T04_ROUTES = {
   parties: '/parties',
   reference: '/settings/reference',
   security: '/settings/security',
+  search: '/search',
   offline: '/offline',
   offlineHtml: '/offline.html',
   manifest: '/manifest.webmanifest',
 } as const;
 
-/** Routes that exist and are reachable in T04/T05/T06 (section 2.1). */
+/** Routes that exist and are reachable in T04/T05/T06/T07 (section 2.1). */
 export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.home,
   T04_ROUTES.login,
@@ -57,6 +59,7 @@ export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.parties,
   T04_ROUTES.reference,
   T04_ROUTES.security,
+  T04_ROUTES.search,
   T04_ROUTES.offline,
   T04_ROUTES.offlineHtml,
 ];
@@ -68,6 +71,7 @@ export const T04_ALLOWED_NAV_HREFS: readonly string[] = [
   T04_ROUTES.parties,
   T04_ROUTES.security,
   T04_ROUTES.reference,
+  T04_ROUTES.search,
 ];
 
 /**
@@ -84,7 +88,6 @@ export const T04_FORBIDDEN_MODULE_ROUTES: readonly string[] = [
   '/tasks',
   '/deadlines',
   '/documents',
-  '/search',
   '/reports',
   '/settings',
 ];

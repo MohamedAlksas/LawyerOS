@@ -36,6 +36,7 @@ html {
   font-family: "Noto Sans Arabic", Tahoma, Arial, sans-serif;
   color: var(--foreground);
   background-color: var(--background);
+  scroll-padding-bottom: var(--mobile-nav-height, 0px);
 }
 
 body {

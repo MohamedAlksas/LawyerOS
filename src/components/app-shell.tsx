@@ -1,7 +1,9 @@
 ﻿'use client';
 
-import React, { useState, useRef, useEffect, Suspense } from 'react';
-import { usePathname } from 'next/navigation';
+import React, { useState, useRef, useEffect, useLayoutEffect, useTransition, Suspense } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { clearSearchSessionStore } from '@/lib/search-session-store';
+import type { UserRole } from '@/modules/identity/types';
 import { ConnectivityBanner } from './connectivity-banner';
 import { SkipLink } from './skip-link';
 import { AppHeader } from './app-header';
@@ -15,9 +17,17 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
+type ViewSession = { actorId: string; sessionId: string; role: UserRole };
+
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'expired' | 'unavailable'>('checking');
+  const [refreshingSession, startSessionRefresh] = useTransition();
+  const privateViewRef = useRef<HTMLDivElement>(null);
+  const mobileNavRef = useRef<HTMLElement>(null);
+  const sessionRef = useRef<ViewSession | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const drawerOpenerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -57,6 +67,106 @@ export function AppShell({ children }: AppShellProps) {
     pathname.startsWith('/verify') ||
     pathname.startsWith('/offline');
 
+  useLayoutEffect(() => {
+    const nav = mobileNavRef.current;
+    if (!nav) return;
+
+    const rootStyle = document.documentElement.style;
+    const reserveSpace = () => rootStyle.setProperty('--mobile-nav-height', `${nav.offsetHeight}px`);
+    reserveSpace();
+    const observer = new ResizeObserver(reserveSpace);
+    observer.observe(nav);
+    return () => {
+      observer.disconnect();
+      rootStyle.removeProperty('--mobile-nav-height');
+    };
+  }, [isPublicAuthPage]);
+
+  useLayoutEffect(() => {
+    // A return from the public auth screens needs a new check before the private shell paints.
+    if (!isPublicAuthPage && privateViewRef.current) privateViewRef.current.hidden = true;
+  }, [isPublicAuthPage]);
+
+  useEffect(() => {
+    if (isPublicAuthPage) return;
+
+    let pending: AbortController | undefined;
+    const conceal = () => {
+      pending?.abort();
+      pending = undefined;
+      // Conceal synchronously so a browser's history snapshot cannot paint private content on resume.
+      if (privateViewRef.current) privateViewRef.current.hidden = true;
+      setSessionStatus('checking');
+    };
+    const checkSession = async () => {
+      if (pending || document.visibilityState === 'hidden') return;
+      const request = new AbortController();
+      pending = request;
+
+      try {
+        const response = await fetch('/api/auth/view-session', { cache: 'no-store', signal: request.signal });
+        if (request.signal.aborted) return;
+        if (response.status === 401) {
+          clearSearchSessionStore();
+          conceal();
+          setSessionStatus('expired');
+          return;
+        }
+        if (!response.ok) throw new Error('Session check unavailable');
+        const session: ViewSession = await response.json();
+        if (request.signal.aborted) return;
+        const previous = sessionRef.current;
+        sessionRef.current = session;
+        if (previous && (previous.actorId !== session.actorId || previous.role !== session.role || previous.sessionId !== session.sessionId)) {
+          clearSearchSessionStore();
+          conceal();
+          if (previous.actorId !== session.actorId || previous.role !== session.role) {
+            window.location.reload();
+            return;
+          }
+          // Update session-scoped Server Component props while keeping same-actor drafts mounted.
+          startSessionRefresh(() => {
+            router.refresh();
+            setSessionStatus('ready');
+          });
+          return;
+        }
+        if (privateViewRef.current) privateViewRef.current.hidden = false;
+        setSessionStatus('ready');
+      } catch {
+        if (request.signal.aborted) return;
+        conceal();
+        setSessionStatus('unavailable');
+      } finally {
+        if (pending === request) pending = undefined;
+      }
+    };
+
+    const resume = () => {
+      conceal();
+      void checkSession();
+    };
+
+    void checkSession();
+    const interval = window.setInterval(checkSession, 30_000);
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pagehide', conceal);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('popstate', resume, true);
+    window.addEventListener('lawoffice:recheck-session', resume);
+    window.addEventListener('lawoffice:session-ended', conceal);
+    return () => {
+      pending?.abort();
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('pagehide', conceal);
+      window.removeEventListener('pageshow', resume);
+      window.removeEventListener('popstate', resume, true);
+      window.removeEventListener('lawoffice:recheck-session', resume);
+      window.removeEventListener('lawoffice:session-ended', conceal);
+    };
+  }, [isPublicAuthPage, router]);
+
   if (isPublicAuthPage) {
     return (
       <>
@@ -69,7 +179,32 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
+  const viewLocked = sessionStatus !== 'ready' || refreshingSession;
   return (
+    <>
+      {viewLocked && (
+        <main className="mx-auto max-w-xl space-y-3 p-6 text-[#172A35]" aria-live="polite" data-testid="protected-view-lock">
+          {sessionStatus === 'expired' ? (
+            <>
+              <p role="alert">انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.</p>
+              <a className="font-semibold underline" href="/login" target="_blank" rel="noopener noreferrer">
+                فتح تسجيل الدخول في نافذة جديدة
+              </a>
+            </>
+          ) : sessionStatus === 'unavailable' ? (
+            <p role="alert">تعذر التحقق من الجلسة. تحقق من الاتصال ثم أعد المحاولة.</p>
+          ) : (
+            <p>جارٍ التحقق من الجلسة...</p>
+          )}
+          {(sessionStatus === 'expired' || sessionStatus === 'unavailable') && (
+            <button type="button" className="block min-h-[44px] font-semibold underline"
+              onClick={() => window.dispatchEvent(new Event('lawoffice:recheck-session'))}>
+              إعادة التحقق من الجلسة
+            </button>
+          )}
+        </main>
+      )}
+      <div ref={privateViewRef} hidden={viewLocked}>
     <NavigationGuardProvider>
       <div
         id="app-shell-content"
@@ -107,7 +242,7 @@ export function AppShell({ children }: AppShellProps) {
             dir="rtl"
             tabIndex={-1}
             data-testid="main-content"
-            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
+            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-[max(5rem,calc(var(--mobile-nav-height,0px)+1rem))] sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
           >
             {children}
           </main>
@@ -118,6 +253,7 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* 6. Mobile Bottom Nav Bar */}
         <MobileBottomNav
+          navRef={mobileNavRef}
           onOpenDrawer={(opener) => {
             drawerOpenerRef.current = opener;
             setIsDrawerOpen(true);
@@ -132,5 +268,7 @@ export function AppShell({ children }: AppShellProps) {
         triggerRef={drawerOpenerRef}
       />
     </NavigationGuardProvider>
+      </div>
+    </>
   );
 }

@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { savePartyAction, checkPartyDuplicatesAction } from '@/modules/parties/actions';
 import {
   PartyKind,
@@ -17,29 +18,33 @@ import {
 } from './party-types';
 
 interface PartyFormProps {
+  ownerId: string;
   party?: ClientProfileDTO;
 }
 
-export function PartyForm({ party }: PartyFormProps) {
+export function PartyForm({ ownerId, party }: PartyFormProps) {
   const router = useRouter();
   const isEdit = Boolean(party);
+  const draft = useFormDraft<SavePartyInput>(ownerId, party ? `/parties/${party.id}/edit` : '/parties/new');
+  const restored = draft.restored;
+  const [pending, setPending] = useState<SavePartyInput | null>(restored ?? null);
 
   // Form inputs kept strictly in component state (page memory)
-  const [kind, setKind] = useState<PartyKind>(party?.kind ?? 'PERSON');
-  const [name, setName] = useState(party?.name ?? '');
-  const [primaryPhone, setPrimaryPhone] = useState(party?.primaryPhone ?? '');
+  const [kind, setKind] = useState<PartyKind>((restored ?? party)?.kind ?? 'PERSON');
+  const [name, setName] = useState((restored ?? party)?.name ?? '');
+  const [primaryPhone, setPrimaryPhone] = useState((restored ?? party)?.primaryPhone ?? '');
   const [additionalPhones, setAdditionalPhones] = useState(
-    party?.additionalPhones?.join(', ') ?? ''
+    (restored ?? party)?.additionalPhones?.join(', ') ?? ''
   );
-  const [email, setEmail] = useState(party?.email ?? '');
-  const [address, setAddress] = useState(party?.address ?? '');
-  const [notes, setNotes] = useState(party?.notes ?? '');
+  const [email, setEmail] = useState((restored ?? party)?.email ?? '');
+  const [address, setAddress] = useState((restored ?? party)?.address ?? '');
+  const [notes, setNotes] = useState((restored ?? party)?.notes ?? '');
 
   // Identity is optional, only editable during creation or if explicitly entered
-  const [hasIdentity, setHasIdentity] = useState(false);
+  const [hasIdentity, setHasIdentity] = useState(Boolean(restored?.identity));
   const [identificationType, setIdentificationType] =
-    useState<IdentificationType>('NATIONAL_ID');
-  const [identityNumber, setIdentityNumber] = useState('');
+    useState<IdentificationType>(restored?.identity?.identificationType ?? 'NATIONAL_ID');
+  const [identityNumber, setIdentityNumber] = useState(restored?.identity?.number ?? '');
 
   // Status and feedback states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,18 +58,8 @@ export function PartyForm({ party }: PartyFormProps) {
   const [duplicateWarnings, setDuplicateWarnings] = useState<DuplicateWarningDTO[]>([]);
   const [acknowledgedDuplicates, setAcknowledgedDuplicates] = useState(false);
 
-  // Idempotency key preserved across retries for the same form state
-  const idempotencyKeyRef = useRef<string | null>(null);
-
-  const getIdempotencyKey = (): string => {
-    if (!idempotencyKeyRef.current) {
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-          ? crypto.randomUUID()
-          : `idemp-${Date.now()}`;
-    }
-    return idempotencyKeyRef.current;
-  };
+  const savingRef = useRef(false);
+  useLeaveGuard(false, isSubmitting || Boolean(pending));
 
   const validateClientSide = (): boolean => {
     const errors: Record<string, string> = {};
@@ -107,39 +102,40 @@ export function PartyForm({ party }: PartyFormProps) {
   };
 
   const doSaveParty = async () => {
+    if (savingRef.current || !draft.isCurrent()) return;
+    savingRef.current = true;
     setIsSubmitting(true);
     setGeneralError(null);
     setHasConcurrencyConflict(false);
 
-    const parsedAdditionalPhones = additionalPhones
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-
-    const payload: SavePartyInput = {
+    const payload: SavePartyInput = pending ?? {
       id: party?.id,
       kind,
       name: name.trim(),
       primaryPhone: primaryPhone.trim() || null,
-      additionalPhones: parsedAdditionalPhones,
+      additionalPhones: additionalPhones.split(',').map((phone) => phone.trim()).filter(Boolean),
       email: email.trim() || null,
       address: address.trim() || null,
       notes: notes.trim() || null,
       expectedVersion: party ? party.version : undefined,
-      idempotencyKey: getIdempotencyKey(),
+      idempotencyKey: generateClientRequestId('party'),
+      ...(!isEdit && hasIdentity && identityNumber.trim()
+        ? { identity: { identificationType, number: identityNumber.trim() } }
+        : {}),
     };
 
-    if (!isEdit && hasIdentity && identityNumber.trim()) {
-      payload.identity = {
-        identificationType,
-        number: identityNumber.trim(),
-      };
-    }
+    setPending(payload);
+    draft.keep(payload);
 
     try {
       const result = await savePartyAction(payload);
+      if (!draft.isCurrent()) return;
 
       if (!result.success) {
+        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN'].includes(result.code ?? '')) {
+          setPending(null);
+          draft.clear();
+        }
         if (result.code === 'CONCURRENCY_CONFLICT') {
           setHasConcurrencyConflict(true);
           setGeneralError(
@@ -148,24 +144,34 @@ export function PartyForm({ party }: PartyFormProps) {
         } else if (result.code === 'VALIDATION_ERROR' && result.fieldErrors) {
           setFieldErrors(result.fieldErrors);
           setGeneralError('يرجى مراجعة الأخطاء الموضحة أدناه.');
+        } else if (isAuthRecoveryCode(result.code)) {
+          setGeneralError('انتهت الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد محاولة الحفظ الأصلي.');
         } else {
           setGeneralError(result.error || 'تعذر حفظ بيانات الطرف.');
         }
-        setIsSubmitting(false);
         return;
       }
 
+      draft.clear();
+      setPending(null);
       const savedParty = result.data.party;
       router.push(`/parties/${savedParty.id}`);
       router.refresh();
     } catch {
-      setGeneralError('حدث خطأ في الاتصال بالخادم. يمكنك إعادة المحاولة.');
-      setIsSubmitting(false);
+      if (draft.isCurrent()) setGeneralError('تعذر تأكيد الحفظ. يمكنك إعادة محاولة الحفظ الأصلي.');
+    } finally {
+      savingRef.current = false;
+      if (draft.isCurrent()) setIsSubmitting(false);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    if (pending) {
+      await doSaveParty();
+      return;
+    }
     setGeneralError(null);
     setHasConcurrencyConflict(false);
 
@@ -338,7 +344,7 @@ export function PartyForm({ party }: PartyFormProps) {
       )}
 
       {/* 4. Form Fields Card */}
-      <div className="bg-white p-5 sm:p-6 rounded-[6px] border border-[#D5DFE3] space-y-6 shadow-xs">
+      <fieldset disabled={isSubmitting || Boolean(pending)} className="min-w-0 bg-white p-5 sm:p-6 rounded-[6px] border border-[#D5DFE3] space-y-6 shadow-xs">
         {/* Kind Radio Selection */}
         <fieldset>
           <legend className="text-sm font-bold text-[#172A35] mb-2">
@@ -625,9 +631,12 @@ export function PartyForm({ party }: PartyFormProps) {
             className="w-full px-3.5 py-2.5 rounded-[6px] border border-[#A7B9C1] text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
           />
         </div>
-      </div>
+      </fieldset>
 
       {/* 5. Actions Footer */}
+      {pending && !isSubmitting && (
+        <p role="status" className="text-sm text-[#14566B]">البيانات الأصلية محفوظة في هذه الجلسة حتى يتأكد الحفظ.</p>
+      )}
       <div className="flex items-center justify-between gap-4 pt-2">
         <Link
           href={party ? `/parties/${party.id}` : '/parties'}
@@ -649,7 +658,7 @@ export function PartyForm({ party }: PartyFormProps) {
               <span>جارٍ الحفظ...</span>
             </>
           ) : (
-            <span>{isEdit ? 'حفظ التعديلات' : 'تسجيل الطرف'}</span>
+            <span>{pending ? 'إعادة محاولة الحفظ الأصلي' : isEdit ? 'حفظ التعديلات' : 'تسجيل الطرف'}</span>
           )}
         </button>
       </div>

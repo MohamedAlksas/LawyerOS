@@ -84,12 +84,13 @@ export interface SavePartyResult {
 export interface SearchPartiesParams {
   query?: string;
   kind?: PartyKind;
+  includeArchived?: boolean;
   page?: number;
   limit?: number;
 }
 
 export interface SearchPartiesResult {
-  parties: PartySummaryDTO[];
+  parties: Pick<PartySummaryDTO, 'id' | 'kind' | 'name' | 'primaryPhone' | 'createdAt' | 'identityMask'>[];
   totalCount: number;
   page: number;
   totalPages: number;
@@ -165,6 +166,7 @@ export interface ClientProfileDTO {
   version: number;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
   identityMask: {
     identificationType: IdentificationType;
     lastFour: string;

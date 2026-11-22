@@ -84,10 +84,10 @@ export function DashboardStatus({ actorEmail }: DashboardStatusProps) {
 
       <div className="max-w-md mx-auto space-y-2">
         <h2 className="text-lg font-bold text-[#172A35]">
-          لا توجد قضايا أو جلسات مسجلة حالياً
+          مساحة عمل المكتب
         </h2>
         <p className="text-sm text-[#4D606A] leading-relaxed">
-          نظام إدارة المكتب في مرحلته التشغيلية الأولى (<bdi dir="ltr">M1</bdi>). سيتم تفعيل وحدات إدارة ملفات القضايا والجلسات ومواعيد المحاكم في المراحل التالية وفق خطة العمل المعتمدة.
+          استخدم قائمة التنقل للوصول إلى أقسام النظام المتاحة لحسابك.
         </p>
       </div>
 

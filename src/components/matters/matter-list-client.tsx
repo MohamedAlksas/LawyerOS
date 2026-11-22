@@ -1,14 +1,22 @@
 ﻿'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { searchMattersAction } from '@/modules/matters/matter-actions';
+import { searchMattersAction, searchMatterClientsAction } from '@/modules/matters/matter-actions';
+import {
+  bindSearchSession,
+  clearSearchSessionStore,
+  readSearchHistory,
+  writeSearchHistory,
+} from '@/lib/search-session-store';
+import { DEFAULT_SEARCH_LIMIT, matterSearchFilters, readParam } from '@/lib/search-params';
 import { MatterListItemDTO, MatterKind, MatterStatus } from '@/modules/matters/matter-types';
 import {
   MATTER_KIND_LABELS,
   MATTER_STATUS_LABELS,
   MATTER_STATUS_CLASSES,
   formatCairoDateOnly,
+  isAuthRecoveryCode,
 } from './matter-ui-types';
 import {
   LoadingIndicator,
@@ -19,92 +27,290 @@ import {
 interface MatterListClientProps {
   initialMatters?: MatterListItemDTO[];
   initialTotal?: number;
-  initialQuery?: string;
+  initialPage?: number;
+  initialTotalPages?: number;
+  initialLimit?: number;
   initialKind?: MatterKind;
   initialStatus?: MatterStatus;
+  initialCourtId?: string;
+  initialIncompleteData?: boolean;
+  initialIncludeArchived?: boolean;
   initialError?: string;
+  courts?: { id: string; name: string }[];
+  clients?: { id: string; name: string }[];
+  sessionId: string;
+}
+
+type MatterView = ReturnType<typeof matterSearchFilters>;
+type ClientOption = { id: string; name: string };
+
+function includesArchivedClients(view: MatterView) {
+  return view.includeArchived || view.status === 'ARCHIVED';
 }
 
 export function MatterListClient({
   initialMatters = [],
   initialTotal = 0,
-  initialQuery = '',
+  initialPage = 1,
+  initialTotalPages = 1,
+  initialLimit = DEFAULT_SEARCH_LIMIT,
   initialKind,
   initialStatus,
+  initialCourtId,
+  initialIncompleteData = false,
+  initialIncludeArchived = false,
   initialError,
+  courts = [],
+  clients = [],
+  sessionId,
 }: MatterListClientProps) {
-  const [query, setQuery] = useState(initialQuery);
-  const [selectedKind, setSelectedKind] = useState<MatterKind | undefined>(initialKind);
-  const [selectedStatus, setSelectedStatus] = useState<MatterStatus | undefined>(initialStatus);
-  const [matters, setMatters] = useState<MatterListItemDTO[]>(initialMatters);
-  const [totalCount, setTotalCount] = useState<number>(initialTotal);
+  const [query, setQuery] = useState('');
+  const [selectedClient, setSelectedClient] = useState<ClientOption>();
+  const selectedClientId = selectedClient?.id;
+  const [view, setView] = useState<MatterView>({
+    kind: initialKind,
+    status: initialStatus,
+    courtId: initialCourtId,
+    incompleteData: initialIncompleteData,
+    includeArchived: initialIncludeArchived,
+    page: initialPage,
+    limit: initialLimit,
+  });
+  const { kind: selectedKind, status: selectedStatus, courtId: selectedCourtId, incompleteData, includeArchived, page } = view;
+  const [totalPages, setTotalPages] = useState(initialTotalPages);
+  const [matters, setMatters] = useState(initialMatters);
+  const [totalCount, setTotalCount] = useState(initialTotal);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(initialError || null);
-
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const requestGenRef = useRef(0);
+  const cancelMatterSearch = useCallback(() => {
+    requestGenRef.current++;
+  }, []);
 
-  const fetchMatters = useCallback(
-    async (searchQuery: string, kind?: MatterKind, status?: MatterStatus) => {
-      const currentGen = ++requestGenRef.current;
-      setIsLoading(true);
-      setError(null);
+  const [clientsList, setClientsList] = useState(clients);
+  const [isClientPickerOpen, setIsClientPickerOpen] = useState(false);
+  const [clientPickerQuery, setClientPickerQuery] = useState('');
+  const [isSearchingClients, setIsSearchingClients] = useState(false);
+  const [clientSearchError, setClientSearchError] = useState<string | null>(null);
+  const [clientPickerPage, setClientPickerPage] = useState(1);
+  const [clientPickerTotalPages, setClientPickerTotalPages] = useState(1);
+  const [clientPickerTotalCount, setClientPickerTotalCount] = useState(clients.length);
+  const clientPickerRef = useRef<HTMLDivElement>(null);
+  const searchClientsTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const clientSearchGenRef = useRef(0);
 
-      try {
-        const res = await searchMattersAction({
-          query: searchQuery.trim() || undefined,
-          kind,
-          status,
-          limit: 50,
-          offset: 0,
-        });
+  const clientSelectOptions = selectedClient && !clientsList.some(({ id }) => id === selectedClient.id)
+    ? [selectedClient, ...clientsList]
+    : clientsList;
 
-        if (currentGen !== requestGenRef.current) return;
+  const cancelClientSearch = useCallback(() => {
+    clearTimeout(searchClientsTimeoutRef.current);
+    clientSearchGenRef.current++;
+  }, []);
 
-        if (!res.success) {
-          setError(res.error || 'تعذر تحميل ملفات القضايا.');
-          setIsLoading(false);
-          return;
-        }
+  const closeClientPicker = useCallback(() => {
+    cancelClientSearch();
+    setIsClientPickerOpen(false);
+    setIsSearchingClients(false);
+  }, [cancelClientSearch]);
 
-        setMatters(res.data.matters);
-        setTotalCount(res.data.total);
-        setIsLoading(false);
-      } catch (err: unknown) {
-        if (currentGen !== requestGenRef.current) return;
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'حدث خطأ في الاتصال أثناء تحميل ملفات القضايا.'
-        );
-        setIsLoading(false);
+  const hidePrivateResults = useCallback(() => {
+    clearSearchSessionStore();
+    cancelMatterSearch();
+    setQuery('');
+    setSelectedClient(undefined);
+    setClientsList([]);
+    setClientPickerQuery('');
+    setMatters([]);
+    setTotalCount(0);
+    setIsLoading(false);
+    closeClientPicker();
+    window.dispatchEvent(new Event('lawoffice:recheck-session'));
+  }, [cancelMatterSearch, closeClientPicker]);
+
+  const fetchClientOptions = useCallback(async (text: string, page: number, includeArchived: boolean) => {
+    const request = ++clientSearchGenRef.current;
+    setIsSearchingClients(true);
+    setClientSearchError(null);
+    try {
+      const res = await searchMatterClientsAction({
+        query: text.trim() || undefined,
+        includeArchived,
+        page,
+        limit: 10,
+      });
+      if (request !== clientSearchGenRef.current) return;
+      if (res.success) {
+        setClientsList(res.data.clients);
+        setClientPickerPage(res.data.page);
+        setClientPickerTotalPages(res.data.totalPages);
+        setClientPickerTotalCount(res.data.total);
+      } else {
+        if (isAuthRecoveryCode(res.code) || res.code === 'FORBIDDEN') hidePrivateResults();
+        setClientSearchError(res.error || 'تعذر البحث في الموكلين.');
       }
-    },
-    []
-  );
+    } catch {
+      if (request === clientSearchGenRef.current) setClientSearchError('حدث خطأ أثناء البحث في الموكلين.');
+    } finally {
+      if (request === clientSearchGenRef.current) setIsSearchingClients(false);
+    }
+  }, [hidePrivateResults]);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    fetchMatters(query, selectedKind, selectedStatus);
+  const handleClientPickerQueryChange = (text: string) => {
+    setClientPickerQuery(text);
+    cancelClientSearch();
+    setClientsList([]);
+    setClientPickerTotalPages(1);
+    setIsSearchingClients(true);
+    searchClientsTimeoutRef.current = setTimeout(
+      () => fetchClientOptions(text, 1, includesArchivedClients(view)),
+      300,
+    );
   };
 
-  const handleKindChange = (kind?: MatterKind) => {
-    setSelectedKind(kind);
-    fetchMatters(query, kind, selectedStatus);
+  useEffect(() => {
+    if (!isClientPickerOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientPickerRef.current && !clientPickerRef.current.contains(event.target as Node)) {
+        closeClientPicker();
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [closeClientPicker, isClientPickerOpen]);
+
+  const syncHistory = useCallback((text: string, filters: MatterView, client?: ClientOption) => {
+    const params = new URLSearchParams();
+    if (filters.kind) params.set('kind', filters.kind);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.courtId) params.set('courtId', filters.courtId);
+    if (filters.incompleteData) params.set('incompleteData', 'true');
+    if (filters.includeArchived) params.set('includeArchived', 'true');
+    if (filters.page > 1) params.set('page', String(filters.page));
+    if (filters.limit !== DEFAULT_SEARCH_LIMIT) params.set('limit', String(filters.limit));
+    writeSearchHistory(sessionId, { query: text, client }, params);
+  }, [sessionId]);
+
+  const fetchMatters = useCallback(async (text: string, filters: MatterView, client?: ClientOption) => {
+    const request = ++requestGenRef.current;
+    setView(filters);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await searchMattersAction({ ...filters, query: text.trim() || undefined, clientId: client?.id });
+      if (request !== requestGenRef.current) return;
+      if (!res.success) {
+        if (isAuthRecoveryCode(res.code) || res.code === 'FORBIDDEN') hidePrivateResults();
+        setError(res.error || 'تعذر تحميل ملفات القضايا.');
+        return;
+      }
+      const resolved = { ...filters, page: res.data.page ?? filters.page };
+      setView(resolved);
+      setMatters(res.data.matters);
+      setTotalCount(res.data.total);
+      setTotalPages(res.data.totalPages ?? 1);
+      syncHistory(text, resolved, client);
+    } catch {
+      if (request === requestGenRef.current) setError('حدث خطأ في الاتصال أثناء تحميل ملفات القضايا.');
+    } finally {
+      if (request === requestGenRef.current) setIsLoading(false);
+    }
+  }, [hidePrivateResults, syncHistory]);
+
+  useEffect(() => {
+    bindSearchSession(sessionId);
+    const restore = (filters: MatterView) => {
+      const saved = readSearchHistory(sessionId);
+      setQuery(saved?.query ?? '');
+      setSelectedClient(saved?.client);
+      void fetchMatters(saved?.query ?? '', filters, saved?.client);
+    };
+    const initial = {
+      kind: initialKind,
+      status: initialStatus,
+      courtId: initialCourtId,
+      incompleteData: initialIncompleteData,
+      includeArchived: initialIncludeArchived,
+      page: initialPage,
+      limit: initialLimit,
+    };
+    const onHistory = () => {
+      if (window.location.pathname !== '/matters') return;
+      const params = new URLSearchParams(window.location.search);
+      const filters = matterSearchFilters((name) => readParam(params, name));
+      closeClientPicker();
+      setClientsList([]);
+      void fetchClientOptions('', 1, includesArchivedClients(filters));
+      restore(filters);
+    };
+    // Back navigation can reuse an earlier render's server props.
+    const saved = readSearchHistory(sessionId);
+    const firstRestore = saved ? setTimeout(onHistory, 0) : undefined;
+    if (!saved) syncHistory('', initial);
+    window.addEventListener('popstate', onHistory);
+    return () => {
+      clearTimeout(firstRestore);
+      cancelClientSearch();
+      cancelMatterSearch();
+      window.removeEventListener('popstate', onHistory);
+    };
+  }, [cancelClientSearch, cancelMatterSearch, closeClientPicker, fetchClientOptions, fetchMatters, initialCourtId, initialIncludeArchived,
+    initialIncompleteData, initialKind, initialLimit, initialPage, initialStatus, sessionId, syncHistory]);
+
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void fetchMatters(query, { ...view, page: 1 }, selectedClient);
   };
 
-  const handleStatusChange = (status?: MatterStatus) => {
-    setSelectedStatus(status);
-    fetchMatters(query, selectedKind, status);
+  const applyFilters = (filters: MatterView) => {
+    const previousScope = includesArchivedClients(view);
+    const nextScope = includesArchivedClients(filters);
+    let client = selectedClient;
+    if (previousScope !== nextScope) {
+      closeClientPicker();
+      setClientsList([]);
+      if (!nextScope) {
+        client = undefined;
+        setSelectedClient(undefined);
+      }
+      void fetchClientOptions('', 1, nextScope);
+    }
+    void fetchMatters(query, { ...filters, page: 1 }, client);
+  };
+
+  const handleKindChange = (kind?: MatterKind) => applyFilters({ ...view, kind });
+  const handleStatusChange = (status?: MatterStatus) => applyFilters({ ...view, status });
+  const handleCourtChange = (courtId?: string) => applyFilters({ ...view, courtId });
+  const handleIncompleteDataChange = (incompleteData: boolean) => applyFilters({ ...view, incompleteData });
+  const handleIncludeArchivedChange = (includeArchived: boolean) => applyFilters({ ...view, includeArchived });
+
+  const handleClientChange = (client?: ClientOption) => {
+    setSelectedClient(client);
+    void fetchMatters(query, { ...view, page: 1 }, client);
   };
 
   const handleClearFilters = () => {
     setQuery('');
-    setSelectedKind(undefined);
-    setSelectedStatus(undefined);
-    fetchMatters('', undefined, undefined);
+    setSelectedClient(undefined);
+    closeClientPicker();
+    setClientsList([]);
+    void fetchClientOptions('', 1, false);
+    void fetchMatters('', { ...matterSearchFilters(() => undefined), limit: view.limit });
   };
 
-  const hasActiveFilters = Boolean(query.trim() || selectedKind || selectedStatus);
+  const handlePageChange = (page: number) => {
+    void fetchMatters(query, { ...view, page }, selectedClient);
+  };
+
+  const hasActiveFilters = Boolean(
+    query.trim() ||
+      selectedKind ||
+      selectedStatus ||
+      selectedCourtId ||
+      selectedClientId ||
+      incompleteData ||
+      includeArchived
+  );
 
   return (
     <div className="space-y-6">
@@ -221,7 +427,7 @@ export function MatterListClient({
             >
               الكل
             </button>
-            {(['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED'] as MatterStatus[]).map((st) => (
+            {(['ACTIVE', 'DRAFT', 'ON_HOLD', 'CLOSED', 'ARCHIVED'] as MatterStatus[]).map((st) => (
               <button
                 key={st}
                 type="button"
@@ -239,8 +445,204 @@ export function MatterListClient({
             ))}
           </div>
 
+          {/* Include Archived Toggle */}
+          <div className="flex items-center gap-2">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+              <input
+                type="checkbox"
+                data-testid="include-archived-checkbox"
+                checked={includeArchived}
+                onChange={(e) => handleIncludeArchivedChange(e.target.checked)}
+                className="w-4 h-4 rounded text-[#14566B] focus:ring-[#14566B] border-[#D5DFE3]"
+              />
+              <span>تضمين الملفات المؤرشفة</span>
+            </label>
+          </div>
+
           <div className="text-xs font-medium text-[#4D606A]" data-testid="matters-total-count">
             إجمالي الملفات: <span className="font-bold text-[#172A35]">{totalCount}</span>
+          </div>
+        </div>
+
+        {/* Extended Filters: Court, Client, Incomplete Data */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E8EEF1]">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Court Filter */}
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="filter-court" className="text-xs font-semibold text-[#4D606A]">المحكمة:</label>
+              <select
+                id="filter-court"
+                data-testid="filter-court-select"
+                value={selectedCourtId || ''}
+                onChange={(e) => handleCourtChange(e.target.value || undefined)}
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              >
+                <option value="">كل المحاكم</option>
+                {courts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Client Filter */}
+            <div className="flex items-center gap-1.5 relative" ref={clientPickerRef}>
+              <label htmlFor="filter-client" className="text-xs font-semibold text-[#4D606A]">الموكل:</label>
+              <select
+                id="filter-client"
+                data-testid="filter-client-select"
+                value={selectedClientId || ''}
+                onChange={(e) => handleClientChange(clientSelectOptions.find(({ id }) => id === e.target.value))}
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              >
+                <option value="">كل الموكلين</option>
+                {clientSelectOptions.map((cl) => (
+                  <option key={cl.id} value={cl.id}>{cl.name}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                data-testid="open-client-picker-button"
+                aria-expanded={isClientPickerOpen}
+                aria-controls={isClientPickerOpen ? 'matter-client-picker' : undefined}
+                onClick={() => {
+                  if (isClientPickerOpen) {
+                    closeClientPicker();
+                  } else {
+                    setIsClientPickerOpen(true);
+                    void fetchClientOptions(clientPickerQuery, 1, includesArchivedClients(view));
+                  }
+                }}
+                className="px-2 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                title="بحث موسع في الموكلين"
+              >
+                🔍 بحث
+              </button>
+
+              {isClientPickerOpen && (
+                <div
+                  id="matter-client-picker"
+                  data-testid="client-picker-popover"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      closeClientPicker();
+                      clientPickerRef.current?.querySelector('button')?.focus();
+                    }
+                  }}
+                  className="absolute top-full mt-1.5 right-0 z-30 w-72 bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
+                >
+                  <div className="flex items-center justify-between pb-1 border-b border-[#E8EEF1]">
+                    <span className="font-semibold text-[#172A35]">اختيار موكل</span>
+                    <button
+                      type="button"
+                      data-testid="close-client-picker-button"
+                      onClick={closeClientPicker}
+                      className="text-[#4D606A] hover:text-[#172A35] text-sm p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <input
+                    type="search"
+                    data-testid="filter-client-search-input"
+                    aria-label="ابحث عن موكل بالاسم أو الهاتف"
+                    value={clientPickerQuery}
+                    onChange={(e) => handleClientPickerQueryChange(e.target.value)}
+                    placeholder="ابحث بالاسم أو الهاتف..."
+                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-xs text-[#172A35] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                  />
+
+                  {isSearchingClients ? (
+                    <div role="status" className="py-3 text-center text-[#4D606A]" data-testid="client-picker-loading">
+                      جارٍ البحث في الموكلين...
+                    </div>
+                  ) : clientSearchError ? (
+                    <div role="alert" className="py-2 text-center text-[#B3261E]" data-testid="client-picker-error">
+                      {clientSearchError}
+                    </div>
+                  ) : clientsList.length === 0 ? (
+                    <div role="status" className="py-3 text-center text-[#4D606A]">لا يوجد موكلين مطابقين</div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto divide-y divide-[#E8EEF1] border border-[#E8EEF1] rounded-[4px]">
+                      <button
+                        type="button"
+                        data-testid="filter-client-option-all"
+                        onClick={() => {
+                          handleClientChange(undefined);
+                          closeClientPicker();
+                        }}
+                        className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium block"
+                      >
+                        كل الموكلين
+                      </button>
+                      {clientsList.map((cl) => (
+                        <button
+                          key={cl.id}
+                          type="button"
+                          data-testid={`filter-client-option-${cl.id}`}
+                          onClick={() => {
+                            handleClientChange(cl);
+                            closeClientPicker();
+                          }}
+                          className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] block transition-colors ${
+                            selectedClientId === cl.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : 'text-[#172A35]'
+                          }`}
+                        >
+                          {cl.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {clientPickerTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1 border-t border-[#E8EEF1] text-[11px] text-[#4D606A]">
+                      <span data-testid="filter-client-picker-page-info">
+                        صفحة {clientPickerPage} من {clientPickerTotalPages} ({clientPickerTotalCount} موكل)
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          data-testid="filter-client-picker-prev"
+                          disabled={clientPickerPage <= 1}
+                          onClick={() => {
+                            const p = clientPickerPage - 1;
+                            void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
+                          }}
+                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                        >
+                          السابق
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="filter-client-picker-next"
+                          disabled={clientPickerPage >= clientPickerTotalPages}
+                          onClick={() => {
+                            const p = clientPickerPage + 1;
+                            void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
+                          }}
+                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                        >
+                          التالي
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Incomplete Data Toggle */}
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+              <input
+                type="checkbox"
+                data-testid="incomplete-data-checkbox"
+                checked={incompleteData}
+                onChange={(e) => handleIncompleteDataChange(e.target.checked)}
+                className="w-4 h-4 rounded text-[#14566B] focus:ring-[#14566B] border-[#D5DFE3]"
+              />
+              <span>بيانات غير مكتملة</span>
+            </label>
           </div>
         </div>
       </div>
@@ -252,7 +654,7 @@ export function MatterListClient({
         <ErrorContainer
           title="تعذر تحميل ملفات القضايا"
           message={error}
-          onRetry={() => fetchMatters(query, selectedKind, selectedStatus)}
+          onRetry={() => fetchMatters(query, view, selectedClient)}
         />
       ) : matters.length === 0 ? (
         hasActiveFilters ? (
@@ -361,13 +763,22 @@ export function MatterListClient({
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${
-                              MATTER_STATUS_CLASSES[matter.status]
-                            }`}
-                          >
-                            {MATTER_STATUS_LABELS[matter.status]}
-                          </span>
+                          {matter.status === 'ARCHIVED' || matter.archivedAt ? (
+                            <span
+                              data-testid="matter-archived-badge"
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border bg-stone-100 text-stone-700 border-stone-300"
+                            >
+                              مؤرشف
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${
+                                MATTER_STATUS_CLASSES[matter.status]
+                              }`}
+                            >
+                              {MATTER_STATUS_LABELS[matter.status]}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs">
                           {matter.paperLocationName ? (
@@ -424,13 +835,22 @@ export function MatterListClient({
                         </Link>
                       </h2>
                     </div>
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 ${
-                        MATTER_STATUS_CLASSES[matter.status]
-                      }`}
-                    >
-                      {MATTER_STATUS_LABELS[matter.status]}
-                    </span>
+                    {matter.status === 'ARCHIVED' || matter.archivedAt ? (
+                      <span
+                        data-testid="matter-archived-badge"
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 bg-stone-100 text-stone-700 border-stone-300"
+                      >
+                        مؤرشف
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border shrink-0 ${
+                          MATTER_STATUS_CLASSES[matter.status]
+                        }`}
+                      >
+                        {MATTER_STATUS_LABELS[matter.status]}
+                      </span>
+                    )}
                   </div>
 
                   <div className="text-xs text-[#4D606A] space-y-1.5 pt-2 border-t border-[#E8EEF1]">
@@ -473,6 +893,39 @@ export function MatterListClient({
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div
+              data-testid="pagination-controls"
+              className="flex items-center justify-between bg-white px-4 py-3 rounded-[6px] border border-[#D5DFE3] text-sm"
+            >
+              <button
+                type="button"
+                data-testid="prev-page-button"
+                onClick={() => handlePageChange(page - 1)}
+                disabled={page <= 1}
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+              >
+                السابق
+              </button>
+
+              <span className="text-xs text-[#4D606A]">
+                صفحة <span className="font-bold text-[#172A35]">{page}</span> من{' '}
+                <span className="font-bold text-[#172A35]">{totalPages}</span>
+              </span>
+
+              <button
+                type="button"
+                data-testid="next-page-button"
+                onClick={() => handlePageChange(page + 1)}
+                disabled={page >= totalPages}
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+              >
+                التالي
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

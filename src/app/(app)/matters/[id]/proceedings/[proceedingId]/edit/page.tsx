@@ -19,7 +19,7 @@ interface EditProceedingPageProps {
 export async function generateMetadata({ params }: EditProceedingPageProps) {
   const { id } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
     const matter = await getMatter(id, actor);
     return {
       title: `تعديل القيد القضائي — ${matter.fileCode} — LawOffice OS`,
@@ -35,7 +35,7 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
   const { id, proceedingId } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -99,6 +99,10 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
         />
       </div>
     );
+  }
+
+  if (matter.status === 'ARCHIVED' || matter.archivedAt || proceeding.archivedAt) {
+    redirect(`/matters/${matter.id}/proceedings/${proceeding.id}`);
   }
 
   let courts: Awaited<ReturnType<typeof listReferenceItems>> = [];

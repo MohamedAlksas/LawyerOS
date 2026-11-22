@@ -17,7 +17,7 @@ interface MatterDetailPageProps {
 export async function generateMetadata({ params }: MatterDetailPageProps) {
   const { id } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
     const matter = await getMatter(id, actor);
     return {
       title: `${matter.fileCode} — ${matter.title} — LawOffice OS`,
@@ -33,7 +33,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
   const { id } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -80,7 +80,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
 
   return (
     <div className="py-2">
-      <MatterDetailClient initialMatter={matter} />
+      <MatterDetailClient key={actor.id} ownerId={actor.id} initialMatter={matter} />
     </div>
   );
 }

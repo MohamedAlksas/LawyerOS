@@ -549,12 +549,13 @@ export async function searchParties(
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
   const skip = (page - 1) * limit;
 
-  const where: Prisma.PartyWhereInput = {
-    archivedAt: null,
-  };
+  const where: Prisma.PartyWhereInput = {};
+  if (!params.includeArchived) {
+    where.archivedAt = null;
+  }
 
   if (params.kind) {
     where.kind = params.kind;
@@ -584,13 +585,33 @@ export async function searchParties(
       where,
       skip,
       take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: { identities: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        kind: true,
+        name: true,
+        primaryPhone: true,
+        createdAt: true,
+        identities: {
+          take: 1,
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { identificationType: true, ciphertext: true, lastFour: true },
+        },
+      },
     }),
   ]);
 
   return {
-    parties: records.map(mapPartySummary),
+    parties: records.map(({ id, kind, name, primaryPhone, createdAt, identities: [identity] }) => ({
+      id,
+      kind,
+      name,
+      primaryPhone,
+      createdAt: createdAt.toISOString(),
+      identityMask: identity
+        ? { identificationType: identity.identificationType, lastFour: getIdentityMaskSuffix(identity) }
+        : null,
+    })),
     totalCount,
     page,
     totalPages: Math.ceil(totalCount / limit) || 1,
@@ -610,14 +631,14 @@ export async function getClientProfile(
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const party = await prisma.party.findUnique({
-    where: { id: partyId, archivedAt: null },
+    where: { id: partyId },
     include: {
       identities: true,
       communicationNotes: {
         orderBy: { communicationAt: 'desc' },
       },
       powersOfAttorney: {
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       },
     },
   });
@@ -640,6 +661,7 @@ export async function getClientProfile(
     version: party.version,
     createdAt: party.createdAt.toISOString(),
     updatedAt: party.updatedAt.toISOString(),
+    archivedAt: party.archivedAt ? party.archivedAt.toISOString() : null,
     identityMask: primaryIdentity
       ? {
           identificationType: primaryIdentity.identificationType,
@@ -1057,4 +1079,3 @@ export async function revealPartyIdentity(
     number: decryptedNumber,
   };
 }
-

@@ -1,7 +1,7 @@
 'use server';
 
 import { requireActor } from '@/modules/identity/require-actor';
-import { AuthenticationError, AuthorizationError, Actor } from '@/modules/identity/types';
+import { AuthenticationError, AuthorizationError, Actor, Permission } from '@/modules/identity/types';
 import { getTrustedOrigins } from '@/lib/auth';
 import {
   openMatter,
@@ -19,6 +19,14 @@ import {
   searchMatters,
   getPartyMatterAssociations,
   findSimilarProceedings,
+  archiveMatter,
+  reopenMatter,
+  archiveProceeding,
+  reopenProceeding,
+  searchProceedings,
+  unifiedSearch,
+  searchMatterClients,
+  type SearchMatterClientsResult,
 } from './matter-service';
 import {
   MatterDTO,
@@ -45,6 +53,15 @@ import {
   UnlinkMatterAuthorizationInput,
   SearchMattersParams,
   SearchMattersResult,
+  ArchiveMatterInput,
+  ReopenMatterInput,
+  ArchiveProceedingInput,
+  ReopenProceedingInput,
+  LifecycleCommandResult,
+  SearchProceedingsParams,
+  SearchProceedingsResult,
+  UnifiedSearchParams,
+  UnifiedSearchResult,
   MatterValidationError,
   LastClientRequiredError,
   PrimaryContactConflictError,
@@ -55,6 +72,9 @@ import {
   ConcurrencyConflictError,
   NotFoundError,
   UnsupportedTransitionError,
+  MatterArchivedError,
+  ProceedingArchivedError,
+  ActiveObligationError,
 } from './matter-types';
 import {
   IdempotencyPayloadMismatchError,
@@ -152,6 +172,30 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
+  if (error instanceof MatterArchivedError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'MATTER_ARCHIVED',
+    };
+  }
+
+  if (error instanceof ProceedingArchivedError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'PROCEEDING_ARCHIVED',
+    };
+  }
+
+  if (error instanceof ActiveObligationError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'ACTIVE_OBLIGATION',
+    };
+  }
+
   if (error instanceof AuthenticationError) {
     return {
       success: false,
@@ -191,7 +235,7 @@ function handleActionError(error: unknown): ActionResult<never> {
   };
 }
 
-async function verifyActionSecurity(): Promise<Actor> {
+async function verifyActionSecurity(options: { requiredPermission?: Permission } = {}): Promise<Actor> {
   try {
     const { headers: nextHeaders } = await import('next/headers');
     const reqHeaders = await nextHeaders();
@@ -208,7 +252,7 @@ async function verifyActionSecurity(): Promise<Actor> {
     }
   }
 
-  return await requireActor();
+  return await requireActor(options);
 }
 
 export async function openMatterAction(
@@ -385,6 +429,102 @@ export async function findSimilarProceedingsAction(
   try {
     const actor = await verifyActionSecurity();
     const data = await findSimilarProceedings(actor, params);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+async function verifyLifecycleActor(originatingActorId: string): Promise<Actor> {
+  const actor = await verifyActionSecurity({ requiredPermission: 'WRITE_CLIENT_DATA' });
+  if (actor.id !== originatingActorId) {
+    throw new AuthorizationError();
+  }
+  return actor;
+}
+
+export async function archiveMatterAction(
+  input: ArchiveMatterInput,
+  originatingActorId: string
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyLifecycleActor(originatingActorId);
+    const data = await archiveMatter(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function reopenMatterAction(
+  input: ReopenMatterInput,
+  originatingActorId: string
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyLifecycleActor(originatingActorId);
+    const data = await reopenMatter(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function archiveProceedingAction(
+  input: ArchiveProceedingInput,
+  originatingActorId: string
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyLifecycleActor(originatingActorId);
+    const data = await archiveProceeding(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function reopenProceedingAction(
+  input: ReopenProceedingInput,
+  originatingActorId: string
+): Promise<ActionResult<LifecycleCommandResult>> {
+  try {
+    const actor = await verifyLifecycleActor(originatingActorId);
+    const data = await reopenProceeding(actor, input);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function searchProceedingsAction(
+  params: SearchProceedingsParams
+): Promise<ActionResult<SearchProceedingsResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await searchProceedings(params, actor);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function unifiedSearchAction(
+  params: UnifiedSearchParams
+): Promise<ActionResult<UnifiedSearchResult>> {
+  try {
+    const actor = await verifyActionSecurity();
+    const data = await unifiedSearch(params, actor);
+    return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function searchMatterClientsAction(
+  rawParams: unknown = {}
+): Promise<ActionResult<SearchMatterClientsResult>> {
+  try {
+    const actor = await verifyActionSecurity({ requiredPermission: 'READ_CLIENT_DATA' });
+    const data = await searchMatterClients(actor, rawParams);
     return { success: true, data };
   } catch (error) {
     return handleActionError(error);

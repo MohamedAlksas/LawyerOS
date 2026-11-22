@@ -29,6 +29,7 @@ import { getEnv, EnvironmentValidationError } from '@/lib/env';
 import { NextRequest } from 'next/server';
 import crypto from 'crypto';
 import { GET as authRouteGET, POST as authRoutePOST } from '@/app/api/auth/[...all]/route';
+import { GET as viewSessionGET } from '@/app/api/auth/view-session/route';
 import {
   createDedicatedTestDatabase,
   createValidatedTestPool,
@@ -3631,7 +3632,12 @@ describe('R14 atomic credential rotation and application namespace isolation', (
     fixture = await createDedicatedTestDatabase();
     process.env.TEST_DATABASE_URL = fixture.url;
     getEnv(true);
-    for (const migration of ['20261111000000_init_auth', '20261114000000_credential_version']) {
+    for (const migration of [
+      '20261111000000_init_auth',
+      '20261114000000_credential_version',
+      '20261117000000_parties_communication_poa',
+      '20261122010000_audit_password_rotation',
+    ]) {
       await fixture.pool.query(fs.readFileSync(path.resolve('prisma/migrations', migration, 'migration.sql'), 'utf8'));
     }
     owner = await provisionOwner({ name: 'مالك اختبار المعاملات', email: 'r14.owner@synthetic.invalid', password });
@@ -3656,6 +3662,23 @@ describe('R14 atomic credential rotation and application namespace isolation', (
     else process.env.PGOPTIONS = originalPgOptions;
     getEnv(true);
   }, 30000);
+
+  it('revalidates a visible session without extending its inactivity window', async () => {
+    const cookie = await login();
+    const getSessionRow = async () => (await fixture.pool.query(
+      'SELECT id, "updatedAt" FROM public.session WHERE "userId"=$1',
+      [owner.user.id],
+    )).rows[0];
+    const before = await getSessionRow();
+    const response = await viewSessionGET(new Request(`${getEnv().BETTER_AUTH_URL}/api/auth/view-session`, {
+      headers: { cookie },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({ actorId: owner.user.id, sessionId: before.id, role: 'OWNER' });
+    expect(await getSessionRow()).toEqual(before);
+  });
 
   it.each(['replacement insert', 'session revocation'] as const)(
     'R14 atomic rotation rolls back %s failure and permits a coherent retry',
@@ -3698,11 +3721,23 @@ describe('R14 atomic credential rotation and application namespace isolation', (
       } finally {
         await fixture.pool.query('DROP TRIGGER r14_rotation_fault ON public.session; DROP FUNCTION public.r14_rotation_fault();');
       }
+      const readPasswordAudits = async () => (await fixture.pool.query(`
+        SELECT "action", "entityType", "entityId", "changedFields" FROM public.audit_event
+        WHERE "userId" = $1 AND "action" IN ('CHANGE_PASSWORD', 'REJECT_PASSWORD_CHANGE')
+        ORDER BY "createdAt", "action"
+      `, [owner.user.id])).rows;
+      expect(await readPasswordAudits()).toEqual([
+        { action: 'REJECT_PASSWORD_CHANGE', entityType: 'User', entityId: owner.user.id, changedFields: null },
+      ]);
       // A failed rotation preserves the old credential and denies the uncommitted new one.
       expect((await signIn(newPassword)).status).toBe(401);
       await login();
       const retry = await authRoutePOST(request('change-password', { currentPassword: password, newPassword }, sessionA));
       expect(retry.status).toBe(200);
+      expect(await readPasswordAudits()).toEqual([
+        { action: 'REJECT_PASSWORD_CHANGE', entityType: 'User', entityId: owner.user.id, changedFields: null },
+        { action: 'CHANGE_PASSWORD', entityType: 'User', entityId: owner.user.id, changedFields: null },
+      ]);
       const replacement = responseCookie(retry, 'session_token');
       expect((await requireActor({ headers: new Headers({ cookie: replacement }) })).id).toBe(owner.user.id);
       expect((await fixture.pool.query('SELECT "credentialVersion" FROM public."user" WHERE id=$1', [owner.user.id])).rows[0].credentialVersion).toBe(2);

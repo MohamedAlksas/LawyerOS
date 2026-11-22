@@ -126,6 +126,10 @@ describe('T06-08: Reference Settings Maintenance & Inactive Reference Guards', (
       idempotencyKey: `deact-court-${crypto.randomUUID()}`,
     });
     expect(deactivatedCourt.isActive).toBe(false);
+    const deactivation = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityId: court.id, action: 'UPDATE_COURT' },
+    });
+    expect(deactivation.changedFields).toMatchObject({ isActive: false });
 
     // 3. Listing with includeInactive = false hides deactivated court
     const activeCourts = await listReferenceItems('COURT', false, actor);

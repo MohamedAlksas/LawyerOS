@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { signOut } from '@/lib/auth-client';
+import { signOutAndReset } from '@/lib/auth-client';
 import {
   revokeSessionAction,
   revokeOtherSessionsAction,
@@ -134,7 +134,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
     setActionSuccess(null);
 
     try {
-      const res = await signOut();
+      const res = await signOutAndReset();
       if (res?.error) {
         setActionError(
           'فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.'
@@ -143,8 +143,6 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
         return;
       }
 
-      // Confirmed logout
-      router.push('/login');
     } catch {
       setActionError(
         'تعذر الاتصال بالخادم لإتمام تسجيل الخروج. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.'

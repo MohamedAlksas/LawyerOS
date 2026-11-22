@@ -24,7 +24,7 @@ interface ProceedingDetailPageProps {
 export async function generateMetadata({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
     const matter = await getMatter(id, actor);
     const proceeding = (matter.proceedings || []).find((p) => p.id === proceedingId);
     if (!proceeding) {
@@ -49,7 +49,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   const { id, proceedingId } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -116,6 +116,9 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   }
 
   const isDraft = !proceeding.numberText || !proceeding.yearLabel;
+  const isProcArchived = Boolean(proceeding.archivedAt);
+  const isParentMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
+  const isReadOnly = isProcArchived || isParentMatterArchived;
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
@@ -136,6 +139,29 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         <span className="font-bold text-[#172A35]">تفاصيل القيد القضائي</span>
       </nav>
 
+      {/* Read-Only Banner for Archived Proceeding or Archived Parent Matter */}
+      {isReadOnly && (
+        <div
+          role="alert"
+          data-testid="proceeding-archived-banner"
+          className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
+            <span aria-hidden="true" className="text-lg">📁</span>
+            <span>
+              {isParentMatterArchived
+                ? 'ملف القضية الرئيسي مؤرشف — القيد في وضع القراءة فقط'
+                : 'القيد القضائي مؤرشف — وضع القراءة فقط'}
+            </span>
+          </div>
+          <p className="text-xs text-stone-700 leading-relaxed">
+            {isParentMatterArchived
+              ? 'تمت أرشفة ملف القضية الرئيسي، وبالتالي تم قفل هذا القيد القضائي وتعطيل أي تعديلات عليه.'
+              : 'تمت أرشفة هذا القيد القضائي وأصبح في وضع القراءة فقط. تم تعطيل تعديل بيانات القيد.'}
+          </p>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -147,7 +173,15 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-[#E8EEF1] text-[#14566B]">
                 {PROCEEDING_INSTANCE_LABELS[proceeding.instance]}
               </span>
-              {isDraft ? (
+              {isProcArchived ? (
+                <span
+                  data-testid="proceeding-archived-badge"
+                  className="text-xs font-bold px-2.5 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 inline-flex items-center gap-1"
+                >
+                  <span>📁</span>
+                  <span>مؤرشف</span>
+                </span>
+              ) : isDraft ? (
                 <span
                   data-testid="proceeding-draft-badge"
                   className="text-xs font-bold px-2.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"
@@ -175,14 +209,16 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <Link
-              href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
-              data-testid="edit-proceeding-button"
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[40px] flex items-center gap-1.5"
-            >
-              <span>✏️</span>
-              <span>تعديل بيانات القيد</span>
-            </Link>
+            {!isReadOnly && (
+              <Link
+                href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
+                data-testid="edit-proceeding-button"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[40px] flex items-center gap-1.5"
+              >
+                <span>✏️</span>
+                <span>تعديل بيانات القيد</span>
+              </Link>
+            )}
             <Link
               href={`/matters/${matter.id}`}
               className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[40px] flex items-center"

@@ -24,6 +24,7 @@ interface PartyProfileClientProps {
 }
 
 export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) {
+  const isArchived = Boolean(party.archivedAt);
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
   const [revealError, setRevealError] = useState<string | null>(null);
@@ -152,20 +153,53 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
             <span className="inline-block px-2.5 py-0.5 rounded text-xs font-semibold bg-[#E8EEF1] text-[#14566B]">
               {PARTY_KIND_LABELS[party.kind]}
             </span>
+            {isArchived && (
+              <span
+                data-testid="party-archived-badge"
+                className="inline-block px-2.5 py-0.5 rounded text-xs font-bold bg-stone-100 text-stone-700 border border-stone-300"
+              >
+                مؤرشف
+              </span>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <Link
-            href={`/parties/${party.id}/edit`}
-            data-testid="edit-party-button"
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
-          >
-            <span>✏️</span>
-            <span>تعديل البيانات</span>
-          </Link>
+          {!isArchived ? (
+            <Link
+              href={`/parties/${party.id}/edit`}
+              data-testid="edit-party-button"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
+            >
+              <span>✏️</span>
+              <span>تعديل البيانات</span>
+            </Link>
+          ) : (
+            <span
+              className="text-xs text-stone-600 bg-stone-100 px-3 py-1.5 rounded border border-stone-300 font-semibold"
+            >
+              🔒 ملف قراءة فقط
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Read-Only Banner for Archived Party */}
+      {isArchived && (
+        <div
+          role="alert"
+          data-testid="party-archived-banner"
+          className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
+            <span aria-hidden="true" className="text-lg">📁</span>
+            <span>ملف الطرف مؤرشف — وضع القراءة فقط</span>
+          </div>
+          <p className="text-xs text-stone-700 leading-relaxed">
+            تمت أرشفة هذا الطرف وهو في وضع القراءة فقط. تم تعطيل عمليات تعديل البيانات وإضافة ملاحظات التواصل وسندات الوكالة.
+          </p>
+        </div>
+      )}
 
       {/* 2. Core Profile Details Card */}
       <div
@@ -281,28 +315,30 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                   </p>
                 </div>
 
-                <div>
-                  {!revealedNumber ? (
-                    <button
-                      type="button"
-                      data-testid="reveal-identity-button"
-                      onClick={handleRevealIdentity}
-                      disabled={isRevealing}
-                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
-                    >
-                      {isRevealing ? 'جارٍ كشف الهوية...' : 'عرض الرقم الكامل'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid="hide-identity-button"
-                      onClick={handleHideIdentity}
-                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
-                    >
-                      إخفاء الرقم
-                    </button>
-                  )}
-                </div>
+                {!isArchived && (
+                  <div>
+                    {!revealedNumber ? (
+                      <button
+                        type="button"
+                        data-testid="reveal-identity-button"
+                        onClick={handleRevealIdentity}
+                        disabled={isRevealing}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
+                      >
+                        {isRevealing ? 'جارٍ كشف الهوية...' : 'عرض الرقم الكامل'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="hide-identity-button"
+                        onClick={handleHideIdentity}
+                        className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-[#172A35] text-xs font-semibold rounded-[6px] transition-colors min-h-[44px]"
+                      >
+                        إخفاء الرقم
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {revealError && (
@@ -341,10 +377,10 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       </div>
 
       {/* 3. Communication Notes Timeline */}
-      <CommunicationNotesSection partyId={party.id} initialNotes={party.communicationNotes} />
+      <CommunicationNotesSection ownerId={ownerId} partyId={party.id} initialNotes={party.communicationNotes} readOnly={isArchived} />
 
       {/* 4. Powers of Attorney Section */}
-      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} />
+      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} readOnly={isArchived} />
 
       {/* 5. Linked Matters Section */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
@@ -352,12 +388,14 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
           <h2 className="text-base font-bold text-[#172A35]">
             📁 ملفات القضايا والنزاعات المرتبطة ({mattersError ? '—' : isLoadingMatters && mattersTotal === 0 ? '…' : mattersTotal})
           </h2>
-          <Link
-            href="/matters/new"
-            className="text-xs font-semibold text-[#14566B] hover:underline"
-          >
-            + فتح ملف جديد
-          </Link>
+          {!isArchived && (
+            <Link
+              href="/matters/new"
+              className="text-xs font-semibold text-[#14566B] hover:underline"
+            >
+              + فتح ملف جديد
+            </Link>
+          )}
         </div>
 
         {mattersError ? (

@@ -2,12 +2,11 @@
 
 import React, { useState } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
-import { usePathname, useRouter } from 'next/navigation';
-import { signOut } from '@/lib/auth-client';
+import { usePathname } from 'next/navigation';
+import { signOutAndReset } from '@/lib/auth-client';
 
 export function DesktopSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const canLeavePage = useCanLeavePage();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
@@ -21,13 +20,12 @@ export function DesktopSidebar() {
     setLogoutError(null);
 
     try {
-      const res = await signOut();
+      const res = await signOutAndReset();
       if (res?.error) {
         setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى التحقق من الاتصال والمحاولة مجدداً.');
         setIsLoggingOut(false);
         return;
       }
-      router.push('/login');
     } catch {
       setLogoutError('فشل تسجيل الخروج من الخادم. جلستك الحالية ما زالت نشطة، يرجى المحاولة مجدداً.');
       setIsLoggingOut(false);
@@ -35,6 +33,7 @@ export function DesktopSidebar() {
   };
 
   const isHomeActive = pathname === '/';
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';
@@ -107,6 +106,21 @@ export function DesktopSidebar() {
           >
             <span aria-hidden="true" className="text-base">🛡️</span>
             <span>إعدادات الأمان</span>
+          </Link>
+
+          {/* Unified Search */}
+          <Link
+            href="/search"
+            data-testid="nav-link-search"
+            aria-current={isSearchActive ? 'page' : undefined}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+              isSearchActive
+                ? 'bg-[#14566B] text-white shadow-xs'
+                : 'text-[#172A35] hover:bg-[#E8EEF1]'
+            }`}
+          >
+            <span aria-hidden="true" className="text-base">🔍</span>
+            <span>البحث الموحد</span>
           </Link>
 
           {/* Reference Settings */}

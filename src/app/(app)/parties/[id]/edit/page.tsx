@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from '@/components/navigation-guard';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -16,7 +16,7 @@ interface PartyEditPageProps {
 export async function generateMetadata({ params }: PartyEditPageProps) {
   const { id } = await params;
   try {
-    const actor = await requireActor();
+    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
     const party = await getClientProfile(actor, id);
     return {
       title: `تعديل: ${party.name} — LawOffice OS`,
@@ -32,7 +32,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
   const { id } = await params;
   let actor;
   try {
-    actor = await requireActor();
+    actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       if (error.code === 'MFA_REQUIRED') {
@@ -77,6 +77,27 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
     throw error;
   }
 
+  // Gate edit route on active state: archived parties cannot be edited
+  if (party.archivedAt) {
+    return (
+      <div className="max-w-3xl mx-auto py-12" dir="rtl" lang="ar-EG">
+        <EmptyStateContainer
+          icon="📦"
+          title="الطرف مؤرشف"
+          description="لا يمكن تعديل بيانات طرف مؤرشف. يتاح الاطلاع على بياناته فقط في وضع القراءة."
+          action={
+            <Link
+              href={`/parties/${party.id}`}
+              className="px-4 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px] flex items-center justify-center"
+            >
+              العودة لصفحة الطرف
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Header & Breadcrumb */}
@@ -101,7 +122,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
       </div>
 
       {/* Main Party Form in Edit Mode */}
-      <PartyForm party={party} />
+      <PartyForm ownerId={actor.id} party={party} />
     </div>
   );
 }
