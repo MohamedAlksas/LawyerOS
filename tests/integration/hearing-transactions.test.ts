@@ -169,6 +169,8 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
       },
     });
     expect(audit).not.toBeNull();
+    expect(audit?.changedFields).toMatchObject({ resultId: result.resultId });
+    expect(JSON.stringify(audit?.changedFields)).not.toContain(decisionText);
 
     // Verify durable reminder work (JobRun outbox) created for next hearing
     const job = await prisma.jobRun.findFirst({
@@ -226,6 +228,15 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     expect(retryRes.resultId).toBe(firstRes.resultId);
     expect(retryRes.nextHearing?.id).toBe(firstRes.nextHearing?.id);
     expect(retryRes).toEqual(firstRes);
+    const equivalentIntent = await recordHearingResult(actor, {
+      ...initialPayload,
+      decisionText: undefined,
+      decision: initialPayload.decisionText,
+      nextHearingDate: undefined,
+      nextHearing: { hearingDate: initialPayload.nextHearingDate, hearingTime: null },
+      tasks: [{ ...initialPayload.tasks[0], priority: 'NORMAL', dueDate: null }],
+    });
+    expect(equivalentIntent).toEqual(firstRes);
     const claim = await prisma.idempotencyRecord.findFirstOrThrow({ where: { actorId: actor.id, key: idemKey } });
     expect(JSON.stringify(claim.resultPayload)).not.toContain(initialPayload.decisionText);
     expect(JSON.stringify(claim.resultPayload)).not.toContain(initialPayload.tasks[0].title);

@@ -261,6 +261,22 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page.getByRole('link', { name: 'عرض الموعد أو تغييره من القيد' }).click();
     await expect(page.getByTestId(`hearing-card-${hearing.id}`)).toContainText('تأجيل لتقديم مذكرة');
     await expect(page.getByTestId(`hearing-card-${nextId}`)).toBeVisible();
+
+    await page.getByTestId(`reschedule-hearing-button-${nextId}`).click();
+    await page.getByTestId('reschedule-new-date-input').fill('2027-02-19');
+    await page.getByTestId('reschedule-reason-input').fill('تعديل الموعد لاختبار نقل مهمة واحدة');
+    await page.getByRole('checkbox', { name: /نقل إعداد مذكرة الدفاع/ }).check();
+    await page.getByLabel(/الموعد الجديد لمهمة إعداد مذكرة الدفاع/).fill('2027-02-17');
+    await page.getByTestId('reschedule-submit-button').click();
+    await expect(page.getByTestId('hearings-count-badge')).toHaveText('3');
+    const replacement = await prisma.hearing.findFirstOrThrow({ where: { supersedesHearingId: nextId } });
+    const movedTasks = await prisma.task.findMany({ where: { hearingId: replacement.id } });
+    expect(movedTasks.map(({ title }) => title)).toEqual(['إعداد مذكرة الدفاع بالدفوع الشكلية']);
+    expect(movedTasks[0].dueDate?.toISOString().slice(0, 10)).toBe('2027-02-17');
+    expect(await prisma.task.count({ where: { hearingId: hearing.id } })).toBe(1);
+    await page.getByTestId(`correct-result-button-${hearing.id}`).click();
+    await expect(page.getByTestId('linked-next-hearing')).toHaveAttribute('href', `/hearings/${replacement.id}`);
+    await expect(page.getByTestId('linked-next-hearing')).toContainText('2027-02-19');
   });
 
   /**

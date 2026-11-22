@@ -306,8 +306,12 @@ export async function scheduleHearing(
   const normTime = validateAndNormalizeHearingTime(input.hearingTime);
   const purpose = input.purpose || input.hearingPurpose || null;
   const courtHall = input.courtHall || input.locationRoom || null;
+  const rollNumber = input.rollNumber || null;
+  const intent = {
+    proceedingId: input.proceedingId, hearingDate: input.hearingDate, hearingTime: normTime, courtHall, purpose, rollNumber,
+  };
 
-  return hearingCommand(actor, 'scheduleHearing', input.idempotencyKey, input, async (tx) => {
+  return hearingCommand(actor, 'scheduleHearing', input.idempotencyKey, intent, async (tx) => {
     await lockHearingParents(tx, input.proceedingId);
 
     // Check same-day scheduled conflict warning
@@ -328,7 +332,7 @@ export async function scheduleHearing(
         hearingTime: normTime,
         courtHall,
         purpose,
-        rollNumber: input.rollNumber?.trim() || null,
+        rollNumber,
         status: 'SCHEDULED',
         version: 1,
         createdById: actor.id,
@@ -415,16 +419,24 @@ export async function recordHearingResult(
     throw new SchedulingValidationError('حدد موقف موعد الجلسة القادم بما يطابق البيانات.');
   }
 
-  // Validate tasks if present
-  if (input.tasks) {
-    for (const t of input.tasks) {
-      if (!t.title || !t.title.trim()) {
-        throw new SchedulingValidationError('عنوان المهمة لا يمكن أن يكون فارغاً.');
-      }
-    }
-  }
+  const normNextTime = validateAndNormalizeHearingTime(nextTimeStr);
+  const nextCourtHall = input.nextHearing?.courtHall || input.nextHearing?.locationRoom || null;
+  const nextPurpose = input.nextHearing?.purpose || null;
+  const nextRoll = input.nextHearing?.rollNumber || null;
+  const tasks = (input.tasks ?? []).map(({ title, dueDate, priority }) => ({
+    title, dueDate: dueDate ?? null, priority: priority ?? 'NORMAL',
+  }));
+  const intent = {
+    hearingId: input.hearingId, expectedVersion: input.expectedVersion, decision,
+    summary: input.summary || null, attendance: input.attendance || null, notes: input.notes || null,
+    nextDateDisposition: input.nextDateDisposition,
+    nextHearing: nextDateStr ? {
+      date: nextDateStr, time: normNextTime, courtHall: nextCourtHall, purpose: nextPurpose, rollNumber: nextRoll,
+    } : null,
+    tasks,
+  };
 
-  return hearingCommand(actor, 'recordHearingResult', input.idempotencyKey, input, async (tx) => {
+  return hearingCommand(actor, 'recordHearingResult', input.idempotencyKey, intent, async (tx) => {
     await lockHearing(tx, input.hearingId);
 
     // 1. Lock and load original hearing
@@ -476,9 +488,9 @@ export async function recordHearingResult(
       data: {
         hearingId: hearing.id,
         decisionText: decision,
-        summary: input.summary?.trim() || null,
-        attendance: input.attendance?.trim() || null,
-        notes: input.notes?.trim() || null,
+        summary: intent.summary,
+        attendance: intent.attendance,
+        notes: intent.notes,
         nextDateDisposition: input.nextDateDisposition,
         recordedAt,
         revision: 1,
@@ -506,19 +518,14 @@ export async function recordHearingResult(
       if (!nextDateUtc) {
         throw new SchedulingValidationError('تاريخ الجلسة القادمة غير صالح.');
       }
-      const normNextTime = validateAndNormalizeHearingTime(nextTimeStr);
-      const nextCourtHall = input.nextHearing?.courtHall || input.nextHearing?.locationRoom || hearing.courtHall;
-      const nextPurpose = input.nextHearing?.purpose || null;
-      const nextRoll = input.nextHearing?.rollNumber || hearing.rollNumber;
-
       const nextHearing = await tx.hearing.create({
         data: {
           proceedingId: hearing.proceedingId,
           hearingDate: nextDateUtc,
           hearingTime: normNextTime,
-          courtHall: nextCourtHall,
+          courtHall: nextCourtHall ?? hearing.courtHall,
           purpose: nextPurpose,
-          rollNumber: nextRoll,
+          rollNumber: nextRoll ?? hearing.rollNumber,
           status: 'SCHEDULED',
           version: 1,
           createdById: actor.id,
@@ -565,21 +572,17 @@ export async function recordHearingResult(
     // 6. Create selected follow-up tasks
     const createdTasksDTO: TaskDTO[] = [];
     const taskIds: string[] = [];
-    if (input.tasks && input.tasks.length > 0) {
-      for (const t of input.tasks) {
-        const trimmedTitle = t.title.trim();
-        if (!trimmedTitle) {
-          throw new SchedulingValidationError('عنوان المهمة لا يمكن أن يكون فارغاً.');
-        }
-        const taskDueDate = parseCalendarDateToUtc(t.dueDate);
+    if (tasks.length > 0) {
+      for (const { title, dueDate, priority } of tasks) {
+        const taskDueDate = parseCalendarDateToUtc(dueDate);
         const task = await tx.task.create({
           data: {
             matterId: hearing.proceeding.matterId,
             proceedingId: hearing.proceedingId,
             hearingId: hearing.id,
-            title: trimmedTitle,
+            title,
             dueDate: taskDueDate,
-            priority: t.priority ?? 'NORMAL',
+            priority,
             status: 'OPEN',
             version: 1,
             createdById: actor.id,
@@ -598,7 +601,7 @@ export async function recordHearingResult(
       entityType: 'Hearing',
       entityId: hearing.id,
       changedFields: {
-        decision,
+        resultId: hearingResult.id,
         nextDateDisposition: input.nextDateDisposition,
         nextHearingId: nextHearingDTO?.id ?? null,
         createdTaskIds: taskIds,
@@ -652,7 +655,14 @@ export async function correctHearingResult(
     throw new SchedulingValidationError('منطوق القرار المصحح مطلوب.');
   }
 
-  return hearingCommand(actor, 'correctHearingResult', input.idempotencyKey, input, async (tx) => {
+  const nextHearingTime = validateAndNormalizeHearingTime(input.nextHearingTime);
+  const intent = {
+    hearingId: input.hearingId, expectedVersion: input.expectedVersion, currentResultId: input.currentResultId,
+    reason, decision, summary: input.summary === '' ? null : input.summary,
+    attendance: input.attendance === '' ? null : input.attendance, notes: input.notes === '' ? null : input.notes,
+    nextDateDisposition: input.nextDateDisposition, nextHearingDate: input.nextHearingDate ?? null, nextHearingTime,
+  };
+  return hearingCommand(actor, 'correctHearingResult', input.idempotencyKey, intent, async (tx) => {
     await lockHearing(tx, input.hearingId);
     // 1. Find latest result for hearing
     const latestResult = await tx.hearingResult.findFirst({
@@ -675,12 +685,12 @@ export async function correctHearingResult(
     if (input.nextDateDisposition && input.nextDateDisposition !== latestResult.nextDateDisposition) {
       throw new SchedulingValidationError('تغيير موعد الجلسة التالية يحتاج إجراءً منفصلاً.');
     }
-    if (input.nextHearingDate || input.nextHearingTime) {
+    if (input.nextHearingDate || nextHearingTime) {
       const link = await tx.hearingLink.findFirst({
         where: { fromHearingId: input.hearingId, relation: 'ADJOURNED_TO' }, include: { toHearing: true },
       });
       if (!link || (input.nextHearingDate && input.nextHearingDate !== toDateString(link.toHearing.hearingDate)) ||
-          (input.nextHearingTime && validateAndNormalizeHearingTime(input.nextHearingTime) !== link.toHearing.hearingTime)) {
+          (nextHearingTime && nextHearingTime !== link.toHearing.hearingTime)) {
         throw new SchedulingValidationError('تغيير موعد الجلسة التالية يحتاج إجراءً منفصلاً.');
       }
     }
@@ -691,9 +701,9 @@ export async function correctHearingResult(
       data: {
         hearingId: input.hearingId,
         decisionText: decision,
-        summary: input.summary !== undefined ? input.summary?.trim() || null : latestResult.summary,
-        attendance: input.attendance !== undefined ? input.attendance?.trim() || null : latestResult.attendance,
-        notes: input.notes !== undefined ? input.notes?.trim() || null : latestResult.notes,
+        summary: intent.summary === undefined ? latestResult.summary : intent.summary,
+        attendance: intent.attendance === undefined ? latestResult.attendance : intent.attendance,
+        notes: intent.notes === undefined ? latestResult.notes : intent.notes,
         correctionReason: reason,
         nextDateDisposition: latestResult.nextDateDisposition,
         recordedAt: new Date(),
@@ -716,7 +726,7 @@ export async function correctHearingResult(
         previousResultId: latestResult.id,
         previousRevision: latestResult.revision,
         newRevision: nextRevision,
-        decision,
+        decisionChanged: latestResult.decisionText !== decision,
       },
     });
 
@@ -750,8 +760,16 @@ export async function rescheduleHearing(
 
   const normTime = validateAndNormalizeHearingTime(input.newHearingTime);
   const reason = input.reason.trim();
+  const courtHall = input.courtHall || input.locationRoom || null;
+  const purpose = input.purpose || null;
+  const rollNumber = input.rollNumber || null;
+  const taskChanges = (input.taskChanges ?? []).toSorted((left, right) => left.taskId.localeCompare(right.taskId));
+  const intent = {
+    hearingId: input.hearingId, expectedVersion: input.expectedVersion, newHearingDate: input.newHearingDate,
+    newHearingTime: normTime, reason, courtHall, purpose, rollNumber, taskChanges,
+  };
 
-  return hearingCommand(actor, 'rescheduleHearing', input.idempotencyKey, input, async (tx) => {
+  return hearingCommand(actor, 'rescheduleHearing', input.idempotencyKey, intent, async (tx) => {
     await lockHearing(tx, input.hearingId);
     // 1. Load hearing
     const hearing = await tx.hearing.findUnique({
@@ -792,9 +810,9 @@ export async function rescheduleHearing(
     });
 
     // 3. Create replacement Hearing
-    const replacementCourtHall = input.courtHall || input.locationRoom || hearing.courtHall;
-    const replacementPurpose = input.purpose || hearing.purpose;
-    const replacementRoll = input.rollNumber || hearing.rollNumber;
+    const replacementCourtHall = courtHall ?? hearing.courtHall;
+    const replacementPurpose = purpose ?? hearing.purpose;
+    const replacementRoll = rollNumber ?? hearing.rollNumber;
 
     const replacementHearing = await tx.hearing.create({
       data: {
@@ -828,14 +846,14 @@ export async function rescheduleHearing(
     });
 
     const taskSources = [hearing.id];
-    if (input.taskChanges?.length) {
+    if (taskChanges.length) {
       const adjournments = await tx.hearingLink.findMany({
         where: { toHearingId: hearing.id, relation: 'ADJOURNED_TO' },
         select: { fromHearingId: true },
       });
       taskSources.push(...adjournments.map(({ fromHearingId }) => fromHearingId));
     }
-    for (const task of input.taskChanges ?? []) {
+    for (const task of taskChanges) {
       const updated = await tx.task.updateMany({
         where: { id: task.taskId, proceedingId: hearing.proceedingId, hearingId: { in: taskSources }, status: 'OPEN', version: task.expectedVersion },
         data: { hearingId: replacementHearing.id, dueDate: parseCalendarDateToUtc(task.dueDate), version: { increment: 1 }, updatedById: actor.id },
@@ -924,7 +942,8 @@ export async function cancelHearing(
   const input = parsed.data;
   const reason = input.reason.trim();
 
-  return hearingCommand(actor, 'cancelHearing', input.idempotencyKey, input, async (tx) => {
+  const intent = { hearingId: input.hearingId, expectedVersion: input.expectedVersion, reason };
+  return hearingCommand(actor, 'cancelHearing', input.idempotencyKey, intent, async (tx) => {
     await lockHearing(tx, input.hearingId);
     const hearing = await tx.hearing.findUnique({
       where: { id: input.hearingId },

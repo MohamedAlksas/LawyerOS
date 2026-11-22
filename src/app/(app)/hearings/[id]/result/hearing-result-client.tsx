@@ -9,6 +9,7 @@ import {
   HearingStatus,
   NextDateDisposition,
   TaskPriority,
+  HEARING_STATUS_LABELS,
   formatRecordResultSummary,
 } from '@/components/hearings/hearing-ui-types';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
@@ -23,7 +24,7 @@ interface FollowUpTaskItem {
 interface HearingResultClientProps {
   actorId: string;
   history: { revision: number; decisionText: string; correctionReason: string | null }[];
-  nextHearing?: { id: string; date: string };
+  nextHearing?: { id: string; date: string; status: HearingStatus };
   hearingId: string;
   initialVersion: number;
   hearingDate: string; // YYYY-MM-DD
@@ -198,7 +199,7 @@ export function HearingResultClient({
       setSavedDecision(result.decisionText);
       setCurrentStatus(hearing.status);
       setLatestResult({ ...result, correctionReason: result.correctionReason ?? null });
-      if (savedNext) setLinkedNext({ id: savedNext.id, date: savedNext.hearingDate });
+      if (savedNext) setLinkedNext({ id: savedNext.id, date: savedNext.hearingDate, status: savedNext.status });
       router.refresh();
     } catch {
       setIsFrozenRetry(true);
@@ -392,7 +393,7 @@ export function HearingResultClient({
       {linkedNext && (
         <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm">
           <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline">
-            الجلسة القادمة {linkedNext.date}
+            الجلسة المرتبطة {linkedNext.date} ({HEARING_STATUS_LABELS[linkedNext.status]})
           </Link>
           {' · '}
           <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline">

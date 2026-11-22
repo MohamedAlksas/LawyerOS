@@ -50,7 +50,10 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       results: {
         orderBy: { revision: 'desc' },
       },
-      linksFrom: { where: { relation: 'ADJOURNED_TO' }, select: { toHearing: { select: { id: true, hearingDate: true } } } },
+      linksFrom: {
+        where: { relation: 'ADJOURNED_TO' },
+        select: { toHearing: { select: { id: true, hearingDate: true, status: true } } },
+      },
     },
   });
 
@@ -63,6 +66,18 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
 
   const latestResult = hearing.results[0] || null;
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
+  let nextHearing = hearing.linksFrom[0]?.toHearing;
+  const visited = new Set<string>();
+  while (nextHearing?.status === 'RESCHEDULED' && !visited.has(nextHearing.id)) {
+    visited.add(nextHearing.id);
+    const replacement = await prisma.hearing.findFirst({
+      where: { supersedesHearingId: nextHearing.id, proceedingId: hearing.proceedingId },
+      select: { id: true, hearingDate: true, status: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!replacement) break;
+    nextHearing = replacement;
+  }
 
   return (
     <HearingResultClient
@@ -79,7 +94,9 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       matterFileCode={hearing.proceeding.matter.fileCode}
       proceedingId={hearing.proceedingId}
       history={hearing.results.map(({ revision, decisionText, correctionReason }) => ({ revision, decisionText, correctionReason }))}
-      nextHearing={hearing.linksFrom.map(({ toHearing }) => ({ id: toHearing.id, date: toHearing.hearingDate.toISOString().slice(0, 10) }))[0]}
+      nextHearing={nextHearing && {
+        id: nextHearing.id, date: nextHearing.hearingDate.toISOString().slice(0, 10), status: nextHearing.status,
+      }}
       latestResult={
         latestResult
           ? {
