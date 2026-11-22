@@ -5,10 +5,11 @@ import { GuardedLink as Link } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 
 interface MobileBottomNavProps {
+  navRef: React.Ref<HTMLElement>;
   onOpenDrawer: (opener: HTMLButtonElement) => void;
 }
 
-export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
+export function MobileBottomNav({ navRef, onOpenDrawer }: MobileBottomNavProps) {
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
@@ -19,6 +20,7 @@ export function MobileBottomNav({ onOpenDrawer }: MobileBottomNavProps) {
 
   return (
     <nav
+      ref={navRef}
       role="navigation"
       aria-label="التنقل السفلي"
       data-testid="mobile-bottom-nav"

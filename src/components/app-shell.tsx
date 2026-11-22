@@ -26,6 +26,7 @@ export function AppShell({ children }: AppShellProps) {
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'expired' | 'unavailable'>('checking');
   const [refreshingSession, startSessionRefresh] = useTransition();
   const privateViewRef = useRef<HTMLDivElement>(null);
+  const mobileNavRef = useRef<HTMLElement>(null);
   const sessionRef = useRef<ViewSession | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const drawerOpenerRef = useRef<HTMLButtonElement | null>(null);
@@ -65,6 +66,21 @@ export function AppShell({ children }: AppShellProps) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/verify') ||
     pathname.startsWith('/offline');
+
+  useLayoutEffect(() => {
+    const nav = mobileNavRef.current;
+    if (!nav) return;
+
+    const rootStyle = document.documentElement.style;
+    const reserveSpace = () => rootStyle.setProperty('--mobile-nav-height', `${nav.offsetHeight}px`);
+    reserveSpace();
+    const observer = new ResizeObserver(reserveSpace);
+    observer.observe(nav);
+    return () => {
+      observer.disconnect();
+      rootStyle.removeProperty('--mobile-nav-height');
+    };
+  }, [isPublicAuthPage]);
 
   useLayoutEffect(() => {
     // A return from the public auth screens needs a new check before the private shell paints.
@@ -226,7 +242,7 @@ export function AppShell({ children }: AppShellProps) {
             dir="rtl"
             tabIndex={-1}
             data-testid="main-content"
-            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-20 sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
+            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-[max(5rem,calc(var(--mobile-nav-height,0px)+1rem))] sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
           >
             {children}
           </main>
@@ -237,6 +253,7 @@ export function AppShell({ children }: AppShellProps) {
 
         {/* 6. Mobile Bottom Nav Bar */}
         <MobileBottomNav
+          navRef={mobileNavRef}
           onOpenDrawer={(opener) => {
             drawerOpenerRef.current = opener;
             setIsDrawerOpen(true);

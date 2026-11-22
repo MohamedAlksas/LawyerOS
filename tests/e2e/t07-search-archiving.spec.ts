@@ -734,6 +734,16 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     const screenshot = testInfo.outputPath('arabic-search-200-percent.png');
     await page.screenshot({ path: screenshot });
     await testInfo.attach('arabic-search-200-percent', { path: screenshot, contentType: 'image/png' });
+
+    const nextPage = page.getByTestId('next-page-button');
+    const pager = page.getByTestId('pagination-controls');
+    const nav = page.getByTestId('mobile-bottom-nav');
+    await expect.poll(async () => {
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const [pagerBox, navBox] = await Promise.all([pager.boundingBox(), nav.boundingBox()]);
+      return pagerBox!.y + pagerBox!.height - navBox!.y;
+    }).toBeLessThanOrEqual(1);
+    await nextPage.click({ trial: true });
   });
 
   // =========================================================================
