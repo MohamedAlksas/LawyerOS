@@ -1,0 +1,248 @@
+import React from 'react';
+import Link from 'next/link';
+import { notFound, redirect } from 'next/navigation';
+import { requireActor } from '@/modules/identity/require-actor';
+import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { getPrismaClient } from '@/lib/auth';
+import {
+  HEARING_STATUS_LABELS,
+  HEARING_STATUS_CLASSES,
+} from '@/components/hearings/hearing-ui-types';
+import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
+
+interface HearingDetailPageProps {
+  params: Promise<{
+    id: string;
+  }>;
+}
+
+export async function generateMetadata({ params }: HearingDetailPageProps) {
+  const { id } = await params;
+  const prisma = getPrismaClient();
+  const hearing = await prisma.hearing.findUnique({
+    where: { id },
+    include: {
+      proceeding: {
+        include: { court: true },
+      },
+    },
+  });
+
+  if (!hearing) {
+    return { title: 'تفاصيل الجلسة — LawOffice OS' };
+  }
+
+  const dateStr = hearing.hearingDate.toISOString().slice(0, 10);
+  return {
+    title: `جلسة ${dateStr} — ${hearing.proceeding.court.name} — LawOffice OS`,
+  };
+}
+
+export default async function HearingDetailPage({ params }: HearingDetailPageProps) {
+  const { id } = await params;
+
+  try {
+    await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      if (error.code === 'MFA_REQUIRED') {
+        redirect('/verify?returnTo=' + encodeURIComponent(`/hearings/${id}`));
+      }
+      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/hearings/${id}`));
+    }
+    if (error instanceof AuthorizationError) {
+      return (
+        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+          <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
+          <p>لا تمتلك الصلاحيات الكافية لاستعراض تفاصيل هذه الجلسة.</p>
+        </div>
+      );
+    }
+    throw error;
+  }
+
+  const prisma = getPrismaClient();
+  const hearing = await prisma.hearing.findUnique({
+    where: { id },
+    include: {
+      proceeding: {
+        include: {
+          court: true,
+          matter: true,
+        },
+      },
+      results: {
+        orderBy: { revision: 'desc' },
+      },
+    },
+  });
+
+  if (!hearing) {
+    notFound();
+  }
+
+  const proceeding = hearing.proceeding;
+  const matter = proceeding.matter;
+  const isProceedingComplete = Boolean(proceeding.numberText && proceeding.yearLabel);
+  const docketText = isProceedingComplete
+    ? `${proceeding.numberText}/${proceeding.yearLabel}`
+    : null;
+
+  const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
+  const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());
+  const latestResult = hearing.results[0] || null;
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
+      {/* Navigation Breadcrumb */}
+      <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] flex items-center gap-1.5 flex-wrap">
+        <Link href="/matters" className="hover:text-[#14566B] hover:underline">
+          القضايا
+        </Link>
+        <span>/</span>
+        <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline font-mono">
+          {matter.fileCode}
+        </Link>
+        <span>/</span>
+        <Link
+          href={`/matters/${matter.id}/proceedings/${proceeding.id}`}
+          className="hover:text-[#14566B] hover:underline"
+        >
+          {isProceedingComplete ? `قيد قضائي ${docketText}` : 'قيد قضائي (مسودة)'}
+        </Link>
+        <span>/</span>
+        <span className="text-[#172A35] font-semibold">تفاصيل الجلسة</span>
+      </nav>
+
+      {/* Main Header Card */}
+      <div className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8EEF1] pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">⚖️</span>
+              <h1 className="text-xl font-bold text-[#172A35]">
+                تفاصيل موعد الجلسة
+              </h1>
+              <span className={`px-2.5 py-0.5 rounded-[4px] text-xs font-semibold ${HEARING_STATUS_CLASSES[hearing.status]}`}>
+                {HEARING_STATUS_LABELS[hearing.status]}
+              </span>
+            </div>
+            <p className="text-xs text-[#4D606A]">
+              تاريخ الجلسة: <span className="font-semibold text-[#172A35]">{dateIso}</span> ({formattedDate})
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/hearings/${hearing.id}/result`}
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 shadow-xs"
+            >
+              <span>{hearing.status === 'COMPLETED' ? '📝 عرض النتيجة / تصحيح' : '✍️ تسجيل قرار ونتيجة الجلسة'}</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Proceeding Status Indicator (Incomplete vs Registered) */}
+        {!isProceedingComplete && (
+          <div
+            role="alert"
+            data-testid="incomplete-proceeding-badge"
+            className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 flex items-center gap-2"
+          >
+            <span>⚠️</span>
+            <div className="space-y-0.5">
+              <span className="font-bold">الرقم غير مستكمل</span>:
+              <span className="text-[#4D606A] mr-1">
+                هذه الجلسة مقيدة ضمن قيد قضائي مسودة لم يستكمل رقم القضية بالمحكمة بعد. الموعد ساري ومنظم.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Hearing Metadata Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs pt-2">
+          <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
+            <span className="text-[#4D606A] block font-medium">ساعة الانعقاد:</span>
+            <div className="font-bold text-[#172A35]">
+              {hearing.hearingTime ? (
+                <span className="font-mono text-sm">{hearing.hearingTime}</span>
+              ) : (
+                <span data-testid={`hearing-time-${hearing.id}`} className="text-[#64748B] italic">
+                  الساعة غير محددة
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
+            <span className="text-[#4D606A] block font-medium">المحكمة والدائرة:</span>
+            <div className="font-bold text-[#172A35]">
+              {proceeding.court.name} {proceeding.circuit ? `— ${proceeding.circuit}` : ''}
+            </div>
+          </div>
+
+          <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
+            <span className="text-[#4D606A] block font-medium">القيد والقضية:</span>
+            <div className="font-bold text-[#172A35]">
+              {isProceedingComplete ? (
+                <span>رقم {docketText}</span>
+              ) : (
+                <span className="text-amber-700">مسودة بدون رقم رسمي</span>
+              )}
+            </div>
+          </div>
+
+          {hearing.courtHall && (
+            <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
+              <span className="text-[#4D606A] block font-medium">القاعة / الدور:</span>
+              <div className="font-bold text-[#172A35]">{hearing.courtHall}</div>
+            </div>
+          )}
+
+          {hearing.rollNumber && (
+            <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
+              <span className="text-[#4D606A] block font-medium">رقم الرول:</span>
+              <div className="font-bold text-[#172A35] font-mono">{hearing.rollNumber}</div>
+            </div>
+          )}
+
+          {hearing.purpose && (
+            <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1] sm:col-span-2">
+              <span className="text-[#4D606A] block font-medium">الغرض المطلوب:</span>
+              <div className="font-semibold text-[#172A35]">{hearing.purpose}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recorded Result & Revision History (if completed) */}
+      {latestResult && (
+        <div className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between border-b border-[#E8EEF1] pb-3">
+            <h2 className="text-base font-bold text-[#172A35] flex items-center gap-2">
+              <span>📜</span>
+              <span>قرار المحكمة المسجل</span>
+            </h2>
+            <span className="text-xs text-[#4D606A]">
+              المراجعة #{latestResult.revision} • سُجلت بتاريخ {formatCairoDateOnly(latestResult.recordedAt.toISOString())}
+            </span>
+          </div>
+
+          <div className="p-4 bg-teal-50/60 border border-teal-200 rounded-[6px] space-y-2">
+            <span className="text-xs text-[#14566B] font-bold block">منطوق القرار:</span>
+            <p className="text-sm font-bold text-[#172A35] whitespace-pre-wrap leading-relaxed">
+              {latestResult.decisionText}
+            </p>
+          </div>
+
+          {latestResult.correctionReason && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900 space-y-1">
+              <span className="font-bold block">سبب التصحيح:</span>
+              <p>{latestResult.correctionReason}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

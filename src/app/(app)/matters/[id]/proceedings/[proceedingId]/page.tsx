@@ -13,6 +13,9 @@ import {
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   formatCairoDateOnly,
 } from '@/components/matters/matter-ui-types';
+import { listHearingsForProceeding } from '@/modules/scheduling/hearing-service';
+import { HearingList } from '@/components/hearings/hearing-list';
+import type { HearingDTO } from '@/components/hearings/hearing-ui-types';
 
 interface ProceedingDetailPageProps {
   params: Promise<{
@@ -119,6 +122,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   const isProcArchived = Boolean(proceeding.archivedAt);
   const isParentMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
   const isReadOnly = isProcArchived || isParentMatterArchived;
+
+  let hearings: HearingDTO[] = [];
+  try {
+    hearings = await listHearingsForProceeding(actor, proceedingId);
+  } catch {
+    hearings = [];
+  }
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
@@ -362,33 +372,30 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         )}
       </div>
 
-      {/* Honest Future Modules Placeholder */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-          <div className="flex items-center gap-2">
-            <span className="text-base">⚖️</span>
-            <h3 className="text-sm font-bold text-[#172A35]">الجلسات والقرارات القضائية</h3>
-          </div>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
-            سجل رول الجلسات، القرارات المؤجلة، ومنطوق الأحكام القضائية سيكون متاحاً في مرحلة تالية للنظام.
-          </p>
-          <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            قريباً في المرحلة القادمة
-          </span>
-        </div>
+      {/* Hearings & Court Calendar Section (S05 & S06) */}
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs">
+        <HearingList
+          proceedingId={proceeding.id}
+          matterId={matter.id}
+          initialHearings={hearings}
+          courtName={proceeding.courtName}
+          circuit={proceeding.circuit}
+          isReadOnly={isReadOnly}
+        />
+      </div>
 
-        <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-          <div className="flex items-center gap-2">
-            <span className="text-base">📄</span>
-            <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
-          </div>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
-            إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
-          </p>
-          <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            قريباً في المرحلة القادمة
-          </span>
+      {/* Honest Future Modules Placeholder */}
+      <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
+        <div className="flex items-center gap-2">
+          <span className="text-base">📄</span>
+          <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
         </div>
+        <p className="text-xs text-[#4D606A] leading-relaxed">
+          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام (المهمة T10).
+        </p>
+        <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+          قريباً في المرحلة القادمة
+        </span>
       </div>
     </div>
   );

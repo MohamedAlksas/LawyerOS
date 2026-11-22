@@ -86,6 +86,7 @@ import {
   UnsupportedTransitionError,
   MatterArchivedError,
   ProceedingArchivedError,
+  ActiveObligationError,
 } from './matter-types';
 
 function extractOperationVersion(payload: unknown, fallback: number): number {
@@ -3022,12 +3023,10 @@ export async function archiveMatter(
       // =========================================================================
       // In accordance with WORKFLOWS.md Section 11:
       // A SCHEDULED hearing or an open CONFIRMED legal deadline blocks archiving the matter.
-      // In T07, Hearing and Deadline tables do not exist yet in Prisma schema.
-      // When T08 introduces Hearing:
-      //   const scheduledHearings = await tx.hearing.count({
-      //     where: { proceeding: { matterId: input.matterId }, status: 'SCHEDULED' }
-      //   });
-      //   if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود جلسات مجدولة قائمة.');
+      const scheduledHearings = await tx.hearing.count({
+        where: { proceeding: { matterId: input.matterId }, status: 'SCHEDULED' }
+      });
+      if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود جلسات مجدولة قائمة.');
       // When T09 introduces Deadline:
       //   const openDeadlines = await tx.deadline.count({
       //     where: { matterId: input.matterId, status: 'CONFIRMED', completedAt: null }
@@ -3391,12 +3390,10 @@ export async function archiveProceeding(
       // =========================================================================
       // In accordance with WORKFLOWS.md Section 11:
       // A SCHEDULED hearing or an open CONFIRMED legal deadline blocks archiving the proceeding.
-      // In T07, Hearing and Deadline tables do not exist yet in Prisma schema.
-      // When T08 introduces Hearing:
-      //   const scheduledHearings = await tx.hearing.count({
-      //     where: { proceedingId: input.proceedingId, status: 'SCHEDULED' }
-      //   });
-      //   if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود جلسات مجدولة قائمة.');
+      const scheduledHearings = await tx.hearing.count({
+        where: { proceedingId: input.proceedingId, status: 'SCHEDULED' }
+      });
+      if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود جلسات مجدولة قائمة.');
       // When T09 introduces Deadline:
       //   const openDeadlines = await tx.deadline.count({
       //     where: { proceedingId: input.proceedingId, status: 'CONFIRMED', completedAt: null }
