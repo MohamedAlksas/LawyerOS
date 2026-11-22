@@ -2,8 +2,11 @@
 
 **Date:** 2026-11-22
 **Task Branch:** `feature/t08-hearing-results`
+**Pull Request:** [Draft PR #17](https://github.com/MohamedAlksas/LawyerOS/pull/17)
+**Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`
 **Base Checkpoint (Accepted T07 / origin/main):** `dc54bd801794160d740b86dd2a24fa324d7c4504`
 **Predecessor Review Acceptance:** `docs/reviews/T07-review.md` (ACCEPTED for T08 implementation)
+**Local HEAD / Verified Pushed SHA:** `f0009792f1b9727243d5d39ab4b001d874ced46d`
 **Current Status:** `READY_FOR_CODEX_REVIEW`
 
 ---
