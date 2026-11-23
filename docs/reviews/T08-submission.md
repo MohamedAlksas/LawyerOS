@@ -1,13 +1,14 @@
 # LawOffice OS Task T08 Submission — Hearings, Results, Adjournments, and Atomic Follow-Up Creation
 
-**Date:** 2026-11-22
+**Date:** 2026-11-23
 **Task Branch:** `feature/t08-hearing-results`
 **Pull Request:** [Draft PR #17](https://github.com/MohamedAlksas/LawyerOS/pull/17)
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`
 **Base Checkpoint (Accepted T07 / origin/main):** `dc54bd801794160d740b86dd2a24fa324d7c4504`
 **Predecessor Review Acceptance:** `docs/reviews/T07-review.md` (ACCEPTED for T08 implementation)
-**Local HEAD / Verified Pushed SHA:** `f0009792f1b9727243d5d39ab4b001d874ced46d`
-**Current Status:** `READY_FOR_CODEX_REVIEW`
+**Inspected Implementation SHA:** `91dcb81f59f8ca50c50f469601c0f75dcac34b07`
+**Report-Only Attestation Note:** This update modifies only `docs/reviews/T08-submission.md` above `91dcb81f59f8ca50c50f469601c0f75dcac34b07`.
+**Current Status:** `READY_FOR_REVIEW`
 
 ---
 
@@ -61,7 +62,9 @@ Task T08 delivers the complete hearing management and atomic result recording in
    - Dedicated hearing details view: `src/app/(app)/hearings/[id]/page.tsx`.
    - Dedicated hearing result recording view: `src/app/(app)/hearings/[id]/result/page.tsx` and client component `hearing-result-client.tsx`.
    - Embedded hearing list and modals in proceeding view: `src/app/(app)/matters/[id]/proceedings/[proceedingId]/page.tsx`.
-   - REST API endpoints with robust error mapping: `/api/scheduling/hearings/[id]/result` and `/api/scheduling/hearings/[id]/correct`.
+   - REST API endpoints with trusted-origin CSRF check, `Cache-Control: private, no-store`, and sanitized Arabic error mapping: `/api/scheduling/hearings/[id]/result` and `/api/scheduling/hearings/[id]/correct`.
+
+> Follow-up hardening commit `91dcb81f59f8ca50c50f469601c0f75dcac34b07` (above `f000979`, `59d7318`, and `14c9f26`) resolved the full-app audit findings across identity (`auth-redirect.ts`, `confirmOwnerProvisioning` closure guard, `/change-password` JSON/`content-length` guard, production rate limits), `next.config.ts` security & `no-store` headers, DB probe timeout rejection safety, scheduling bounds & explicit hall clearing, modal portals/a11y/touch targets, unified session-expiry recovery UX, and added matching unit/integration regressions.
 
 ---
 
@@ -84,7 +87,7 @@ In strict compliance with `AGENTS.md` and `docs/AGENCY_AGENTS.md`, distinct nati
 | Role | Profile / Specialist | Invocation / Conversation ID | Profile Path & Hash | Target Scope | Verdict | Summary of Findings & Actions |
 |---|---|---|---|---|---|---|
 | **Lead Backend Architect** | `agency-backend-architect` | `038d2e62-d762-444a-a990-81981278193f` | Profile: `.agents/skills/engineering-backend-architect/SKILL.md`<br>Profile SHA: `05A2FD1CBC4E1C05147B3574FE4CAD69A08E851A72D43A4591427DF6BD061AAF` | `prisma/schema.prisma`<br>`prisma/migrations/`<br>`src/modules/scheduling/`<br>`src/modules/matters/matter-service.ts`<br>`src/app/api/scheduling/` | **ACCEPT** | Added `Hearing`, `HearingResult`, `HearingLink`, `Task`, `JobRun` models; implemented `scheduleHearing`, `recordHearingResult`, `rescheduleHearing`, `cancelHearing`, `correctHearingResult`; enforced atomic transaction with task, job, and audit synchronization; added active obligation archive guards. |
-| **Supporting Frontend Specialist** | `agency-frontend-developer` | `51084846-8355-44fb-bc11-40bb29827660` | Profile: `.agents/skills/engineering-frontend-developer/SKILL.md`<br>Profile SHA: `69D473C132831E0861BBF3CC50BB933C1DC231D74872B08731C3B453D79925F0` | `src/components/hearings/`<br>`src/app/(app)/hearings/`<br>`src/app/(app)/matters/[id]/proceedings/[proceedingId]/page.tsx`<br>`tests/unit/hearing-ui-types.test.ts` | **ACCEPT** | Built accessible Arabic RTL hearing components (`hearing-list.tsx`, `schedule-hearing-modal.tsx`, `record-result-modal.tsx`, `reschedule-hearing-modal.tsx`, `cancel-hearing-modal.tsx`, `correct-result-modal.tsx`); built S06 dedicated routes `/hearings/[id]` and `/hearings/[id]/result`; delivered live pre-save confirmation banner, network disconnect recovery, and unit tests. |
+| **Supporting Frontend Specialist** | `agency-frontend-developer` | `51084846-8355-44fb-bc11-40bb29827660` | Profile: `.agents/skills/engineering-frontend-developer/SKILL.md`<br>Profile SHA: `69D473C132831E0861BBF3CC50BB933C1DC231D74872B08731C3B453D79925F0` | `src/components/hearings/`<br>`src/app/(app)/hearings/`<br>`src/app/(app)/matters/[id]/proceedings/[proceedingId]/page.tsx`<br>`tests/unit/hearing-ui-types.test.ts` | **ACCEPT** | Built accessible Arabic RTL hearing components (`hearing-list.tsx`, `hearing-recovery.ts`, `schedule-hearing-modal.tsx`, `reschedule-hearing-modal.tsx`, `cancel-hearing-modal.tsx`, consolidated in `59d7318` by removing duplicate `record-result-modal.tsx` and `correct-result-modal.tsx` in favor of `/hearings/[id]/result`); built S06 dedicated routes `/hearings/[id]` and `/hearings/[id]/result`; delivered live pre-save confirmation banner, network disconnect recovery, and unit tests. |
 | **Supporting Test Automation Specialist** | `agency-test-automation-engineer` | `262257d5-5713-4fa1-8613-029ba34f8d72` | Profile: `.agents/skills/testing-test-automation-engineer/SKILL.md`<br>Profile SHA: `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` | `playwright.t08.config.ts`<br>`tests/e2e/t08-hearings.spec.ts`<br>`tests/integration/hearing-*.test.ts`<br>`tests/unit/hearing-validation.test.ts` | **ACCEPT** | Configured isolated Playwright runner on port 3208; authored comprehensive E2E test suite covering T08-TC-01, T08-TC-02, T08-TC-03, T08-TC-05, T08-TC-07; authored integration test suites covering T08-TC-04, T08-TC-06, and migration upgrade testing; confirmed 7/7 acceptance cases passed. |
 
 ---
@@ -107,17 +110,30 @@ Synthetic fixtures were used for all test executions in an isolated test databas
 
 ## 5. Verification Commands & Execution Results
 
-All verification suites were run against real PostgreSQL and isolated browser contexts:
+Verification suites were executed against real PostgreSQL (`test:integration` / Playwright) and isolated browser contexts:
+
+### Post-Final-Edit Checks (exact `91dcb81f59f8ca50c50f469601c0f75dcac34b07` tree)
 
 | Command | Exit Code | Observed Output / Summary |
 |---|:---:|---|
 | `npm.cmd run typecheck` (`tsc --noEmit`) | **0** | Clean compilation, 0 TypeScript errors across the entire codebase. |
 | `npm.cmd run lint` (`eslint .`) | **0** | Clean, 0 ESLint warnings, 0 errors. |
-| `npm.cmd test` (`vitest run tests/unit`) | **0** | **17 test files passed, 287 unit tests passed (8.15s)** (including `hearing-validation.test.ts` and `hearing-ui-types.test.ts`). |
-| `npx vitest run tests/integration/hearing-*.test.ts` | **0** | **3 test files passed, 13 integration tests passed (6.82s)** (`hearing-migration-upgrade.test.ts`, `hearing-transactions.test.ts`, `hearing-archive-guards.test.ts`). |
-| `npx playwright test --config=playwright.t08.config.ts` | **0** | **17 browser tests passed across 5 profiles (32.8s)** (Cairo Chromium, New York Chromium, Mobile Safari 390px, Tablet Chromium 768px, Desktop 1440px). |
-| `npm.cmd run build` (`next build`) | **0** | Next.js Turbopack production build succeeded; all static and dynamic routes compiled. |
-| `git diff --check` | **0** | Clean diff, 0 trailing whitespace or newline formatting issues. |
+| `npm.cmd run test` (`vitest run tests/unit`) | **0** | **19 test files passed, 307 unit tests passed (16.99s)** (includes `hearing-validation.test.ts`, `hearing-ui-types.test.ts`, `db-pool.test.ts`, `sanitize-return-to.test.ts`, `search-history.test.ts`, and `audit-fixes.test.ts`). |
+| `npm.cmd run build` (`next build`) | **0** | Next.js 16.4.6 Turbopack production build succeeded; all static and dynamic routes compiled. |
+| `git diff --check` | **0** | Clean diff, 0 whitespace/conflict markers. |
+
+### Full Integration & E2E Run (executed right before final 3-file UI hygiene diff: duplicate `setSessionExpired(false)` removal in `poa-section.tsx`, `min-h-[44px]` in `proceedings/[proceedingId]/page.tsx`, and UTF-8 BOM strip in `user-identity-badge.tsx`)
+
+| Command | Exit Code | Observed Output / Summary |
+|---|:---:|---|
+| `npm.cmd run test:integration` (`vitest run tests/integration`) | **0** | **34 test files passed, 325 integration tests passed (383.21s)** (includes `hearing-*.test.ts`, `auth-integration.test.ts`, and `audit-fixes-regressions.test.ts`). |
+| `npm.cmd run test:e2e:t03` | **0** | **60 passed (1.7m)** across configured browsers/viewports. |
+| `npm.cmd run test:e2e:t04` | **0** | **46 passed (1.0m)** across desktop/tablet/mobile projects. |
+| `npm.cmd run test:e2e:t05` | **0** | **22 passed (2.3m)** across desktop/tablet/mobile projects. |
+| `npm.cmd run test:e2e:t06` | **0** | **66 passed (6.5m)** across desktop/tablet/mobile projects. |
+| `npm.cmd run test:e2e:t07` | **0** | **16 passed (2.3m)** across desktop/tablet/mobile projects. |
+| `npm.cmd run test:e2e:t08` | **0** | **17 passed (2.5m)** across 5 profiles (`desktop-1440`, `tablet-768`, `mobile-390`, `cairo-profile`, `newyork-profile`). |
+| Screen-reader AT / live `NODE_ENV=production` HTTPS rate-limit load / GitHub Actions CI run on `91dcb81` | **NOT RUN locally** | Playwright suites run under `NODE_ENV=test`; GitHub Actions `.github/workflows/ci.yml` executes on push. |
 
 ---
 
