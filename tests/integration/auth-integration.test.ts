@@ -3703,7 +3703,7 @@ describe('R14 atomic credential rotation and application namespace isolation', (
     }));
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(await response.json()).toEqual({ actorId: owner.user.id, sessionId: before.id, role: 'OWNER', name: owner.user.name, email: owner.user.email });
     expect(await getSessionRow()).toEqual(before);
   });

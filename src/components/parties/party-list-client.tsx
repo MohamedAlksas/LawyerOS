@@ -232,7 +232,7 @@ export function PartyListClient({
         hasActiveFilters ? (
           <EmptyStateContainer
             testId="empty-search-container"
-            icon="🔍"
+            icon=""
             title="لم يتم العثور على نتائج"
             description="لا يوجد أطراف مسجلة مطابقة لمعايير البحث الحالية."
             action={
@@ -248,7 +248,7 @@ export function PartyListClient({
         ) : (
           <EmptyStateContainer
             testId="empty-state-container"
-            icon="👥"
+            icon=""
             title="لا توجد أطراف مسجلة حتى الآن"
             description="ابدأ بإضافة أول طرف أو موكل في مكتبك لتسجيل التوكيلات والملاحظات."
             action={

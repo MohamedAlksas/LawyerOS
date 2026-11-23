@@ -41,13 +41,24 @@ import {
   generateClientRequestId,
   isAuthRecoveryCode,
 } from './matter-ui-types';
+import { TasksView } from '@/components/productivity/tasks-view';
+import { DeadlinesView } from '@/components/deadlines/deadlines-view';
+import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
+import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailClientProps {
   ownerId: string;
   initialMatter: MatterDTO;
+  initialTasks?: TaskItemDTO[];
+  initialDeadlines?: DeadlineDTO[];
 }
 
-export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClientProps) {
+export function MatterDetailClient({
+  ownerId,
+  initialMatter,
+  initialTasks = [],
+  initialDeadlines = [],
+}: MatterDetailClientProps) {
   const router = useRouter();
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
   // U8: router.refresh() supplies a newly confirmed aggregate. Replace the
@@ -59,7 +70,9 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
       setMatter(initialMatter);
     }
   }, [initialMatter]);
-  const [activeTab, setActiveTab] = useState<'parties' | 'proceedings' | 'authorizations' | 'summary' | 'audit'>('parties');
+  const [activeTab, setActiveTab] = useState<
+    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary' | 'audit'
+  >('parties');
 
   // Party Linking Modal / Form State (C11 guarded async lifecycle)
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
@@ -1478,7 +1491,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 }}
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-[6px] border border-amber-300 transition-colors min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <span>📦</span>
                 <span>أرشفة الملف</span>
               </button>
               <Link
@@ -1486,7 +1498,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 data-testid="edit-matter-button"
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
               >
-                <span>✏️</span>
                 <span>تعديل بيانات الملف</span>
               </Link>
               <Link
@@ -1494,7 +1505,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 data-testid="add-proceeding-button"
                 className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
               >
-                <span>⚖️</span>
                 <span>+ إضافة قيد قضائي</span>
               </Link>
             </>
@@ -1508,7 +1518,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               }}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <span>📂</span>
               <span>إعادة فتح الملف</span>
             </button>
           )}
@@ -1524,7 +1533,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
         >
           <div className="space-y-0.5">
             <div className="font-bold flex items-center gap-1.5 text-amber-900 text-sm">
-              <span aria-hidden="true">⚠️</span>
               <span>عملية غير محسومة قيد الانتظار: {pendingLifecycleOp.description}</span>
             </div>
             <p className="text-amber-800">
@@ -1567,7 +1575,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
-            <span aria-hidden="true" className="text-lg">📁</span>
             <span>ملف القضية مؤرشف — وضع القراءة فقط</span>
           </div>
           <p className="text-xs text-stone-700 leading-relaxed">
@@ -1600,7 +1607,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           data-testid="party-action-error"
           className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs flex items-center justify-between"
         >
-          <span>⚠️ {partyActionError}</span>
+          <span>{partyActionError}</span>
           <button
             type="button"
             onClick={() => setPartyActionError(null)}
@@ -1619,7 +1626,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>🔒</span>
             <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تعديل العلاقات</span>
           </div>
           <p className="leading-relaxed">
@@ -1655,7 +1661,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⏳</span>
             <span>عملية ({pendingAssocOp.description}) معلّقة بانتظار نتيجة مؤكدة</span>
           </div>
           <p className="leading-relaxed">
@@ -1682,7 +1687,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           className="bg-amber-50 border border-amber-300 rounded-[6px] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-amber-900 shadow-xs"
         >
           <div className="flex items-start sm:items-center gap-2.5">
-            <span className="text-xl select-none" aria-hidden="true">⚠️</span>
             <div className="text-xs leading-relaxed">
               <span className="font-bold block text-sm mb-0.5">الملف نشط بدون مكان حفظ ورقي محدد</span>
               <span>
@@ -1703,7 +1707,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           className="bg-white rounded-[6px] border border-[#D5DFE3] px-4 py-3 flex items-center justify-between text-xs text-[#172A35]"
         >
           <div className="flex items-center gap-2">
-            <span className="text-base">📁</span>
             <span className="font-semibold text-[#4D606A]">مكان الحفظ الورقي بالمكتب:</span>
             <span className="font-bold text-[#14566B]">{matter.paperLocationName}</span>
           </div>
@@ -1749,7 +1752,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
 
       {/* 4. Navigation Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex space-x-1 sm:space-x-4 space-x-reverse" aria-label="أقسام ملف القضية">
+        <nav className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية">
           <button
             type="button"
             data-testid="tab-parties"
@@ -1760,7 +1763,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            👥 الأطراف والصفات ({parties.length})
+            الأطراف والصفات ({parties.length})
           </button>
 
           <button
@@ -1773,7 +1776,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            ⚖️ القيود والدعاوى القضائية ({proceedings.length})
+            القيود والدعاوى القضائية ({proceedings.length})
           </button>
 
           <button
@@ -1786,7 +1789,20 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            📜 سندات الوكالة والتوكيلات ({authorizations.length})
+            سندات الوكالة والتوكيلات ({authorizations.length})
+          </button>
+
+          <button
+            type="button"
+            data-testid="tab-tasks-deadlines"
+            onClick={() => setActiveTab('tasksDeadlines')}
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+              activeTab === 'tasksDeadlines'
+                ? 'border-[#14566B] text-[#14566B]'
+                : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
+            }`}
+          >
+            المهام والمواعيد ({initialTasks.length + initialDeadlines.length})
           </button>
 
           <button
@@ -1799,7 +1815,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            📝 الملخص والملاحظات
+            الملخص والملاحظات
           </button>
         </nav>
       </div>
@@ -2158,7 +2174,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                 data-testid="add-proceeding-tab-button"
                 className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
               >
-                <span>⚖️</span>
                 <span>+ تسجيل قيد قضائي جديد</span>
               </Link>
             )}
@@ -2169,7 +2184,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               data-testid="empty-proceedings-container"
               className="bg-white rounded-[6px] border border-[#D5DFE3] p-8 text-center space-y-3 shadow-xs"
             >
-              <div className="text-3xl">⚖️</div>
+              <div className="text-3xl"></div>
               <h3 className="text-base font-bold text-[#172A35]">لا توجد قيود قضائية مسجلة</h3>
               <p className="text-xs text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 لم يتم قيد أي دعوى أو استئناف في المحاكم لهذا الملف حتى الآن. يمكنك تسجيل أول قيد قضائي بالمحكمة لتنظيم الجلسات.
@@ -2211,7 +2226,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                               data-testid="proceeding-archived-badge"
                               className="text-xs font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 inline-flex items-center gap-1"
                             >
-                              <span>📁</span>
                               <span>مؤرشف</span>
                             </span>
                           ) : isDraft ? (
@@ -2219,7 +2233,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                               data-testid="proceeding-draft-badge"
                               className="text-xs font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"
                             >
-                              <span>⚠️</span>
                               <span>الرقم غير مستكمل (مسودة قيد)</span>
                             </span>
                           ) : (
@@ -2318,7 +2331,6 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                         data-testid="parent-proceeding-link"
                         className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-[6px] text-xs text-blue-900 flex items-center gap-2"
                       >
-                        <span aria-hidden="true">🔗</span>
                         <span className="font-semibold">مرتبط بالدعوى السابقة:</span>
                         <span>{proc.parentProceedingSummary}</span>
                       </div>
@@ -2412,7 +2424,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                   data-testid="poa-load-error"
                   className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded"
                 >
-                  ⚠️ {poaActionError}
+                  {poaActionError}
                 </p>
               )}
 
@@ -2492,7 +2504,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               data-testid="empty-authorizations-container"
               className="bg-white rounded-[6px] border border-[#D5DFE3] p-8 text-center space-y-3 shadow-xs"
             >
-              <div className="text-3xl">📜</div>
+              <div className="text-3xl"></div>
               <h3 className="text-base font-bold text-[#172A35]">لا توجد توكيلات مرتبطة بهذا الملف</h3>
               <p className="text-xs text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 لم يتم إسناد أي توكيل رسمي لهذا الملف بعد. يمكنك ربط توكيل موثق صادر من أحد الموكلين بالملف.
@@ -2553,7 +2565,46 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
         </div>
       )}
 
-      {/* Tab 4: Summary & Notes */}
+      {/* Tab 4: Tasks & Legal Deadlines */}
+      {activeTab === 'tasksDeadlines' && (
+        <div className="space-y-8" data-testid="matter-tasks-deadlines-panel">
+          <DeadlinesView
+            actorId={ownerId}
+            initialDeadlines={initialDeadlines}
+            selectableMatters={[]}
+            lockedMatterId={matter.id}
+            lockedMatterProceedings={(matter.proceedings || [])
+              .filter((p) => !p.archivedAt)
+              .map((p) => ({
+                id: p.id,
+                courtId: p.courtId,
+                courtName: p.courtName,
+                label: `${p.courtName}${p.numberText ? ` — ${p.numberText}${p.yearLabel ? `/${p.yearLabel}` : ''}` : ' (مسودة قيد)'}`,
+              }))}
+            isReadOnly={isMatterArchived}
+            onDataChanged={() => router.refresh()}
+          />
+
+          <TasksView
+            actorId={ownerId}
+            initialTasks={initialTasks}
+            selectableMatters={[]}
+            lockedMatterId={matter.id}
+            lockedMatterProceedings={(matter.proceedings || [])
+              .filter((p) => !p.archivedAt)
+              .map((p) => ({
+                id: p.id,
+                courtId: p.courtId,
+                courtName: p.courtName,
+                label: `${p.courtName}${p.numberText ? ` — ${p.numberText}${p.yearLabel ? `/${p.yearLabel}` : ''}` : ' (مسودة قيد)'}`,
+              }))}
+            isReadOnly={isMatterArchived}
+            onDataChanged={() => router.refresh()}
+          />
+        </div>
+      )}
+
+      {/* Tab 5: Summary & Notes */}
       {activeTab === 'summary' && (
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs">
           <div>
@@ -2600,7 +2651,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
       {/* Future Modules Notice */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          📁 المستندات والحسابات
+          المستندات والحسابات
         </span>
         <p>
           وحدات حفظ المستندات الرقمية وحسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها.
@@ -2625,7 +2676,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
-                📦 أرشفة ملف القضية
+                أرشفة ملف القضية
               </h3>
               <button
                 type="button"
@@ -2639,16 +2690,16 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
             </div>
 
             <p className="text-xs text-[#4D606A] leading-relaxed">
-              عند أرشفة الملف، سيتحول إلى وضع القراءة فقط ولن تتمكن من تعديل بياناته أو إضافة قيود جديدة أو ربط أطراف إلا بعد إلغاء الأرشفة.
+              عند أرشفة الملف، سيتحول إلى وضع القراءة فقط ولن تتمكن من تعديل بياناته أو إضافة قيود جديدة أو ربط أطراف إلا بعد إلغاء الأرشفة. لا يمكن الأرشفة مع وجود جلسات مجدولة أو مواعيد قانونية مؤكدة مفتوحة.
             </p>
 
             {lifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {lifecycleError}
+                {lifecycleError}
               </div>
             )}
 
-            {pendingLifecycleOp?.kind === 'archiveMatter' && (
+            {!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter' && (
               <div className="space-y-2">
                 <div
                   data-testid="frozen-reason-notice"
@@ -2685,14 +2736,14 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                     if (pendingLifecycleOp?.kind === 'archiveMatter') return;
                     setMatterLifecycleReason(e.target.value);
                   }}
-                  readOnly={pendingLifecycleOp?.kind === 'archiveMatter'}
+                  readOnly={!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter'}
                   placeholder="اكتب سبب أرشفة هذا الملف (مثال: انتهاء الإجراءات وحفظ الأوراق)..."
                   rows={3}
                   minLength={3}
                   required
                   disabled={isLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
-                    pendingLifecycleOp?.kind === 'archiveMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-amber-300 cursor-not-allowed' : 'border-[#D5DFE3]'
+                    !isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-amber-300 cursor-not-allowed' : 'border-[#D5DFE3]'
                   }`}
                 />
               </div>
@@ -2742,7 +2793,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
-                📂 إعادة فتح ملف القضية
+                إعادة فتح ملف القضية
               </h3>
               <button
                 type="button"
@@ -2761,11 +2812,11 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
 
             {lifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {lifecycleError}
+                {lifecycleError}
               </div>
             )}
 
-            {pendingLifecycleOp?.kind === 'reopenMatter' && (
+            {!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter' && (
               <div className="space-y-2">
                 <div
                   data-testid="frozen-reason-notice"
@@ -2802,14 +2853,14 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                     if (pendingLifecycleOp?.kind === 'reopenMatter') return;
                     setMatterLifecycleReason(e.target.value);
                   }}
-                  readOnly={pendingLifecycleOp?.kind === 'reopenMatter'}
+                  readOnly={!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter'}
                   placeholder="اكتب سبب إعادة فتح الملف (مثال: ظهور مستندات جديدة أو استئناف النزاع)..."
                   rows={3}
                   minLength={3}
                   required
                   disabled={isLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
-                    pendingLifecycleOp?.kind === 'reopenMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-sky-300 cursor-not-allowed' : 'border-[#D5DFE3]'
+                    !isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-sky-300 cursor-not-allowed' : 'border-[#D5DFE3]'
                   }`}
                 />
               </div>
@@ -2859,7 +2910,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
-                {proceedingLifecycleAction === 'archive' ? '📦 أرشفة القيد القضائي' : '📂 إعادة فتح القيد القضائي'}
+                {proceedingLifecycleAction === 'archive' ? 'أرشفة القيد القضائي' : 'إعادة فتح القيد القضائي'}
               </h3>
               <button
                 type="button"
@@ -2880,11 +2931,12 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
 
             {proceedingLifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {proceedingLifecycleError}
+                {proceedingLifecycleError}
               </div>
             )}
 
-            {pendingLifecycleOp &&
+            {!isProceedingLifecycleSubmitting &&
+              pendingLifecycleOp &&
               (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
               pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id && (
                 <div className="space-y-2">
@@ -2946,6 +2998,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                     setProceedingLifecycleReason(e.target.value);
                   }}
                   readOnly={Boolean(
+                    !isProceedingLifecycleSubmitting &&
                     pendingLifecycleOp &&
                     (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
                     pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id
@@ -2956,6 +3009,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                   required
                   disabled={isProceedingLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
+                    !isProceedingLifecycleSubmitting &&
                     pendingLifecycleOp &&
                     (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
                     pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id

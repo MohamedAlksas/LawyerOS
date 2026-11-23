@@ -87,7 +87,7 @@ function createAuthInstance() {
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: env.NODE_ENV === 'production',
+        secure: env.BETTER_AUTH_URL.startsWith('https://'),
       },
     },
     rateLimit: {

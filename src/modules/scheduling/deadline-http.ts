@@ -1,0 +1,106 @@
+﻿import { NextResponse } from 'next/server';
+import { getTrustedOrigins } from '@/lib/auth';
+import { requireActor } from '@/modules/identity/require-actor';
+import type { Actor } from '@/modules/identity/types';
+import { hearingError } from './hearing-errors';
+import { SchedulingValidationError, type ActionResult } from './deadline-types';
+
+const PRIVATE_NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
+
+export function statusFromErrorCode(code: string | undefined): number {
+  if (code === 'FORBIDDEN') return 403;
+  if (['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '')) {
+    return 401;
+  }
+  if (
+    [
+      'CONCURRENCY_CONFLICT',
+      'IDEMPOTENCY_PAYLOAD_MISMATCH',
+      'IDEMPOTENCY_CONCURRENT_CONFLICT',
+    ].includes(code ?? '')
+  ) {
+    return 409;
+  }
+  if (code === 'NOT_FOUND') return 404;
+  if (code === 'INTERNAL_ERROR') return 500;
+  return 400;
+}
+
+export function schedulingHttpErrorResponse(error: unknown, mapper: (err: unknown) => ActionResult<never> = hearingError) {
+  const problem = mapper(error);
+  const code = !problem.success ? problem.code : 'INTERNAL_ERROR';
+  return NextResponse.json(problem, {
+    status: statusFromErrorCode(code),
+    headers: PRIVATE_NO_STORE_HEADERS,
+  });
+}
+
+export async function readSchedulingFromRequest<R>(
+  request: Request,
+  query: (actor: Actor) => Promise<R>,
+  mapper: (err: unknown) => ActionResult<never> = hearingError
+) {
+  try {
+    const actor = await requireActor({
+      headers: request.headers,
+      requiredPermission: 'READ_CLIENT_DATA',
+    });
+    const data = await query(actor);
+    return NextResponse.json({ success: true, data }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    return schedulingHttpErrorResponse(error, mapper);
+  }
+}
+
+export async function writeSchedulingFromRequest<T, R>(
+  request: Request,
+  command: (actor: Actor, input: T) => Promise<R>,
+  options: {
+    pathIdKey?: string;
+    pathIdValue?: string;
+    mapper?: (err: unknown) => ActionResult<never>;
+  } = {}
+) {
+  const mapper = options.mapper ?? hearingError;
+  try {
+    const origin = request.headers.get('origin');
+    if (
+      !origin ||
+      !getTrustedOrigins().has(origin) ||
+      request.headers.get('sec-fetch-site') === 'cross-site'
+    ) {
+      return NextResponse.json(
+        { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },
+        { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
+      );
+    }
+
+    const actor = await requireActor({
+      headers: request.headers,
+      requiredPermission: 'WRITE_CLIENT_DATA',
+    });
+
+    const contentType = request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    if (contentType !== 'application/json') {
+      throw new SchedulingValidationError('صيغة البيانات غير صحيحة (يجب إرسال JSON).');
+    }
+
+    const body: unknown = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new SchedulingValidationError('بيانات الطلب غير صالحة.');
+    }
+
+    const payload: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    if (options.pathIdKey && options.pathIdValue) {
+      if (options.pathIdKey in payload && payload[options.pathIdKey] !== options.pathIdValue) {
+        throw new SchedulingValidationError('معرف السجل في الطلب لا يطابق المسار.');
+      }
+      payload[options.pathIdKey] = options.pathIdValue;
+    }
+
+    const data = await command(actor, payload as T);
+    return NextResponse.json({ success: true, data }, { headers: PRIVATE_NO_STORE_HEADERS });
+  } catch (error) {
+    return schedulingHttpErrorResponse(error, mapper);
+  }
+}

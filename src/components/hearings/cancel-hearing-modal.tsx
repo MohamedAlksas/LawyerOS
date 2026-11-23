@@ -128,7 +128,7 @@ export function CancelHearingModal({
         <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
           <div className="space-y-0.5">
             <h2 id="cancel-hearing-modal-title" className="text-base sm:text-lg font-bold text-red-900">
-              🚫 إلغاء موعد الجلسة
+              إلغاء موعد الجلسة
             </h2>
             <p className="text-xs text-[#4D606A]">
               إلغاء جلسة لم تنعقد مع تعطيل التذكيرات المرتبطة وتوثيق السبب
@@ -161,7 +161,7 @@ export function CancelHearingModal({
             data-testid="hearing-modal-session-recovery-alert"
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
           >
-            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
             <p>أُبقيت بيانات إلغاء الجلسة ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
             <a
               href="/login"
@@ -182,7 +182,6 @@ export function CancelHearingModal({
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-1.5"
           >
             <div className="flex items-center gap-1.5 font-bold">
-              <span>⚠️</span>
               <span>تعذر استلام تأكيد الخادم</span>
             </div>
             <p>
@@ -247,17 +246,14 @@ export function CancelHearingModal({
             >
               {isSubmitting ? (
                 <>
-                  <span className="inline-block animate-spin">⏳</span>
                   <span>جارٍ الإلغاء...</span>
                 </>
               ) : isFrozenRetry ? (
                 <>
-                  <span>🔄</span>
                   <span>إعادة المحاولة بنفس المفتاح</span>
                 </>
               ) : (
                 <>
-                  <span>🚫</span>
                   <span>تأكيد إلغاء الجلسة</span>
                 </>
               )}

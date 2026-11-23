@@ -11,9 +11,9 @@ export default function ErrorBoundary({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log error to console without sensitive information
+    // Log error digest only without exposing sensitive error payloads
     if (process.env.NODE_ENV !== 'production') {
-      console.error('Unhandled route error caught by boundary:', error);
+      console.error('Unhandled route error caught by boundary', error.digest ?? 'no-digest');
     }
   }, [error]);
 

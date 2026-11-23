@@ -249,12 +249,9 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
           className="p-4 bg-rose-50 border-2 border-rose-300 rounded-[6px] space-y-3 shadow-xs"
         >
           <div className="flex items-start gap-3">
-            <span className="text-xl" aria-hidden="true">
-              ⚠️
-            </span>
             <div>
               <h3 className="text-sm font-bold text-rose-900">
-                البيانات اتعدلت من شاشة تانية
+                تم تعديل البيانات من شاشة أخرى
               </h3>
               <p className="text-xs text-rose-800 mt-1 leading-relaxed">
                 قام مستخدم آخر أو شاشة أخرى بتحديث بيانات هذا الطرف أثناء تحريرك لها.
@@ -285,9 +282,6 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
           className="p-4 bg-amber-50 border-2 border-amber-300 rounded-[6px] space-y-3 shadow-xs"
         >
           <div className="flex items-start gap-3">
-            <span className="text-xl" aria-hidden="true">
-              💡
-            </span>
             <div>
               <h3 className="text-sm font-bold text-amber-900">
                 تنبيه استرشادي: يوجد أطراف مسجلة مسبقاً ببيانات مشابهة

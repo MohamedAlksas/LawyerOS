@@ -35,7 +35,7 @@ export function ConnectivityBanner({ sticky = true }: { sticky?: boolean } = {})
         sticky ? 'sticky top-0 z-50' : 'relative z-30'
       } shadow-md flex items-center justify-center gap-2 min-h-[44px]`}
     >
-      النت مقطوع. التعديلات مش محفوظة
+      انقطع الاتصال بالإنترنت. التعديلات غير محفوظة
     </div>
   );
 }

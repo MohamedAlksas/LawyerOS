@@ -100,7 +100,6 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E8EEF1] pb-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">⚖️</span>
               <h1 className="text-xl font-bold text-[#172A35]">
                 تفاصيل موعد الجلسة
               </h1>
@@ -120,7 +119,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
                 data-testid="hearing-result-link"
                 className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 shadow-xs"
               >
-                <span>{hearing.status === 'COMPLETED' ? '📝 عرض النتيجة / تصحيح' : '✍️ تسجيل قرار ونتيجة الجلسة'}</span>
+                <span>{hearing.status === 'COMPLETED' ? 'عرض النتيجة / تصحيح' : 'تسجيل قرار ونتيجة الجلسة'}</span>
               </Link>
             ) : isArchived ? (
               <span
@@ -140,7 +139,6 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             data-testid="incomplete-proceeding-badge"
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 flex items-center gap-2"
           >
-            <span>⚠️</span>
             <div className="space-y-0.5">
               <span className="font-bold">الرقم غير مستكمل</span>:
               <span className="text-[#4D606A] mr-1">
@@ -225,7 +223,6 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
         <div className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-[#E8EEF1] pb-3">
             <h2 className="text-base font-bold text-[#172A35] flex items-center gap-2">
-              <span>📜</span>
               <span>قرار المحكمة المسجل</span>
             </h2>
             <span className="text-xs text-[#4D606A]">

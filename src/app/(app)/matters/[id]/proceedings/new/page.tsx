@@ -46,7 +46,7 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
       return (
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
-            icon="⚠️"
+            icon=""
             title="الملف غير موجود"
             description="لم يتم العثور على الملف المراد إضافة قيد قضائي له."
             action={

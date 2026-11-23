@@ -346,6 +346,7 @@ model Matter {
   proceedings     Proceeding[]
   authorizations  MatterAuthorization[]
   tasks           Task[]
+  deadlines       Deadline[]
   noteRevisions   MatterNoteRevision[]
 
   @@index([status])
@@ -425,6 +426,7 @@ model Proceeding {
   parties            ProceedingParty[]
   hearings           Hearing[]
   tasks              Task[]
+  deadlines          Deadline[]
 
   @@index([matterId])
   @@index([courtId])
@@ -576,7 +578,15 @@ enum TaskPriority {
 
 enum TaskStatus {
   OPEN
+  IN_PROGRESS
   DONE
+  CANCELLED
+}
+
+enum DeadlineStatus {
+  DRAFT
+  CONFIRMED
+  COMPLETED
   CANCELLED
 }
 
@@ -666,27 +676,72 @@ model HearingLink {
 
 model Task {
   id            String       @id @default(uuid())
-  matterId      String       @map("matter_id")
+  matterId      String?      @map("matter_id")
   proceedingId  String?      @map("proceeding_id")
   hearingId     String?      @map("hearing_id")
+  deadlineId    String?      @map("deadline_id")
   title         String       @map("title")
+  details       String?      @map("details")
   dueDate       DateTime?    @db.Date @map("due_date")
+  dueTime       String?      @map("due_time")
   priority      TaskPriority @default(NORMAL) @map("priority")
   status        TaskStatus   @default(OPEN) @map("status")
+  completedAt   DateTime?    @db.Timestamptz(3) @map("completed_at")
+  completedById String?      @map("completed_by_id")
   version       Int          @default(1) @map("version")
   createdAt     DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
   updatedAt     DateTime     @updatedAt @db.Timestamptz(3) @map("updated_at")
   createdById   String       @map("created_by_id")
   updatedById   String       @map("updated_by_id")
 
-  matter        Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  matter        Matter?      @relation(fields: [matterId], references: [id], onDelete: Cascade)
   proceeding    Proceeding?  @relation(fields: [proceedingId], references: [id], onDelete: SetNull)
   hearing       Hearing?     @relation(fields: [hearingId], references: [id], onDelete: SetNull)
+  deadline      Deadline?    @relation(fields: [deadlineId], references: [id], onDelete: SetNull)
 
   @@index([matterId, status])
+  @@index([status, dueDate])
   @@index([proceedingId])
   @@index([hearingId])
+  @@index([deadlineId])
   @@map("task")
+}
+
+model Deadline {
+  id                    String         @id @default(uuid())
+  matterId              String         @map("matter_id")
+  proceedingId          String?        @map("proceeding_id")
+  title                 String         @map("title")
+  dueDate               DateTime?      @db.Date @map("due_date")
+  dueTime               String?        @map("due_time")
+  source                String?        @map("source")
+  basisNotes            String?        @map("basis_notes")
+  sourceDocumentId      String?        @map("source_document_id")
+  status                DeadlineStatus @default(DRAFT) @map("status")
+  confirmedAt           DateTime?      @db.Timestamptz(3) @map("confirmed_at")
+  confirmedById         String?        @map("confirmed_by_id")
+  confirmedByName       String?        @map("confirmed_by_name")
+  dateChangeReason      String?        @map("date_change_reason")
+  completionDescription String?        @map("completion_description")
+  completedDate         DateTime?      @db.Date @map("completed_date")
+  completedAt           DateTime?      @db.Timestamptz(3) @map("completed_at")
+  completedById         String?        @map("completed_by_id")
+  cancellationReason    String?        @map("cancellation_reason")
+  cancelledAt           DateTime?      @db.Timestamptz(3) @map("cancelled_at")
+  version               Int            @default(1) @map("version")
+  createdAt             DateTime       @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt             DateTime       @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById           String         @map("created_by_id")
+  updatedById           String         @map("updated_by_id")
+
+  matter                Matter         @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  proceeding            Proceeding?    @relation(fields: [proceedingId], references: [id], onDelete: SetNull)
+  tasks                 Task[]
+
+  @@index([status, dueDate])
+  @@index([matterId, status])
+  @@index([proceedingId, status])
+  @@map("deadline")
 }
 
 model JobRun {

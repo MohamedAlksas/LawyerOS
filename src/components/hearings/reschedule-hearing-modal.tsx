@@ -146,7 +146,7 @@ export function RescheduleHearingModal({
         <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
           <div className="space-y-0.5">
             <h2 id="reschedule-modal-title" className="text-base sm:text-lg font-bold text-[#172A35]">
-              🔄 تعديل موعد جلسة لم تنعقد
+              تعديل موعد جلسة لم تنعقد
             </h2>
             <p className="text-xs text-[#4D606A]">
               تعديل الموعد المحدد مع الاحتفاظ بسجل الجلسة السابقة كـ &laquo;تم تعديل الموعد&raquo;
@@ -183,7 +183,7 @@ export function RescheduleHearingModal({
             data-testid="hearing-modal-session-recovery-alert"
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
           >
-            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
             <p>أُبقيت بيانات تعديل الموعد ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
             <a
               href="/login"
@@ -204,7 +204,6 @@ export function RescheduleHearingModal({
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-1.5"
           >
             <div className="flex items-center gap-1.5 font-bold">
-              <span>⚠️</span>
               <span>تعذر استلام تأكيد الخادم (حالة عدم يقين)</span>
             </div>
             <p>
@@ -389,17 +388,14 @@ export function RescheduleHearingModal({
             >
               {isSubmitting ? (
                 <>
-                  <span className="inline-block animate-spin">⏳</span>
                   <span>جارٍ الحفظ...</span>
                 </>
               ) : isFrozenRetry ? (
                 <>
-                  <span>🔄</span>
                   <span>إعادة المحاولة بنفس المفتاح</span>
                 </>
               ) : (
                 <>
-                  <span>💾</span>
                   <span>تأكيد تعديل الموعد</span>
                 </>
               )}

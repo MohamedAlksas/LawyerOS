@@ -574,7 +574,7 @@ export async function searchParties(
     if (textNorm) {
       orClauses.push({ nameNormalized: { contains: textNorm } });
     }
-    if (phoneNorm) {
+    if (phoneNorm && !/\p{L}/u.test(rawQuery)) {
       orClauses.push({ primaryPhoneNormalized: { contains: phoneNorm } });
     }
 

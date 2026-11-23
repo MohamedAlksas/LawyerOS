@@ -107,7 +107,7 @@ interface HearingResultRecord {
 
 interface TaskRecord {
   id: string;
-  matterId: string;
+  matterId: string | null;
   proceedingId?: string | null;
   hearingId?: string | null;
   title: string;

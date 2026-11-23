@@ -55,7 +55,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       return (
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
-            icon="⚠️"
+            icon=""
             title="الملف غير موجود"
             description="لم يتم العثور على ملف القضية المطلوب."
             action={
@@ -78,7 +78,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     return (
       <div className="max-w-3xl mx-auto py-12">
         <EmptyStateContainer
-          icon="⚠️"
+          icon=""
           title="القيد القضائي غير موجود"
           description="لم يتم العثور على القيد القضائي المطلوب داخل هذا الملف، أو قد يكون تابعاً لملف آخر."
           action={
@@ -128,7 +128,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
-            <span aria-hidden="true" className="text-lg">📁</span>
             <span>
               {isParentMatterArchived
                 ? 'ملف القضية الرئيسي مؤرشف — القيد في وضع القراءة فقط'
@@ -159,7 +158,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
                   data-testid="proceeding-archived-badge"
                   className="text-xs font-bold px-2.5 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 inline-flex items-center gap-1"
                 >
-                  <span>📁</span>
                   <span>مؤرشف</span>
                 </span>
               ) : isDraft ? (
@@ -167,7 +165,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
                   data-testid="proceeding-draft-badge"
                   className="text-xs font-bold px-2.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"
                 >
-                  <span>⚠️</span>
                   <span>الرقم غير مستكمل (مسودة قيد)</span>
                 </span>
               ) : (
@@ -196,7 +193,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
                 data-testid="edit-proceeding-button"
                 className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
               >
-                <span>✏️</span>
                 <span>تعديل بيانات القيد</span>
               </Link>
             )}
@@ -273,7 +269,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             className="mt-4 p-3 bg-blue-50/70 border border-blue-200 rounded-[6px] text-xs text-blue-900 flex items-center justify-between gap-3"
           >
             <div className="flex items-center gap-2">
-              <span aria-hidden="true">🔗</span>
               <span className="font-bold">مرتبط بالدعوى السابقة:</span>
               <span>{proceeding.parentProceedingSummary}</span>
             </div>
@@ -359,7 +354,6 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       {/* Honest Future Modules Placeholder */}
       <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
         <div className="flex items-center gap-2">
-          <span className="text-base">📄</span>
           <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
         </div>
         <p className="text-xs text-[#4D606A] leading-relaxed">

@@ -26,6 +26,10 @@ export const T04_TEST_IDS = {
   errorRetryButton: 'error-retry-button',
   sessionExpiredAlert: 'session-expired-alert',
   navHome: 'nav-link-home',
+  navToday: 'nav-link-today',
+  navAgenda: 'nav-link-agenda',
+  navTasks: 'nav-link-tasks',
+  navDeadlines: 'nav-link-deadlines',
   navMatters: 'nav-link-matters',
   navParties: 'nav-link-parties',
   navReference: 'nav-link-reference',
@@ -38,6 +42,10 @@ export type T04TestId = (typeof T04_TEST_IDS)[keyof typeof T04_TEST_IDS];
 
 export const T04_ROUTES = {
   home: '/',
+  today: '/today',
+  agenda: '/agenda',
+  tasks: '/tasks',
+  deadlines: '/deadlines',
   login: '/login',
   verify: '/verify',
   matters: '/matters',
@@ -50,9 +58,13 @@ export const T04_ROUTES = {
   manifest: '/manifest.webmanifest',
 } as const;
 
-/** Routes that exist and are reachable in T04/T05/T06/T07 (section 2.1). */
+/** Routes that exist and are reachable in T04/T05/T06/T07/T09 (section 2.1). */
 export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.home,
+  T04_ROUTES.today,
+  T04_ROUTES.agenda,
+  T04_ROUTES.tasks,
+  T04_ROUTES.deadlines,
   T04_ROUTES.login,
   T04_ROUTES.verify,
   T04_ROUTES.matters,
@@ -67,6 +79,10 @@ export const T04_AVAILABLE_ROUTES: readonly string[] = [
 /** The only destinations the navigation shell may expose (section 4.2). */
 export const T04_ALLOWED_NAV_HREFS: readonly string[] = [
   T04_ROUTES.home,
+  T04_ROUTES.today,
+  T04_ROUTES.agenda,
+  T04_ROUTES.tasks,
+  T04_ROUTES.deadlines,
   T04_ROUTES.matters,
   T04_ROUTES.parties,
   T04_ROUTES.security,
@@ -83,10 +99,6 @@ export const T04_FORBIDDEN_MODULE_ROUTES: readonly string[] = [
   '/hearings',
   '/finance',
   '/clients',
-  '/today',
-  '/agenda',
-  '/tasks',
-  '/deadlines',
   '/documents',
   '/reports',
   '/settings',
@@ -102,7 +114,7 @@ export const T04_COPY = {
   emptyStateHeading: 'مكتب المحامي — لوحة المتابعة',
   emptyStateSecurityAction: 'مراجعة إعدادات الأمان',
   sessionExpired: 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.',
-  offlineBanner: 'النت مقطوع. التعديلات مش محفوظة',
+  offlineBanner: 'انقطع الاتصال بالإنترنت. التعديلات غير محفوظة',
   loadingLabel: 'جارٍ التحميل...',
   errorRetry: 'إعادة المحاولة',
 } as const;

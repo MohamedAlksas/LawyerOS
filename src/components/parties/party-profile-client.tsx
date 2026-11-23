@@ -181,14 +181,13 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
               data-testid="edit-party-button"
               className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
             >
-              <span>✏️</span>
               <span>تعديل البيانات</span>
             </Link>
           ) : (
             <span
               className="text-xs text-stone-600 bg-stone-100 px-3 py-1.5 rounded border border-stone-300 font-semibold"
             >
-              🔒 ملف قراءة فقط
+              ملف قراءة فقط
             </span>
           )}
         </div>
@@ -202,7 +201,6 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
           className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
-            <span aria-hidden="true" className="text-lg">📁</span>
             <span>ملف الطرف مؤرشف — وضع القراءة فقط</span>
           </div>
           <p className="text-xs text-stone-700 leading-relaxed">
@@ -396,7 +394,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
         <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
           <h2 className="text-base font-bold text-[#172A35]">
-            📁 ملفات القضايا والنزاعات المرتبطة ({mattersError ? '—' : isLoadingMatters && mattersTotal === 0 ? '…' : mattersTotal})
+            ملفات القضايا والنزاعات المرتبطة ({mattersError ? '—' : isLoadingMatters && mattersTotal === 0 ? '…' : mattersTotal})
           </h2>
           {!isArchived && (
             <Link
@@ -414,7 +412,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
             data-testid="party-matters-error-banner"
             className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] flex items-center justify-between gap-2"
           >
-            <span>⚠️ {mattersError}</span>
+            <span>{mattersError}</span>
             <button
               type="button"
               onClick={() => loadMatters(requestedMattersPage.current)}
@@ -513,7 +511,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       {/* 6. Future Financial & Documents Modules Indicator */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          💰 الحسابات المالية والمستندات الرقمية
+          الحسابات المالية والمستندات الرقمية
         </span>
         <p>
           وحدات المستندات الرقمية وحسابات الأتعاب والمصروفات

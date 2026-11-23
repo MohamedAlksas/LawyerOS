@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { IconFolder, IconWarning } from './stitch-icons';
 
 export interface LoadingIndicatorProps {
   label?: string;
@@ -50,10 +51,10 @@ export function ErrorContainer({
       className={`bg-white rounded-[6px] border border-red-200 p-6 sm:p-8 text-center space-y-4 shadow-xs ${className}`}
     >
       <div
-        className="w-12 h-12 mx-auto rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-xl text-[#A4262C] select-none"
+        className="w-12 h-12 mx-auto rounded-[6px] bg-red-50 border border-red-200 flex items-center justify-center text-[#A4262C] select-none"
         aria-hidden="true"
       >
-        ⚠️
+        <IconWarning className="w-6 h-6" />
       </div>
       <div className="space-y-1">
         <h3 className="text-base font-bold text-[#172A35]">{title}</h3>
@@ -77,7 +78,7 @@ export function ErrorContainer({
 }
 
 export interface EmptyStateContainerProps {
-  icon?: string;
+  icon?: React.ReactNode;
   title: string;
   description: string;
   action?: React.ReactNode;
@@ -87,7 +88,6 @@ export interface EmptyStateContainerProps {
 }
 
 export function EmptyStateContainer({
-  icon = '📂',
   title,
   description,
   action,
@@ -101,10 +101,10 @@ export function EmptyStateContainer({
       className={`bg-white rounded-[6px] border border-[#D5DFE3] p-8 sm:p-12 text-center shadow-xs space-y-6 ${className}`}
     >
       <div
-        className="w-16 h-16 mx-auto rounded-full bg-[#F4F6F7] border border-[#D5DFE3] flex items-center justify-center text-3xl select-none"
+        className="w-14 h-14 mx-auto rounded-[6px] bg-[#E9F2F5] border border-[#C2D9E2] flex items-center justify-center text-[#14566B] select-none"
         aria-hidden="true"
       >
-        {icon}
+        <IconFolder className="w-7 h-7" />
       </div>
       <div className="max-w-md mx-auto space-y-2">
         <h2 className="text-lg font-bold text-[#172A35]">{title}</h2>

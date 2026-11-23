@@ -1,6 +1,6 @@
 'use server';
 
-import { requireActor } from '@/modules/identity/require-actor';
+import { verifyActionSecurity } from '@/modules/identity/action-security';
 import {
   listActiveSessions,
   revokeSession,
@@ -35,7 +35,7 @@ export type RegenerateBackupCodesResult =
     };
 
 export async function getSecurityOverview() {
-  const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+  const actor = await verifyActionSecurity('MANAGE_SECURITY');
   const sessions = await listActiveSessions(actor.id, actor.sessionId);
 
   return {
@@ -69,7 +69,7 @@ export async function revokeSessionAction(
       };
     }
 
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     await revokeSession(sessionId, actor);
     return { success: true };
   } catch (err: unknown) {
@@ -97,7 +97,7 @@ export async function revokeSessionAction(
 
 export async function revokeOtherSessionsAction(): Promise<RevokeOtherSessionsResult> {
   try {
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     const count = await revokeOtherSessions(actor);
     return { success: true, count };
   } catch (err: unknown) {
@@ -135,7 +135,7 @@ export async function regenerateBackupCodesAction(
       };
     }
 
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     const freshBackupCodes = await regenerateRecoveryCodes(actor, currentPassword);
 
     return {

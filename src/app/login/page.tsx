@@ -52,10 +52,17 @@ function LoginForm() {
   };
 
   return (
-    <div className="w-full max-w-md bg-white rounded-lg shadow-sm border border-[#D5DFE3] p-6 sm:p-8">
-      <div className="text-center mb-6">
+    <div className="w-full max-w-md bg-white rounded-[6px] shadow-xs border border-[#D5DFE3] p-6 sm:p-8">
+      <div className="text-center mb-6 space-y-2">
+        <div
+          className="w-11 h-11 mx-auto rounded-[6px] bg-[#14566B] text-white font-bold text-sm tracking-wider flex items-center justify-center select-none"
+          aria-hidden="true"
+          dir="ltr"
+        >
+          LO
+        </div>
         <h1 className="text-2xl font-bold text-[#172A35]">تسجيل الدخول</h1>
-        <p className="text-sm text-[#4D606A] mt-1">نظام إدارة مكتب المحاماة — LawOffice OS</p>
+        <p className="text-sm text-[#4D606A]">نظام إدارة مكتب المحاماة — LawOffice OS</p>
       </div>
 
       {error && (
@@ -63,7 +70,6 @@ function LoginForm() {
           role="alert"
           className="mb-4 p-3 bg-red-50 border border-red-200 text-[#A4262C] text-sm rounded flex items-center gap-2"
         >
-          <span>⚠️</span>
           <span>{error}</span>
         </div>
       )}
