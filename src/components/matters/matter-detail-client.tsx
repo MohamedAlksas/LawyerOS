@@ -2713,7 +2713,7 @@ export function MatterDetailClient({
               </div>
             )}
 
-            {pendingLifecycleOp?.kind === 'archiveMatter' && (
+            {!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter' && (
               <div className="space-y-2">
                 <div
                   data-testid="frozen-reason-notice"
@@ -2750,14 +2750,14 @@ export function MatterDetailClient({
                     if (pendingLifecycleOp?.kind === 'archiveMatter') return;
                     setMatterLifecycleReason(e.target.value);
                   }}
-                  readOnly={pendingLifecycleOp?.kind === 'archiveMatter'}
+                  readOnly={!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter'}
                   placeholder="اكتب سبب أرشفة هذا الملف (مثال: انتهاء الإجراءات وحفظ الأوراق)..."
                   rows={3}
                   minLength={3}
                   required
                   disabled={isLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
-                    pendingLifecycleOp?.kind === 'archiveMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-amber-300 cursor-not-allowed' : 'border-[#D5DFE3]'
+                    !isLifecycleSubmitting && pendingLifecycleOp?.kind === 'archiveMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-amber-300 cursor-not-allowed' : 'border-[#D5DFE3]'
                   }`}
                 />
               </div>
@@ -2830,7 +2830,7 @@ export function MatterDetailClient({
               </div>
             )}
 
-            {pendingLifecycleOp?.kind === 'reopenMatter' && (
+            {!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter' && (
               <div className="space-y-2">
                 <div
                   data-testid="frozen-reason-notice"
@@ -2867,14 +2867,14 @@ export function MatterDetailClient({
                     if (pendingLifecycleOp?.kind === 'reopenMatter') return;
                     setMatterLifecycleReason(e.target.value);
                   }}
-                  readOnly={pendingLifecycleOp?.kind === 'reopenMatter'}
+                  readOnly={!isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter'}
                   placeholder="اكتب سبب إعادة فتح الملف (مثال: ظهور مستندات جديدة أو استئناف النزاع)..."
                   rows={3}
                   minLength={3}
                   required
                   disabled={isLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
-                    pendingLifecycleOp?.kind === 'reopenMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-sky-300 cursor-not-allowed' : 'border-[#D5DFE3]'
+                    !isLifecycleSubmitting && pendingLifecycleOp?.kind === 'reopenMatter' ? 'bg-[#F4F6F7] text-[#4D606A] border-sky-300 cursor-not-allowed' : 'border-[#D5DFE3]'
                   }`}
                 />
               </div>
@@ -2949,7 +2949,8 @@ export function MatterDetailClient({
               </div>
             )}
 
-            {pendingLifecycleOp &&
+            {!isProceedingLifecycleSubmitting &&
+              pendingLifecycleOp &&
               (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
               pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id && (
                 <div className="space-y-2">
@@ -3011,6 +3012,7 @@ export function MatterDetailClient({
                     setProceedingLifecycleReason(e.target.value);
                   }}
                   readOnly={Boolean(
+                    !isProceedingLifecycleSubmitting &&
                     pendingLifecycleOp &&
                     (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
                     pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id
@@ -3021,6 +3023,7 @@ export function MatterDetailClient({
                   required
                   disabled={isProceedingLifecycleSubmitting}
                   className={`w-full p-2 text-xs border rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60 ${
+                    !isProceedingLifecycleSubmitting &&
                     pendingLifecycleOp &&
                     (pendingLifecycleOp.kind === 'archiveProceeding' || pendingLifecycleOp.kind === 'reopenProceeding') &&
                     pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id
