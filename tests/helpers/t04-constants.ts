@@ -114,7 +114,7 @@ export const T04_COPY = {
   emptyStateHeading: 'مكتب المحامي — لوحة المتابعة',
   emptyStateSecurityAction: 'مراجعة إعدادات الأمان',
   sessionExpired: 'انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.',
-  offlineBanner: 'النت مقطوع. التعديلات مش محفوظة',
+  offlineBanner: 'انقطع الاتصال بالإنترنت. التعديلات غير محفوظة',
   loadingLabel: 'جارٍ التحميل...',
   errorRetry: 'إعادة المحاولة',
 } as const;

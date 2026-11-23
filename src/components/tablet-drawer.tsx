@@ -4,6 +4,20 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 import { signOutAndReset } from '@/lib/auth-client';
+import {
+  IconCalendar,
+  IconDashboard,
+  IconDeadline,
+  IconFolder,
+  IconLogout,
+  IconSearch,
+  IconSettings,
+  IconShield,
+  IconTask,
+  IconToday,
+  IconUsers,
+  IconWallet,
+} from './stitch-icons';
 
 interface TabletDrawerProps {
   isOpen: boolean;
@@ -25,20 +39,16 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     onClose();
   }, [onClose]);
 
-  // Focus trap & Escape key handling
   useEffect(() => {
     if (!isOpen) return;
 
-    // Save previous active element to restore focus on close
     const previouslyFocused = triggerRef?.current || (document.activeElement as HTMLElement | null);
 
-    // Focus close button initially via animation frame without arbitrary timeout
     const frameId = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
 
     const restoreFocus = () => {
-      // Attempt restoring focus to trigger or previous active element if visible and focusable
       const target = triggerRef?.current || previouslyFocused;
       if (target && typeof target.focus === 'function') {
         const isVisible =
@@ -53,7 +63,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
         }
       }
 
-      // Safe fallback to main content if trigger button is hidden or unfocused on desktop
       const mainContent = document.getElementById('main-content');
       if (mainContent && typeof mainContent.focus === 'function') {
         mainContent.focus();
@@ -134,9 +143,15 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
+  const navItemClass = (active: boolean) =>
+    `flex items-center gap-2.5 px-3 py-2.5 text-sm transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-1 ${
+      active
+        ? 'bg-[#E9F2F5] text-[#14566B] border-r-4 border-[#14566B] font-bold rounded-l-[4px]'
+        : 'text-[#4D606A] hover:bg-[#F4F6F7] hover:text-[#172A35] font-medium rounded-[4px]'
+    }`;
+
   return (
     <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
-      {/* Backdrop */}
       <div
         data-testid="drawer-backdrop"
         aria-hidden="true"
@@ -144,7 +159,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
         className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity"
       />
 
-      {/* Drawer Dialog */}
       <div
         ref={drawerRef}
         role="dialog"
@@ -155,11 +169,14 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
         className="relative w-full max-w-xs sm:w-80 bg-white h-full shadow-2xl z-10 flex flex-col justify-between p-4 overflow-y-auto"
       >
         <div>
-          {/* Drawer Header */}
           <div className="flex items-center justify-between pb-4 border-b border-[#D5DFE3] mb-4">
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-[6px] bg-[#14566B] flex items-center justify-center text-white font-bold text-sm select-none" aria-hidden="true">
-                ⚖️
+            <div className="flex items-center gap-2.5">
+              <span
+                className="w-8 h-8 rounded-[6px] bg-[#14566B] flex items-center justify-center text-white font-bold text-xs tracking-wider select-none"
+                aria-hidden="true"
+                dir="ltr"
+              >
+                LO
               </span>
               <span className="font-bold text-base text-[#172A35]">قائمة التنقل</span>
             </div>
@@ -179,20 +196,15 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             </button>
           </div>
 
-          {/* Navigation Links */}
-          <nav aria-label="التنقل الرئيسي" className="flex flex-col gap-2">
+          <nav aria-label="التنقل الرئيسي" className="flex flex-col gap-1.5">
             <Link
               href="/"
               data-testid="nav-link-home"
               aria-current={isHomeActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isHomeActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isHomeActive)}
             >
-              <span aria-hidden="true" className="text-base">🏠</span>
+              <IconDashboard className="w-5 h-5 shrink-0" />
               <span>الرئيسية</span>
             </Link>
 
@@ -201,14 +213,10 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-today"
               aria-current={isTodayActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isTodayActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isTodayActive)}
             >
-              <span aria-hidden="true" className="text-base">☀️</span>
-              <span>النهارده (اليوم)</span>
+              <IconToday className="w-5 h-5 shrink-0" />
+              <span>أجندة اليوم</span>
             </Link>
 
             <Link
@@ -216,14 +224,10 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-agenda"
               aria-current={isAgendaActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isAgendaActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isAgendaActive)}
             >
-              <span aria-hidden="true" className="text-base">📅</span>
-              <span>الأجندة</span>
+              <IconCalendar className="w-5 h-5 shrink-0" />
+              <span>جدول الجلسات والأجندة</span>
             </Link>
 
             <Link
@@ -231,14 +235,10 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-tasks"
               aria-current={isTasksActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isTasksActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isTasksActive)}
             >
-              <span aria-hidden="true" className="text-base">☑️</span>
-              <span>المهام</span>
+              <IconTask className="w-5 h-5 shrink-0" />
+              <span>المهام الإجرائية</span>
             </Link>
 
             <Link
@@ -246,13 +246,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-deadlines"
               aria-current={isDeadlinesActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isDeadlinesActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isDeadlinesActive)}
             >
-              <span aria-hidden="true" className="text-base">⏳</span>
+              <IconDeadline className="w-5 h-5 shrink-0" />
               <span>المواعيد القانونية</span>
             </Link>
 
@@ -261,13 +257,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-matters"
               aria-current={isMattersActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isMattersActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isMattersActive)}
             >
-              <span aria-hidden="true" className="text-base">📁</span>
+              <IconFolder className="w-5 h-5 shrink-0" />
               <span>ملفات القضايا</span>
             </Link>
 
@@ -276,13 +268,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-parties"
               aria-current={isPartiesActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isPartiesActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isPartiesActive)}
             >
-              <span aria-hidden="true" className="text-base">👥</span>
+              <IconUsers className="w-5 h-5 shrink-0" />
               <span>دليل الأطراف</span>
             </Link>
 
@@ -291,13 +279,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-security"
               aria-current={isSecurityActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isSecurityActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isSecurityActive)}
             >
-              <span aria-hidden="true" className="text-base">🛡️</span>
+              <IconShield className="w-5 h-5 shrink-0" />
               <span>إعدادات الأمان</span>
             </Link>
 
@@ -306,13 +290,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-search"
               aria-current={isSearchActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isSearchActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isSearchActive)}
             >
-              <span aria-hidden="true" className="text-base">🔍</span>
+              <IconSearch className="w-5 h-5 shrink-0" />
               <span>البحث الموحد</span>
             </Link>
 
@@ -321,38 +301,34 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               data-testid="nav-link-reference"
               aria-current={isReferenceActive ? 'page' : undefined}
               onNavigate={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
-                isReferenceActive
-                  ? 'bg-[#14566B] text-white shadow-xs'
-                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
-              }`}
+              className={navItemClass(isReferenceActive)}
             >
-              <span aria-hidden="true" className="text-base">⚙️</span>
+              <IconSettings className="w-5 h-5 shrink-0" />
               <span>إعدادات المراجع</span>
             </Link>
 
-            {/* Future Modules */}
-            <div className="pt-4 mt-2 border-t border-[#D5DFE3]">
-              <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-2">
+            <div className="pt-3 mt-2 border-t border-[#D5DFE3]">
+              <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-1.5">
                 الوحدات القادمة
               </span>
               <div className="space-y-1">
                 <div
                   aria-disabled="true"
-                  className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"
+                  className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
                 >
                   <div className="flex items-center gap-2">
-                    <span aria-hidden="true">💰</span>
+                    <IconWallet className="w-4 h-4 text-[#4D606A]" />
                     <span>حسابات الموكلين</span>
                   </div>
-                  <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
+                  <span className="text-[10px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
+                    قريباً
+                  </span>
                 </div>
               </div>
             </div>
           </nav>
         </div>
 
-        {/* Drawer Footer / Logout */}
         <div className="pt-4 border-t border-[#D5DFE3] space-y-2">
           {logoutError && (
             <div
@@ -369,9 +345,9 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             onClick={handleLogout}
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium text-[#A4262C] hover:bg-red-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-2 transition-colors min-h-[44px]"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[4px] text-sm font-medium text-[#A4262C] hover:bg-red-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#A4262C] focus:ring-offset-1 transition-colors min-h-[44px]"
           >
-            <span aria-hidden="true" className="text-base">🚪</span>
+            <IconLogout className="w-5 h-5 shrink-0" />
             <span>{isLoggingOut ? 'جارٍ تسجيل الخروج...' : 'تسجيل الخروج'}</span>
           </button>
         </div>

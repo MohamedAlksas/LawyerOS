@@ -1491,7 +1491,6 @@ export function MatterDetailClient({
                 }}
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-[6px] border border-amber-300 transition-colors min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <span>📦</span>
                 <span>أرشفة الملف</span>
               </button>
               <Link
@@ -1499,7 +1498,6 @@ export function MatterDetailClient({
                 data-testid="edit-matter-button"
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
               >
-                <span>✏️</span>
                 <span>تعديل بيانات الملف</span>
               </Link>
               <Link
@@ -1507,7 +1505,6 @@ export function MatterDetailClient({
                 data-testid="add-proceeding-button"
                 className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px]"
               >
-                <span>⚖️</span>
                 <span>+ إضافة قيد قضائي</span>
               </Link>
             </>
@@ -1521,7 +1518,6 @@ export function MatterDetailClient({
               }}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <span>📂</span>
               <span>إعادة فتح الملف</span>
             </button>
           )}
@@ -1537,7 +1533,6 @@ export function MatterDetailClient({
         >
           <div className="space-y-0.5">
             <div className="font-bold flex items-center gap-1.5 text-amber-900 text-sm">
-              <span aria-hidden="true">⚠️</span>
               <span>عملية غير محسومة قيد الانتظار: {pendingLifecycleOp.description}</span>
             </div>
             <p className="text-amber-800">
@@ -1580,7 +1575,6 @@ export function MatterDetailClient({
           className="p-4 bg-stone-100 border-2 border-stone-300 rounded-[6px] text-stone-900 space-y-1 shadow-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm text-stone-900">
-            <span aria-hidden="true" className="text-lg">📁</span>
             <span>ملف القضية مؤرشف — وضع القراءة فقط</span>
           </div>
           <p className="text-xs text-stone-700 leading-relaxed">
@@ -1613,7 +1607,7 @@ export function MatterDetailClient({
           data-testid="party-action-error"
           className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs flex items-center justify-between"
         >
-          <span>⚠️ {partyActionError}</span>
+          <span>{partyActionError}</span>
           <button
             type="button"
             onClick={() => setPartyActionError(null)}
@@ -1632,7 +1626,6 @@ export function MatterDetailClient({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>🔒</span>
             <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تعديل العلاقات</span>
           </div>
           <p className="leading-relaxed">
@@ -1668,7 +1661,6 @@ export function MatterDetailClient({
           className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⏳</span>
             <span>عملية ({pendingAssocOp.description}) معلّقة بانتظار نتيجة مؤكدة</span>
           </div>
           <p className="leading-relaxed">
@@ -1695,7 +1687,6 @@ export function MatterDetailClient({
           className="bg-amber-50 border border-amber-300 rounded-[6px] p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-amber-900 shadow-xs"
         >
           <div className="flex items-start sm:items-center gap-2.5">
-            <span className="text-xl select-none" aria-hidden="true">⚠️</span>
             <div className="text-xs leading-relaxed">
               <span className="font-bold block text-sm mb-0.5">الملف نشط بدون مكان حفظ ورقي محدد</span>
               <span>
@@ -1716,7 +1707,6 @@ export function MatterDetailClient({
           className="bg-white rounded-[6px] border border-[#D5DFE3] px-4 py-3 flex items-center justify-between text-xs text-[#172A35]"
         >
           <div className="flex items-center gap-2">
-            <span className="text-base">📁</span>
             <span className="font-semibold text-[#4D606A]">مكان الحفظ الورقي بالمكتب:</span>
             <span className="font-bold text-[#14566B]">{matter.paperLocationName}</span>
           </div>
@@ -1773,7 +1763,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            👥 الأطراف والصفات ({parties.length})
+            الأطراف والصفات ({parties.length})
           </button>
 
           <button
@@ -1786,7 +1776,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            ⚖️ القيود والدعاوى القضائية ({proceedings.length})
+            القيود والدعاوى القضائية ({proceedings.length})
           </button>
 
           <button
@@ -1799,7 +1789,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            📜 سندات الوكالة والتوكيلات ({authorizations.length})
+            سندات الوكالة والتوكيلات ({authorizations.length})
           </button>
 
           <button
@@ -1812,7 +1802,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            ⏳ المهام والمواعيد ({initialTasks.length + initialDeadlines.length})
+            المهام والمواعيد ({initialTasks.length + initialDeadlines.length})
           </button>
 
           <button
@@ -1825,7 +1815,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            📝 الملخص والملاحظات
+            الملخص والملاحظات
           </button>
         </nav>
       </div>
@@ -2184,7 +2174,6 @@ export function MatterDetailClient({
                 data-testid="add-proceeding-tab-button"
                 className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
               >
-                <span>⚖️</span>
                 <span>+ تسجيل قيد قضائي جديد</span>
               </Link>
             )}
@@ -2195,7 +2184,7 @@ export function MatterDetailClient({
               data-testid="empty-proceedings-container"
               className="bg-white rounded-[6px] border border-[#D5DFE3] p-8 text-center space-y-3 shadow-xs"
             >
-              <div className="text-3xl">⚖️</div>
+              <div className="text-3xl"></div>
               <h3 className="text-base font-bold text-[#172A35]">لا توجد قيود قضائية مسجلة</h3>
               <p className="text-xs text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 لم يتم قيد أي دعوى أو استئناف في المحاكم لهذا الملف حتى الآن. يمكنك تسجيل أول قيد قضائي بالمحكمة لتنظيم الجلسات.
@@ -2237,7 +2226,6 @@ export function MatterDetailClient({
                               data-testid="proceeding-archived-badge"
                               className="text-xs font-bold px-2 py-0.5 rounded bg-stone-100 text-stone-700 border border-stone-300 inline-flex items-center gap-1"
                             >
-                              <span>📁</span>
                               <span>مؤرشف</span>
                             </span>
                           ) : isDraft ? (
@@ -2245,7 +2233,6 @@ export function MatterDetailClient({
                               data-testid="proceeding-draft-badge"
                               className="text-xs font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300 inline-flex items-center gap-1"
                             >
-                              <span>⚠️</span>
                               <span>الرقم غير مستكمل (مسودة قيد)</span>
                             </span>
                           ) : (
@@ -2344,7 +2331,6 @@ export function MatterDetailClient({
                         data-testid="parent-proceeding-link"
                         className="p-2.5 bg-blue-50/60 border border-blue-200 rounded-[6px] text-xs text-blue-900 flex items-center gap-2"
                       >
-                        <span aria-hidden="true">🔗</span>
                         <span className="font-semibold">مرتبط بالدعوى السابقة:</span>
                         <span>{proc.parentProceedingSummary}</span>
                       </div>
@@ -2438,7 +2424,7 @@ export function MatterDetailClient({
                   data-testid="poa-load-error"
                   className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded"
                 >
-                  ⚠️ {poaActionError}
+                  {poaActionError}
                 </p>
               )}
 
@@ -2518,7 +2504,7 @@ export function MatterDetailClient({
               data-testid="empty-authorizations-container"
               className="bg-white rounded-[6px] border border-[#D5DFE3] p-8 text-center space-y-3 shadow-xs"
             >
-              <div className="text-3xl">📜</div>
+              <div className="text-3xl"></div>
               <h3 className="text-base font-bold text-[#172A35]">لا توجد توكيلات مرتبطة بهذا الملف</h3>
               <p className="text-xs text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 لم يتم إسناد أي توكيل رسمي لهذا الملف بعد. يمكنك ربط توكيل موثق صادر من أحد الموكلين بالملف.
@@ -2665,7 +2651,7 @@ export function MatterDetailClient({
       {/* Future Modules Notice */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          📁 المستندات والحسابات
+          المستندات والحسابات
         </span>
         <p>
           وحدات حفظ المستندات الرقمية وحسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها.
@@ -2690,7 +2676,7 @@ export function MatterDetailClient({
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
-                📦 أرشفة ملف القضية
+                أرشفة ملف القضية
               </h3>
               <button
                 type="button"
@@ -2709,7 +2695,7 @@ export function MatterDetailClient({
 
             {lifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {lifecycleError}
+                {lifecycleError}
               </div>
             )}
 
@@ -2807,7 +2793,7 @@ export function MatterDetailClient({
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
-                📂 إعادة فتح ملف القضية
+                إعادة فتح ملف القضية
               </h3>
               <button
                 type="button"
@@ -2826,7 +2812,7 @@ export function MatterDetailClient({
 
             {lifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {lifecycleError}
+                {lifecycleError}
               </div>
             )}
 
@@ -2924,7 +2910,7 @@ export function MatterDetailClient({
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
-                {proceedingLifecycleAction === 'archive' ? '📦 أرشفة القيد القضائي' : '📂 إعادة فتح القيد القضائي'}
+                {proceedingLifecycleAction === 'archive' ? 'أرشفة القيد القضائي' : 'إعادة فتح القيد القضائي'}
               </h3>
               <button
                 type="button"
@@ -2945,7 +2931,7 @@ export function MatterDetailClient({
 
             {proceedingLifecycleError && (
               <div role="alert" className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs">
-                ⚠️ {proceedingLifecycleError}
+                {proceedingLifecycleError}
               </div>
             )}
 

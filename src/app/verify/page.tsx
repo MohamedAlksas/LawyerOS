@@ -86,7 +86,6 @@ function VerifyForm() {
             aria-live="polite"
             className="mb-4 p-3 bg-red-50 border border-red-200 text-[#A4262C] text-sm rounded flex items-center gap-2"
           >
-            <span aria-hidden="true">⚠️</span>
             <span>{error}</span>
           </div>
         )}

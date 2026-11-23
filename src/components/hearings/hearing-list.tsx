@@ -70,7 +70,7 @@ export function HearingList({
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-bold text-[#172A35]" data-testid="hearings-section-heading">
-              ⚖️ رول وجدول الجلسات القضائية
+              رول وجدول الجلسات القضائية
             </h2>
             <span
               data-testid="hearings-count-badge"
@@ -94,7 +94,6 @@ export function HearingList({
             data-testid="schedule-hearing-button"
             className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] flex items-center justify-center gap-1.5 shrink-0"
           >
-            <span>➕</span>
             <span>{pendingSchedule ? 'إعادة محاولة جدولة الجلسة' : 'إضافة وتحديد موعد جلسة'}</span>
           </button>
         )}
@@ -107,8 +106,7 @@ export function HearingList({
           className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-8 text-center space-y-3"
         >
           <div className="text-3xl" aria-hidden="true">
-            📅
-          </div>
+            </div>
           <div className="space-y-1">
             <p className="font-bold text-sm text-[#172A35]">
               لا توجد جلسات مسجلة لهذا القيد القضائي بعد
@@ -127,7 +125,6 @@ export function HearingList({
               data-testid="empty-schedule-hearing-button"
               className="inline-flex items-center gap-2 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
             >
-              <span>➕</span>
               <span>تحديد موعد الجلسة الأولى</span>
             </button>
           )}
@@ -219,7 +216,6 @@ export function HearingList({
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-emerald-900 flex items-center gap-1">
-                        <span>⚖️</span>
                         <span>قرار المحكمة (الإصدار {latestResult.revision}):</span>
                       </span>
                       {latestResult.correctionReason && (
@@ -279,7 +275,6 @@ export function HearingList({
                           data-testid={`record-result-button-${hearing.id}`}
                           className="px-3.5 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
                         >
-                          <span>⚖️</span>
                           <span>تسجيل النتيجة</span>
                         </Link>
                       )}
@@ -293,7 +288,6 @@ export function HearingList({
                           data-testid={`reschedule-hearing-button-${hearing.id}`}
                           className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center gap-1"
                         >
-                          <span>🔄</span>
                           <span>{pendingReschedule ? 'إعادة محاولة تعديل الموعد' : 'تعديل الموعد'}</span>
                         </button>
                       )}
@@ -307,7 +301,6 @@ export function HearingList({
                           data-testid={`cancel-hearing-button-${hearing.id}`}
                           className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold rounded-[6px] border border-red-200 transition-colors min-h-[44px] flex items-center gap-1"
                         >
-                          <span>🚫</span>
                           <span>{pendingCancel ? 'إعادة محاولة إلغاء الجلسة' : 'إلغاء'}</span>
                         </button>
                       )}
@@ -318,7 +311,6 @@ export function HearingList({
                           data-testid={`correct-result-button-${hearing.id}`}
                           className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center gap-1"
                         >
-                          <span>✏️</span>
                           <span>تصحيح منطوق القرار</span>
                         </Link>
                       )}

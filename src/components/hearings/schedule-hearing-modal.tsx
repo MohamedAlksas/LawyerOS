@@ -139,7 +139,7 @@ export function ScheduleHearingModal({
         <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
           <div className="space-y-0.5">
             <h2 id="schedule-hearing-modal-title" className="text-base sm:text-lg font-bold text-[#172A35]">
-              📅 إضافة وتحديد موعد جلسة جديدة
+              إضافة وتحديد موعد جلسة جديدة
             </h2>
             <p className="text-xs text-[#4D606A]">
               تحديد موعد جلسة مرافعة أو إدارية في هذا القيد القضائي
@@ -162,7 +162,7 @@ export function ScheduleHearingModal({
             data-testid="hearing-modal-session-recovery-alert"
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
           >
-            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
             <p>أُبقيت بيانات الجلسة ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
             <a
               href="/login"
@@ -183,7 +183,6 @@ export function ScheduleHearingModal({
             className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-1.5"
           >
             <div className="flex items-center gap-1.5 font-bold">
-              <span>⚠️</span>
               <span>تعذر تأكيد حفظ الجلسة على الخادم</span>
             </div>
             <p>
@@ -284,7 +283,6 @@ export function ScheduleHearingModal({
               </div>
             ) : (
               <div className="text-xs text-[#4D606A] italic flex items-center gap-1 pt-1" data-testid="schedule-hearing-unknown-time-indicator">
-                <span>🕒</span>
                 <span>الساعة غير محددة (سيتم عرضها &laquo;الساعة غير محددة&raquo; دون افتراض وقت عشوائي)</span>
               </div>
             )}
@@ -364,17 +362,14 @@ export function ScheduleHearingModal({
             >
               {isSubmitting ? (
                 <>
-                  <span className="inline-block animate-spin">⏳</span>
                   <span>جارٍ الحفظ...</span>
                 </>
               ) : isFrozenRetry ? (
                 <>
-                  <span>🔄</span>
                   <span>إعادة المحاولة (بنفس المفتاح)</span>
                 </>
               ) : (
                 <>
-                  <span>💾</span>
                   <span>حفظ موعد الجلسة</span>
                 </>
               )}

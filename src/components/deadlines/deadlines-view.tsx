@@ -513,7 +513,7 @@ export function DeadlinesView({
           draftModalDraft.clear();
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setDraftConflictError('البيانات اتعدلت من شاشة تانية. يرجى تحديث القائمة ومراجعة أحدث نسخة قبل الحفظ.');
+          setDraftConflictError('تم تعديل البيانات من شاشة أخرى. يرجى تحديث القائمة ومراجعة أحدث نسخة قبل الحفظ.');
         } else {
           setDraftFormError(res.error || 'تعذر تنفيذ العملية.');
           if (res.fieldErrors) setDraftFieldErrors(res.fieldErrors);
@@ -796,7 +796,7 @@ export function DeadlinesView({
           changeDateDraft.clear();
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setDateChangeConflict('البيانات اتعدلت من شاشة تانية. يرجى تحديث البيانات ومراجعة النسخة الأحدث.');
+          setDateChangeConflict('تم تعديل البيانات من شاشة أخرى. يرجى تحديث البيانات ومراجعة النسخة الأحدث.');
         } else {
           setDateChangeError(res.error || 'تعذر تعديل تاريخ الموعد.');
         }
@@ -882,7 +882,7 @@ export function DeadlinesView({
           completeDraft.clear();
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setCompleteConflict('البيانات اتعدلت من شاشة تانية. يرجى تحديث القائمة والمحاولة بعد المراجعة.');
+          setCompleteConflict('تم تعديل البيانات من شاشة أخرى. يرجى تحديث القائمة والمحاولة بعد المراجعة.');
         } else {
           setCompleteError(res.error || 'تعذر تسجيل إتمام الموعد القانوني.');
         }
@@ -935,7 +935,7 @@ export function DeadlinesView({
           pendingCancelKeysRef.current.delete(opKey);
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setCancelConflict('البيانات اتعدلت من شاشة تانية. يرجى تحديث البيانات أولاً.');
+          setCancelConflict('تم تعديل البيانات من شاشة أخرى. يرجى تحديث البيانات أولاً.');
         } else {
           setCancelError(res.error || 'تعذر إلغاء الموعد القانوني.');
         }
@@ -975,7 +975,6 @@ export function DeadlinesView({
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pb-2 border-b border-[#E8EEF1]">
         <div className="space-y-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span aria-hidden="true">⏳</span>
             <h3 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">{d.title}</h3>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-[#4D606A]">
@@ -998,7 +997,7 @@ export function DeadlinesView({
               data-testid={`deadline-overdue-badge-${d.id}`}
               className="text-sm font-bold px-2.5 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300"
             >
-              ⚠️ متأخر
+              متأخر
             </span>
           )}
         </div>
@@ -1108,7 +1107,7 @@ export function DeadlinesView({
             onClick={() => openChangeDateModal(d)}
             className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
           >
-            📅 تعديل التاريخ
+            تعديل التاريخ
           </button>
 
           <button
@@ -1122,7 +1121,7 @@ export function DeadlinesView({
             }}
             className="px-4 py-2 bg-white hover:bg-red-50 text-[#A4262C] text-sm font-semibold rounded-[6px] border border-red-200 min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
           >
-            🚫 إلغاء الموعد
+            إلغاء الموعد
           </button>
         </div>
       )}
@@ -1131,11 +1130,16 @@ export function DeadlinesView({
 
   return (
     <div className="space-y-6" data-testid="deadlines-view">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#D5DFE3]">
+      {/* Stitch S08b Header Card */}
+      <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
         <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-[#7A4A00] bg-[#FFF7E6] px-2.5 py-0.5 rounded-[4px] border border-[#E0B46A]">
+              بروتوكول التحقق البشري الإلزامي
+            </span>
+          </div>
           <h1 className={lockedMatterId ? 'text-lg font-bold text-[#172A35]' : 'text-2xl font-bold text-[#172A35]'}>
-            ⏳ المواعيد القانونية الحرجة
+            المواعيد القانونية الحرجة
           </h1>
           <p className="text-sm text-[#4D606A]">
             المواعيد القانونية تُحسب وتُعتمد يدوياً بواسطة المحامي ولا يُنشئها النظام أو يغلقها تلقائياً.
@@ -1150,7 +1154,7 @@ export function DeadlinesView({
             disabled={isLoading}
             className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50"
           >
-            🔄 تحديث
+            تحديث
           </button>
           {!isReadOnly && (
             <button
@@ -1159,10 +1163,66 @@ export function DeadlinesView({
               onClick={openNewDeadlineModal}
               className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] shadow-xs min-h-[44px] flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
             >
-              <span>➕</span>
               <span>موعد قانوني جديد</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Stitch S08b Strict Procedural Rule Banner */}
+      <div className="bg-white border-r-4 border-r-[#14566B] border border-[#D5DFE3] rounded-[6px] p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-[#14566B]">الضابط الإجرائي المُلزم للمكتب</h2>
+            <span className="bg-red-50 text-[#A4262C] border border-red-200 px-2 py-0.5 rounded text-xs font-semibold">
+              مبدأ حتمي
+            </span>
+          </div>
+          <p className="text-xs text-[#172A35] leading-relaxed">
+            «لا يوجد احتساب تلقائي للمواعيد القانونية؛ يتطلب كل ميعاد إجرائي تدقيقاً بشرياً واعتماداً رسمياً من المحامي بناءً على إعلان رسمي أو حكم قضائي».
+          </p>
+        </div>
+      </div>
+
+      {/* Stitch S08b Metric Summary Tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#7A4A00] block">مسودات مقترحة تحتاج مراجعة</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#7A4A00]">{draftList.length}</strong>
+              <span className="text-xs text-[#4D606A]">معلقة الاعتماد</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-[#FFF7E6] border border-[#E0B46A] flex items-center justify-center text-[#7A4A00] font-bold text-sm">
+            {draftList.length}
+          </span>
+        </div>
+
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#14566B] block">مواعيد معتمدة رسمياً</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#14566B]">{confirmedList.length}</strong>
+              <span className="text-xs text-[#4D606A]">مواعيد حاسمة قيد السريان</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-[#E9F2F5] border border-[#C2D9E2] flex items-center justify-center text-[#14566B] font-bold text-sm">
+            {confirmedList.length}
+          </span>
+        </div>
+
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#176449] block">مواعيد موثقة ومنتهية</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#176449]">{closedList.length}</strong>
+              <span className="text-xs text-[#4D606A]">مقيدة بمحاضر التنفيذ</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-emerald-50 border border-emerald-200 flex items-center justify-center text-[#176449] font-bold text-sm">
+            {closedList.length}
+          </span>
         </div>
       </div>
 
@@ -1197,7 +1257,6 @@ export function DeadlinesView({
         />
       ) : deadlines.length === 0 ? (
         <EmptyStateContainer
-          icon="⏳"
           title="لا توجد مواعيد قانونية مسجلة"
           description="أضف موعداً قانونياً كمسودة للمراجعة أو اعتمد موعداً بعد التحقق من مصدره القانوني."
           action={
@@ -1217,7 +1276,6 @@ export function DeadlinesView({
           {/* Draft Section */}
           <section data-testid="deadlines-draft-section" className="space-y-3" aria-labelledby="draft-deadlines-heading">
             <h2 id="draft-deadlines-heading" className="text-lg font-bold text-[#7A4A00] flex items-center gap-2">
-              <span>⚠️</span>
               <span>مواعيد تحتاج مراجعة واعتماد ({draftList.length})</span>
             </h2>
             {draftList.length === 0 ? (
@@ -1247,7 +1305,6 @@ export function DeadlinesView({
           {/* Completed / Cancelled Section */}
           <section data-testid="deadlines-completed-section" className="space-y-3" aria-labelledby="closed-deadlines-heading">
             <h2 id="closed-deadlines-heading" className="text-lg font-bold text-[#172A35] flex items-center gap-2">
-              <span>📁</span>
               <span>مواعيد منتهية أو ملغاة ({closedList.length})</span>
             </h2>
             {closedList.length === 0 ? (
@@ -1284,7 +1341,7 @@ export function DeadlinesView({
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="deadline-modal-title" className="text-lg font-bold text-[#172A35]">
-                  {editingDeadline ? '⏳ مراجعة واعتماد الموعد القانوني' : '⏳ تسجيل موعد قانوني جديد'}
+                  {editingDeadline ? 'مراجعة واعتماد الموعد القانوني' : 'تسجيل موعد قانوني جديد'}
                 </h2>
                 <button
                   type="button"
@@ -1299,7 +1356,7 @@ export function DeadlinesView({
 
               {draftSessionExpired && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] space-y-2">
-                  <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+                  <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
                   <a
                     href="/login"
                     target="_blank"
@@ -1317,7 +1374,7 @@ export function DeadlinesView({
                   data-testid="deadline-conflict-banner"
                   className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                 >
-                  <span>⚠️ {draftConflictError}</span>
+                  <span>{draftConflictError}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1337,7 +1394,7 @@ export function DeadlinesView({
                   data-testid="deadline-form-error"
                   className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C] font-semibold"
                 >
-                  ⚠️ {draftFormError}
+                  {draftFormError}
                 </div>
               )}
 
@@ -1560,7 +1617,7 @@ export function DeadlinesView({
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="change-deadline-date-title" className="text-lg font-bold text-[#172A35]">
-                  📅 تعديل تاريخ الموعد القانوني
+                  تعديل تاريخ الموعد القانوني
                 </h2>
                 <button
                   type="button"
@@ -1575,13 +1632,13 @@ export function DeadlinesView({
 
               {changeDateTarget.status === 'CONFIRMED' && (
                 <div className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00]">
-                  ⚠️ تغيير تاريخ الموعد المؤكد سيعيده تلقائياً إلى <strong>«مسودة تحتاج مراجعة»</strong> ويلغي الاعتماد والتذكيرات السابقة لحين إعادة الاعتماد.
+                  تغيير تاريخ الموعد المؤكد سيعيده تلقائياً إلى <strong>«مسودة تحتاج مراجعة»</strong> ويلغي الاعتماد والتذكيرات السابقة لحين إعادة الاعتماد.
                 </div>
               )}
 
               {dateChangeSessionExpired && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] space-y-2">
-                  <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم التحقق</p>
+                  <p className="font-bold">انتهت صلاحية الجلسة أو يلزم التحقق</p>
                   <a
                     href="/login"
                     target="_blank"
@@ -1599,7 +1656,7 @@ export function DeadlinesView({
                   data-testid="deadline-conflict-banner"
                   className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] flex flex-col gap-2"
                 >
-                  <span>⚠️ {dateChangeConflict}</span>
+                  <span>{dateChangeConflict}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1619,7 +1676,7 @@ export function DeadlinesView({
                   data-testid="deadline-form-error"
                   className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C] font-semibold"
                 >
-                  ⚠️ {dateChangeError}
+                  {dateChangeError}
                 </div>
               )}
 
@@ -1742,7 +1799,7 @@ export function DeadlinesView({
 
               {completeSessionExpired && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] space-y-2">
-                  <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم التحقق</p>
+                  <p className="font-bold">انتهت صلاحية الجلسة أو يلزم التحقق</p>
                   <a
                     href="/login"
                     target="_blank"
@@ -1760,7 +1817,7 @@ export function DeadlinesView({
                   data-testid="deadline-conflict-banner"
                   className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] flex flex-col gap-2"
                 >
-                  <span>⚠️ {completeConflict}</span>
+                  <span>{completeConflict}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1780,7 +1837,7 @@ export function DeadlinesView({
                   data-testid="deadline-completion-error"
                   className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C] font-semibold"
                 >
-                  ⚠️ {completeError}
+                  {completeError}
                 </div>
               )}
 
@@ -1868,7 +1925,7 @@ export function DeadlinesView({
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="cancel-deadline-title" className="text-lg font-bold text-[#172A35]">
-                  🚫 إلغاء الموعد القانوني
+                  إلغاء الموعد القانوني
                 </h2>
                 <button
                   type="button"
@@ -1891,7 +1948,7 @@ export function DeadlinesView({
                   data-testid="deadline-conflict-banner"
                   className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] flex flex-col gap-2"
                 >
-                  <span>⚠️ {cancelConflict}</span>
+                  <span>{cancelConflict}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1907,7 +1964,7 @@ export function DeadlinesView({
 
               {cancelError && (
                 <div role="alert" data-testid="deadline-form-error" className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C]">
-                  ⚠️ {cancelError}
+                  {cancelError}
                 </div>
               )}
 

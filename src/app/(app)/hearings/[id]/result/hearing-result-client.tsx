@@ -301,7 +301,6 @@ export function HearingResultClient({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E8EEF1] pb-3">
           <div className="space-y-0.5">
             <h1 className="text-lg sm:text-xl font-bold text-[#172A35] flex items-center gap-2">
-              <span>⚖️</span>
               <span>تسجيل قرار ونتيجة الجلسة</span>
             </h1>
             <p className="text-xs text-[#4D606A]">
@@ -336,7 +335,6 @@ export function HearingResultClient({
           className="p-4 bg-red-50 border border-red-300 rounded-[6px] text-xs text-red-900 space-y-2"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تضارب في تحديث السجل</span>
           </div>
           <p className="leading-relaxed">
@@ -362,7 +360,6 @@ export function HearingResultClient({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>🔒</span>
             <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
           </div>
           <p className="leading-relaxed">
@@ -399,7 +396,6 @@ export function HearingResultClient({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>📡</span>
             <span>تعذر استلام تأكيد الخادم (حالة عدم يقين في الشبكة)</span>
           </div>
           <p className="leading-relaxed">
@@ -413,7 +409,6 @@ export function HearingResultClient({
               data-testid="record-result-retry-btn"
               className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
             >
-              <span>🔄</span>
               <span>إعادة المحاولة وحفظ النتيجة</span>
             </button>
           </div>
@@ -428,7 +423,6 @@ export function HearingResultClient({
           className="p-4 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 space-y-2"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>✅</span>
             <span>تم حفظ النتيجة بنجاح!</span>
           </div>
           <p className="font-semibold text-emerald-800">{savedDecision}</p>
@@ -460,7 +454,7 @@ export function HearingResultClient({
           role="alert"
           className="p-3 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 font-bold"
         >
-          ✅ تم حفظ التصحيح بنجاح!
+          تم حفظ التصحيح بنجاح!
         </div>
       )}
 
@@ -470,7 +464,6 @@ export function HearingResultClient({
           <div className="flex items-center justify-between border-b border-[#E8EEF1] pb-3">
             <div className="space-y-0.5">
               <h2 className="text-base font-bold text-[#172A35] flex items-center gap-2">
-                <span>📜</span>
                 <span>النتيجة المسجلة الحالية</span>
               </h2>
               <span className="text-xs text-[#4D606A]">
@@ -487,7 +480,7 @@ export function HearingResultClient({
                 data-testid="correct-result-button"
                 className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
               >
-                ✏️ تصحيح نتيجة الجلسة
+                تصحيح نتيجة الجلسة
               </button>
             )}
           </div>
@@ -675,7 +668,7 @@ export function HearingResultClient({
                   onChange={() => setNextDateDisposition('KNOWN')}
                   className="sr-only"
                 />
-                <span>📅 نعم، يوجد موعد قادم (تأجيل لتاريخ محدد)</span>
+                <span>نعم، يوجد موعد قادم (تأجيل لتاريخ محدد)</span>
               </label>
 
               <label
@@ -694,7 +687,7 @@ export function HearingResultClient({
                   onChange={() => setNextDateDisposition('UNDETERMINED')}
                   className="sr-only"
                 />
-                <span>⏳ لم يحدد موعد بعد</span>
+                <span>لم يحدد موعد بعد</span>
               </label>
 
               <label
@@ -713,7 +706,7 @@ export function HearingResultClient({
                   onChange={() => setNextDateDisposition('NONE')}
                   className="sr-only"
                 />
-                <span>🏁 لا توجد جلسة أخرى (حكم منهي للخصومة)</span>
+                <span>لا توجد جلسة أخرى (حكم منهي للخصومة)</span>
               </label>
             </div>
 
@@ -759,7 +752,6 @@ export function HearingResultClient({
                 data-testid="add-task-button"
                 className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1"
               >
-                <span>➕</span>
                 <span>إضافة مهمة عمل مطلوبة</span>
               </button>
             </div>
@@ -833,7 +825,6 @@ export function HearingResultClient({
             className="p-4 bg-teal-50 border-2 border-[#14566B]/30 rounded-[8px] text-[#14566B] space-y-1 shadow-xs"
           >
             <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
-              <span>📋</span>
               <span className="text-sm sm:text-base text-[#172A35] font-bold">
                 «{summaryText}»
               </span>
@@ -860,12 +851,10 @@ export function HearingResultClient({
             >
               {isSubmitting ? (
                 <>
-                  <span className="inline-block animate-spin">⏳</span>
                   <span>جارٍ الحفظ الذري...</span>
                 </>
               ) : (
                 <>
-                  <span>✅</span>
                   <span>تأكيد وحفظ النتيجة</span>
                 </>
               )}

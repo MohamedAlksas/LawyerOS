@@ -14,6 +14,16 @@ import type {
 import { addCairoDays, formatCairoDateArabic } from '@/lib/cairo-date';
 import { LoadingIndicator, EmptyStateContainer } from '@/components/presentation-state';
 import {
+  IconCalendar,
+  IconClock,
+  IconDeadline,
+  IconGavel,
+  IconPrint,
+  IconRefresh,
+  IconTask,
+  IconWarning,
+} from '@/components/stitch-icons';
+import {
   DEADLINE_STATUS_CLASSES,
   DEADLINE_STATUS_LABELS,
   TASK_PRIORITY_LABELS,
@@ -182,12 +192,13 @@ export function AgendaView({
         <article
           key={`hearing-${h.id}`}
           data-testid={`agenda-item-hearing-${h.id}`}
-          className="bg-white rounded-[6px] border border-[#D5DFE3] p-3.5 shadow-xs space-y-2"
+          className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-2"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <span className="text-sm font-bold px-2 py-0.5 rounded bg-sky-50 text-[#14566B] border border-sky-200">
-                ⚖️ جلسة
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2]">
+                <IconGavel className="w-3.5 h-3.5" />
+                <span>جلسة قضائية</span>
               </span>
               <Link
                 href={`/matters/${h.matterId}`}
@@ -195,19 +206,19 @@ export function AgendaView({
               >
                 {h.matterTitle}
               </Link>
-              <bdi dir="ltr" className="text-sm font-mono text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+              <bdi dir="ltr" className="text-xs font-mono text-[#14566B] bg-[#F8FAFB] px-2 py-0.5 rounded border border-[#D5DFE3]">
                 {h.matterFileCode}
               </bdi>
             </div>
 
             {h.hearingTime ? (
-              <span className="text-sm font-bold px-2.5 py-0.5 rounded bg-blue-50 text-blue-900 border border-blue-200">
+              <span className="text-xs font-bold px-2.5 py-1 rounded bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2]">
                 {h.timeLabel}
               </span>
             ) : (
               <span
                 data-testid={`hearing-unknown-time-${h.id}`}
-                className="text-sm font-semibold px-2.5 py-0.5 rounded bg-stone-100 text-[#4D606A] border border-stone-300"
+                className="text-xs font-semibold px-2.5 py-1 rounded bg-[#FFF7E6] text-[#7A4A00] border border-[#E0B46A]"
               >
                 {h.timeLabel}
               </span>
@@ -239,26 +250,27 @@ export function AgendaView({
         <article
           key={`deadline-${d.id}`}
           data-testid={`agenda-item-deadline-${d.id}`}
-          className={`bg-white rounded-[6px] border p-3.5 shadow-xs space-y-2 ${
-            d.isOverdue ? 'border-[#A4262C]' : d.status === 'DRAFT' ? 'border-amber-300' : 'border-[#D5DFE3]'
+          className={`bg-white rounded-[6px] border p-4 shadow-xs space-y-2 ${
+            d.isOverdue ? 'border-[#A4262C]' : d.status === 'DRAFT' ? 'border-[#E0B46A]' : 'border-[#D5DFE3]'
           }`}
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <span className={`text-sm font-bold px-2 py-0.5 rounded border ${DEADLINE_STATUS_CLASSES[d.status]}`}>
-                ⏳ موعد قانوني — {DEADLINE_STATUS_LABELS[d.status]}
+              <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded border ${DEADLINE_STATUS_CLASSES[d.status]}`}>
+                <IconDeadline className="w-3.5 h-3.5" />
+                <span>موعد قانوني — {DEADLINE_STATUS_LABELS[d.status]}</span>
               </span>
               {d.isOverdue && (
                 <span
                   data-testid={`deadline-overdue-badge-${d.id}`}
-                  className="text-sm font-bold px-2 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300"
+                  className="text-xs font-bold px-2 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300"
                 >
-                  ⚠️ متأخر
+                  متأخر
                 </span>
               )}
               <span className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">{d.title}</span>
             </div>
-            <span className="text-sm font-medium text-[#4D606A]">{d.timeLabel}</span>
+            <span className="text-xs font-medium text-[#4D606A]">{d.timeLabel}</span>
           </div>
 
           <div className="text-sm text-[#4D606A] flex flex-wrap items-center gap-2">
@@ -287,23 +299,24 @@ export function AgendaView({
       <article
         key={`task-${t.id}`}
         data-testid={`agenda-item-task-${t.id}`}
-        className={`bg-white rounded-[6px] border p-3.5 shadow-xs space-y-2 ${
+        className={`bg-white rounded-[6px] border p-4 shadow-xs space-y-2 ${
           t.isOverdue ? 'border-[#A4262C]/60' : 'border-[#D5DFE3]'
         }`}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <span className="text-sm font-bold px-2 py-0.5 rounded border bg-slate-100 text-[#172A35] border-slate-300">
-              ☑️ مهمة • {TASK_STATUS_LABELS[t.status]}
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded border bg-[#F8FAFB] text-[#172A35] border-[#D5DFE3]">
+              <IconTask className="w-3.5 h-3.5 text-[#14566B]" />
+              <span>مهمة إجرائية • {TASK_STATUS_LABELS[t.status]}</span>
             </span>
             {t.isOverdue && (
-              <span className="text-sm font-bold px-2 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300">
-                ⚠️ متأخرة
+              <span className="text-xs font-bold px-2 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300">
+                متأخرة
               </span>
             )}
             <span className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">{t.title}</span>
           </div>
-          <span className="text-sm text-[#4D606A]">
+          <span className="text-xs text-[#4D606A]">
             {t.dueDate ? t.timeLabel : 'بدون تاريخ'} • {TASK_PRIORITY_LABELS[t.priority]}
           </span>
         </div>
@@ -326,7 +339,6 @@ export function AgendaView({
     );
   };
 
-  // Build grouped map by Cairo YYYY-MM-DD for list/day/week/month
   const buildGroupedByDate = (dto: AgendaDTO) => {
     const byDate = new Map<string, { timed: RenderableAgendaItem[]; untimed: RenderableAgendaItem[] }>();
     const renderedIds = {
@@ -389,10 +401,11 @@ export function AgendaView({
       {bucket.untimed.length > 0 && (
         <div
           data-testid={useUnknownGroupTestId ? 'agenda-unknown-time-group' : undefined}
-          className="space-y-2.5 bg-stone-50 p-3.5 rounded-[6px] border border-stone-300"
+          className="space-y-2.5 bg-[#FAFBFD] p-3.5 rounded-[6px] border border-[#D5DFE3]"
         >
-          <h3 className="text-sm font-bold text-[#172A35]">
-            🕒 مواعيد وجلسات بدون ساعة محددة — {formatCairoDateArabic(dateStr)} ({bucket.untimed.length})
+          <h3 className="text-sm font-bold text-[#172A35] flex items-center gap-2">
+            <IconClock className="w-4 h-4 text-[#7A4A00]" />
+            <span>مواعيد وجلسات بدون ساعة محددة — {formatCairoDateArabic(dateStr)} ({bucket.untimed.length})</span>
           </h3>
           <div className="space-y-2.5">{bucket.untimed.map(renderAgendaItemCard)}</div>
         </div>
@@ -409,11 +422,36 @@ export function AgendaView({
     dto.overdueTasks.length > 0 ||
     dto.undatedTasks.length > 0;
 
+  // Deduplicated lists for the formal Word-style print roll
+  const getPrintDeadlines = (dto: AgendaDTO) => {
+    const map = new Map<string, AgendaDeadlineItemDTO>();
+    for (const d of dto.overdueDeadlines) map.set(d.id, d);
+    for (const d of dto.confirmedDeadlines) if (!map.has(d.id)) map.set(d.id, d);
+    for (const d of dto.draftDeadlines) if (!map.has(d.id)) map.set(d.id, d);
+    return Array.from(map.values());
+  };
+
+  const getPrintTasks = (dto: AgendaDTO) => {
+    const map = new Map<string, AgendaTaskItemDTO>();
+    for (const t of dto.overdueTasks) map.set(t.id, t);
+    for (const t of dto.datedTasks) if (!map.has(t.id)) map.set(t.id, t);
+    for (const t of dto.undatedTasks) if (!map.has(t.id)) map.set(t.id, t);
+    return Array.from(map.values());
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto" data-testid="agenda-view">
-      {/* Print-only A4 styling to suppress shell navigation */}
+      {/* Print-only A4 Word-document styling */}
       <style>{`
         @media print {
+          @page {
+            size: A4;
+            margin: 14mm;
+          }
+          body, html {
+            background: #FFFFFF !important;
+            color: #000000 !important;
+          }
           [data-testid="desktop-sidebar"],
           [data-testid="app-header"],
           [data-testid="mobile-bottom-nav"],
@@ -427,25 +465,200 @@ export function AgendaView({
         }
       `}</style>
 
-      {/* Print Header */}
+      {/* Formal Word-Style Black & White Print Document */}
       {agenda && (
-        <div className="hidden print:block border-b-2 border-[#172A35] pb-3 mb-4 space-y-1">
-          <h1 className="text-xl font-bold text-[#172A35]">مكتب المحامي — أجندة العمل اليومية</h1>
-          <p className="text-sm text-[#172A35]">
-            الفترة (توقيت القاهرة): {formatCairoDateArabic(agenda.rangeStart)} (
-            <bdi dir="ltr">{agenda.rangeStart}</bdi>) إلى {formatCairoDateArabic(agenda.rangeEnd)} (
-            <bdi dir="ltr">{agenda.rangeEnd}</bdi>)
-          </p>
-          <p className="text-sm text-[#4D606A]">
-            تاريخ وتوقيت الطباعة: {formatCairoInstantArabic(generatedAtIso)}
-          </p>
+        <div className="hidden print:block text-black bg-white space-y-6">
+          {/* Formal Letterhead Header */}
+          <div className="border-b-2 border-black pb-3 flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h1 className="text-xl font-bold text-black">مكتب المحامي — أجندة العمل اليومية</h1>
+              <p className="text-sm font-semibold text-black">
+                كشف رسمي برول الجلسات القضائية والمواعيد القانونية والمهام الإجرائية
+              </p>
+              <p className="text-xs text-black">
+                الفترة (بتوقيت القاهرة): من {formatCairoDateArabic(agenda.rangeStart)} (
+                <bdi dir="ltr">{agenda.rangeStart}</bdi>) إلى {formatCairoDateArabic(agenda.rangeEnd)} (
+                <bdi dir="ltr">{agenda.rangeEnd}</bdi>)
+              </p>
+            </div>
+            <div className="text-left text-xs text-black space-y-1 border border-black px-3 py-2">
+              <div>
+                <strong>تاريخ الإصدار:</strong> {formatCairoInstantArabic(generatedAtIso)}
+              </div>
+              <div>
+                <strong>إجمالي الجلسات:</strong> {agenda.hearings.length} |{' '}
+                <strong>المواعيد:</strong> {getPrintDeadlines(agenda).length} |{' '}
+                <strong>المهام:</strong> {getPrintTasks(agenda).length}
+              </div>
+            </div>
+          </div>
+
+          {/* Table 1: Judicial Hearings Roll */}
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-black border-b border-black pb-1">
+              أولاً: كشف رول الجلسات القضائية ({agenda.hearings.length})
+            </h2>
+            {agenda.hearings.length === 0 ? (
+              <p className="text-xs text-black border border-black p-2.5">
+                لا توجد جلسات قضائية مدرجة خلال هذه الفترة.
+              </p>
+            ) : (
+              <table className="w-full border-collapse border border-black text-xs text-black">
+                <thead>
+                  <tr className="bg-[#EFEFEF]">
+                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">التاريخ والوقت</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">المحكمة والدائرة</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">رقم القيد</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية والموكل</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">الحفظ الورقي</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">المطلوب / القرار</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agenda.hearings.map((h, idx) => (
+                    <tr key={`print-h-${h.id}`} className="break-inside-avoid">
+                      <td className="border border-black px-2 py-1.5 text-center font-mono">{idx + 1}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        <div>{formatCairoDateArabic(h.hearingDate)}</div>
+                        <div className="font-semibold">{h.timeLabel}</div>
+                      </td>
+                      <td className="border border-black px-2 py-1.5">
+                        <div className="font-semibold">{h.courtName}</div>
+                        {h.circuit && <div>{h.circuit}</div>}
+                      </td>
+                      <td className="border border-black px-2 py-1.5">{h.proceedingLabel}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        <div className="font-semibold">
+                          <bdi dir="ltr">{h.matterFileCode}</bdi> — {h.matterTitle}
+                        </div>
+                        {h.clientNames.length > 0 && <div>الموكل: {h.clientNames.join('، ')}</div>}
+                      </td>
+                      <td className="border border-black px-2 py-1.5">{h.paperLocationName || '—'}</td>
+                      <td className="border border-black px-2 py-1.5">{h.purpose || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* Table 2: Legal Deadlines */}
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-black border-b border-black pb-1">
+              ثانياً: كشف المواعيد القانونية ({getPrintDeadlines(agenda).length})
+            </h2>
+            {getPrintDeadlines(agenda).length === 0 ? (
+              <p className="text-xs text-black border border-black p-2.5">
+                لا توجد مواعيد قانونية مدرجة خلال هذه الفترة.
+              </p>
+            ) : (
+              <table className="w-full border-collapse border border-black text-xs text-black">
+                <thead>
+                  <tr className="bg-[#EFEFEF]">
+                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">الحالة</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">البيان والإجراء القانوني</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">المصدر وسند الاحتساب</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {getPrintDeadlines(agenda).map((d, idx) => (
+                    <tr key={`print-d-${d.id}`} className="break-inside-avoid">
+                      <td className="border border-black px-2 py-1.5 text-center font-mono">{idx + 1}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        {d.dueDate ? (
+                          <>
+                            <div>{formatCairoDateArabic(d.dueDate)}</div>
+                            <div>{d.timeLabel}</div>
+                          </>
+                        ) : (
+                          'غير محدد'
+                        )}
+                      </td>
+                      <td className="border border-black px-2 py-1.5 font-semibold">
+                        {DEADLINE_STATUS_LABELS[d.status]}
+                        {d.isOverdue ? ' (متأخر)' : ''}
+                      </td>
+                      <td className="border border-black px-2 py-1.5 font-semibold">{d.title}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        <bdi dir="ltr">{d.matterFileCode}</bdi> — {d.matterTitle}
+                      </td>
+                      <td className="border border-black px-2 py-1.5">
+                        <div>{d.source || '—'}</div>
+                        {d.basisNotes && <div>{d.basisNotes}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* Table 3: Procedural Tasks */}
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-black border-b border-black pb-1">
+              ثالثاً: كشف المهام الإجرائية ({getPrintTasks(agenda).length})
+            </h2>
+            {getPrintTasks(agenda).length === 0 ? (
+              <p className="text-xs text-black border border-black p-2.5">
+                لا توجد مهام إجرائية مدرجة خلال هذه الفترة.
+              </p>
+            ) : (
+              <table className="w-full border-collapse border border-black text-xs text-black">
+                <thead>
+                  <tr className="bg-[#EFEFEF]">
+                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">الأولوية والحالة</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">بيان المهمة</th>
+                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {getPrintTasks(agenda).map((t, idx) => (
+                    <tr key={`print-t-${t.id}`} className="break-inside-avoid">
+                      <td className="border border-black px-2 py-1.5 text-center font-mono">{idx + 1}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        {t.dueDate ? `${formatCairoDateArabic(t.dueDate)} (${t.timeLabel})` : 'بدون تاريخ محدد'}
+                      </td>
+                      <td className="border border-black px-2 py-1.5">
+                        {TASK_PRIORITY_LABELS[t.priority]} — {TASK_STATUS_LABELS[t.status]}
+                        {t.isOverdue ? ' (متأخرة)' : ''}
+                      </td>
+                      <td className="border border-black px-2 py-1.5 font-semibold">{t.title}</td>
+                      <td className="border border-black px-2 py-1.5">
+                        {t.matterTitle ? `${t.matterFileCode} — ${t.matterTitle}` : 'مهمة عامة للمكتب'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {/* Formal Document Footer */}
+          <div className="pt-6 border-t border-black flex items-center justify-between text-xs text-black">
+            <span>مراجعة واعتماد المحامي المسؤول: ........................................</span>
+            <span>التوقيع: ........................................</span>
+          </div>
         </div>
       )}
 
-      {/* Screen Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#D5DFE3] print:hidden">
+      {/* Stitch S07 Screen Header */}
+      <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs print:hidden">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold text-[#172A35]">📅 الأجندة الموحدة للمكتب</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-[#14566B] bg-[#E9F2F5] px-2.5 py-0.5 rounded-[4px] border border-[#C2D9E2]">
+              رول الجلسات والأجندة الموحدة
+            </span>
+            <span className="text-xs font-medium text-[#176449] bg-emerald-50 px-2.5 py-0.5 rounded-[4px] border border-emerald-200">
+              توقيت القاهرة الرسمي
+            </span>
+          </div>
+          <h1 className="text-2xl font-bold text-[#172A35]">جدول الجلسات والمواعيد الإجرائية</h1>
           <p className="text-sm text-[#4D606A]">
             جميع الأيام محسوبة بتوقيت القاهرة (<bdi dir="ltr">Africa/Cairo</bdi>) — الجلسات والمواعيد القانونية والمهام مفصولة بوضوح.
           </p>
@@ -457,24 +670,25 @@ export function AgendaView({
             data-testid="agenda-refresh-button"
             onClick={handleRetry}
             disabled={isLoading}
-            className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50"
+            className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] inline-flex items-center gap-1.5 disabled:opacity-50 transition-colors"
           >
-            🔄 تحديث
+            <IconRefresh className="w-4 h-4 text-[#14566B]" />
+            <span>تحديث</span>
           </button>
           <button
             type="button"
             data-testid="agenda-print-button"
             onClick={() => window.print()}
-            className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px]"
+            className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] inline-flex items-center gap-1.5 transition-colors"
           >
-            🖨️ طباعة الأجندة
+            <IconPrint className="w-4 h-4" />
+            <span>طباعة كشف الأجندة</span>
           </button>
         </div>
       </div>
 
       {/* Controls Bar */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4 print:hidden">
-        {/* View Switcher & Date Navigation */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="طريقة عرض الأجندة">
             {(
@@ -600,73 +814,74 @@ export function AgendaView({
         </div>
       </div>
 
-      {/* Body States */}
-      {isLoading ? (
-        <div data-testid="agenda-loading-state" className="bg-white rounded-[6px] border border-[#D5DFE3] p-8">
-          <LoadingIndicator label="جارٍ تحميل الأجندة..." />
-        </div>
-      ) : loadError || !agenda ? (
-        <div data-testid="agenda-error-state">
-          <div
-            role="alert"
-            data-testid="error-container"
-            className="bg-white rounded-[6px] border border-red-200 p-6 sm:p-8 text-center space-y-4 shadow-xs"
-          >
-            <div
-              className="w-12 h-12 mx-auto rounded-full bg-red-50 border border-red-200 flex items-center justify-center text-xl text-[#A4262C] select-none"
-              aria-hidden="true"
-            >
-              ⚠️
-            </div>
-            <div className="space-y-1">
-              <h2 className="text-base font-bold text-[#172A35]">تعذر تحميل الأجندة</h2>
-              <p className="text-sm text-[#4D606A] max-w-md mx-auto leading-relaxed">
-                {loadError || 'حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة مجدداً.'}
-              </p>
-            </div>
-            <div className="pt-2">
-              <button
-                type="button"
-                data-testid="agenda-error-retry-button"
-                onClick={handleRetry}
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px]"
-              >
-                إعادة المحاولة
-              </button>
-            </div>
+      {/* Body States (Screen-only; print uses the dedicated Word-style roll above) */}
+      <div className="print:hidden">
+        {isLoading ? (
+          <div data-testid="agenda-loading-state" className="bg-white rounded-[6px] border border-[#D5DFE3] p-8">
+            <LoadingIndicator label="جارٍ تحميل الأجندة..." />
           </div>
-        </div>
-      ) : !hasAnyAgendaData(agenda) ? (
-        <div data-testid="agenda-empty-state">
-          <EmptyStateContainer
-            icon="📅"
-            title="لا توجد بنود في هذه الفترة"
-            description="لا توجد جلسات أو مواعيد قانونية أو مهام مطابقة للفترة أو الفلاتر المحددة."
-            action={
-              courtId || itemType !== 'ALL' || includeCompleted ? (
+        ) : loadError || !agenda ? (
+          <div data-testid="agenda-error-state">
+            <div
+              role="alert"
+              data-testid="error-container"
+              className="bg-white rounded-[6px] border border-red-200 p-6 sm:p-8 text-center space-y-4 shadow-xs"
+            >
+              <div
+                className="w-12 h-12 mx-auto rounded-[6px] bg-red-50 border border-red-200 flex items-center justify-center text-[#A4262C] select-none"
+                aria-hidden="true"
+              >
+                <IconWarning className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-base font-bold text-[#172A35]">تعذر تحميل الأجندة</h2>
+                <p className="text-sm text-[#4D606A] max-w-md mx-auto leading-relaxed">
+                  {loadError || 'حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة مجدداً.'}
+                </p>
+              </div>
+              <div className="pt-2">
                 <button
                   type="button"
-                  onClick={() =>
-                    applyFilterChange({ courtId: '', itemType: 'ALL', includeCompleted: false })
-                  }
-                  className="px-4 py-2 bg-[#14566B] text-white text-sm font-bold rounded-[6px] min-h-[44px]"
+                  data-testid="agenda-error-retry-button"
+                  onClick={handleRetry}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px]"
                 >
-                  غيّر الفلاتر
+                  إعادة المحاولة
                 </button>
-              ) : undefined
-            }
+              </div>
+            </div>
+          </div>
+        ) : !hasAnyAgendaData(agenda) ? (
+          <div data-testid="agenda-empty-state">
+            <EmptyStateContainer
+              title="لا توجد بنود في هذه الفترة"
+              description="لا توجد جلسات أو مواعيد قانونية أو مهام مطابقة للفترة أو الفلاتر المحددة."
+              action={
+                courtId || itemType !== 'ALL' || includeCompleted ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      applyFilterChange({ courtId: '', itemType: 'ALL', includeCompleted: false })
+                    }
+                    className="px-4 py-2 bg-[#14566B] text-white text-sm font-bold rounded-[6px] min-h-[44px]"
+                  >
+                    غيّر الفلاتر
+                  </button>
+                ) : undefined
+              }
+            />
+          </div>
+        ) : (
+          <AgendaResultsSection
+            agenda={agenda}
+            view={view}
+            onSelectDay={(dateStr) => applyFilterChange({ view: 'day', anchorDate: dateStr })}
+            buildGroupedByDate={buildGroupedByDate}
+            renderDayBucketContent={renderDayBucketContent}
+            renderAgendaItemCard={renderAgendaItemCard}
           />
-        </div>
-      ) : (
-        <AgendaResultsSection
-          agenda={agenda}
-          view={view}
-          onSelectDay={(dateStr) => applyFilterChange({ view: 'day', anchorDate: dateStr })}
-          buildGroupedByDate={buildGroupedByDate}
-          renderDayBucketContent={renderDayBucketContent}
-          renderAgendaItemCard={renderAgendaItemCard}
-        />
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -695,7 +910,6 @@ function AgendaResultsSection({
 }) {
   const { byDate, renderedIds } = buildGroupedByDate(agenda);
 
-  // Overdue items not already shown in the dated window
   const outsideOverdueDeadlines = agenda.overdueDeadlines.filter(
     (d) => !renderedIds.deadlines.has(d.id)
   );
@@ -712,23 +926,23 @@ function AgendaResultsSection({
 
   return (
     <div className="space-y-6">
-      {/* Same-day Court Conflicts */}
       {agenda.sameDayCourtConflicts.length > 0 && (
         <div className="space-y-2" role="region" aria-label="تعارضات المحاكم">
           {agenda.sameDayCourtConflicts.map((c) => (
             <div
               key={`${c.date}-${c.courtIds.join(',')}`}
               role="alert"
-              className="p-3.5 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] text-sm font-semibold"
+              className="p-3.5 bg-[#FFF7E6] border border-[#E0B46A] text-[#7A4A00] rounded-[6px] text-sm font-semibold flex items-center gap-2"
             >
-              ⚠️ {c.message}
+              <IconWarning className="w-4 h-4 shrink-0" />
+              <span>{c.message}</span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Active Range Label */}
-      <div className="text-sm font-semibold text-[#4D606A] flex flex-wrap items-center gap-2">
+      <div className="text-sm font-semibold text-[#4D606A] flex flex-wrap items-center gap-2 bg-white px-4 py-2.5 rounded-[6px] border border-[#D5DFE3]">
+        <IconCalendar className="w-4 h-4 text-[#14566B]" />
         <span>{view === 'list' ? 'النطاق المعروض (قائمة الأعمال القادمة):' : 'النطاق المعروض:'}</span>
         <span className="text-[#172A35]">
           {view === 'list' ? 'بدايةً من ' : ''}
@@ -744,14 +958,14 @@ function AgendaResultsSection({
         )}
       </div>
 
-      {/* Overdue Items outside active date window */}
       {(outsideOverdueDeadlines.length > 0 || outsideOverdueTasks.length > 0) && (
         <section
           aria-label="أعمال متأخرة عن تاريخها"
           className="bg-red-50/60 border border-[#A4262C]/40 rounded-[6px] p-4 space-y-3"
         >
-          <h2 className="text-lg font-bold text-[#A4262C]">
-            ⚠️ مواعيد ومهام متأخرة مفتوحة ({outsideOverdueDeadlines.length + outsideOverdueTasks.length})
+          <h2 className="text-lg font-bold text-[#A4262C] flex items-center gap-2">
+            <IconWarning className="w-5 h-5" />
+            <span>مواععيد ومهام متأخرة مفتوحة ({outsideOverdueDeadlines.length + outsideOverdueTasks.length})</span>
           </h2>
           <div className="space-y-2.5">
             {outsideOverdueDeadlines.map((d) =>
@@ -764,7 +978,6 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* VIEW: DAY / TODAY */}
       {(view === 'day' || view === 'today') && (
         <section className="space-y-4" aria-label="عرض اليوم">
           <h2 className="text-lg font-bold text-[#172A35] pb-2 border-b border-[#D5DFE3]">
@@ -780,7 +993,6 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* VIEW: LIST */}
       {view === 'list' && (
         <section className="space-y-6" aria-label="عرض القائمة">
           {sortedListDates.length === 0 ? (
@@ -803,7 +1015,7 @@ function AgendaResultsSection({
                       ({dateStr})
                     </bdi>
                     {isToday && (
-                      <span className="text-sm font-bold px-2 py-0.5 rounded bg-[#14566B] text-white">
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#14566B] text-white">
                         اليوم
                       </span>
                     )}
@@ -816,7 +1028,6 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* VIEW: WEEK */}
       {view === 'week' && (
         <section className="space-y-4" aria-label="عرض الأسبوع">
           <div className="grid grid-cols-1 gap-4">
@@ -839,7 +1050,7 @@ function AgendaResultsSection({
                       </bdi>
                     </h2>
                     {isToday && (
-                      <span className="text-sm font-bold px-2 py-0.5 rounded bg-[#14566B] text-white">
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded bg-[#14566B] text-white">
                         اليوم
                       </span>
                     )}
@@ -856,10 +1067,8 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* VIEW: MONTH */}
       {view === 'month' && (
         <section className="space-y-4" aria-label="عرض الشهر">
-          {/* Weekday header on md+ */}
           <div className="hidden md:grid md:grid-cols-7 gap-2 text-center text-sm font-bold text-[#4D606A]">
             {WEEKDAY_NAMES_SAT_FIRST.map((dayName) => (
               <div key={dayName} className="py-1.5 bg-[#E8EEF1] rounded-[6px]">
@@ -900,7 +1109,7 @@ function AgendaResultsSection({
                       <span className="hidden md:inline">{dayNum}</span>
                     </button>
                     {allDayItems.length > 0 && (
-                      <span className="text-sm font-semibold text-[#14566B]">
+                      <span className="text-xs font-bold text-[#14566B] bg-[#E9F2F5] px-1.5 py-0.5 rounded">
                         {allDayItems.length}
                       </span>
                     )}
@@ -915,9 +1124,9 @@ function AgendaResultsSection({
                             <div
                               key={`m-h-${h.id}`}
                               data-testid={`agenda-item-hearing-${h.id}`}
-                              className="text-sm p-1.5 rounded bg-sky-50 border border-sky-200 text-[#172A35] space-y-0.5"
+                              className="text-xs p-1.5 rounded bg-[#E9F2F5] border border-[#C2D9E2] text-[#172A35] space-y-0.5"
                             >
-                              <div className="font-bold [overflow-wrap:anywhere]">⚖️ {h.matterTitle}</div>
+                              <div className="font-bold [overflow-wrap:anywhere]">جلسة: {h.matterTitle}</div>
                               <div className="text-[#4D606A]">
                                 {h.hearingTime ? (
                                   h.timeLabel
@@ -936,13 +1145,13 @@ function AgendaResultsSection({
                             <div
                               key={`m-d-${d.id}`}
                               data-testid={`agenda-item-deadline-${d.id}`}
-                              className="text-sm p-1.5 rounded bg-amber-50 border border-amber-300 text-[#172A35] space-y-0.5"
+                              className="text-xs p-1.5 rounded bg-[#FFF7E6] border border-[#E0B46A] text-[#172A35] space-y-0.5"
                             >
-                              <div className="font-bold [overflow-wrap:anywhere]">⏳ {d.title}</div>
+                              <div className="font-bold [overflow-wrap:anywhere]">موعد: {d.title}</div>
                               {d.isOverdue && (
                                 <span
                                   data-testid={`deadline-overdue-badge-${d.id}`}
-                                  className="inline-block text-sm font-bold text-[#A4262C]"
+                                  className="inline-block text-xs font-bold text-[#A4262C]"
                                 >
                                   متأخر
                                 </span>
@@ -955,9 +1164,9 @@ function AgendaResultsSection({
                           <div
                             key={`m-t-${t.id}`}
                             data-testid={`agenda-item-task-${t.id}`}
-                            className="text-sm p-1.5 rounded bg-slate-100 border border-slate-300 text-[#172A35] [overflow-wrap:anywhere]"
+                            className="text-xs p-1.5 rounded bg-[#F8FAFB] border border-[#D5DFE3] text-[#172A35] [overflow-wrap:anywhere]"
                           >
-                            ☑️ {t.title}
+                            مهمة: {t.title}
                           </div>
                         );
                       })}
@@ -970,14 +1179,14 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* Draft Deadlines Needing Review */}
       {agenda.draftDeadlines.length > 0 && (
         <section
           aria-label="مواعيد قانونية مسودة تحتاج مراجعة"
-          className="bg-amber-50/60 border border-amber-300 rounded-[6px] p-4 space-y-3"
+          className="bg-[#FFFDF9] border border-[#E0B46A] rounded-[6px] p-4 space-y-3"
         >
-          <h2 className="text-lg font-bold text-[#7A4A00]">
-            ⚠️ مواعيد قانونية مسودة تحتاج مراجعة واعتماد ({agenda.draftDeadlines.length})
+          <h2 className="text-lg font-bold text-[#7A4A00] flex items-center gap-2">
+            <IconWarning className="w-5 h-5" />
+            <span>مواعيد قانونية مسودة تحتاج مراجعة واعتماد ({agenda.draftDeadlines.length})</span>
           </h2>
           <div className="space-y-2.5">
             {agenda.draftDeadlines.map((d) =>
@@ -987,15 +1196,15 @@ function AgendaResultsSection({
         </section>
       )}
 
-      {/* Undated Tasks Group (always separate from calendar days) */}
       {agenda.undatedTasks.length > 0 && (
         <section
           data-testid="agenda-undated-tasks-group"
           aria-label="مهام بدون تاريخ محدد"
-          className="bg-slate-50 border border-slate-300 rounded-[6px] p-4 space-y-3"
+          className="bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] p-4 space-y-3"
         >
-          <h2 className="text-lg font-bold text-[#172A35]">
-            📌 مهام بدون تاريخ محدد ({agenda.undatedTasks.length})
+          <h2 className="text-lg font-bold text-[#172A35] flex items-center gap-2">
+            <IconTask className="w-5 h-5 text-[#14566B]" />
+            <span>مهام بدون تاريخ محدد ({agenda.undatedTasks.length})</span>
           </h2>
           <div className="space-y-2.5">
             {agenda.undatedTasks.map((t) =>

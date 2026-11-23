@@ -306,7 +306,6 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
             className="p-3 bg-red-50 border border-red-200 text-[#A4262C] text-sm rounded flex items-center justify-between"
           >
             <div className="flex items-center gap-2">
-              <span aria-hidden="true">⚠️</span>
               <span>{actionError}</span>
             </div>
             <button
@@ -493,7 +492,6 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 aria-live="assertive"
                 className="p-3 bg-red-50 border border-red-200 text-[#A4262C] text-sm rounded flex items-center gap-2"
               >
-                <span aria-hidden="true">⚠️</span>
                 <span>{regenError}</span>
               </div>
             )}
@@ -558,7 +556,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 </div>
 
                 <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-[#A4262C] space-y-1">
-                  <div className="font-bold">⚠️ تنبيه هام جداً:</div>
+                  <div className="font-bold">تنبيه هام جداً:</div>
                   <p>
                     لن تظهر هذه الرموز مرة أخرى بعد إغلاق هذه النافذة! اطبعها أو احفظها في مكان آمن ومنفصل خارج هذا الجهاز.
                   </p>

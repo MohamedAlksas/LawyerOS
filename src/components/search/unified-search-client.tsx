@@ -38,17 +38,17 @@ const ENTITY_TYPE_CONFIG: Record<
 > = {
   MATTER: {
     label: 'ملف قضية',
-    icon: '📁',
+    icon: '',
     badgeClass: 'bg-blue-50 text-blue-800 border-blue-200',
   },
   PROCEEDING: {
     label: 'قيد قضائي',
-    icon: '⚖️',
+    icon: '',
     badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   },
   PARTY: {
     label: 'طرف / موكل',
-    icon: '👥',
+    icon: '',
     badgeClass: 'bg-purple-50 text-purple-800 border-purple-200',
   },
 };
@@ -212,13 +212,7 @@ export function UnifiedSearchClient({
               data-testid="unified-search-input"
               className="w-full pl-3 pr-10 py-2.5 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
             />
-            <span
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-base text-[#4D606A] pointer-events-none"
-              aria-hidden="true"
-            >
-              🔍
-            </span>
-          </div>
+            </div>
 
           <div className="flex gap-2">
             <button
@@ -283,7 +277,7 @@ export function UnifiedSearchClient({
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
               }`}
             >
-              <span>📁 ملفات القضايا</span>
+              <span>ملفات القضايا</span>
               <span
                 className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
                   searchType === 'MATTER' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
@@ -305,7 +299,7 @@ export function UnifiedSearchClient({
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
               }`}
             >
-              <span>⚖️ القيود القضائية</span>
+              <span>القيود القضائية</span>
               <span
                 className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
                   searchType === 'PROCEEDING' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
@@ -327,7 +321,7 @@ export function UnifiedSearchClient({
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
               }`}
             >
-              <span>👥 دليل الأطراف</span>
+              <span>دليل الأطراف</span>
               <span
                 className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
                   searchType === 'PARTY' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
@@ -379,7 +373,7 @@ export function UnifiedSearchClient({
         hasActiveFilters ? (
           <EmptyStateContainer
             testId="empty-search-container"
-            icon="🔍"
+            icon=""
             title="لم يتم العثور على نتائج"
             description="لا توجد سجلات مطابقة لكلمات البحث أو الفلاتر المحددة."
             action={
@@ -395,7 +389,7 @@ export function UnifiedSearchClient({
         ) : (
           <EmptyStateContainer
             testId="empty-state-container"
-            icon="🔍"
+            icon=""
             title="ابدأ بالبحث في النظام"
             description="اكتب كود الملف (مثال: 2026/0001)، أو اسم الموكل أو الخصم، أو رقم الدعوى بالمحكمة للوصول المباشر."
           />
@@ -411,7 +405,7 @@ export function UnifiedSearchClient({
             {items.map((item) => {
               const config = ENTITY_TYPE_CONFIG[item.entityType] || {
                 label: 'سجل',
-                icon: '📄',
+                icon: '',
                 badgeClass: 'bg-gray-100 text-gray-800 border-gray-300',
               };
 

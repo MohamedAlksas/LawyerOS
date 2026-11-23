@@ -18,10 +18,10 @@ export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
       href="/settings/security"
       data-testid="user-identity-badge"
       aria-label="حساب المستخدم"
-      className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-white hover:bg-[#E8EEF1] text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] max-w-[130px] sm:max-w-[200px] md:max-w-[260px] shrink"
+      className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] hover:bg-[#E9F2F5] text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] max-w-[130px] sm:max-w-[210px] md:max-w-[270px] shrink"
     >
       <span
-        className="w-8 h-8 rounded-full bg-[#14566B] text-white flex items-center justify-center font-bold text-xs shrink-0 select-none"
+        className="w-7 h-7 rounded-[4px] bg-[#14566B] text-white flex items-center justify-center font-bold text-xs shrink-0 select-none"
         aria-hidden="true"
       >
         {initial}

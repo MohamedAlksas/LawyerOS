@@ -355,7 +355,6 @@ export function MatterForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تعذر تحميل بعض البيانات المرجعية بالكامل</span>
           </div>
           <p className="leading-relaxed">
@@ -403,7 +402,6 @@ export function MatterForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تعارض في التعديل المتزامن (تحديث أحدث متوفر)</span>
           </div>
           <p className="text-xs leading-relaxed">
@@ -433,7 +431,6 @@ export function MatterForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>🔒</span>
             <span>انتهت صلاحية الجلسة أو تم إلغاؤها أثناء تحرير النموذج</span>
           </div>
           <p className="text-xs leading-relaxed">
@@ -469,7 +466,6 @@ export function MatterForm({
           className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⏳</span>
             <span>العملية الأصلية معلّقة بانتظار نتيجة مؤكدة</span>
           </div>
           <p className="text-xs leading-relaxed">
@@ -505,7 +501,6 @@ export function MatterForm({
           className="p-4 bg-red-50 border border-red-200 rounded-[6px] text-[#A4262C] space-y-1"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تعذر إتمام العملية</span>
           </div>
           <p className="text-xs leading-relaxed">{generalError}</p>
@@ -687,7 +682,6 @@ export function MatterForm({
                 className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-[6px]"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">👤</span>
                   <div>
                     <span className="text-sm font-bold text-emerald-900 block">
                       {selectedClient.name}
@@ -836,7 +830,7 @@ export function MatterForm({
             </select>
             {!paperLocationId && (
               <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded border border-amber-200 mt-1">
-                ⚠️ ترك مكان الحفظ فارغاً مسموح به، ولكن يفضل تحديده لتسهيل الرجوع للأوراق والمستندات الورقية في المكتب.
+                ترك مكان الحفظ فارغاً مسموح به، ولكن يفضل تحديده لتسهيل الرجوع للأوراق والمستندات الورقية في المكتب.
               </p>
             )}
           </div>

@@ -1066,7 +1066,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       await page.context().setOffline(true);
       await expect(page.getByTestId('connectivity-banner')).toBeVisible();
       await expect(page.getByTestId('connectivity-banner')).toHaveText(
-        'النت مقطوع. التعديلات مش محفوظة'
+        'انقطع الاتصال بالإنترنت. التعديلات غير محفوظة'
       );
 
       await page.getByTestId('task-submit-button').click();

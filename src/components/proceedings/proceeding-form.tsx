@@ -614,7 +614,6 @@ export function ProceedingForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تعذر تحميل قائمة المحاكم بالكامل</span>
           </div>
           <p className="leading-relaxed">
@@ -636,7 +635,7 @@ export function ProceedingForm({
           data-testid="concurrency-conflict-alert"
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-2 text-xs"
         >
-          <span className="font-bold block text-sm">⚠️ تعارض في التعديل المتزامن</span>
+          <span className="font-bold block text-sm">تعارض في التعديل المتزامن</span>
           <p>تم تعديل هذا القيد من مستخدم آخر أثناء تحريرك. تم الاحتفاظ ببياناتك المدخلة في الذاكرة. يرجى تحديث الصفحة للحصول على أحدث إصدار ثم إعادة الحفظ.</p>
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
@@ -676,7 +675,6 @@ export function ProceedingForm({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>🔒</span>
             <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق أثناء تحرير القيد</span>
           </div>
           <p className="leading-relaxed">
@@ -714,7 +712,6 @@ export function ProceedingForm({
           className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⏳</span>
             <span>العملية الأصلية معلّقة بانتظار نتيجة مؤكدة</span>
           </div>
           <p className="text-xs leading-relaxed">
@@ -750,7 +747,7 @@ export function ProceedingForm({
           data-testid="proceeding-error-banner"
           className="p-4 bg-red-50 border border-red-200 rounded-[6px] text-[#A4262C] space-y-1 text-xs"
         >
-          <span className="font-bold block text-sm">⚠️ تعذر حفظ القيد القضائي</span>
+          <span className="font-bold block text-sm">تعذر حفظ القيد القضائي</span>
           <p>{generalError}</p>
           {Object.keys(fieldErrors).length > 0 && (
             <ul className="list-disc list-inside space-y-0.5 mt-2">
@@ -770,7 +767,7 @@ export function ProceedingForm({
           data-testid="similarity-lookup-error"
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-1 text-xs"
         >
-          <span className="font-bold block text-sm">⚠️ تعذر إكمال فحص التشابه</span>
+          <span className="font-bold block text-sm">تعذر إكمال فحص التشابه</span>
           <p className="leading-relaxed">
             {similarLookupError} يمكنك متابعة الحفظ، لكن يُنصح بإعادة المحاولة قبل اعتماد رقم القيد.
           </p>
@@ -802,7 +799,7 @@ export function ProceedingForm({
           data-testid="similarity-warning-banner"
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-2 text-xs shadow-xs"
         >
-          <span className="font-bold block text-sm">⚠️ أرقام قيد متشابهة في نفس المحكمة</span>
+          <span className="font-bold block text-sm">أرقام قيد متشابهة في نفس المحكمة</span>
           <p className="leading-relaxed">
             عُثر على قيود قضائية {hasDirectMatch ? 'مطابقة' : 'مشابهة'} بعد التطبيع. راجعها قبل الحفظ؛ ويمكنك متابعة تسجيل قيد جديد
             إذا كانت هذه دعوى منفصلة (مثل دعوى فرعية أو متقابلة).

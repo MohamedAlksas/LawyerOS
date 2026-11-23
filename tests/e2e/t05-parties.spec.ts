@@ -337,7 +337,7 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     // Concurrency conflict banner must appear
     const conflictBanner = page.getByTestId('concurrency-conflict-banner');
     await expect(conflictBanner).toBeVisible();
-    await expect(conflictBanner).toContainText('البيانات اتعدلت من شاشة تانية');
+    await expect(conflictBanner).toContainText('تم تعديل البيانات من شاشة أخرى');
     await expect(page.getByTestId('reload-latest-button')).toBeVisible();
 
     // Form inputs must remain preserved in memory

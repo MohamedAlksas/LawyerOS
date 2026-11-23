@@ -46,7 +46,7 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
       return (
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
-            icon="⚠️"
+            icon=""
             title="الملف غير موجود"
             description="لم يتم العثور على الملف المطلوب تعديله."
             action={

@@ -43,7 +43,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
       return (
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
-            icon="⚠️"
+            icon=""
             title="الطرف غير موجود"
             description="لم يتم العثور على الطرف المطلوب لتعديله."
             action={
@@ -66,7 +66,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
     return (
       <div className="max-w-3xl mx-auto py-12" dir="rtl" lang="ar-EG">
         <EmptyStateContainer
-          icon="📦"
+          icon=""
           title="الطرف مؤرشف"
           description="لا يمكن تعديل بيانات طرف مؤرشف. يتاح الاطلاع على بياناته فقط في وضع القراءة."
           action={

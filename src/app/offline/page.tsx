@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React from 'react';
+import { IconWarning } from '@/components/stitch-icons';
 
 export default function OfflinePage() {
   return (
@@ -13,15 +14,18 @@ export default function OfflinePage() {
       <div
         role="alert"
         data-testid="error-container"
-        className="w-full max-w-md bg-white rounded-[6px] shadow-sm border border-[#D5DFE3] p-6 sm:p-8 text-center space-y-6"
+        className="w-full max-w-md bg-white rounded-[6px] shadow-xs border border-[#D5DFE3] p-6 sm:p-8 text-center space-y-6"
       >
-        <div className="text-4xl" aria-hidden="true">
-          📡
+        <div
+          className="w-14 h-14 mx-auto rounded-[6px] bg-[#FFF7E6] border border-[#E0B46A] flex items-center justify-center text-[#7A4A00]"
+          aria-hidden="true"
+        >
+          <IconWarning className="w-7 h-7" />
         </div>
 
         <div className="space-y-2">
           <h1 className="text-xl font-bold text-[#172A35]">
-            النت مقطوع — غير متصل بالشبكة
+            انقطع الاتصال — غير متصل بالشبكة
           </h1>
           <div
             role="status"
@@ -29,10 +33,10 @@ export default function OfflinePage() {
             data-testid="connectivity-banner"
             className="bg-[#FFF8E1] border border-[#FFE082] text-[#7A4A00] p-2.5 rounded-[4px] text-sm font-semibold"
           >
-            النت مقطوع. التعديلات مش محفوظة
+            انقطع الاتصال بالإنترنت. التعديلات غير محفوظة
           </div>
           <p className="text-sm text-[#4D606A] leading-relaxed pt-2">
-            أنت تعمل حالياً دون اتصال بالإنترنت. حفاظاً على سرية وسلامة بيانات القضايا والموكلين، لا يتم حفظ أي تعديلات محلياً أثناء انقطاع الشبكة.
+            أنت تعمل حالياً دون اتصال بالشبكة. حفاظاً على سرية وسلامة بيانات القضايا والموكلين، لا يتم حفظ أي تعديلات محلياً أثناء انقطاع الشبكة.
           </p>
         </div>
 

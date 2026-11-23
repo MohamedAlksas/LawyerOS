@@ -279,7 +279,7 @@ export function TasksView({
           pendingTaskKeysRef.current.delete(opKeyId);
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setConflictNotice('البيانات اتعدلت من شاشة تانية. يرجى تحديث القائمة ومراجعة أحدث نسخة قبل التنفيذ.');
+          setConflictNotice('تم تعديل البيانات من شاشة أخرى. يرجى تحديث القائمة ومراجعة أحدث نسخة قبل التنفيذ.');
         } else {
           setActionError(res.error || 'تعذر إتمام المهمة.');
         }
@@ -320,7 +320,7 @@ export function TasksView({
           pendingTaskKeysRef.current.delete(opKeyId);
         }
         if (res.code === 'CONCURRENCY_CONFLICT') {
-          setConflictNotice('البيانات اتعدلت من شاشة تانية. يرجى تحديث القائمة قبل الإلغاء.');
+          setConflictNotice('تم تعديل البيانات من شاشة أخرى. يرجى تحديث القائمة قبل الإلغاء.');
           setCancelTarget(null);
         } else {
           setCancelError(res.error || 'تعذر إلغاء المهمة.');
@@ -356,11 +356,16 @@ export function TasksView({
 
   return (
     <div className="space-y-6" data-testid="tasks-view">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#D5DFE3]">
+      {/* Stitch S08a Header Card */}
+      <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
         <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-[#14566B] bg-[#E9F2F5] px-2.5 py-0.5 rounded-[4px] border border-[#C2D9E2]">
+              سجل المتابعة الإدارية والإجرائية
+            </span>
+          </div>
           <h1 className={lockedMatterId ? 'text-lg font-bold text-[#172A35]' : 'text-2xl font-bold text-[#172A35]'}>
-            ☑️ مهام المتابعة الإدارية
+            المهام الإجرائية ومهام المتابعة
           </h1>
           <p className="text-sm text-[#4D606A]">
             إتمام مهمة متابعة أو قراءة إشعار لا يُغلق أو يعتمد أي موعد قانوني — المواعيد القانونية تُدار بشكل مستقل.
@@ -375,7 +380,7 @@ export function TasksView({
             disabled={isLoading}
             className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] disabled:opacity-50"
           >
-            🔄 تحديث
+            تحديث
           </button>
           {!isReadOnly && (
             <button
@@ -384,10 +389,51 @@ export function TasksView({
               onClick={openNewTaskModal}
               className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
             >
-              <span>➕</span>
               <span>{isFrozenCreateRetry ? 'إعادة محاولة حفظ المهمة' : 'مهمة جديدة'}</span>
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Stitch S08a Metric Summary Tiles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#4D606A] block">المهام الإجرائية المفتوحة</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#14566B]">{openCount}</strong>
+              <span className="text-xs text-[#4D606A]">مهمة قيد المتابعة</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-[#E9F2F5] border border-[#C2D9E2] flex items-center justify-center text-[#14566B] font-bold text-sm">
+            {openCount}
+          </span>
+        </div>
+
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#A4262C] block">المهام المتأخرة عن موعدها</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#A4262C]">{overdueCount}</strong>
+              <span className="text-xs text-[#4D606A]">تتطلب إجراءً عاجلاً</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-red-50 border border-red-200 flex items-center justify-center text-[#A4262C] font-bold text-sm">
+            {overdueCount}
+          </span>
+        </div>
+
+        <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <span className="text-xs font-semibold text-[#4D606A] block">مهام بدون تاريخ استحقاق</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <strong className="text-2xl font-bold text-[#172A35]">{undatedCount}</strong>
+              <span className="text-xs text-[#4D606A]">مفصولة عن أيام التقويم</span>
+            </div>
+          </div>
+          <span className="w-10 h-10 rounded-[6px] bg-[#F8FAFB] border border-[#D5DFE3] flex items-center justify-center text-[#172A35] font-bold text-sm">
+            {undatedCount}
+          </span>
         </div>
       </div>
 
@@ -416,7 +462,7 @@ export function TasksView({
           data-testid="task-conflict-banner"
           className="p-4 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3"
         >
-          <span>⚠️ {conflictNotice}</span>
+          <span>{conflictNotice}</span>
           <button
             type="button"
             onClick={refreshTasks}
@@ -433,7 +479,7 @@ export function TasksView({
           data-testid="task-action-error"
           className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-sm font-medium flex items-center justify-between gap-2"
         >
-          <span>⚠️ {actionError}</span>
+          <span>{actionError}</span>
           <button
             type="button"
             onClick={() => setActionError(null)}
@@ -486,7 +532,6 @@ export function TasksView({
         />
       ) : filteredTasks.length === 0 ? (
         <EmptyStateContainer
-          icon="☑️"
           title={tasks.length === 0 ? 'لا توجد مهام مسجلة حالياً' : 'لا توجد مهام مطابقة للتصفية الحالية'}
           description={
             tasks.length === 0
@@ -533,9 +578,6 @@ export function TasksView({
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pb-2 border-b border-[#E8EEF1]">
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-[#14566B]" aria-hidden="true">
-                        ☑️
-                      </span>
                       <h2 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
                         {task.title}
                       </h2>
@@ -579,7 +621,7 @@ export function TasksView({
                     </span>
                     {task.isOverdue && (
                       <span className="text-sm font-bold px-2.5 py-0.5 rounded border bg-red-50 text-[#A4262C] border-red-300">
-                        ⚠️ متأخرة
+                        متأخرة
                       </span>
                     )}
                   </div>
@@ -665,7 +707,7 @@ export function TasksView({
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="create-task-modal-title" className="text-lg font-bold text-[#172A35]">
-                  ☑️ إضافة مهمة متابعة جديدة
+                  إضافة مهمة متابعة جديدة
                 </h2>
                 <button
                   type="button"
@@ -680,7 +722,7 @@ export function TasksView({
 
               {createSessionExpired && (
                 <div role="alert" className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-sm text-[#7A4A00] space-y-2">
-                  <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+                  <p className="font-bold">انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
                   <a
                     href="/login"
                     target="_blank"
@@ -698,7 +740,7 @@ export function TasksView({
                   data-testid="task-form-error"
                   className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C] font-semibold"
                 >
-                  ⚠️ {createError}
+                  {createError}
                 </div>
               )}
 
@@ -911,7 +953,7 @@ export function TasksView({
 
               {cancelError && (
                 <div role="alert" className="p-3 bg-red-50 border border-red-300 rounded-[6px] text-sm text-[#A4262C]">
-                  ⚠️ {cancelError}
+                  {cancelError}
                 </div>
               )}
 

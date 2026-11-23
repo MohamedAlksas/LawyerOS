@@ -336,7 +336,6 @@ export function MatterListClient({
           data-testid="new-matter-button"
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
         >
-          <span aria-hidden="true" className="text-base">➕</span>
           <span>فتح ملف جديد</span>
         </Link>
       </div>
@@ -354,13 +353,7 @@ export function MatterListClient({
               data-testid="matters-search-input"
               className="w-full pl-3 pr-10 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
             />
-            <span
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-base text-[#4D606A] pointer-events-none"
-              aria-hidden="true"
-            >
-              🔍
-            </span>
-          </div>
+            </div>
 
           <div className="flex gap-2">
             <button
@@ -523,7 +516,7 @@ export function MatterListClient({
                 className="px-2 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 title="بحث موسع في الموكلين"
               >
-                🔍 بحث
+                بحث
               </button>
 
               {isClientPickerOpen && (
@@ -667,7 +660,7 @@ export function MatterListClient({
         hasActiveFilters ? (
           <EmptyStateContainer
             testId="empty-search-container"
-            icon="🔍"
+            icon=""
             title="لم يتم العثور على نتائج"
             description="لا توجد ملفات مطابقة لمعايير البحث الحالية."
             action={
@@ -683,7 +676,6 @@ export function MatterListClient({
         ) : (
           <EmptyStateContainer
             testId="empty-state-container"
-            icon="📁"
             title="لا توجد ملفات قضايا مسجلة حتى الآن"
             description="ابدأ بفتح أول ملف قضية أو استشارة في المكتب لتنظيم الجلسات والمستندات."
             action={
@@ -792,7 +784,6 @@ export function MatterListClient({
                             <span className="text-[#172A35]">{matter.paperLocationName}</span>
                           ) : (
                             <span className="text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1">
-                              <span>⚠️</span>
                               <span>غير محدد</span>
                             </span>
                           )}
@@ -882,7 +873,7 @@ export function MatterListClient({
                         {matter.paperLocationName ? (
                           matter.paperLocationName
                         ) : (
-                          <span className="text-amber-700 font-medium">⚠️ غير محدد</span>
+                          <span className="text-amber-700 font-medium">غير محدد</span>
                         )}
                       </span>
                     </div>

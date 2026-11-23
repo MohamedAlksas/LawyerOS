@@ -791,7 +791,6 @@ export function ReferenceSettingsClient({
           href="/settings/security"
           className="text-xs font-semibold text-[#14566B] hover:underline flex items-center gap-1"
         >
-          <span>🛡️</span>
           <span>الانتقال لإعدادات الأمان والجلسات</span>
         </Link>
       </div>
@@ -804,7 +803,6 @@ export function ReferenceSettingsClient({
           className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-2 text-xs"
         >
           <div className="flex items-center gap-2 font-bold text-sm">
-            <span>⚠️</span>
             <span>تعذر تحميل بعض الجداول المرجعية بالكامل</span>
           </div>
           <p className="leading-relaxed">
@@ -832,7 +830,7 @@ export function ReferenceSettingsClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
             }`}
           >
-            🏢 بيانات المكتب
+            بيانات المكتب
           </button>
 
           <button
@@ -845,7 +843,7 @@ export function ReferenceSettingsClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
             }`}
           >
-            ⚖️ المحاكم والجهات ({courts.length})
+            المحاكم والجهات ({courts.length})
           </button>
 
           <button
@@ -858,7 +856,7 @@ export function ReferenceSettingsClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
             }`}
           >
-            📂 دوائر التخصص ({practiceAreas.length})
+            دوائر التخصص ({practiceAreas.length})
           </button>
 
           <button
@@ -871,7 +869,7 @@ export function ReferenceSettingsClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
             }`}
           >
-            📁 أماكن الحفظ الورقي ({storageLocations.length})
+            أماكن الحفظ الورقي ({storageLocations.length})
           </button>
         </nav>
       </div>
@@ -897,7 +895,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>🔒</span>
                 <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
               </div>
               <p className="leading-relaxed">
@@ -934,7 +931,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-950 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>⚠️</span>
                 <span>تعارض في التعديل المتزامن: بيانات أحدث موجودة على الخادم</span>
               </div>
               <p className="leading-relaxed">
@@ -996,7 +992,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>⏳</span>
                 <span>العملية الأصلية معلّقة بانتظار نتيجة مؤكدة</span>
               </div>
               <p className="leading-relaxed">
@@ -1031,7 +1026,7 @@ export function ReferenceSettingsClient({
               data-testid="office-error-banner"
               className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold"
             >
-              ⚠️ {officeError}
+              {officeError}
             </div>
           )}
 
@@ -1200,7 +1195,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>🔒</span>
                 <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
               </div>
               <p className="leading-relaxed">
@@ -1246,7 +1240,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>⏳</span>
                 <span>عملية الإضافة معلّقة بانتظار نتيجة مؤكدة</span>
               </div>
               <p className="leading-relaxed">
@@ -1290,7 +1283,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>🔒</span>
                 <span>انتهت صلاحية الجلسة أثناء تعديل حالة العنصر</span>
               </div>
               <p className="leading-relaxed">
@@ -1330,7 +1322,6 @@ export function ReferenceSettingsClient({
               className="p-4 bg-sky-50 border border-sky-300 rounded-[6px] text-sky-950 space-y-3 text-xs"
             >
               <div className="flex items-center gap-2 font-bold text-sm">
-                <span>⏳</span>
                 <span>عملية تعديل الحالة معلّقة بانتظار نتيجة مؤكدة</span>
               </div>
               <p className="leading-relaxed">
@@ -1357,7 +1348,7 @@ export function ReferenceSettingsClient({
               data-testid="reference-error-banner"
               className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold"
             >
-              ⚠️ {itemError}
+              {itemError}
             </div>
           )}
 
@@ -1644,7 +1635,7 @@ export function ReferenceSettingsClient({
 
             {editItemError && !editItemSessionExpired && !editItemPending && (
               <div role="alert" className="p-2.5 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] font-semibold">
-                ⚠️ {editItemError}
+                {editItemError}
               </div>
             )}
 
