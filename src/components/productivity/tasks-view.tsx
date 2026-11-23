@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   createTaskAction,
+  updateTaskAction,
   completeTaskAction,
   cancelTaskAction,
 } from '@/modules/productivity/productivity-actions';
@@ -14,6 +15,7 @@ import type {
   SelectableMatterOptionDTO,
   TaskItemDTO,
   TaskPriority,
+  UpdateTaskInput,
 } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -64,13 +66,15 @@ export function TasksView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
-  // Create Modal State
+  // Create / Edit Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(Boolean(createDraft.restored));
+  const [editingTask, setEditingTask] = useState<TaskItemDTO | null>(null);
   const [title, setTitle] = useState(createDraft.restored?.title ?? '');
   const [details, setDetails] = useState(createDraft.restored?.details ?? '');
   const [dueDate, setDueDate] = useState(createDraft.restored?.dueDate ?? '');
   const [dueTime, setDueTime] = useState(createDraft.restored?.dueTime ?? '');
   const [priority, setPriority] = useState<TaskPriority>(createDraft.restored?.priority ?? 'NORMAL');
+  const [editStatus, setEditStatus] = useState<'OPEN' | 'IN_PROGRESS'>('OPEN');
   const [matterId, setMatterId] = useState(lockedMatterId ?? createDraft.restored?.matterId ?? '');
   const [proceedingId, setProceedingId] = useState(createDraft.restored?.proceedingId ?? '');
   const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
@@ -81,6 +85,7 @@ export function TasksView({
   );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const pendingCreateRef = useRef<CreateTaskInput | undefined>(createDraft.restored);
+  const pendingUpdateRef = useRef<UpdateTaskInput | undefined>(undefined);
 
   // Per-task mutation pending/retry state (in-memory only)
   const [mutatingTaskId, setMutatingTaskId] = useState<string | null>(null);
@@ -102,6 +107,12 @@ export function TasksView({
   const closeCreateModal = () => {
     if (isSubmittingCreate) return;
     setIsCreateOpen(false);
+    setEditingTask(null);
+    pendingUpdateRef.current = undefined;
+    if (!pendingCreateRef.current) {
+      setIsFrozenCreateRetry(false);
+      setCreateSessionExpired(false);
+    }
     setCreateError(null);
     setFieldErrors({});
   };
@@ -154,18 +165,50 @@ export function TasksView({
   const openNewTaskModal = () => {
     setActionError(null);
     setStatusNotice(null);
+    setEditingTask(null);
+    pendingUpdateRef.current = undefined;
     if (!pendingCreateRef.current) {
       setTitle('');
       setDetails('');
       setDueDate('');
       setDueTime('');
       setPriority('NORMAL');
+      setEditStatus('OPEN');
       setMatterId(lockedMatterId ?? '');
       setProceedingId('');
       setCreateError(null);
       setFieldErrors({});
       setCreateSessionExpired(false);
+      setIsFrozenCreateRetry(false);
+    } else {
+      setTitle(pendingCreateRef.current.title);
+      setDetails(pendingCreateRef.current.details ?? '');
+      setDueDate(pendingCreateRef.current.dueDate ?? '');
+      setDueTime(pendingCreateRef.current.dueTime ?? '');
+      setPriority(pendingCreateRef.current.priority ?? 'NORMAL');
+      setMatterId(lockedMatterId ?? pendingCreateRef.current.matterId ?? '');
+      setProceedingId(pendingCreateRef.current.proceedingId ?? '');
+      setIsFrozenCreateRetry(true);
     }
+    setIsCreateOpen(true);
+  };
+
+  const openEditTaskModal = (task: TaskItemDTO) => {
+    setActionError(null);
+    setStatusNotice(null);
+    setConflictNotice(null);
+    setEditingTask(task);
+    pendingUpdateRef.current = undefined;
+    setTitle(task.title);
+    setDetails(task.details ?? '');
+    setDueDate(task.dueDate ?? '');
+    setDueTime(task.dueTime ?? '');
+    setPriority(task.priority);
+    setEditStatus(task.status === 'IN_PROGRESS' ? 'IN_PROGRESS' : 'OPEN');
+    setCreateError(null);
+    setFieldErrors({});
+    setCreateSessionExpired(false);
+    setIsFrozenCreateRetry(false);
     setIsCreateOpen(true);
   };
 
@@ -180,6 +223,88 @@ export function TasksView({
     setCreateError(null);
     setCreateSessionExpired(false);
     setFieldErrors({});
+
+    if (editingTask) {
+      if (!pendingUpdateRef.current) {
+        const trimmedTitle = title.trim();
+        const trimmedDate = dueDate.trim();
+        const trimmedTime = dueTime.trim();
+        const nextErrors: Record<string, string> = {};
+
+        if (!trimmedTitle) {
+          nextErrors.title = 'عنوان المهمة مطلوب.';
+        }
+        if (trimmedTime && !trimmedDate) {
+          nextErrors.dueTime = 'لا يمكن تحديد وقت بدون تحديد التاريخ.';
+        }
+
+        if (Object.keys(nextErrors).length > 0) {
+          setFieldErrors(nextErrors);
+          setCreateError(nextErrors.title ?? nextErrors.dueTime ?? 'بيانات المهمة غير صالحة.');
+          if (nextErrors.title) {
+            titleInputRef.current?.focus();
+          } else if (nextErrors.dueTime) {
+            dueDateInputRef.current?.focus();
+          }
+          return;
+        }
+
+        pendingUpdateRef.current = {
+          taskId: editingTask.id,
+          expectedVersion: editingTask.version,
+          title: trimmedTitle,
+          details: details.trim() || null,
+          dueDate: trimmedDate || null,
+          dueTime: trimmedTime || null,
+          priority,
+          status: editStatus,
+          idempotencyKey: generateClientRequestId('task-upd'),
+        };
+      }
+
+      setIsSubmittingCreate(true);
+      try {
+        const res = await updateTaskAction(pendingUpdateRef.current);
+        if (!res.success) {
+          if (isAuthRecoveryCode(res.code)) {
+            setCreateSessionExpired(true);
+            setIsFrozenCreateRetry(true);
+            setCreateError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت تعديلات المهمة مجمّدة؛ سجّل الدخول ثم أعد المحاولة.');
+            return;
+          }
+          const uncertain = isUncertainMutationOutcome(res.code);
+          setIsFrozenCreateRetry(uncertain);
+          if (!uncertain) {
+            pendingUpdateRef.current = undefined;
+          }
+          if (res.code === 'CONCURRENCY_CONFLICT') {
+            setConflictNotice('تم تعديل البيانات من شاشة أخرى. يرجى تحديث القائمة ومراجعة أحدث نسخة قبل الحفظ.');
+            setIsCreateOpen(false);
+            setEditingTask(null);
+          } else {
+            setCreateError(res.error || 'تعذر تحديث المهمة.');
+            if (res.fieldErrors) setFieldErrors(res.fieldErrors);
+          }
+          return;
+        }
+
+        pendingUpdateRef.current = undefined;
+        setIsFrozenCreateRetry(false);
+        setCreateSessionExpired(false);
+        setTasks((prev) => prev.map((t) => (t.id === res.data.id ? res.data : t)));
+        setIsCreateOpen(false);
+        setEditingTask(null);
+        setStatusNotice('تم تحديث بيانات المهمة بنجاح.');
+        onDataChanged?.();
+        router.refresh();
+      } catch {
+        setIsFrozenCreateRetry(true);
+        setCreateError('تعذر استلام تأكيد التعديل من الخادم. يمكنك إعادة المحاولة بنفس المفتاح دون تكرار.');
+      } finally {
+        setIsSubmittingCreate(false);
+      }
+      return;
+    }
 
     if (!pendingCreateRef.current) {
       const trimmedTitle = title.trim();
@@ -664,6 +789,15 @@ export function TasksView({
                       </button>
                       <button
                         type="button"
+                        data-testid={`edit-task-button-${task.id}`}
+                        disabled={isBusy}
+                        onClick={() => openEditTaskModal(task)}
+                        className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
+                      >
+                        تعديل
+                      </button>
+                      <button
+                        type="button"
                         data-testid={`cancel-task-button-${task.id}`}
                         disabled={isBusy}
                         onClick={() => {
@@ -707,7 +841,7 @@ export function TasksView({
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="create-task-modal-title" className="text-lg font-bold text-[#172A35]">
-                  إضافة مهمة متابعة جديدة
+                  {editingTask ? 'تعديل بيانات المهمة' : 'إضافة مهمة متابعة جديدة'}
                 </h2>
                 <button
                   type="button"
@@ -834,34 +968,53 @@ export function TasksView({
                     </select>
                   </div>
 
-                  {!lockedMatterId && (
+                  {editingTask ? (
                     <div className="space-y-1">
-                      <label htmlFor="task-matter-select" className="block text-sm font-bold text-[#172A35]">
-                        ملف القضية (اختياري)
+                      <label htmlFor="task-status-select" className="block text-sm font-bold text-[#172A35]">
+                        الحالة
                       </label>
                       <select
-                        id="task-matter-select"
-                        data-testid="task-matter-select"
-                        value={matterId}
-                        onChange={(e) => {
-                          setMatterId(e.target.value);
-                          setProceedingId('');
-                        }}
+                        id="task-status-select"
+                        data-testid="task-status-select"
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as 'OPEN' | 'IN_PROGRESS')}
                         disabled={isSubmittingCreate || isFrozenCreateRetry}
                         className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                       >
-                        <option value="">مهمة عامة (بدون ربط بملف)</option>
-                        {selectableMatters.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.fileCode} — {m.title}
-                          </option>
-                        ))}
+                        <option value="OPEN">{TASK_STATUS_LABELS.OPEN}</option>
+                        <option value="IN_PROGRESS">{TASK_STATUS_LABELS.IN_PROGRESS}</option>
                       </select>
                     </div>
+                  ) : (
+                    !lockedMatterId && (
+                      <div className="space-y-1">
+                        <label htmlFor="task-matter-select" className="block text-sm font-bold text-[#172A35]">
+                          ملف القضية (اختياري)
+                        </label>
+                        <select
+                          id="task-matter-select"
+                          data-testid="task-matter-select"
+                          value={matterId}
+                          onChange={(e) => {
+                            setMatterId(e.target.value);
+                            setProceedingId('');
+                          }}
+                          disabled={isSubmittingCreate || isFrozenCreateRetry}
+                          className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                        >
+                          <option value="">مهمة عامة (بدون ربط بملف)</option>
+                          {selectableMatters.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.fileCode} — {m.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )
                   )}
                 </div>
 
-                {(lockedMatterId || matterId) && selectedMatterProceedings.length > 0 && (
+                {!editingTask && (lockedMatterId || matterId) && selectedMatterProceedings.length > 0 && (
                   <div className="space-y-1">
                     <label htmlFor="task-proceeding-select" className="block text-sm font-bold text-[#172A35]">
                       القيد القضائي داخل الملف (اختياري)
@@ -903,6 +1056,8 @@ export function TasksView({
                       ? 'جارٍ الحفظ...'
                       : isFrozenCreateRetry
                       ? 'إعادة المحاولة بنفس المفتاح'
+                      : editingTask
+                      ? 'حفظ التعديلات'
                       : 'حفظ المهمة'}
                   </button>
                 </div>

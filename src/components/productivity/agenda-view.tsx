@@ -965,7 +965,7 @@ function AgendaResultsSection({
         >
           <h2 className="text-lg font-bold text-[#A4262C] flex items-center gap-2">
             <IconWarning className="w-5 h-5" />
-            <span>مواععيد ومهام متأخرة مفتوحة ({outsideOverdueDeadlines.length + outsideOverdueTasks.length})</span>
+            <span>مواعيد ومهام متأخرة مفتوحة ({outsideOverdueDeadlines.length + outsideOverdueTasks.length})</span>
           </h2>
           <div className="space-y-2.5">
             {outsideOverdueDeadlines.map((d) =>

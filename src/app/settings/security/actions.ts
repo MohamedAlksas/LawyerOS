@@ -1,5 +1,6 @@
 'use server';
 
+import { getTrustedOrigins } from '@/lib/auth';
 import { requireActor } from '@/modules/identity/require-actor';
 import {
   listActiveSessions,
@@ -7,7 +8,27 @@ import {
   revokeOtherSessions,
   regenerateRecoveryCodes,
 } from '@/modules/identity';
-import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { AuthenticationError, AuthorizationError, type Actor, type Permission } from '@/modules/identity/types';
+
+async function verifyActionSecurity(requiredPermission: Permission): Promise<Actor> {
+  try {
+    const { headers: nextHeaders } = await import('next/headers');
+    const reqHeaders = await nextHeaders();
+    const origin = reqHeaders?.get('origin');
+    if (origin && !getTrustedOrigins().has(origin)) {
+      throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
+    }
+    if (reqHeaders?.get('sec-fetch-site') === 'cross-site') {
+      throw new AuthorizationError('غير مصرح بالوصول من مصدر خارجي.');
+    }
+  } catch (err) {
+    if (err instanceof AuthorizationError) {
+      throw err;
+    }
+  }
+
+  return await requireActor({ requiredPermission });
+}
 
 export type SecurityActionErrorCode =
   | 'INVALID_PASSWORD'
@@ -35,7 +56,7 @@ export type RegenerateBackupCodesResult =
     };
 
 export async function getSecurityOverview() {
-  const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+  const actor = await verifyActionSecurity('MANAGE_SECURITY');
   const sessions = await listActiveSessions(actor.id, actor.sessionId);
 
   return {
@@ -69,7 +90,7 @@ export async function revokeSessionAction(
       };
     }
 
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     await revokeSession(sessionId, actor);
     return { success: true };
   } catch (err: unknown) {
@@ -97,7 +118,7 @@ export async function revokeSessionAction(
 
 export async function revokeOtherSessionsAction(): Promise<RevokeOtherSessionsResult> {
   try {
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     const count = await revokeOtherSessions(actor);
     return { success: true, count };
   } catch (err: unknown) {
@@ -135,7 +156,7 @@ export async function regenerateBackupCodesAction(
       };
     }
 
-    const actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
+    const actor = await verifyActionSecurity('MANAGE_SECURITY');
     const freshBackupCodes = await regenerateRecoveryCodes(actor, currentPassword);
 
     return {

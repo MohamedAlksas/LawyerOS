@@ -3,7 +3,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { LoadingIndicator, ErrorContainer } from './presentation-state';
-import { IconFolder, IconShield } from './stitch-icons';
+import {
+  IconCalendar,
+  IconDeadline,
+  IconFolder,
+  IconShield,
+  IconToday,
+} from './stitch-icons';
 
 export interface DashboardStatusProps {
   actorEmail: string;
@@ -92,13 +98,41 @@ export function DashboardStatus({ actorEmail }: DashboardStatusProps) {
         </p>
       </div>
 
-      <div className="pt-2">
+      <div className="pt-2 flex flex-wrap items-center justify-center gap-2.5">
+        <Link
+          href="/today"
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
+        >
+          <IconToday className="w-4 h-4" />
+          <span>أجندة اليوم</span>
+        </Link>
+        <Link
+          href="/agenda"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
+        >
+          <IconCalendar className="w-4 h-4 text-[#14566B]" />
+          <span>جدول الجلسات والأجندة</span>
+        </Link>
+        <Link
+          href="/matters"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
+        >
+          <IconFolder className="w-4 h-4 text-[#14566B]" />
+          <span>ملفات القضايا</span>
+        </Link>
+        <Link
+          href="/deadlines"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
+        >
+          <IconDeadline className="w-4 h-4 text-[#14566B]" />
+          <span>المواعيد القانونية</span>
+        </Link>
         <Link
           href="/settings/security"
           data-testid="empty-state-security-action"
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px]"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] min-w-[44px]"
         >
-          <IconShield className="w-4 h-4" />
+          <IconShield className="w-4 h-4 text-[#14566B]" />
           <span>مراجعة إعدادات الأمان</span>
         </Link>
       </div>
