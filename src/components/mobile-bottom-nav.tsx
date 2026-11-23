@@ -3,7 +3,7 @@
 import React from 'react';
 import { GuardedLink as Link } from './navigation-guard';
 import { usePathname } from 'next/navigation';
-import { IconDashboard, IconFolder, IconSearch, IconShield, IconUsers } from './stitch-icons';
+import { IconDashboard, IconFolder, IconSearch, IconShield, IconToday, IconUsers } from './stitch-icons';
 
 interface MobileBottomNavProps {
   navRef: React.Ref<HTMLElement>;
@@ -14,6 +14,7 @@ export function MobileBottomNav({ navRef, onOpenDrawer }: MobileBottomNavProps) 
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
+  const isTodayActive = pathname === '/today' || pathname.startsWith('/today/');
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
@@ -38,6 +39,18 @@ export function MobileBottomNav({ navRef, onOpenDrawer }: MobileBottomNavProps) 
       >
         <IconDashboard className="w-5 h-5" />
         <span className="text-xs leading-tight mt-0.5">الرئيسية</span>
+      </Link>
+      <Link
+        href="/today"
+        data-testid="nav-link-today-mobile"
+        aria-label="أجندة اليوم"
+        aria-current={isTodayActive ? 'page' : undefined}
+        className={`flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+          isTodayActive ? 'text-[#14566B] font-bold bg-[#E9F2F5]/60' : 'text-[#4D606A] hover:text-[#172A35]'
+        }`}
+      >
+        <IconToday className="w-5 h-5" />
+        <span className="text-xs leading-tight mt-0.5">اليوم</span>
       </Link>
 
       <Link

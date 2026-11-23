@@ -142,23 +142,38 @@ export function TasksView({
     initialFocusRef: cancelReasonInputRef,
   });
 
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshSeqRef = useRef(0);
+
   const refreshTasks = useCallback(async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const seq = ++refreshSeqRef.current;
+
     setIsLoading(true);
     setLoadError(null);
     try {
       const sp = new URLSearchParams({ includeCompleted: 'true' });
       if (lockedMatterId) sp.set('matterId', lockedMatterId);
-      const res = await fetch(`/api/tasks?${sp.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/tasks?${sp.toString()}`, { cache: 'no-store', signal: controller.signal });
       const body = (await res.json().catch(() => null)) as ActionResult<TaskItemDTO[]> | null;
+      if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
         throw new Error(body && !body.success ? body.error : 'تعذر تحميل قائمة المهام من الخادم.');
       }
       setTasks(body.data);
       setConflictNotice(null);
     } catch (err) {
+      if (controller.signal.aborted || seq !== refreshSeqRef.current) return;
       setLoadError(err instanceof Error ? err.message : 'تعذر تحميل قائمة المهام من الخادم.');
     } finally {
-      setIsLoading(false);
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+      if (seq === refreshSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [lockedMatterId]);
 

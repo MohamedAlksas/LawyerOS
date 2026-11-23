@@ -49,21 +49,35 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
   const [taskActionError, setTaskActionError] = useState<string | null>(null);
   const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   const pendingCompleteKeysRef = useRef<Map<string, string>>(new Map());
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshSeqRef = useRef(0);
 
   const refreshToday = useCallback(async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const seq = ++refreshSeqRef.current;
+
     setIsLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch('/api/today', { cache: 'no-store' });
+      const res = await fetch('/api/today', { cache: 'no-store', signal: controller.signal });
       const body = (await res.json().catch(() => null)) as ActionResult<TodayOverviewDTO> | null;
+      if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
         throw new Error(body && !body.success ? body.error : 'تعذر تحميل ملخص اليوم من الخادم.');
       }
       setOverview(body.data);
     } catch (err) {
+      if (controller.signal.aborted || seq !== refreshSeqRef.current) return;
       setLoadError(err instanceof Error ? err.message : 'تعذر تحميل ملخص اليوم من الخادم.');
     } finally {
-      setIsLoading(false);
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+      if (seq === refreshSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 

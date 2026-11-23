@@ -355,14 +355,23 @@ export function DeadlinesView({
     });
   };
 
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshSeqRef = useRef(0);
+
   const refreshDeadlines = useCallback(async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const seq = ++refreshSeqRef.current;
+
     setIsLoading(true);
     setLoadError(null);
     try {
       const sp = new URLSearchParams({ includeClosed: 'true' });
       if (lockedMatterId) sp.set('matterId', lockedMatterId);
-      const res = await fetch(`/api/deadlines?${sp.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/deadlines?${sp.toString()}`, { cache: 'no-store', signal: controller.signal });
       const body = (await res.json().catch(() => null)) as ActionResult<DeadlineDTO[]> | null;
+      if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
         throw new Error(body && !body.success ? body.error : 'تعذر تحميل قائمة المواعيد القانونية.');
       }
@@ -372,9 +381,15 @@ export function DeadlinesView({
       setCompleteConflict(null);
       setCancelConflict(null);
     } catch (err) {
+      if (controller.signal.aborted || seq !== refreshSeqRef.current) return;
       setLoadError(err instanceof Error ? err.message : 'تعذر تحميل قائمة المواعيد القانونية.');
     } finally {
-      setIsLoading(false);
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+      if (seq === refreshSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [lockedMatterId]);
 
