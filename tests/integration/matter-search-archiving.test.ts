@@ -21,6 +21,7 @@ import {
 } from '@/modules/matters/matter-service';
 import {
   MatterArchivedError,
+  MatterValidationError,
   ProceedingArchivedError,
   ConcurrencyConflictError,
   UnsupportedTransitionError,
@@ -540,9 +541,9 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
 
     // 2. Matter
     const m = await openMatter(actor, {
-      title: `قضية شركة ${uniqueTerm} للمقاولات`,
+      title: 'قضية شركة للمقاولات',
       kind: 'CONTRACT',
-      status: 'DRAFT',
+      initialClientId: p.party.id,
       idempotencyKey: `unified-m-${crypto.randomUUID()}`,
     });
     createdMatterIds.push(m.matter.id);
@@ -573,6 +574,93 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
     expect(types.has('PARTY')).toBe(true);
     expect(types.has('MATTER')).toBe(true);
     expect(types.has('PROCEEDING')).toBe(true);
+    expect((await searchMatters({ query: uniqueTerm }, actor)).matters.map(({ id }) => id)).toEqual([m.matter.id]);
+    expect((await unifiedSearch({ query: uniqueTerm, type: 'MATTER' }, actor)).items.map(({ id }) => id)).toEqual([m.matter.id]);
+  });
+
+  it('matches the complete docket pair in both digit systems without matching a different year', async () => {
+    const opened = await openMatter(actor, {
+      title: 'ملف فحص الرقم والسنة معاً', kind: 'LITIGATION', idempotencyKey: crypto.randomUUID(),
+    });
+    const matterId = opened.matter.id;
+    createdMatterIds.push(matterId);
+    const addDocket = (yearLabel: string) => addProceeding(actor, {
+      matterId, courtId: testCourtId, instance: 'FIRST_INSTANCE', status: 'DRAFT',
+      numberText: '007788', yearLabel, idempotencyKey: crypto.randomUUID(),
+    });
+    const correct = await addDocket('2026');
+    const other = await addDocket('2027');
+    for (const query of ['007788/2026', '٠٠٧٧٨٨/٢٠٢٦']) {
+      const directory = (await searchProceedings({ query }, actor)).proceedings.map(({ id }) => id);
+      const global = (await unifiedSearch({ query, type: 'PROCEEDING' }, actor)).items.map(({ id }) => id);
+      expect(directory).toContain(correct.id);
+      expect(directory).not.toContain(other.id);
+      expect(global).toContain(correct.id);
+      expect(global).not.toContain(other.id);
+    }
+  });
+
+  it('stores private note revisions and audits only references and paper location changes', async () => {
+    const location = await prisma.storageLocation.create({
+      data: { name: 'مكان ورقي للاختبار', createdById: actor.id, updatedById: actor.id },
+    });
+    const beforeText = 'ملاحظات خاصة قبل التعديل';
+    const updatedText = 'ملاحظات خاصة بعد التعديل';
+    let matterId: string | undefined;
+    try {
+      const opened = await openMatter(actor, {
+        title: 'ملف اختبار مراجعات الملاحظات', kind: 'OTHER', notes: beforeText, idempotencyKey: crypto.randomUUID(),
+      });
+      matterId = opened.matter.id;
+      const base = { id: matterId, title: opened.matter.title, kind: opened.matter.kind, status: opened.matter.status };
+      const moved = await updateMatter(actor, {
+        ...base, expectedVersion: opened.matter.version, paperLocationId: location.id, idempotencyKey: crypto.randomUUID(),
+      });
+      expect(moved.matter.notes).toBe(beforeText);
+      const changed = await updateMatter(actor, {
+        ...base, expectedVersion: moved.matter.version, notes: updatedText, idempotencyKey: crypto.randomUUID(),
+      });
+      expect(changed.matter.paperLocationId).toBe(location.id);
+      expect((await getMatter(matterId, actor)).noteRevisions).toBeUndefined();
+      const revisions = (await getMatter(matterId, actor, true)).noteRevisions;
+      expect(revisions?.map(({ notes, version, changedById }) => ({ notes, version, changedById }))).toEqual([
+        { notes: updatedText, version: changed.matter.version, changedById: actor.id },
+        { notes: beforeText, version: opened.matter.version, changedById: actor.id },
+      ]);
+      for (const row of revisions ?? []) expect(new Date(row.createdAt).toISOString()).toBe(row.createdAt);
+      const audit = await prisma.auditEvent.findMany({
+        where: { entityId: matterId, action: 'UPDATE_MATTER' }, select: { changedFields: true },
+      });
+      expect(audit).toHaveLength(2);
+      expect(audit.map(({ changedFields }) => changedFields)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ paperLocationId: { from: null, to: location.id } }),
+        expect.objectContaining({ noteRevision: changed.matter.version }),
+      ]));
+      expect(JSON.stringify(audit)).not.toContain(beforeText);
+      expect(JSON.stringify(audit)).not.toContain(updatedText);
+    } finally {
+      if (matterId) await cleanupMatterFixtures(prisma, [matterId]);
+      await prisma.storageLocation.delete({ where: { id: location.id } });
+    }
+  });
+
+  it('requires complete Proceeding registration in every non-draft state', async () => {
+    const opened = await openMatter(actor, {
+      title: 'ملف لاختبار اكتمال القيد', kind: 'LITIGATION', idempotencyKey: crypto.randomUUID(),
+    });
+    const matterId = opened.matter.id;
+    createdMatterIds.push(matterId);
+    const input = {
+      matterId, courtId: testCourtId, instance: 'FIRST_INSTANCE' as const, numberText: '222', yearLabel: '2026',
+    };
+    const draft = await addProceeding(actor, { ...input, status: 'DRAFT', idempotencyKey: crypto.randomUUID() });
+    for (const status of ['ACTIVE', 'AWAITING_JUDGMENT', 'DECIDED', 'CLOSED'] as const) {
+      await expect(addProceeding(actor, { ...input, status, idempotencyKey: crypto.randomUUID() })).rejects.toThrow(MatterValidationError);
+      await expect(updateProceeding(actor, {
+        ...input, id: draft.id, expectedVersion: draft.version, status, idempotencyKey: crypto.randomUUID(),
+      })).rejects.toThrow(MatterValidationError);
+    }
+    expect(await prisma.proceeding.count({ where: { matterId } })).toBe(1);
   });
 
   it('T07-11: Migration backfill translates Arabic-Indic digits into ASCII normalized columns', async () => {

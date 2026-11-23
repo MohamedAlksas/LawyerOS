@@ -26,6 +26,7 @@ import {
   searchProceedings,
   unifiedSearch,
   searchMatterClients,
+  listMatterAuthorizationOptions,
   type SearchMatterClientsResult,
 } from './matter-service';
 import {
@@ -394,6 +395,15 @@ export async function getMatterAction(
     const actor = await verifyActionSecurity();
     const data = await getMatter(matterId, actor);
     return { success: true, data };
+  } catch (error) {
+    return handleActionError(error);
+  }
+}
+
+export async function listMatterAuthorizationOptionsAction(matterId: string): Promise<ActionResult<Awaited<ReturnType<typeof listMatterAuthorizationOptions>>>> {
+  try {
+    const actor = await verifyActionSecurity({ requiredPermission: 'READ_CLIENT_DATA' });
+    return { success: true, data: await listMatterAuthorizationOptions(matterId, actor) };
   } catch (error) {
     return handleActionError(error);
   }

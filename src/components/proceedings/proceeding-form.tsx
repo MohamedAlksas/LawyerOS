@@ -7,10 +7,6 @@ import {
   addProceedingAction,
   updateProceedingAction,
   findSimilarProceedingsAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  linkProceedingPartyAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  unlinkProceedingPartyAction,
 } from '@/modules/matters/matter-actions';
 import {
   MatterDTO,
@@ -23,6 +19,7 @@ import {
   AddProceedingInput,
   UpdateProceedingInput,
   SimilarProceedingCandidateDTO,
+  hasCompleteProceedingRegistration,
 } from '@/modules/matters/matter-types';
 import {
   PROCEEDING_INSTANCE_LABELS,
@@ -248,7 +245,7 @@ export function ProceedingForm({
   }, [matter.proceedings, initialProceeding]);
 
   // Docket Incomplete Check
-  const isDocketIncomplete = !numberText.trim() || !yearLabel.trim() || !registerType.trim();
+  const isDocketIncomplete = !hasCompleteProceedingRegistration({ numberText, yearLabel, registerType, courtId });
 
   // Confirmation is scoped to the full docket identity and the displayed candidates.
   const [similarCandidates, setSimilarCandidates] = useState<SimilarProceedingCandidateDTO[]>([]);
@@ -819,9 +816,9 @@ export function ProceedingForm({
                   rel="noopener noreferrer"
                   className="text-[#14566B] font-bold underline"
                 >
-                  <bdi dir="ltr" className="font-mono">
-                    {candidate.numberText || '—'} لسنة {candidate.yearLabel || '—'}
-                  </bdi>
+                  <span className="font-mono">
+                    <bdi dir="ltr">{candidate.numberText || '—'}</bdi> لسنة <bdi dir="ltr">{candidate.yearLabel || '—'}</bdi>
+                  </span>
                   {' '}— {candidate.matterFileCode} ({candidate.matterTitle}) ↗
                 </Link>
                 <span className="block text-[11px] text-amber-800">

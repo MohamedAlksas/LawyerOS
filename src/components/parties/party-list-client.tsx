@@ -4,6 +4,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { searchPartiesAction } from '@/modules/parties/actions';
 import { PartyKind, SearchPartiesResult } from '@/modules/parties/types';
+import { isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
   PARTY_KIND_SHORT_LABELS,
   IDENTIFICATION_TYPE_LABELS,
@@ -62,6 +63,9 @@ export function PartyListClient({
         }
 
         if (!res.success) {
+          if (isAuthRecoveryCode(res.code)) {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setError(res.error || 'تعذر تحميل بيانات الأطراف.');
           setIsLoading(false);
           return;
@@ -171,7 +175,7 @@ export function PartyListClient({
               data-testid="filter-all"
               onClick={() => handleKindFilterChange(undefined)}
               aria-pressed={selectedKind === undefined}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 selectedKind === undefined
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -185,7 +189,7 @@ export function PartyListClient({
               data-testid="filter-person"
               onClick={() => handleKindFilterChange('PERSON')}
               aria-pressed={selectedKind === 'PERSON'}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 selectedKind === 'PERSON'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -199,7 +203,7 @@ export function PartyListClient({
               data-testid="filter-organization"
               onClick={() => handleKindFilterChange('ORGANIZATION')}
               aria-pressed={selectedKind === 'ORGANIZATION'}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 selectedKind === 'ORGANIZATION'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -326,7 +330,7 @@ export function PartyListClient({
                         <Link
                           href={`/parties/${party.id}`}
                           data-testid={`view-party-${party.id}`}
-                          className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium text-[#14566B] hover:bg-[#E8EEF1] rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px]"
+                          className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium text-[#14566B] hover:bg-[#E8EEF1] rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
                         >
                           عرض الملف
                         </Link>
@@ -380,8 +384,9 @@ export function PartyListClient({
                   {party.identityMask && (
                     <div className="flex items-center justify-between">
                       <span>الهوية:</span>
-                      <span className="inline-flex items-center gap-1 font-mono">
-                        {IDENTIFICATION_TYPE_LABELS[party.identityMask.identificationType]} (••••{party.identityMask.lastFour})
+                      <span className="inline-flex items-center gap-1">
+                        <span>{IDENTIFICATION_TYPE_LABELS[party.identityMask.identificationType]}</span>
+                        <bdi dir="ltr" className="font-mono">(••••{party.identityMask.lastFour})</bdi>
                       </span>
                     </div>
                   )}

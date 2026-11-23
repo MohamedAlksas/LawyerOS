@@ -1,6 +1,6 @@
 import React from 'react';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { searchMatters, searchMatterClients } from '@/modules/matters/matter-service';
 import { listReferenceItems } from '@/modules/settings/reference-service';
@@ -23,10 +23,7 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent('/matters'));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/matters'));
+      await redirectOnAuthError(error, '/matters');
     }
     if (error instanceof AuthorizationError) {
       return (

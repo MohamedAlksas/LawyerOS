@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
@@ -14,20 +14,7 @@ interface MatterDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: MatterDetailPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    return {
-      title: `${matter.fileCode} — ${matter.title} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'ملف القضية — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'ملف القضية — LawOffice OS' };
 
 export default async function MatterDetailPage({ params }: MatterDetailPageProps) {
   const { id } = await params;
@@ -36,10 +23,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/matters/${id}`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/matters/${id}`));
+      await redirectOnAuthError(error, `/matters/${id}`);
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -54,7 +38,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
 
   let matter;
   try {
-    matter = await getMatter(id, actor);
+    matter = await getMatter(id, actor, true);
   } catch (error) {
     if (error instanceof NotFoundError) {
       return (

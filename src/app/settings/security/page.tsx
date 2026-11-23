@@ -1,7 +1,7 @@
 import React from 'react';
 import SecurityClient from './security-client';
 import { getSecurityOverview } from './actions';
-import { redirect } from 'next/navigation';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 
 export const metadata = {
@@ -14,19 +14,7 @@ export default async function SecuritySettingsPage() {
     overview = await getSecurityOverview();
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent('/settings/security'));
-      }
-      if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
-        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
-      }
-      const { headers } = await import('next/headers');
-      const reqHeaders = await headers();
-      const cookie = reqHeaders.get('cookie') || '';
-      if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
-        redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/settings/security'));
-      }
-      redirect('/login?returnTo=' + encodeURIComponent('/settings/security'));
+      await redirectOnAuthError(error, '/settings/security');
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -46,13 +34,14 @@ export default async function SecuritySettingsPage() {
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
           <nav className="text-xs text-[#4D606A] mb-1">الإعدادات &gt; الأمان</nav>
-          <h1 className="text-2xl font-bold text-[#172A35]">الأمان وإدارة الجلسات (S14)</h1>
+          <h1 className="text-2xl font-bold text-[#172A35]">الأمان وإدارة الجلسات</h1>
           <p className="text-sm text-[#4D606A] mt-1">
             إدارة مفاتيح التحقق الثنائي ومراجعة وإنهاء الجلسات والأجهزة النشطة لمكتب المحاماة.
           </p>
         </div>
 
         <SecurityClient
+          key={overview.sessions.find((session) => session.isCurrent)?.id}
           initialSessions={overview.sessions}
           actor={overview.actor}
         />

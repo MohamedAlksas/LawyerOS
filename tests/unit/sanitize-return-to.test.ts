@@ -121,6 +121,16 @@ describe('sanitizeReturnTo (C21 / R04-06)', () => {
       expect(sanitizeReturnTo(`/parties/${VALID_UUID_1}`)).toBe(`/parties/${VALID_UUID_1}`);
       expect(sanitizeReturnTo(`/parties/${VALID_UUID_1}/edit`)).toBe(`/parties/${VALID_UUID_1}/edit`);
     });
+
+    it('allows /search and query parameters', () => {
+      expect(sanitizeReturnTo('/search')).toBe('/search');
+      expect(sanitizeReturnTo('/search?q=contract')).toBe('/search?q=contract');
+    });
+
+    it('allows hearing detail and result routes with valid UUID', () => {
+      expect(sanitizeReturnTo(`/hearings/${VALID_UUID_1}`)).toBe(`/hearings/${VALID_UUID_1}`);
+      expect(sanitizeReturnTo(`/hearings/${VALID_UUID_2}/result`)).toBe(`/hearings/${VALID_UUID_2}/result`);
+    });
   });
 
   describe('Hostile return vectors & open redirect protection', () => {
@@ -181,10 +191,15 @@ describe('sanitizeReturnTo (C21 / R04-06)', () => {
 
     it('rejects malformed IDs fail-closed to root', () => {
       expect(sanitizeReturnTo('/matters/not-a-valid-uuid')).toBe('/');
+      expect(sanitizeReturnTo('/matters/------------------------------------')).toBe('/');
       expect(sanitizeReturnTo('/matters/123')).toBe('/');
       expect(sanitizeReturnTo('/matters/123/edit')).toBe('/');
       expect(sanitizeReturnTo('/parties/invalid-id')).toBe('/');
       expect(sanitizeReturnTo(`/matters/${VALID_UUID_1}/proceedings/not-a-uuid`)).toBe('/');
+      expect(sanitizeReturnTo('/hearings/not-a-uuid')).toBe('/');
+      expect(sanitizeReturnTo('/hearings/123/result')).toBe('/');
+      expect(sanitizeReturnTo('/settings/security/unknown')).toBe('/');
+      expect(sanitizeReturnTo('/offline/unknown')).toBe('/');
     });
   });
 });

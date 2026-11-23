@@ -14,6 +14,16 @@ export interface AuditExecutionOptions {
   simulateFailure?: boolean;
 }
 
+function sanitizeAuditValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditValue(item));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return sanitizeAuditPayload(value as Record<string, unknown>);
+  }
+  return value;
+}
+
 /**
  * Redacts potentially sensitive values from audit event metadata.
  * Explicitly guards against leaking plaintext national IDs, passports,
@@ -31,6 +41,7 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
     if (
       lowerKey.includes('secret') ||
       lowerKey.includes('password') ||
+      lowerKey.includes('token') ||
       lowerKey.includes('encryptionkey') ||
       lowerKey.includes('ciphertext') ||
       lowerKey.includes('authtag') ||
@@ -55,11 +66,7 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
       continue;
     }
 
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      sanitized[key] = sanitizeAuditPayload(value as Record<string, unknown>);
-    } else {
-      sanitized[key] = value;
-    }
+    sanitized[key] = sanitizeAuditValue(value);
   }
 
   return sanitized as Prisma.InputJsonValue;

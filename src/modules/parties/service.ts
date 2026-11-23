@@ -4,6 +4,7 @@ import { getEnv } from '@/lib/env';
 import { Actor } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { normalizeArabicText, normalizePhone } from '@/lib/normalization';
+import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import {
   encryptPartyIdentity,
   decryptPartyIdentity,
@@ -13,6 +14,7 @@ import { recordAuditEvent } from '@/lib/audit';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
+  IdempotencyConcurrentConflictError,
   isIdempotencyUniqueConflict,
   resolveConcurrentIdempotency,
 } from '@/lib/idempotency';
@@ -297,7 +299,7 @@ export async function saveParty(
         }
 
         const nameNormalized = normalizeArabicText(input.name);
-    const primaryPhoneNormalized = normalizePhone(input.primaryPhone);
+    const primaryPhoneNormalized = normalizePhone(input.primaryPhone) || null;
 
     let targetPartyId: string;
     let resultingParty: Prisma.PartyGetPayload<{ include: { identities: true } }>;
@@ -331,8 +333,8 @@ export async function saveParty(
           name: input.name,
           nameNormalized,
           primaryPhone: input.primaryPhone,
-          primaryPhoneNormalized,
-          additionalPhones: input.additionalPhones ?? [],
+          primaryPhoneNormalized: input.primaryPhone === undefined ? undefined : primaryPhoneNormalized,
+          additionalPhones: input.additionalPhones,
           email: input.email,
           address: input.address,
           notes: input.notes,
@@ -533,7 +535,7 @@ export async function saveParty(
     }
   }
 
-  throw new ConcurrencyConflictError('فشلت محاولات حفظ الطرف بسبب تعارض متزامن.');
+  throw new IdempotencyConcurrentConflictError();
 }
 
 /**
@@ -548,8 +550,10 @@ export async function searchParties(
   assertAuthorized(actor, 'READ_CLIENT_DATA');
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  const page = Math.max(1, params.page ?? 1);
-  const limit = Math.min(100, Math.max(1, params.limit ?? 20));
+  const rawPage = params.page ?? 1;
+  const page = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const rawLimit = params.limit ?? 20;
+  const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.trunc(rawLimit))) : 20;
   const skip = (page - 1) * limit;
 
   const where: Prisma.PartyWhereInput = {};
@@ -808,7 +812,7 @@ export async function addCommunicationNote(
     }
   }
 
-  throw new ConcurrencyConflictError('فشلت محاولات تسجيل ملاحظة التواصل بسبب تعارض متزامن.');
+  throw new IdempotencyConcurrentConflictError();
 }
 
 /**
@@ -881,7 +885,9 @@ export async function savePowerOfAttorney(
               poaYearLabel: input.poaYearLabel,
               notarizationOffice: input.notarizationOffice,
               poaType: input.poaType,
-              issueDate: input.issueDate ? new Date(input.issueDate) : null,
+              ...(input.issueDate !== undefined
+                ? { issueDate: input.issueDate ? new Date(input.issueDate) : null }
+                : {}),
               humanReviewStatus: input.humanReviewStatus ?? existing.humanReviewStatus,
               humanReviewedAt: isStatusChanged
                 ? input.humanReviewStatus === 'UNREVIEWED' ? null : new Date()
@@ -1018,7 +1024,7 @@ export async function savePowerOfAttorney(
     }
   }
 
-  throw new ConcurrencyConflictError('فشلت محاولات حفظ التوكيل بسبب تعارض متزامن.');
+  throw new IdempotencyConcurrentConflictError();
 }
 
 /**
@@ -1026,6 +1032,11 @@ export async function savePowerOfAttorney(
  * Decrypts identity number via context-bound AES-256-GCM.
  * Emits an immutable audit event recording the viewing actor and reason.
  */
+const ALLOWED_IDENTITY_REVEAL_REASONS = new Set([
+  'عرض رسمي للتحقق أمام المحكمة',
+  'استعراض رقم الهوية لأغراض التحقق القانوني بالمكتب',
+]);
+
 export async function revealPartyIdentity(
   actor: Actor,
   partyId: string,
@@ -1067,8 +1078,8 @@ export async function revealPartyIdentity(
         partyId: party.id,
         identificationType: identity.identificationType,
       },
-      reason: reason === 'عرض رسمي للتحقق أمام المحكمة'
-        ? 'عرض رسمي للتحقق أمام المحكمة'
+      reason: reason && ALLOWED_IDENTITY_REVEAL_REASONS.has(reason)
+        ? reason
         : 'Authoritative identity view',
     },
     { simulateFailure: options.simulateAuditFailure }

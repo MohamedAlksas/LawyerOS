@@ -53,6 +53,22 @@ describe('private search history', () => {
     bindSearchSession('session-a');
     expect(readSearchHistory('session-a')).toBeUndefined();
   });
+
+  it('caps in-memory tabStore at 50 entries using LRU eviction', () => {
+    bindSearchSession('session-lru');
+    for (let i = 0; i < 55; i += 1) {
+      history.state = { __NA: true, navKey: `k-${i}` };
+      writeSearchHistory('session-lru', { query: `q-${i}` }, new URLSearchParams());
+    }
+    history.state = { __NA: true, navKey: 'k-0' };
+    expect(readSearchHistory('session-lru')).toBeUndefined();
+    history.state = { __NA: true, navKey: 'k-4' };
+    expect(readSearchHistory('session-lru')).toBeUndefined();
+    history.state = { __NA: true, navKey: 'k-5' };
+    expect(readSearchHistory('session-lru')).toEqual({ query: 'q-5' });
+    history.state = { __NA: true, navKey: 'k-54' };
+    expect(readSearchHistory('session-lru')).toEqual({ query: 'q-54' });
+  });
 });
 
 it('parses public filters identically from server and browser parameters', () => {

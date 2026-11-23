@@ -27,6 +27,34 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     }
   });
 
+  test('guards unsaved Party edits through sidebar and account navigation and restores on Back @desktop', async ({ page }) => {
+    await signInWithTotp(page, owner);
+    await page.goto('/parties');
+    await page.getByTestId('add-party-button').click();
+    const name = page.getByTestId('party-name-input');
+    await name.fill('مسودة غير محفوظة');
+    for (const link of [
+      page.getByTestId('nav-link-search').filter({ visible: true }).first(),
+      page.getByTestId('user-identity-badge'),
+    ]) {
+      const confirmation = page.waitForEvent('dialog').then(async (dialog) => {
+        expect(dialog.message()).toContain('تغييرات غير محفوظة');
+        await dialog.dismiss();
+      });
+      await link.click();
+      await confirmation;
+      await expect(name).toHaveValue('مسودة غير محفوظة');
+    }
+    await page.goBack();
+    await expect(page).toHaveURL(/\/parties$/);
+    await page.getByTestId('add-party-button').click();
+    await expect(name).toHaveValue('مسودة غير محفوظة');
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByTestId('cancel-party-button').click();
+    await page.getByTestId('add-party-button').click();
+    await expect(name).toHaveValue('');
+  });
+
   test('full operational party lifecycle journey @parties', async ({ page }) => {
     test.setTimeout(120_000);
     // 1. Authenticate with real TOTP

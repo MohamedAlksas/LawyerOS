@@ -1,3 +1,4 @@
+import { browserSessionToken } from '../helpers/browser-session';
 ﻿import { describe, it, expect, beforeAll } from 'vitest';
 import { Client, Pool } from 'pg';
 import path from 'path';
@@ -378,9 +379,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         });
         const verifyTotpRes = await authRoutePOST(verifyTotpReq);
         expect(verifyTotpRes.status).toBe(200);
-        const verifyJson = await verifyTotpRes.json();
-        expect(verifyJson.token).toBeDefined();
-        preMigrationSessionToken = verifyJson.token;
+        preMigrationSessionToken = await browserSessionToken(verifyTotpRes);
 
         // Verify authenticated actor behavior before migration
         const actorPre = await requireActor({ headers: makeSessionHeaders(preMigrationSessionToken) });

@@ -345,6 +345,8 @@ model Matter {
   parties         MatterParty[]
   proceedings     Proceeding[]
   authorizations  MatterAuthorization[]
+  tasks           Task[]
+  noteRevisions   MatterNoteRevision[]
 
   @@index([status])
   @@index([status, updatedAt])
@@ -354,6 +356,19 @@ model Matter {
   @@index([paperLocationId])
   @@index([titleNormalized])
   @@map("matter")
+}
+
+model MatterNoteRevision {
+  id          String   @id @default(uuid())
+  matterId    String
+  version     Int
+  notes       String?
+  changedById String
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  matter      Matter   @relation(fields: [matterId], references: [id], onDelete: Cascade)
+
+  @@unique([matterId, version])
+  @@map("matter_note_revision")
 }
 
 model MatterParty {
@@ -408,6 +423,8 @@ model Proceeding {
   parentProceeding   Proceeding?        @relation("ProceedingHierarchy", fields: [parentProceedingId], references: [id])
   childProceedings   Proceeding[]       @relation("ProceedingHierarchy")
   parties            ProceedingParty[]
+  hearings           Hearing[]
+  tasks              Task[]
 
   @@index([matterId])
   @@index([courtId])
@@ -530,4 +547,161 @@ model FileCodeSequence {
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
   @@map("file_code_sequence")
+}
+
+enum HearingStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum NextDateDisposition {
+  KNOWN
+  NONE
+  UNDETERMINED
+}
+
+enum HearingLinkRelation {
+  ADJOURNED_TO
+  RESCHEDULED_TO
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+enum JobType {
+  REMINDER_DELIVERY
+}
+
+enum JobRunStatus {
+  PENDING
+  CANCELLED
+}
+
+model Hearing {
+  id                   String         @id @default(uuid())
+  proceedingId         String         @map("proceeding_id")
+  hearingDate          DateTime       @db.Date @map("hearing_date")
+  hearingTime          String?        @map("hearing_time")
+  courtHall            String?        @map("court_hall")
+  purpose              String?        @map("purpose")
+  rollNumber           String?        @map("roll_number")
+  status               HearingStatus  @default(SCHEDULED) @map("status")
+  version              Int            @default(1) @map("version")
+  rescheduleReason     String?        @map("reschedule_reason")
+  cancellationReason   String?        @map("cancellation_reason")
+  supersedesHearingId  String?        @map("supersedes_hearing_id")
+  createdAt            DateTime       @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt            DateTime       @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById          String         @map("created_by_id")
+  updatedById          String         @map("updated_by_id")
+
+  proceeding           Proceeding     @relation(fields: [proceedingId], references: [id], onDelete: Cascade)
+  results              HearingResult[]
+  tasks                Task[]
+  linksFrom            HearingLink[]  @relation("HearingLinksFrom")
+  linksTo              HearingLink[]  @relation("HearingLinksTo")
+  supersededBy         Hearing[]      @relation("HearingSupersedes")
+  supersedesHearing    Hearing?       @relation("HearingSupersedes", fields: [supersedesHearingId], references: [id])
+
+  @@index([proceedingId, hearingDate])
+  @@index([status, hearingDate])
+  @@index([hearingDate])
+  @@map("hearing")
+}
+
+model HearingResult {
+  id                   String              @id @default(uuid())
+  hearingId            String              @map("hearing_id")
+  decisionText         String              @map("decision_text")
+  summary              String?             @map("summary")
+  attendance           String?             @map("attendance")
+  notes                String?             @map("notes")
+  correctionReason     String?             @map("correction_reason")
+  nextDateDisposition  NextDateDisposition @map("next_date_disposition")
+  recordedAt           DateTime            @db.Timestamptz(3) @map("recorded_at")
+  revision             Int                 @default(1) @map("revision")
+  supersedesResultId   String?             @map("supersedes_result_id")
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById          String              @map("created_by_id")
+  updatedById          String              @map("updated_by_id")
+
+  hearing              Hearing             @relation(fields: [hearingId], references: [id], onDelete: Cascade)
+  supersededBy         HearingResult[]     @relation("HearingResultSupersedes")
+  supersedesResult     HearingResult?      @relation("HearingResultSupersedes", fields: [supersedesResultId], references: [id])
+
+  @@index([hearingId])
+  @@unique([hearingId, revision])
+  @@map("hearing_result")
+}
+
+model HearingLink {
+  id             String              @id @default(uuid())
+  fromHearingId  String              @map("from_hearing_id")
+  toHearingId    String              @map("to_hearing_id")
+  relation       HearingLinkRelation @map("relation")
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3) @map("created_at")
+  createdById    String              @map("created_by_id")
+
+  fromHearing    Hearing             @relation("HearingLinksFrom", fields: [fromHearingId], references: [id], onDelete: Cascade)
+  toHearing      Hearing             @relation("HearingLinksTo", fields: [toHearingId], references: [id], onDelete: Cascade)
+
+  @@unique([fromHearingId, toHearingId, relation])
+  @@index([fromHearingId])
+  @@index([toHearingId])
+  @@map("hearing_link")
+}
+
+model Task {
+  id            String       @id @default(uuid())
+  matterId      String       @map("matter_id")
+  proceedingId  String?      @map("proceeding_id")
+  hearingId     String?      @map("hearing_id")
+  title         String       @map("title")
+  dueDate       DateTime?    @db.Date @map("due_date")
+  priority      TaskPriority @default(NORMAL) @map("priority")
+  status        TaskStatus   @default(OPEN) @map("status")
+  version       Int          @default(1) @map("version")
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById   String       @map("created_by_id")
+  updatedById   String       @map("updated_by_id")
+
+  matter        Matter       @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  proceeding    Proceeding?  @relation(fields: [proceedingId], references: [id], onDelete: SetNull)
+  hearing       Hearing?     @relation(fields: [hearingId], references: [id], onDelete: SetNull)
+
+  @@index([matterId, status])
+  @@index([proceedingId])
+  @@index([hearingId])
+  @@map("task")
+}
+
+model JobRun {
+  id               String       @id @default(uuid())
+  jobType          JobType      @default(REMINDER_DELIVERY) @map("job_type")
+  sourceType       String       @default("Hearing") @map("source_type")
+  sourceId         String       @map("source_id")
+  scheduledAt      DateTime     @db.Timestamptz(3) @map("scheduled_at")
+  status           JobRunStatus @default(PENDING) @map("status")
+  deduplicationKey String       @unique @map("deduplication_key")
+  payload          Json         @map("payload")
+  createdAt        DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt        DateTime     @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  @@index([sourceType, sourceId, status])
+  @@index([status, scheduledAt])
+  @@map("job_run")
 }

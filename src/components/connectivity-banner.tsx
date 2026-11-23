@@ -19,7 +19,7 @@ function getServerSnapshot() {
   return true;
 }
 
-export function ConnectivityBanner() {
+export function ConnectivityBanner({ sticky = true }: { sticky?: boolean } = {}) {
   const isOnline = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   if (isOnline) {
@@ -31,7 +31,9 @@ export function ConnectivityBanner() {
       role="status"
       aria-live="polite"
       data-testid="connectivity-banner"
-      className="bg-[#7A4A00] text-white text-sm font-semibold py-2.5 px-4 text-center sticky top-0 z-50 shadow-md flex items-center justify-center gap-2 min-h-[44px]"
+      className={`bg-[#7A4A00] text-white text-sm font-semibold py-2.5 px-4 text-center ${
+        sticky ? 'sticky top-0 z-50' : 'relative z-30'
+      } shadow-md flex items-center justify-center gap-2 min-h-[44px]`}
     >
       النت مقطوع. التعديلات مش محفوظة
     </div>

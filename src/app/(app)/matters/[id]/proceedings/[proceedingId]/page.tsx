@@ -1,9 +1,10 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
+import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { NotFoundError } from '@/modules/matters/matter-types';
 import { EmptyStateContainer } from '@/components/presentation-state';
 import {
@@ -13,6 +14,9 @@ import {
   PROCEEDING_LEGAL_CAPACITY_LABELS,
   formatCairoDateOnly,
 } from '@/components/matters/matter-ui-types';
+import { listHearingsForProceeding } from '@/modules/scheduling/hearing-service';
+import { HearingList } from '@/components/hearings/hearing-list';
+import type { HearingDTO } from '@/components/hearings/hearing-ui-types';
 
 interface ProceedingDetailPageProps {
   params: Promise<{
@@ -21,29 +25,7 @@ interface ProceedingDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: ProceedingDetailPageProps) {
-  const { id, proceedingId } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    const proceeding = (matter.proceedings || []).find((p) => p.id === proceedingId);
-    if (!proceeding) {
-      return {
-        title: 'القيد القضائي — LawOffice OS',
-      };
-    }
-    const docket = proceeding.numberText && proceeding.yearLabel
-      ? `${proceeding.numberText}/${proceeding.yearLabel}`
-      : 'مسودة';
-    return {
-      title: `قيد قضائي ${docket} — ${matter.fileCode} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'القيد القضائي — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'القيد القضائي — LawOffice OS' };
 
 export default async function ProceedingDetailPage({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
@@ -52,10 +34,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}`));
+      await redirectOnAuthError(error, `/matters/${id}/proceedings/${proceedingId}`);
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -115,10 +94,12 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     );
   }
 
-  const isDraft = !proceeding.numberText || !proceeding.yearLabel;
+  const isDraft = !hasCompleteProceedingRegistration(proceeding);
   const isProcArchived = Boolean(proceeding.archivedAt);
   const isParentMatterArchived = matter.status === 'ARCHIVED' || Boolean(matter.archivedAt);
   const isReadOnly = isProcArchived || isParentMatterArchived;
+
+  const hearings: HearingDTO[] = await listHearingsForProceeding(actor, proceedingId);
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
@@ -213,7 +194,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
                 data-testid="edit-proceeding-button"
-                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[40px] flex items-center gap-1.5"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
               >
                 <span>✏️</span>
                 <span>تعديل بيانات القيد</span>
@@ -221,7 +202,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             )}
             <Link
               href={`/matters/${matter.id}`}
-              className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[40px] flex items-center"
+              className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center"
             >
               العودة للملف
             </Link>
@@ -239,9 +220,9 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           <div className="space-y-1">
             <span className="text-[#4D606A] block font-semibold">رقم الدعوى والسنة:</span>
             {proceeding.numberText && proceeding.yearLabel ? (
-              <bdi dir="ltr" className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2.5 py-1 rounded border border-slate-200 inline-block">
-                {proceeding.numberText} لسنة {proceeding.yearLabel}
-              </bdi>
+              <span className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2.5 py-1 rounded border border-slate-200 inline-block">
+                <bdi dir="ltr">{proceeding.numberText}</bdi> لسنة <bdi dir="ltr">{proceeding.yearLabel}</bdi>
+              </span>
             ) : (
               <span className="text-amber-800 font-semibold italic">لم يقيد برقم رسمي بعد</span>
             )}
@@ -362,33 +343,31 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         )}
       </div>
 
-      {/* Honest Future Modules Placeholder */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-          <div className="flex items-center gap-2">
-            <span className="text-base">⚖️</span>
-            <h3 className="text-sm font-bold text-[#172A35]">الجلسات والقرارات القضائية</h3>
-          </div>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
-            سجل رول الجلسات، القرارات المؤجلة، ومنطوق الأحكام القضائية سيكون متاحاً في مرحلة تالية للنظام.
-          </p>
-          <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            قريباً في المرحلة القادمة
-          </span>
-        </div>
+      {/* Hearings & Court Calendar Section (S05 & S06) */}
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs">
+        <HearingList
+          actorId={actor.id}
+          proceedingId={proceeding.id}
+          matterId={matter.id}
+          initialHearings={hearings}
+          courtName={proceeding.courtName}
+          circuit={proceeding.circuit}
+          isReadOnly={isReadOnly}
+        />
+      </div>
 
-        <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-          <div className="flex items-center gap-2">
-            <span className="text-base">📄</span>
-            <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
-          </div>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
-            إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
-          </p>
-          <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-            قريباً في المرحلة القادمة
-          </span>
+      {/* Honest Future Modules Placeholder */}
+      <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
+        <div className="flex items-center gap-2">
+          <span className="text-base">📄</span>
+          <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
         </div>
+        <p className="text-xs text-[#4D606A] leading-relaxed">
+          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
+        </p>
+        <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+          قريباً في المرحلة القادمة
+        </span>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getClientProfile, NotFoundError } from '@/modules/parties/service';
 import { PartyProfileClient } from '@/components/parties/party-profile-client';
@@ -13,20 +13,7 @@ interface PartyDetailPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: PartyDetailPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
-    const party = await getClientProfile(actor, id);
-    return {
-      title: `${party.name} — ملف الطرف — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'ملف الطرف — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'ملف الطرف — LawOffice OS' };
 
 export default async function PartyDetailPage({ params }: PartyDetailPageProps) {
   const { id } = await params;
@@ -35,10 +22,7 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/parties/${id}`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/parties/${id}`));
+      await redirectOnAuthError(error, `/parties/${id}`);
     }
     if (error instanceof AuthorizationError) {
       return (

@@ -1,3 +1,4 @@
+import { browserSessionToken } from '../helpers/browser-session';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { Pool } from 'pg';
 import fs from 'fs';
@@ -291,6 +292,36 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(await isBootstrapClosed()).toBe(true);
   });
 
+  it('rejects confirmOwnerProvisioning after bootstrap closure without mutating lockout counters or closedAt', async () => {
+    const prisma = getPrismaClient();
+    const beforeTf = await prisma.twoFactor.findFirstOrThrow({
+      where: { userId: provisionedOwner.userId },
+    });
+    const beforeBootstrap = await prisma.officeBootstrap.findUniqueOrThrow({
+      where: { id: 'singleton' },
+    });
+
+    let err: unknown;
+    try {
+      await confirmOwnerProvisioning(provisionedOwner.userId, '000000');
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(ProvisioningError);
+    expect((err as ProvisioningError).code).toBe('BOOTSTRAP_ALREADY_CLOSED');
+
+    const afterTf = await prisma.twoFactor.findFirstOrThrow({
+      where: { userId: provisionedOwner.userId },
+    });
+    const afterBootstrap = await prisma.officeBootstrap.findUniqueOrThrow({
+      where: { id: 'singleton' },
+    });
+    expect(afterTf.failedVerificationCount).toBe(beforeTf.failedVerificationCount);
+    expect(afterTf.lockedUntil).toEqual(beforeTf.lockedUntil);
+    expect(afterBootstrap.closedAt.getTime()).toBe(beforeBootstrap.closedAt.getTime());
+  });
+
   it('fails closed and rejects duplicate owner provisioning', async () => {
     expect(await hasAnyOwner()).toBe(true);
 
@@ -412,14 +443,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyTotpRes = await authRoutePOST(verifyTotpReq);
     expect(verifyTotpRes.status).toBe(200);
-    const verifyJson = await verifyTotpRes.json();
-    expect(verifyJson.token).toBeDefined();
+    const verifyJsonToken = await browserSessionToken(verifyTotpRes);
 
     const verifyCookies = verifyTotpRes.headers.getSetCookie?.() || [verifyTotpRes.headers.get('set-cookie') || ''];
     const sessionCookie = verifyCookies.find((c) => c.includes('better-auth.session_token='));
     expect(sessionCookie).toBeDefined();
 
-    const sessionToken = verifyJson.token;
+    const sessionToken = verifyJsonToken;
     activeSessionToken = sessionToken;
 
     const sessionInDb = await prisma.session.findFirst({
@@ -883,8 +913,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyTotpResA = await authRoutePOST(verifyTotpReqA);
     expect(verifyTotpResA.status).toBe(200);
-    const verifyJsonA = await verifyTotpResA.json();
-    const sessionAToken = verifyJsonA.token;
+    const verifyJsonAToken = await browserSessionToken(verifyTotpResA);
+    const sessionAToken = verifyJsonAToken;
     expect(sessionAToken).toBeDefined();
     const setCookiesA2 = verifyTotpResA.headers.getSetCookie?.() || [verifyTotpResA.headers.get('set-cookie') || ''];
     const sessionCookieHeaderA = setCookiesA2.find((c) => c.includes('better-auth.session_token='));
@@ -916,8 +946,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyTotpResB = await authRoutePOST(verifyTotpReqB);
     expect(verifyTotpResB.status).toBe(200);
-    const verifyJsonB = await verifyTotpResB.json();
-    const sessionBToken = verifyJsonB.token;
+    const verifyJsonBToken = await browserSessionToken(verifyTotpResB);
+    const sessionBToken = verifyJsonBToken;
     expect(sessionBToken).toBeDefined();
     const setCookiesB2 = verifyTotpResB.headers.getSetCookie?.() || [verifyTotpResB.headers.get('set-cookie') || ''];
     const sessionCookieHeaderB = setCookiesB2.find((c) => c.includes('better-auth.session_token='));
@@ -1065,12 +1095,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         clientDrop.release();
       }
 
-      // 3. Retry password change from Context A after fault removal
+      // 3. Retry password change from Context A after fault removal (including stale content-length header)
       const pwChangeRetryReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
         method: 'POST',
         headers: {
           cookie: sessionACookie,
           'content-type': 'application/json',
+          'content-length': '2',
         },
         body: JSON.stringify({
           currentPassword: fcPassword,
@@ -1080,7 +1111,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       const pwChangeRetryRes = await authRoutePOST(pwChangeRetryReq);
       expect(pwChangeRetryRes.status).toBe(200);
       const retryBody = await pwChangeRetryRes.json();
-      expect(retryBody.token).toBeDefined();
+      expect(Object.hasOwn(retryBody, 'token')).toBe(false);
 
       const retrySetCookies =
         pwChangeRetryRes.headers.getSetCookie?.() || [
@@ -1204,11 +1235,10 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyRes1 = await authRoutePOST(verifyReq1);
     expect(verifyRes1.status).toBe(200);
-    const verifyJson1 = await verifyRes1.json();
-    expect(verifyJson1.token).toBeDefined();
+    const verifyJson1Token = await browserSessionToken(verifyRes1);
 
     // Verify authenticated session issued
-    const actor1 = await requireActor({ headers: makeSessionHeaders(verifyJson1.token) });
+    const actor1 = await requireActor({ headers: makeSessionHeaders(verifyJson1Token) });
     expect(actor1.id).toBe(provisionedOwner.userId);
     expect(actor1.role).toBe('OWNER');
 
@@ -2481,10 +2511,9 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       });
       const mfa128Res = await authRoutePOST(mfa128Req);
       expect(mfa128Res.status).toBe(200);
-      const mfa128Json = await mfa128Res.json();
-      expect(mfa128Json.token).toBeDefined();
+      const mfa128JsonToken = await browserSessionToken(mfa128Res);
 
-      const session128Cookie = `better-auth.session_token=${signSessionTokenCookie(mfa128Json.token, getEnv().BETTER_AUTH_SECRET)}`;
+      const session128Cookie = `better-auth.session_token=${signSessionTokenCookie(mfa128JsonToken, getEnv().BETTER_AUTH_SECRET)}`;
       const actor128 = await requireActor({ headers: new Headers({ cookie: session128Cookie }) });
       expect(actor128.id).toBe(res128.user.id);
       expect(actor128.role).toBe('OWNER');
@@ -2729,8 +2758,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyResA = await authRoutePOST(verifyReqA);
     expect(verifyResA.status).toBe(200);
-    const verifyJsonA = await verifyResA.json();
-    const sessionTokenA = verifyJsonA.token;
+    const verifyJsonAToken = await browserSessionToken(verifyResA);
+    const sessionTokenA = verifyJsonAToken;
     const sessionCookieHeaderA = `better-auth.session_token=${signSessionTokenCookie(sessionTokenA, getEnv().BETTER_AUTH_SECRET)}`;
 
     // Verify Context A has an active actor
@@ -2822,15 +2851,14 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const freshVerifyRes = await authRoutePOST(freshVerifyReq);
     expect(freshVerifyRes.status).toBe(200);
-    const freshVerifyJson = await freshVerifyRes.json();
-    expect(freshVerifyJson.token).toBeDefined();
+    const freshVerifyJsonToken = await browserSessionToken(freshVerifyRes);
 
     // Reset password back for subsequent tests if any
     const resetPwReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        cookie: `better-auth.session_token=${signSessionTokenCookie(freshVerifyJson.token, getEnv().BETTER_AUTH_SECRET)}`,
+        cookie: `better-auth.session_token=${signSessionTokenCookie(freshVerifyJsonToken, getEnv().BETTER_AUTH_SECRET)}`,
       },
       body: JSON.stringify({
         currentPassword: rotatedPassword,
@@ -2873,8 +2901,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     });
     const verifyResA = await authRoutePOST(verifyReqA);
     expect(verifyResA.status).toBe(200);
-    const verifyJsonA = await verifyResA.json();
-    const sessionTokenA = verifyJsonA.token;
+    const verifyJsonAToken = await browserSessionToken(verifyResA);
+    const sessionTokenA = verifyJsonAToken;
     const sessionCookieHeaderA = `better-auth.session_token=${signSessionTokenCookie(sessionTokenA, getEnv().BETTER_AUTH_SECRET)}`;
 
     const actorA = await requireActor({ headers: new Headers({ cookie: sessionCookieHeaderA }) });
@@ -3013,8 +3041,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         body: JSON.stringify({ code: freshCode }),
       });
       const freshMfaRes = await authRoutePOST(freshMfaReq);
-      const freshMfaJson = await freshMfaRes.json();
-      const freshSessionCookie = `better-auth.session_token=${signSessionTokenCookie(freshMfaJson.token, getEnv().BETTER_AUTH_SECRET)}`;
+      const freshMfaJsonToken = await browserSessionToken(freshMfaRes);
+      const freshSessionCookie = `better-auth.session_token=${signSessionTokenCookie(freshMfaJsonToken, getEnv().BETTER_AUTH_SECRET)}`;
 
       const resetPwReq = new NextRequest(`${testOrigin}/api/auth/change-password`, {
         method: 'POST',
@@ -3349,8 +3377,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       body: JSON.stringify({ code: codeA }),
     }));
     expect(verifyA.status).toBe(200);
-    const verifyAJson = await verifyA.json();
-    const sessionCookieA = `better-auth.session_token=${signSessionTokenCookie(verifyAJson.token, env.BETTER_AUTH_SECRET)}`;
+    const verifyAJsonToken = await browserSessionToken(verifyA);
+    const sessionCookieA = `better-auth.session_token=${signSessionTokenCookie(verifyAJsonToken, env.BETTER_AUTH_SECRET)}`;
 
     // 3. Sign in Context B and acquire valid session B
     const signInB = await authRoutePOST(new NextRequest(`${testOrigin}/api/auth/sign-in/email`, {
@@ -3372,8 +3400,8 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       body: JSON.stringify({ code: codeB }),
     }));
     expect(verifyB.status).toBe(200);
-    const verifyBJson = await verifyB.json();
-    const sessionCookieB = `better-auth.session_token=${signSessionTokenCookie(verifyBJson.token, env.BETTER_AUTH_SECRET)}`;
+    const verifyBJsonToken = await browserSessionToken(verifyB);
+    const sessionCookieB = `better-auth.session_token=${signSessionTokenCookie(verifyBJsonToken, env.BETTER_AUTH_SECRET)}`;
 
     // Verify both session A and session B have credentialVersion: 1
     const userBeforeRot = await prisma.user.findUnique({ where: { id: rotUserId } });
@@ -3417,7 +3445,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(actorRep.id).toBe(rotUserId);
 
     // 7. Assert old session B is physically revoked from PostgreSQL and fails requireActor
-    const oldSessionInDb = await prisma.session.findFirst({ where: { token: verifyBJson.token } });
+    const oldSessionInDb = await prisma.session.findFirst({ where: { token: verifyBJsonToken } });
     expect(oldSessionInDb).toBeNull();
 
     await expect(requireActor({ headers: new Headers({ cookie: sessionCookieB }) })).rejects.toThrowError(
@@ -3676,7 +3704,7 @@ describe('R14 atomic credential rotation and application namespace isolation', (
 
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(await response.json()).toEqual({ actorId: owner.user.id, sessionId: before.id, role: 'OWNER' });
+    expect(await response.json()).toEqual({ actorId: owner.user.id, sessionId: before.id, role: 'OWNER', name: owner.user.name, email: owner.user.email });
     expect(await getSessionRow()).toEqual(before);
   });
 

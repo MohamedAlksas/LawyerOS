@@ -54,6 +54,7 @@ export function getTrustedOrigins(): Set<string> {
 
 function createAuthInstance() {
   const env = getEnv();
+  const isProd = env.NODE_ENV === 'production';
   const prisma = getPrismaClient();
 
   return betterAuth({
@@ -66,7 +67,7 @@ function createAuthInstance() {
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: Array.from(getTrustedOrigins()),
     // Session revocation is exposed through the application's audited security actions.
-    disabledPaths: ['/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
+    disabledPaths: ['/list-sessions', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
     emailAndPassword: {
       enabled: true,
       disableSignUp: true, // Public self-registration is strictly forbidden
@@ -91,19 +92,19 @@ function createAuthInstance() {
     },
     rateLimit: {
       window: 60,
-      max: 100,
+      max: isProd ? 60 : 100,
       customRules: {
         '/sign-in/email': {
-          window: 10,
-          max: 50,
+          window: isProd ? 60 : 10,
+          max: isProd ? 10 : 50,
         },
         '/two-factor/verify-totp': {
-          window: 10,
-          max: 50,
+          window: isProd ? 60 : 10,
+          max: isProd ? 10 : 50,
         },
         '/two-factor/verify-backup-code': {
-          window: 10,
-          max: 50,
+          window: isProd ? 60 : 10,
+          max: isProd ? 10 : 50,
         },
       },
     },

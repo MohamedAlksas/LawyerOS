@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
@@ -15,20 +16,7 @@ interface NewProceedingPageProps {
   }>;
 }
 
-export async function generateMetadata({ params }: NewProceedingPageProps) {
-  const { id } = await params;
-  try {
-    const actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
-    const matter = await getMatter(id, actor);
-    return {
-      title: `إضافة قيد قضائي جديد — ${matter.fileCode} — LawOffice OS`,
-    };
-  } catch {
-    return {
-      title: 'إضافة قيد قضائي جديد — LawOffice OS',
-    };
-  }
-}
+export const metadata = { title: 'إضافة قيد قضائي جديد — LawOffice OS' };
 
 export default async function NewProceedingPage({ params }: NewProceedingPageProps) {
   const { id } = await params;
@@ -37,10 +25,7 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/new`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/new`));
+      await redirectOnAuthError(error, `/matters/${id}/proceedings/new`);
     }
     if (error instanceof AuthorizationError) {
       return (

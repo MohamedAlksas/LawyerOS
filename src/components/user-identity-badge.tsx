@@ -1,30 +1,14 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { GuardedLink as Link } from './navigation-guard';
-import { getSession } from '@/lib/auth-client';
 
 interface UserInfo {
   name?: string;
   email?: string;
 }
 
-export function UserIdentityBadge() {
-  const [user, setUser] = useState<UserInfo | null>(null);
-
-  useEffect(() => {
-    getSession().then((res) => {
-      if (res?.data?.user) {
-        setUser({
-          name: res.data.user.name,
-          email: res.data.user.email,
-        });
-      }
-    }).catch(() => {
-      // Ignored
-    });
-  }, []);
-
+export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
   const name = user?.name || 'الأستاذ المحامي';
   const email = user?.email || '';
   const initial = name.trim().charAt(0) || 'م';

@@ -1,3 +1,4 @@
+import { browserSessionToken } from '../helpers/browser-session';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Pool } from 'pg';
 import path from 'path';
@@ -391,11 +392,10 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     });
     const verifyTotpRes = await authRoutePOST(verifyTotpReq);
     expect(verifyTotpRes.status).toBe(200);
-    const verifyJson = await verifyTotpRes.json();
-    expect(verifyJson.token).toBeDefined();
+    const sessionToken = await browserSessionToken(verifyTotpRes);
 
     // 5. Verify authoritative actor resolution via requireActor
-    const actor = await requireActor({ headers: makeSessionHeaders(verifyJson.token) });
+    const actor = await requireActor({ headers: makeSessionHeaders(sessionToken) });
     expect(actor.id).toBe(ownerResult.user.id);
     expect(actor.email).toBe('upgrade.owner@office.eg');
     expect(actor.role).toBe('OWNER');

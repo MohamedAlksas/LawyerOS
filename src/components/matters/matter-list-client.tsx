@@ -96,6 +96,7 @@ export function MatterListClient({
   const [clientPickerTotalPages, setClientPickerTotalPages] = useState(1);
   const [clientPickerTotalCount, setClientPickerTotalCount] = useState(clients.length);
   const clientPickerRef = useRef<HTMLDivElement>(null);
+  const clientPickerTrigger = useRef<HTMLButtonElement>(null);
   const searchClientsTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const clientSearchGenRef = useRef(0);
 
@@ -113,6 +114,11 @@ export function MatterListClient({
     setIsClientPickerOpen(false);
     setIsSearchingClients(false);
   }, [cancelClientSearch]);
+
+  const dismissClientPicker = () => {
+    closeClientPicker();
+    clientPickerTrigger.current?.focus();
+  };
 
   const hidePrivateResults = useCallback(() => {
     clearSearchSessionStore();
@@ -503,6 +509,7 @@ export function MatterListClient({
               <button
                 type="button"
                 data-testid="open-client-picker-button"
+                ref={clientPickerTrigger}
                 aria-expanded={isClientPickerOpen}
                 aria-controls={isClientPickerOpen ? 'matter-client-picker' : undefined}
                 onClick={() => {
@@ -525,8 +532,7 @@ export function MatterListClient({
                   data-testid="client-picker-popover"
                   onKeyDown={(event) => {
                     if (event.key === 'Escape') {
-                      closeClientPicker();
-                      clientPickerRef.current?.querySelector('button')?.focus();
+                      dismissClientPicker();
                     }
                   }}
                   className="absolute top-full mt-1.5 right-0 z-30 w-72 bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
@@ -536,7 +542,8 @@ export function MatterListClient({
                     <button
                       type="button"
                       data-testid="close-client-picker-button"
-                      onClick={closeClientPicker}
+                      aria-label="إغلاق اختيار الموكل"
+                      onClick={dismissClientPicker}
                       className="text-[#4D606A] hover:text-[#172A35] text-sm p-1"
                     >
                       ✕
@@ -570,7 +577,7 @@ export function MatterListClient({
                         data-testid="filter-client-option-all"
                         onClick={() => {
                           handleClientChange(undefined);
-                          closeClientPicker();
+                          dismissClientPicker();
                         }}
                         className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium block"
                       >
@@ -583,7 +590,7 @@ export function MatterListClient({
                           data-testid={`filter-client-option-${cl.id}`}
                           onClick={() => {
                             handleClientChange(cl);
-                            closeClientPicker();
+                            dismissClientPicker();
                           }}
                           className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] block transition-colors ${
                             selectedClientId === cl.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : 'text-[#172A35]'

@@ -378,6 +378,69 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
   // =========================================================================
   // 3. Unified Search S12
   // =========================================================================
+  test('recovers search state after a session service error and a stalled session check @t07 @search', async ({ page }) => {
+    await signInWithTotp(page, owner);
+    await page.goto('/search');
+    const input = page.getByTestId('unified-search-input');
+    await input.fill(runId);
+    await page.getByTestId('search-submit-button').click();
+    await expect(page.getByTestId('search-results-list')).toBeVisible();
+    const sessionUrl = '**/api/auth/view-session';
+    const lock = page.getByTestId('protected-view-lock');
+    const retry = page.getByRole('button', { name: 'إعادة التحقق من الجلسة' });
+
+    await page.route(sessionUrl, (route) => route.fulfill({ status: 503 }), { times: 1 });
+    await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    await expect(lock).toContainText('تعذر التحقق من الجلسة');
+    await expect(input).toBeHidden();
+    await retry.click();
+    await expect(input).toHaveValue(runId);
+
+    let release: () => void = () => {};
+    const stalled = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(sessionUrl, async (route) => {
+      await stalled;
+      await route.abort().catch(() => {});
+    }, { times: 1 });
+    try {
+      await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+      await expect(lock).toContainText('تعذر التحقق من الجلسة');
+      await expect(input).toBeHidden();
+      await retry.click();
+      await expect(input).toHaveValue(runId);
+      await expect(page.getByTestId('search-results-list')).toBeVisible();
+    } finally {
+      release();
+    }
+  });
+
+  test('moves the current-session controls to the replacement after same-account sign-in @t07', async ({ page, context }) => {
+    await signInWithTotp(page, owner);
+    const sessionId = () => page.evaluate(async () => (await (await fetch('/api/auth/view-session')).json()).sessionId as string);
+    const oldId = await sessionId();
+    await prisma.session.update({ where: { id: oldId }, data: { userAgent: 'T07 previous browser' } });
+    await page.goto('/settings/security');
+    const previous = page.locator('div.divide-y > div').filter({ hasText: 'T07 previous browser' });
+    await expect(previous.getByText('الجلسة الحالية')).toBeVisible();
+    await expect(previous.getByRole('button', { name: 'تسجيل الخروج' })).toBeVisible();
+
+    await context.clearCookies();
+    await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    await expect(page.getByTestId('protected-view-lock')).toContainText('انتهت الجلسة');
+    const reauth = await context.newPage();
+    await signInWithTotp(reauth, owner);
+    const replacement = await sessionId();
+    expect(replacement).not.toBe(oldId);
+    await prisma.session.update({ where: { id: replacement }, data: { userAgent: 'T07 replacement browser' } });
+    await reauth.close();
+    await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
+    const current = page.locator('div.divide-y > div').filter({ hasText: 'T07 replacement browser' });
+    await expect(current.getByText('الجلسة الحالية')).toBeVisible();
+    await expect(current.getByRole('button', { name: 'تسجيل الخروج' })).toBeVisible();
+    await expect(previous.getByText('جلسة متصلة')).toBeVisible();
+    await expect(previous.getByRole('button', { name: 'إنهاء الجلسة' })).toBeVisible();
+  });
+
   test('searches across Matter, Proceeding, Party with live counts, tabs, archive toggle, and deep links @t07 @search', async ({
     page,
   }) => {
@@ -828,6 +891,10 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     const openClientPickerBtn = page.getByTestId('open-client-picker-button');
     await openClientPickerBtn.click();
     await expect(page.getByTestId('client-picker-popover')).toBeVisible();
+    await page.getByRole('button', { name: 'إغلاق اختيار الموكل' }).click();
+    await expect(openClientPickerBtn).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('client-picker-popover')).toBeVisible();
 
     const clientSearchInput = page.getByTestId('filter-client-search-input');
     await clientSearchInput.fill(`لا يوجد اسم مطابق ${runId}`);
@@ -837,6 +904,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     const clientOption = page.getByTestId(`filter-client-option-${testPartyId}`);
     await expect(clientOption).toBeVisible();
     await clientOption.click();
+    await expect(openClientPickerBtn).toBeFocused();
 
     // Verify client select is updated
     const clientSelect = page.getByTestId('filter-client-select');

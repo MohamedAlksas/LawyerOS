@@ -38,6 +38,11 @@ export function useFormDraft<T>(ownerId: string, pathname: string) {
   };
 }
 
+export function useHasFormDraft() {
+  const drafts = useContext(FormDrafts);
+  return (ownerId: string, pathname: string) => drafts?.has(`${ownerId}:${pathname}`) ?? false;
+}
+
 export function useLeaveGuard(dirty: boolean, pending: boolean) {
   const guards = useContext(NavigationGuards);
 
