@@ -5,8 +5,8 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Worktree & Branch:** `D:/Lawyer/work/t09-gemini` on `feature/t09-deadlines-tasks`  
 **Base Commit (origin/main):** `26249e1ec24eb57edbcf6805d01e646ef4887f53`  
-**Final Implementation SHA:** `13bde734011a3a9b42d7f3e1b52e493bec9ca232`  
-**Report-Only Attestation Note:** This submission document (`docs/reviews/T09-submission.md`) is committed on top of `13bde734011a3a9b42d7f3e1b52e493bec9ca232` with zero code/test/config edits.  
+**Final Implementation SHA:** `3a41016b03848af120bf58053ed00accd96105c4`
+**Report-Only Attestation Note:** This submission document (`docs/reviews/T09-submission.md`) is committed on top of `3a41016b03848af120bf58053ed00accd96105c4` with zero code/test/config edits.
 **Predecessor Status Note:** PR #17 (T08) was squash-merged into `origin/main` at `26249e1ec24eb57edbcf6805d01e646ef4887f53` by the project owner, and work proceeded on explicit owner instruction. `docs/reviews/T08-review.md` is not present in the `origin/main` tree (`D:/Lawyer/docs/reviews/T08-review.md` in the root checkout reflects an earlier `CHANGES_REQUESTED` snapshot prior to PR #17 finalization and merge).
 
 ---
@@ -84,7 +84,7 @@ All tests ran against isolated PostgreSQL (`lawoffice_t08_test` on `127.0.0.1:54
 
 ## 5. Verification Commands Executed & Real Exits
 
-### On Final Implementation SHA `13bde734011a3a9b42d7f3e1b52e493bec9ca232`
+### On Final Implementation SHA `3a41016b03848af120bf58053ed00accd96105c4`
 
 | Command | Exit Code | Observed Result |
 |---|:---:|---|
@@ -92,8 +92,21 @@ All tests ran against isolated PostgreSQL (`lawoffice_t08_test` on `127.0.0.1:54
 | `npm.cmd run typecheck` | `0` | Clean (`tsc --noEmit`) |
 | `npm.cmd run test` | `0` | **20/20 files, 312/312 unit tests passed** |
 | `npm.cmd run build` | `0` | Next.js 16.4.6 Turbopack production build succeeded (43 routes compiled) |
-| `npx.cmd vitest run tests/integration/t09-deadlines-tasks-agenda.test.ts tests/integration/audit-fixes-regressions.test.ts` | `0` | **2/2 files, 18/18 real PG integration tests passed** (`t09` 8, `audit-fixes-regressions` 10) |
-| `npx.cmd vitest run tests/integration/auth-integration.test.ts -t "revalidates a visible session without extending its inactivity window"` | `0` | **1 passed / 56 skipped (`-t` filter)** — verifies `Cache-Control: private, no-store` on `/api/auth/view-session` |
+| `npx.cmd playwright test --config=playwright.t04.config.ts` | `0` | **46/46 passed** (`desktop-1440`, `tablet-768`, `mobile-390`) |
+| `npx.cmd playwright test --config=playwright.t07.config.ts` | `0` | **16/16 passed** (`desktop-1440`, `tablet-768`, `mobile-390`, after removing 23 stale synthetic T07 `2026/7788` / `2026/88%` rows left by an earlier interrupted test run) |
+| `npx.cmd playwright test --config=playwright.t09.config.ts` | `0` | **9/9 passed** (`desktop-1440`, `tablet-768`, `mobile-390`, `cairo-profile`, `newyork-profile`) |
+| `git diff --check` | `0` | Clean (no trailing whitespace / conflict markers) |
+
+### Prior Verification Run on `13bde734011a3a9b42d7f3e1b52e493bec9ca232` / `5d26d20ace74e70c4adef303148f697363c60f00`
+
+| Command | Exit Code | Observed Result |
+|---|:---:|---|
+| `npm.cmd run lint` | `0` | Clean (`eslint .`, 0 errors, 0 warnings) |
+| `npm.cmd run typecheck` | `0` | Clean (`tsc --noEmit`) |
+| `npm.cmd run test` | `0` | **20/20 files, 312/312 unit tests passed** |
+| `npm.cmd run build` | `0` | Next.js 16.4.6 Turbopack production build succeeded (43 routes compiled) |
+| `npm.cmd run test:integration` | `0` | **35/35 files, 333/333 real PG integration tests passed** (`317.37s`) |
+| `npm.cmd run test:e2e` (T03, T05, T06, T08 subset observed prior to `3a41016` fixes) | — | T03 **60/60**, T05 **22/22**, T06 **66/66**, T08 **17/17** passed |
 | `git diff --check` | `0` | Clean (no trailing whitespace / conflict markers) |
 
 ### Prior Verification Run on `4cbac3107be219e6df18e6e676ff9639f46a3caa`
@@ -144,5 +157,5 @@ All tests ran against isolated PostgreSQL (`lawoffice_t08_test` on `127.0.0.1:54
   - **T10 (Reminder Worker):** T09 atomically creates/cancels durable `JobRun` (`REMINDER_DELIVERY`) records; no polling worker, lease claiming, email/push dispatch, or `ReminderDelivery` dispatch occurs in T09.
   - **T12 (Documents):** `Deadline.sourceDocumentId` is stored as a nullable field; passing a non-null ID is rejected with `VALIDATION_ERROR` until T12 introduces the `Document` table and FK constraints.
 - **`NOT RUN` Limits:**
-  - After the final cleanup commit `13bde734011a3a9b42d7f3e1b52e493bec9ca232` (unifying `verifyActionSecurity` into `src/modules/identity/action-security.ts` with `sec-fetch-site`, SQL date-window filtering in `listAgenda`, `noStoreJson` `'private, no-store'` + `view-session` test expectation, `statusFromErrorCode` reuse in `hearing-http.ts`, and `AbortController` in `DashboardStatus`), the full 35-file `npm.cmd run test:integration`, unfiltered `auth-integration.test.ts`, and Playwright browser suites (`test:e2e:t03..t09`) were not re-executed on `13bde734011a3a9b42d7f3e1b52e493bec9ca232` (Playwright T09 `desktop-1440`/`mobile-390` 6/6 and T04 navigation/auth 11/11 passed on `4cbac3107be219e6df18e6e676ff9639f46a3caa` directly before this commit). Verification on `13bde734011a3a9b42d7f3e1b52e493bec9ca232` covered `lint`, `typecheck`, unit tests (`312/312`), production `build`, `t09` + `audit-fixes-regressions` PG integration (`18/18`), and targeted `view-session` integration (`1` passed).
+  - After the final E2E/layout fix commit `3a41016b03848af120bf58053ed00accd96105c4` (`agenda-view.tsx` tablet header wrapping, restoring 6-item `mobile-bottom-nav.tsx`, and `tabThrough(page, 24)` in `tests/e2e/t04-04-accessibility-keyboard.spec.ts`), `npm.cmd run test:integration` (`35/35`, `333/333` passed on `5d26d20`), T03 (`60/60`), T05 (`22/22`), T06 (`66/66`), and T08 (`17/17`) were not re-executed locally; verification directly on `3a41016b03848af120bf58053ed00accd96105c4` covered `lint`, `typecheck`, unit tests (`312/312`), production `build`, and all fixed Playwright suites (`T04` `46/46`, `T07` `16/16`, `T09` `9/9`).
   - Native screen reader AT walkthroughs and live HTTPS production mobile testing remain outside local automated Playwright runs.
