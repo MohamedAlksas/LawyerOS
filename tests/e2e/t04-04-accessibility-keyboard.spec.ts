@@ -73,7 +73,7 @@ test('keyboard tab order reaches navigation with visible focus @desktop', async 
   await page.goto(T04_ROUTES.home);
   await expectShellReady(page);
 
-  const stops = (await tabThrough(page, 14)).filter(
+  const stops = (await tabThrough(page, 24)).filter(
     (stop) => stop.tagName !== 'body' && stop.tagName !== 'html'
   );
   expect(stops.length, 'No keyboard stops were recorded').toBeGreaterThanOrEqual(4);

@@ -648,8 +648,8 @@ export function AgendaView({
       )}
 
       {/* Stitch S07 Screen Header */}
-      <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs print:hidden">
-        <div className="space-y-1">
+      <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 flex flex-wrap items-center justify-between gap-4 shadow-xs print:hidden">
+        <div className="space-y-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-[#14566B] bg-[#E9F2F5] px-2.5 py-0.5 rounded-[4px] border border-[#C2D9E2]">
               رول الجلسات والأجندة الموحدة
@@ -664,7 +664,7 @@ export function AgendaView({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
           <button
             type="button"
             data-testid="agenda-refresh-button"
