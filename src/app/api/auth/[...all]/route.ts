@@ -17,7 +17,7 @@ import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from '@/modules/identi
 
 function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
   const res = NextResponse.json(body, init);
-  res.headers.set('Cache-Control', 'no-store');
+  res.headers.set('Cache-Control', 'private, no-store');
   return res;
 }
 

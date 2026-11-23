@@ -934,6 +934,7 @@ export async function listAgenda(
 
   const rangeStartUtc = parseCalendarDateToUtcDate(rangeStart)!;
   const rangeEndUtc = parseCalendarDateToUtcDate(rangeEnd)!;
+  const cairoTodayUtc = parseCalendarDateToUtcDate(cairoToday)!;
 
   const includeTypes = new Set(params.types ?? ['HEARING', 'DEADLINE', 'TASK']);
   const includeHearings = includeTypes.has('HEARING');
@@ -1001,6 +1002,17 @@ export async function listAgenda(
             AND: [
               { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
               ...(courtFilterId ? [{ proceeding: { courtId: courtFilterId } }] : []),
+              {
+                OR: [
+                  view === 'today' || view === 'list'
+                    ? { status: 'DRAFT' }
+                    : { status: 'DRAFT', dueDate: null },
+                  { status: 'CONFIRMED', dueDate: { lt: cairoTodayUtc } },
+                  view === 'list'
+                    ? { dueDate: { gte: rangeStartUtc } }
+                    : { dueDate: { gte: rangeStartUtc, lte: rangeEndUtc } },
+                ],
+              },
             ],
           },
           include: {
@@ -1042,6 +1054,15 @@ export async function listAgenda(
                 ],
               },
               { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+              {
+                OR: [
+                  { status: { in: ['OPEN', 'IN_PROGRESS'] }, dueDate: null },
+                  { status: { in: ['OPEN', 'IN_PROGRESS'] }, dueDate: { lt: cairoTodayUtc } },
+                  view === 'list'
+                    ? { dueDate: { gte: rangeStartUtc } }
+                    : { dueDate: { gte: rangeStartUtc, lte: rangeEndUtc } },
+                ],
+              },
               ...(courtFilterId
                 ? [
                     {

@@ -1,8 +1,6 @@
 ﻿'use server';
 
-import { getTrustedOrigins } from '@/lib/auth';
-import { requireActor } from '@/modules/identity/require-actor';
-import { AuthorizationError, type Actor, type Permission } from '@/modules/identity/types';
+import { verifyActionSecurity } from '@/modules/identity/action-security';
 import { hearingError } from './hearing-errors';
 import {
   createDeadline,
@@ -25,26 +23,6 @@ import type {
   CancelDeadlineInput,
   ListDeadlinesParams,
 } from './deadline-types';
-
-async function verifyActionSecurity(requiredPermission: Permission): Promise<Actor> {
-  try {
-    const { headers: nextHeaders } = await import('next/headers');
-    const reqHeaders = await nextHeaders();
-    const origin = reqHeaders?.get('origin');
-    if (origin && !getTrustedOrigins().has(origin)) {
-      throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
-    }
-    if (reqHeaders?.get('sec-fetch-site') === 'cross-site') {
-      throw new AuthorizationError('غير مصرح بالوصول من مصدر خارجي.');
-    }
-  } catch (err) {
-    if (err instanceof AuthorizationError) {
-      throw err;
-    }
-  }
-
-  return await requireActor({ requiredPermission });
-}
 
 export async function createDeadlineAction(
   input: CreateDeadlineInput

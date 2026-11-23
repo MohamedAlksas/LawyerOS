@@ -3,6 +3,7 @@ import { getTrustedOrigins } from '@/lib/auth';
 import { requireActor } from '@/modules/identity/require-actor';
 import type { Actor } from '@/modules/identity/types';
 import { hearingError } from './hearing-errors';
+import { statusFromErrorCode } from './deadline-http';
 import { SchedulingValidationError } from './hearing-types';
 
 const headers = { 'Cache-Control': 'private, no-store' };
@@ -28,10 +29,6 @@ export async function writeHearingFromRequest<T extends { hearingId: string }, R
   } catch (error) {
     const problem = hearingError(error);
     const code = !problem.success ? problem.code : 'INTERNAL_ERROR';
-    const status = code === 'FORBIDDEN' ? 403 :
-      ['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '') ? 401 :
-      ['CONCURRENCY_CONFLICT', 'IDEMPOTENCY_PAYLOAD_MISMATCH', 'IDEMPOTENCY_CONCURRENT_CONFLICT'].includes(code ?? '') ? 409 :
-      code === 'NOT_FOUND' ? 404 : code === 'INTERNAL_ERROR' ? 500 : 400;
-    return NextResponse.json(problem, { status, headers });
+    return NextResponse.json(problem, { status: statusFromErrorCode(code), headers });
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { LoadingIndicator, ErrorContainer } from './presentation-state';
 import {
@@ -15,47 +15,70 @@ export interface DashboardStatusProps {
   actorEmail: string;
 }
 
+async function probeHealthReady(signal: AbortSignal) {
+  const res = await fetch('/api/health/ready', {
+    headers: { 'Cache-Control': 'no-cache' },
+    signal,
+  });
+  if (!res.ok) {
+    throw new Error('فشل الاتصال بخدمة جاهزية النظام');
+  }
+}
+
 export function DashboardStatus({ actorEmail }: DashboardStatusProps) {
   const [status, setStatus] = useState<'loading' | 'error' | 'settled'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const executeStatusCheck = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setStatus('loading');
     setErrorMessage(null);
     try {
-      const res = await fetch('/api/health/ready', {
-        headers: { 'Cache-Control': 'no-cache' },
-      });
-      if (!res.ok) {
-        throw new Error('فشل الاتصال بخدمة جاهزية النظام');
+      await probeHealthReady(controller.signal);
+      if (!controller.signal.aborted && abortRef.current === controller) {
+        setStatus('settled');
       }
-      setStatus('settled');
     } catch {
-      setStatus('error');
-      setErrorMessage('تعذر تحميل بيانات لوحة المتابعة. يرجى التحقق من الاتصال والمحاولة مجدداً.');
+      if (!controller.signal.aborted && abortRef.current === controller) {
+        setStatus('error');
+        setErrorMessage('تعذر تحميل بيانات لوحة المتابعة. يرجى التحقق من الاتصال والمحاولة مجدداً.');
+      }
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
     }
   }, []);
 
   useEffect(() => {
-    let isSubscribed = true;
-    fetch('/api/health/ready', {
-      headers: { 'Cache-Control': 'no-cache' },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('فشل الاتصال بخدمة جاهزية النظام');
-        if (isSubscribed) {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    probeHealthReady(controller.signal)
+      .then(() => {
+        if (!controller.signal.aborted && abortRef.current === controller) {
           setStatus('settled');
         }
       })
       .catch(() => {
-        if (isSubscribed) {
+        if (!controller.signal.aborted && abortRef.current === controller) {
           setStatus('error');
           setErrorMessage('تعذر تحميل بيانات لوحة المتابعة. يرجى التحقق من الاتصال والمحاولة مجدداً.');
+        }
+      })
+      .finally(() => {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
         }
       });
 
     return () => {
-      isSubscribed = false;
+      controller.abort();
     };
   }, []);
 

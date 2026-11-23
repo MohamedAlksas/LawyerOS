@@ -1,8 +1,7 @@
 'use server';
 
-import { requireActor } from '@/modules/identity/require-actor';
-import { AuthenticationError, AuthorizationError, Actor, Permission } from '@/modules/identity/types';
-import { getTrustedOrigins } from '@/lib/auth';
+import { verifyActionSecurity } from '@/modules/identity/action-security';
+import { AuthenticationError, AuthorizationError, Actor } from '@/modules/identity/types';
 import {
   openMatter,
   updateMatter,
@@ -234,26 +233,6 @@ function handleActionError(error: unknown): ActionResult<never> {
     error: 'حدث خطأ غير متوقع أثناء معالجة الطلب. يرجى المحاولة مرة أخرى.',
     code: 'INTERNAL_ERROR',
   };
-}
-
-async function verifyActionSecurity(options: { requiredPermission?: Permission } = {}): Promise<Actor> {
-  try {
-    const { headers: nextHeaders } = await import('next/headers');
-    const reqHeaders = await nextHeaders();
-    const origin = reqHeaders?.get('origin');
-    if (origin) {
-      const trusted = getTrustedOrigins();
-      if (!trusted.has(origin)) {
-        throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
-      }
-    }
-  } catch (err) {
-    if (err instanceof AuthorizationError) {
-      throw err;
-    }
-  }
-
-  return await requireActor(options);
 }
 
 export async function openMatterAction(

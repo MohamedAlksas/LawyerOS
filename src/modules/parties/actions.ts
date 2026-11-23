@@ -1,10 +1,10 @@
 'use server';
 
-import { requireActor } from '@/modules/identity/require-actor';
+import { verifyActionSecurity } from '@/modules/identity/action-security';
 import { assertAuthorized } from '@/modules/identity/authorize';
-import { AuthenticationError, AuthorizationError, Actor } from '@/modules/identity/types';
+import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { CryptoDecryptionError } from '@/lib/crypto/party-identity';
-import { getPrismaClient, getTrustedOrigins } from '@/lib/auth';
+import { getPrismaClient } from '@/lib/auth';
 import {
   saveParty,
   searchParties,
@@ -116,40 +116,6 @@ function handleActionError(error: unknown): ActionResult<never> {
     error: 'حدث خطأ غير متوقع أثناء معالجة الطلب. يرجى المحاولة مرة أخرى.',
     code: 'INTERNAL_ERROR',
   };
-}
-
-/**
- * Internal action security guard (R2-01).
- * 1. Derives headers strictly from Next.js server context (next/headers).
- * 2. Enforces defense-in-depth Origin header verification against getTrustedOrigins().
- * 3. Enforces authoritative server session validation via requireActor() with ZERO caller-controlled options.
- */
-/**
- * Server action security middleware:
- * 1. Validates host / origin against trusted deployment origins to defeat CSRF.
- * 2. Enforces valid HTTP methods and context boundaries.
- * 3. Enforces authoritative server session validation via requireActor() with ZERO caller-controlled options (R2-01).
- */
-async function verifyActionSecurity(): Promise<Actor> {
-  try {
-    const { headers: nextHeaders } = await import('next/headers');
-    const reqHeaders = await nextHeaders();
-    const origin = reqHeaders?.get('origin');
-    if (origin) {
-      const trusted = getTrustedOrigins();
-      if (!trusted.has(origin)) {
-        throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
-      }
-    }
-  } catch (err) {
-    if (err instanceof AuthorizationError) {
-      throw err;
-    }
-    // Continue if outside Next.js request context (e.g. test environments without mock headers)
-  }
-
-  // Derive actor strictly from server-owned session without caller-controlled options (R2-01)
-  return await requireActor();
 }
 
 export async function savePartyAction(
