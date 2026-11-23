@@ -5,8 +5,8 @@
 **Canonical Origin:** `https://github.com/MohamedAlksas/LawyerOS.git`  
 **Worktree & Branch:** `D:/Lawyer/work/t09-gemini` on `feature/t09-deadlines-tasks`  
 **Base Commit (origin/main):** `26249e1ec24eb57edbcf6805d01e646ef4887f53`  
-**Final Implementation SHA:** `0eaf6a0ada89ea510ed0334f031a0b9fff1f81a8`  
-**Report-Only Attestation Note:** This submission document (`docs/reviews/T09-submission.md`) is committed on top of `0eaf6a0ada89ea510ed0334f031a0b9fff1f81a8` with zero code/test/config edits.  
+**Final Implementation SHA:** `c442b000de9ea07ac03666ee2dcb2ee4a91aef8c`  
+**Report-Only Attestation Note:** This submission document (`docs/reviews/T09-submission.md`) is committed on top of `c442b000de9ea07ac03666ee2dcb2ee4a91aef8c` with zero code/test/config edits.  
 **Predecessor Status Note:** PR #17 (T08) was squash-merged into `origin/main` at `26249e1ec24eb57edbcf6805d01e646ef4887f53` by the project owner, and work proceeded on explicit owner instruction. `docs/reviews/T08-review.md` is not present in the `origin/main` tree (`D:/Lawyer/docs/reviews/T08-review.md` in the root checkout reflects an earlier `CHANGES_REQUESTED` snapshot prior to PR #17 finalization and merge).
 
 ---
