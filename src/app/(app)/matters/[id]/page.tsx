@@ -7,6 +7,10 @@ import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
 import { MatterDetailClient } from '@/components/matters/matter-detail-client';
 import { EmptyStateContainer } from '@/components/presentation-state';
+import { listTasks } from '@/modules/productivity';
+import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
+import { listDeadlines } from '@/modules/scheduling';
+import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailPageProps {
   params: Promise<{
@@ -62,9 +66,20 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     throw error;
   }
 
+  const [initialTasks, initialDeadlines] = await Promise.all([
+    listTasks(actor, { matterId: id, includeCompleted: true }).catch(() => [] as TaskItemDTO[]),
+    listDeadlines(actor, { matterId: id, includeClosed: true }).catch(() => [] as DeadlineDTO[]),
+  ]);
+
   return (
     <div className="py-2">
-      <MatterDetailClient key={actor.id} ownerId={actor.id} initialMatter={matter} />
+      <MatterDetailClient
+        key={actor.id}
+        ownerId={actor.id}
+        initialMatter={matter}
+        initialTasks={initialTasks}
+        initialDeadlines={initialDeadlines}
+      />
     </div>
   );
 }

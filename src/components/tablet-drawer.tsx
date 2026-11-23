@@ -124,6 +124,10 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   };
 
   const isHomeActive = pathname === '/';
+  const isTodayActive = pathname === '/today' || pathname.startsWith('/today/');
+  const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
+  const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
+  const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
@@ -188,8 +192,68 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
                   : 'text-[#172A35] hover:bg-[#E8EEF1]'
               }`}
             >
+              <span aria-hidden="true" className="text-base">🏠</span>
+              <span>الرئيسية</span>
+            </Link>
+
+            <Link
+              href="/today"
+              data-testid="nav-link-today"
+              aria-current={isTodayActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isTodayActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">☀️</span>
+              <span>النهارده (اليوم)</span>
+            </Link>
+
+            <Link
+              href="/agenda"
+              data-testid="nav-link-agenda"
+              aria-current={isAgendaActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isAgendaActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
               <span aria-hidden="true" className="text-base">📅</span>
-              <span>الرئيسية / اليوم</span>
+              <span>الأجندة</span>
+            </Link>
+
+            <Link
+              href="/tasks"
+              data-testid="nav-link-tasks"
+              aria-current={isTasksActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isTasksActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">☑️</span>
+              <span>المهام</span>
+            </Link>
+
+            <Link
+              href="/deadlines"
+              data-testid="nav-link-deadlines"
+              aria-current={isDeadlinesActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm font-medium transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 ${
+                isDeadlinesActive
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span aria-hidden="true" className="text-base">⏳</span>
+              <span>المواعيد القانونية</span>
             </Link>
 
             <Link
@@ -273,18 +337,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
                 الوحدات القادمة
               </span>
               <div className="space-y-1">
-
-                <div
-                  aria-disabled="true"
-                  className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"
-                >
-                  <div className="flex items-center gap-2">
-                    <span aria-hidden="true">⚖️</span>
-                    <span>جدول الجلسات العام</span>
-                  </div>
-                  <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
-                </div>
-
                 <div
                   aria-disabled="true"
                   className="flex items-center justify-between px-3 py-2 rounded-[6px] text-xs font-medium text-[#4D606A] bg-[#F4F6F7] opacity-75 cursor-not-allowed select-none min-h-[40px]"

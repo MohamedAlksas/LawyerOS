@@ -10,6 +10,11 @@ const NO_STORE_HEADER = [{ key: 'Cache-Control', value: 'private, no-store' }];
 
 const NO_STORE_PATHS = [
   '/',
+  '/today',
+  '/agenda',
+  '/tasks',
+  '/deadlines',
+  '/deadlines/:path*',
   '/matters',
   '/matters/:path*',
   '/parties',

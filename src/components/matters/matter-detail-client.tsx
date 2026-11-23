@@ -41,13 +41,24 @@ import {
   generateClientRequestId,
   isAuthRecoveryCode,
 } from './matter-ui-types';
+import { TasksView } from '@/components/productivity/tasks-view';
+import { DeadlinesView } from '@/components/deadlines/deadlines-view';
+import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
+import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailClientProps {
   ownerId: string;
   initialMatter: MatterDTO;
+  initialTasks?: TaskItemDTO[];
+  initialDeadlines?: DeadlineDTO[];
 }
 
-export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClientProps) {
+export function MatterDetailClient({
+  ownerId,
+  initialMatter,
+  initialTasks = [],
+  initialDeadlines = [],
+}: MatterDetailClientProps) {
   const router = useRouter();
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
   // U8: router.refresh() supplies a newly confirmed aggregate. Replace the
@@ -59,7 +70,9 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
       setMatter(initialMatter);
     }
   }, [initialMatter]);
-  const [activeTab, setActiveTab] = useState<'parties' | 'proceedings' | 'authorizations' | 'summary' | 'audit'>('parties');
+  const [activeTab, setActiveTab] = useState<
+    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary' | 'audit'
+  >('parties');
 
   // Party Linking Modal / Form State (C11 guarded async lifecycle)
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
@@ -1749,7 +1762,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
 
       {/* 4. Navigation Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex space-x-1 sm:space-x-4 space-x-reverse" aria-label="أقسام ملف القضية">
+        <nav className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية">
           <button
             type="button"
             data-testid="tab-parties"
@@ -1787,6 +1800,19 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
             }`}
           >
             📜 سندات الوكالة والتوكيلات ({authorizations.length})
+          </button>
+
+          <button
+            type="button"
+            data-testid="tab-tasks-deadlines"
+            onClick={() => setActiveTab('tasksDeadlines')}
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+              activeTab === 'tasksDeadlines'
+                ? 'border-[#14566B] text-[#14566B]'
+                : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
+            }`}
+          >
+            ⏳ المهام والمواعيد ({initialTasks.length + initialDeadlines.length})
           </button>
 
           <button
@@ -2553,7 +2579,46 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
         </div>
       )}
 
-      {/* Tab 4: Summary & Notes */}
+      {/* Tab 4: Tasks & Legal Deadlines */}
+      {activeTab === 'tasksDeadlines' && (
+        <div className="space-y-8" data-testid="matter-tasks-deadlines-panel">
+          <DeadlinesView
+            actorId={ownerId}
+            initialDeadlines={initialDeadlines}
+            selectableMatters={[]}
+            lockedMatterId={matter.id}
+            lockedMatterProceedings={(matter.proceedings || [])
+              .filter((p) => !p.archivedAt)
+              .map((p) => ({
+                id: p.id,
+                courtId: p.courtId,
+                courtName: p.courtName,
+                label: `${p.courtName}${p.numberText ? ` — ${p.numberText}${p.yearLabel ? `/${p.yearLabel}` : ''}` : ' (مسودة قيد)'}`,
+              }))}
+            isReadOnly={isMatterArchived}
+            onDataChanged={() => router.refresh()}
+          />
+
+          <TasksView
+            actorId={ownerId}
+            initialTasks={initialTasks}
+            selectableMatters={[]}
+            lockedMatterId={matter.id}
+            lockedMatterProceedings={(matter.proceedings || [])
+              .filter((p) => !p.archivedAt)
+              .map((p) => ({
+                id: p.id,
+                courtId: p.courtId,
+                courtName: p.courtName,
+                label: `${p.courtName}${p.numberText ? ` — ${p.numberText}${p.yearLabel ? `/${p.yearLabel}` : ''}` : ' (مسودة قيد)'}`,
+              }))}
+            isReadOnly={isMatterArchived}
+            onDataChanged={() => router.refresh()}
+          />
+        </div>
+      )}
+
+      {/* Tab 5: Summary & Notes */}
       {activeTab === 'summary' && (
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs">
           <div>
@@ -2639,7 +2704,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
             </div>
 
             <p className="text-xs text-[#4D606A] leading-relaxed">
-              عند أرشفة الملف، سيتحول إلى وضع القراءة فقط ولن تتمكن من تعديل بياناته أو إضافة قيود جديدة أو ربط أطراف إلا بعد إلغاء الأرشفة.
+              عند أرشفة الملف، سيتحول إلى وضع القراءة فقط ولن تتمكن من تعديل بياناته أو إضافة قيود جديدة أو ربط أطراف إلا بعد إلغاء الأرشفة. لا يمكن الأرشفة مع وجود جلسات مجدولة أو مواعيد قانونية مؤكدة مفتوحة.
             </p>
 
             {lifecycleError && (
