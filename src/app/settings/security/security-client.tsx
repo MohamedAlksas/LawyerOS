@@ -162,6 +162,9 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
     try {
       const res = await revokeSessionAction(sessionId);
       if (!res.success) {
+        if (res.code === 'UNAUTHENTICATED') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setActionError(res.message || 'فشل إنهاء الجلسة.');
         return;
       }
@@ -186,6 +189,9 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
     try {
       const res = await revokeOtherSessionsAction();
       if (!res.success) {
+        if (res.code === 'UNAUTHENTICATED') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setActionError(res.message || 'فشل إنهاء الجلسات.');
         return;
       }
@@ -212,6 +218,9 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
         return;
       }
       if (!res.success) {
+        if (res.code === 'UNAUTHENTICATED') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setRegenError(res.message || 'فشل إعادة توليد الرموز.');
         return;
       }

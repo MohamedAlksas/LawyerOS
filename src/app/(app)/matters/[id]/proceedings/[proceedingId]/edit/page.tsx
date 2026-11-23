@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
@@ -25,10 +26,7 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}/edit`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}/edit`));
+      await redirectOnAuthError(error, `/matters/${id}/proceedings/${proceedingId}/edit`);
     }
     if (error instanceof AuthorizationError) {
       return (

@@ -1,6 +1,6 @@
 ﻿import React from 'react';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError } from '@/modules/identity/types';
 import { DashboardStatus } from '@/components/dashboard-status';
 
@@ -10,19 +10,7 @@ export default async function HomePage() {
     actor = await requireActor();
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify');
-      }
-      if (error.code === 'SESSION_EXPIRED' || error.code === 'SESSION_INACTIVE') {
-        redirect('/login?error=session_expired');
-      }
-      const { headers } = await import('next/headers');
-      const reqHeaders = await headers();
-      const cookie = reqHeaders.get('cookie') || '';
-      if (/(?:better-auth\.session_token|__Secure-better-auth\.session_token)/i.test(cookie)) {
-        redirect('/login?error=session_expired');
-      }
-      redirect('/login');
+      await redirectOnAuthError(error);
     }
     throw error;
   }

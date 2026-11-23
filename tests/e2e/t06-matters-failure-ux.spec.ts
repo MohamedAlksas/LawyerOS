@@ -422,11 +422,11 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
       // 3. Navigate directly to matter deep link
       await page.goto(`/matters/${matter.id}`);
 
-      // 4. Verify redirected to login with returnTo
+      // 4. Verify redirected to login with returnTo (without false expiry error on fresh unauth visit)
       await expect(page).toHaveURL((url) => {
         return (
           url.pathname === '/login' &&
-          url.searchParams.get('error') === 'session_expired' &&
+          url.searchParams.get('error') === null &&
           url.searchParams.get('returnTo') === `/matters/${matter.id}`
         );
       });

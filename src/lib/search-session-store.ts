@@ -3,6 +3,7 @@ interface PrivateSearchState {
   client?: { id: string; name: string };
 }
 
+const MAX_TAB_STORE_ENTRIES = 50;
 const tabStore = new Map<string, PrivateSearchState>();
 let boundSession: string | null = null;
 
@@ -34,7 +35,14 @@ export function writeSearchHistory(
   const key = typeof state?.navKey === 'string'
     ? state.navKey
     : Array.from(window.crypto.getRandomValues(new Uint32Array(4))).join('-');
-  tabStore.set(`${window.location.pathname}:${key}`, entry);
+  const storeKey = `${window.location.pathname}:${key}`;
+  tabStore.delete(storeKey);
+  tabStore.set(storeKey, entry);
+  while (tabStore.size > MAX_TAB_STORE_ENTRIES) {
+    const oldestKey = tabStore.keys().next().value;
+    if (oldestKey === undefined) break;
+    tabStore.delete(oldestKey);
+  }
   const search = params.toString();
   const url = window.location.pathname + (search ? `?${search}` : '');
   if (state?.navKey !== key || window.location.search !== (search ? `?${search}` : '')) {

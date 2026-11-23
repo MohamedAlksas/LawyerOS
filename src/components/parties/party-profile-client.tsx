@@ -7,6 +7,7 @@ import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actio
 import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
 import { ClientProfileDTO } from '@/modules/parties/types';
 import {
+  isAuthRecoveryCode,
   MATTER_PARTY_ROLE_LABELS,
   MATTER_STATUS_LABELS,
 } from '@/components/matters/matter-ui-types';
@@ -60,6 +61,9 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
         }
         if (gen !== mattersGenRef.current) return;
         if (!res.success) {
+          if (isAuthRecoveryCode(res.code)) {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
           return;
         }
@@ -88,6 +92,9 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
         if (ignore || gen !== mattersGenRef.current) return;
         setIsLoadingMatters(false);
         if (!res.success) {
+          if (isAuthRecoveryCode(res.code)) {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setMattersError(res.error || 'تعذر تحميل ملفات القضايا المرتبطة بهذا الطرف.');
           return;
         }
@@ -116,6 +123,9 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       );
 
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code)) {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setRevealError(res.error || 'تعذر فك تشفير رقم الهوية.');
         setIsRevealing(false);
         return;
@@ -462,7 +472,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
 
                 <Link
                   href={`/matters/${m.matterId}`}
-                  className="px-3 py-1.5 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] rounded border border-[#D5DFE3] min-h-[36px] flex items-center"
+                  className="px-3 py-1.5 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] rounded border border-[#D5DFE3] min-h-[44px] flex items-center"
                 >
                   عرض الملف
                 </Link>
@@ -481,7 +491,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                   onClick={() => loadMatters(mattersPage - 1)}
                   disabled={mattersPage <= 0 || isLoadingMatters}
                   data-testid="party-matters-prev"
-                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[44px]"
                 >
                   السابق
                 </button>
@@ -490,7 +500,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                   onClick={() => loadMatters(mattersPage + 1)}
                   disabled={mattersPage + 1 >= mattersTotalPages || isLoadingMatters}
                   data-testid="party-matters-next"
-                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                  className="px-2.5 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[44px]"
                 >
                   التالي
                 </button>
@@ -506,7 +516,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
           💰 الحسابات المالية والمستندات الرقمية
         </span>
         <p>
-          وحدات المستندات الرقمية (T10) وحسابات الأتعاب والمصروفات (T11/T12)
+          وحدات المستندات الرقمية وحسابات الأتعاب والمصروفات
           غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
         </p>
       </div>

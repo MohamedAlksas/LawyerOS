@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { scheduleHearingAction } from '@/modules/scheduling/hearing-actions';
 import type { ScheduleHearingInput } from '@/modules/scheduling/hearing-types';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
-import { isUncertainHearingOutcome } from './hearing-recovery';
+import {
+  isUncertainHearingOutcome,
+  renderHearingModalPortal,
+  useHearingModalEffects,
+} from './hearing-recovery';
 import { HearingDTO } from './hearing-ui-types';
-import { generateClientRequestId, getCairoTodayDate } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, getCairoTodayDate, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface ScheduleHearingModalProps {
   actorId: string;
@@ -34,7 +38,8 @@ export function ScheduleHearingModal({
 
   const draft = useFormDraft<ScheduleHearingInput>(`${actorId}:schedule-hearing`, `/matters/${matterId}/proceedings/${proceedingId}`);
   const pending = useRef(draft.restored);
-  const [hearingDate, setHearingDate] = useState(() => draft.restored?.hearingDate ?? getCairoTodayDate());
+  const [initialDate] = useState(() => getCairoTodayDate());
+  const [hearingDate, setHearingDate] = useState(() => draft.restored?.hearingDate ?? initialDate);
   const [hasSpecificTime, setHasSpecificTime] = useState(() => Boolean(draft.restored?.hearingTime));
   const [hearingTime, setHearingTime] = useState(() => draft.restored?.hearingTime ?? '');
   const [locationRoom, setLocationRoom] = useState(() => draft.restored?.locationRoom ?? '');
@@ -45,56 +50,20 @@ export function ScheduleHearingModal({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
-  useLeaveGuard(false, isSubmitting);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const dirty = isOpen && Boolean(
+    hasSpecificTime || hearingTime || locationRoom || rollNumber || purpose || hearingDate !== initialDate
+  );
+  useLeaveGuard(dirty, isSubmitting || isFrozenRetry);
 
-  // Auto-focus first input on open
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => {
-        if (pending.current) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
-        else firstInputRef.current?.focus();
-      });
-    }
-  }, [isOpen]);
-
-  // Focus trap and Escape listener
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (!isSubmitting) {
-          e.preventDefault();
-          onClose();
-        }
-        return;
-      }
-
-      if (e.key === 'Tab') {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-
-        const focusables = dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusables.length === 0) return;
-
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting, onClose]);
+  useHearingModalEffects({
+    isOpen,
+    isSubmitting,
+    hasPending: isFrozenRetry,
+    onClose,
+    dialogRef,
+    initialFocusRef: firstInputRef,
+  });
 
   if (!isOpen) return null;
 
@@ -103,6 +72,7 @@ export function ScheduleHearingModal({
     if (isSubmitting) return;
 
     setError(null);
+    setSessionExpired(false);
     setFieldErrors({});
     setIsSubmitting(true);
 
@@ -122,6 +92,12 @@ export function ScheduleHearingModal({
 
       if (!res.success) {
         setIsSubmitting(false);
+        if (isAuthRecoveryCode(res.code)) {
+          setSessionExpired(true);
+          setIsFrozenRetry(true);
+          setError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+          return;
+        }
         const uncertain = isUncertainHearingOutcome(res.code);
         setIsFrozenRetry(uncertain);
         if (!uncertain) { pending.current = undefined; draft.clear(); }
@@ -145,7 +121,7 @@ export function ScheduleHearingModal({
     }
   };
 
-  return (
+  return renderHearingModalPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
       role="presentation"
@@ -180,8 +156,27 @@ export function ScheduleHearingModal({
           </button>
         </div>
 
+        {sessionExpired && (
+          <div
+            role="alert"
+            data-testid="hearing-modal-session-recovery-alert"
+            className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
+          >
+            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p>أُبقيت بيانات الجلسة ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] hover:bg-[#114252] min-h-[44px]"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+          </div>
+        )}
+
         {/* Frozen Retry Banner on Network Failure */}
-        {isFrozenRetry && (
+        {isFrozenRetry && !sessionExpired && (
           <div
             role="alert"
             data-testid="schedule-hearing-retry-banner"
@@ -246,9 +241,15 @@ export function ScheduleHearingModal({
           {/* Hearing Time (Optional with explicit Unknown Time toggle) */}
           <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-[6px]">
             <div className="flex items-center justify-between">
-              <label className="font-bold text-[#172A35]">
-                وقت الجلسة (اختياري)
-              </label>
+              {hasSpecificTime ? (
+                <label htmlFor="schedule-hearing-time" className="font-bold text-[#172A35]">
+                  وقت الجلسة (اختياري)
+                </label>
+              ) : (
+                <span className="font-bold text-[#172A35]">
+                  وقت الجلسة (اختياري)
+                </span>
+              )}
               <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-[#14566B] font-semibold">
                 <input
                   type="checkbox"

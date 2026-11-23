@@ -100,6 +100,8 @@ export async function checkDatabaseReadiness(
 
       return res.rows[0]?.probe === 1;
     })();
+    // Prevent unhandled rejection if client.release(true) rejects the in-flight query after timeout
+    probePromise.catch(() => {});
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutTimer = setTimeout(() => {

@@ -1,18 +1,20 @@
-// UUID segment pattern (36 chars: alphanumeric and hyphens)
-const UUID_SEGMENT = '[0-9a-fA-F-]{36}';
+// Canonical UUID v1-v5/random pattern (8-4-4-4-12 hex with hyphens)
+const UUID_SEGMENT = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
 const ALLOWED_EXACT_ROUTES = new Set([
   '/',
+  '/search',
   '/matters',
   '/matters/new',
   '/parties',
   '/parties/new',
   '/settings/reference',
   '/settings/security',
+  '/settings/security/sessions',
   '/offline',
 ]);
 
-const ALLOWED_PREFIX_ROUTES = ['/settings/security/', '/offline/'];
+const ALLOWED_PREFIX_ROUTES: string[] = [];
 
 const ALLOWED_PATTERN_ROUTES = [
   new RegExp(`^/matters/${UUID_SEGMENT}$`),
@@ -21,6 +23,8 @@ const ALLOWED_PATTERN_ROUTES = [
   new RegExp(`^/matters/${UUID_SEGMENT}/proceedings/new$`),
   new RegExp(`^/matters/${UUID_SEGMENT}/proceedings/${UUID_SEGMENT}$`),
   new RegExp(`^/matters/${UUID_SEGMENT}/proceedings/${UUID_SEGMENT}/edit$`),
+  new RegExp(`^/hearings/${UUID_SEGMENT}$`),
+  new RegExp(`^/hearings/${UUID_SEGMENT}/result$`),
   new RegExp(`^/parties/${UUID_SEGMENT}$`),
   new RegExp(`^/parties/${UUID_SEGMENT}/edit$`),
 ];

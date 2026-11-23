@@ -3,6 +3,7 @@
 import React, { useState, useLayoutEffect, useRef } from 'react';
 import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
   PoAType,
   PoAReviewStatus,
@@ -36,7 +37,7 @@ interface PoaDraft {
 
 export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: PoaSectionProps) {
   const draft = useFormDraft<PoaDraft>(ownerId, `/parties/${partyId}`);
-  const restored = draft.restored;
+  const restored = readOnly ? undefined : draft.restored;
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
   const [isFormOpen, setIsFormOpen] = useState(Boolean(restored));
   const [isDirty, setIsDirty] = useState(Boolean(restored));
@@ -53,16 +54,17 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const idempotencyKeyRef = useRef<string | null>(null);
   const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(restored?.pending ?? null);
   const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, humanReviewStatus, notes };
   useLayoutEffect(() => {
-    if (!draft.isCurrent()) return;
+    if (readOnly || !draft.isCurrent()) return;
     if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
     else draft.clear();
   });
-  useLeaveGuard(isFormOpen && isDirty, isSubmitting || Boolean(pending));
+  useLeaveGuard(!readOnly && isFormOpen && isDirty, !readOnly && (isSubmitting || Boolean(pending)));
 
   const getIdempotencyKey = (): string => {
     if (!idempotencyKeyRef.current) {
@@ -85,6 +87,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     setHumanReviewStatus(record?.humanReviewStatus ?? 'UNREVIEWED');
     setNotes(record?.notes ?? '');
     setError(null);
+    setSessionExpired(false);
     idempotencyKeyRef.current = null;
     setPending(null);
     setIsFormOpen(true);
@@ -94,6 +97,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     e.preventDefault();
     if (isSubmitting || !draft.isCurrent()) return;
     setError(null);
+    setSessionExpired(false);
 
     if (!poaNumberText.trim()) {
       setError('رقم التوكيل مطلوب.');
@@ -136,16 +140,24 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
       }
 
       if (!result.success) {
-        setError(result.error || 'تعذر حفظ التوكيل.');
-        if (!result.code || result.code === 'INTERNAL_ERROR' || result.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT') {
+        if (isAuthRecoveryCode(result.code)) {
           setPending(payload);
+          setSessionExpired(true);
+          setError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. يرجى تسجيل الدخول في نافذة جديدة ثم إعادة محاولة الحفظ الأصلي.');
         } else {
-          setPending(null);
-          idempotencyKeyRef.current = null;
+          setError(result.error || 'تعذر حفظ التوكيل.');
+          if (!result.code || result.code === 'INTERNAL_ERROR' || result.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT') {
+            setPending(payload);
+          } else {
+            setPending(null);
+            idempotencyKeyRef.current = null;
+          }
         }
         setIsSubmitting(false);
         return;
       }
+
+      setSessionExpired(false);
 
       setPoas((prev) => {
         if (prev.some((record) => record.id === result.data.id)) {
@@ -368,7 +380,20 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
           </div>
           </fieldset>
           {pending && !isSubmitting && (
-            <button type="submit" className="min-h-[44px] px-3 font-semibold text-[#14566B]">إعادة محاولة الحفظ</button>
+            <div className="flex flex-wrap items-center gap-3">
+              {sessionExpired && (
+                <a
+                  href="/login"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="poa-session-login-link"
+                  className="min-h-[44px] inline-flex items-center px-3 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252]"
+                >
+                  فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                </a>
+              )}
+              <button type="submit" className="min-h-[44px] px-3 font-semibold text-[#14566B]">إعادة محاولة الحفظ</button>
+            </div>
           )}
         </form>
       )}

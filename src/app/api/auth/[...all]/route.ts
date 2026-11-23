@@ -10,9 +10,16 @@ import {
   getUserCredentialVersionByEmail,
   setSessionCredentialVersion,
   isSessionCredentialVersionMismatched,
+  extractRawTokens,
 } from '@/modules/identity/credential-version';
 
 import { MAX_SESSION_LIFETIME_MS, INACTIVITY_TIMEOUT_MS } from '@/modules/identity/session-limits';
+
+function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
+  const res = NextResponse.json(body, init);
+  res.headers.set('Cache-Control', 'no-store');
+  return res;
+}
 
 async function auditIdentityOutcome(userId: string, action: string) {
   try {
@@ -31,43 +38,12 @@ function auditSignInMfa(userId: string, accepted: boolean) {
   return auditIdentityOutcome(userId, accepted ? 'VERIFY_SIGN_IN_MFA' : 'REJECT_SIGN_IN_MFA');
 }
 
-function extractRawTokens(cookiePart: string): {
-  rawToken: string;
-  candidateIdentifiers: string[];
-} {
-  const eqIdx = cookiePart.indexOf('=');
-  const cookieVal = eqIdx !== -1 ? cookiePart.slice(eqIdx + 1) : '';
-  const decodedVal = decodeURIComponent(cookieVal);
-  const withoutPrefix = decodedVal.startsWith('s:') ? decodedVal.slice(2) : decodedVal;
-  const dotIdx = withoutPrefix.lastIndexOf('.');
-  const rawToken = dotIdx !== -1 ? withoutPrefix.substring(0, dotIdx) : withoutPrefix.split('.')[0];
-  const bareToken = rawToken.startsWith('2fa-') ? rawToken.slice(4) : rawToken;
-
-  const candidateIdentifiers = Array.from(
-    new Set(
-      [
-        rawToken,
-        bareToken,
-        `2fa-${rawToken}`,
-        `2fa-${bareToken}`,
-        `two-factor-${rawToken}`,
-        `two-factor-${bareToken}`,
-        decodedVal,
-        withoutPrefix,
-        cookieVal,
-      ].filter(Boolean)
-    )
-  );
-
-  return { rawToken: bareToken || rawToken, candidateIdentifiers };
-}
-
 async function handleAuthSecurityGuards(request: NextRequest): Promise<NextResponse | null> {
   const pathname = request.nextUrl.pathname;
 
   // R02: Block public sign-up unconditionally
   if (pathname.includes('/sign-up')) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: 'التسجيل العام محظور في نظام LawOffice OS.' },
       { status: 403 }
     );
@@ -75,7 +51,7 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
 
   // R02: Block two-factor disable unconditionally for all clients
   if (pathname.includes('/two-factor/disable')) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: 'تعطيل المصادقة الثنائية محظور في نظام LawOffice OS لحماية حساب المالك.' },
       { status: 403 }
     );
@@ -153,7 +129,7 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
           // Immediately evict session from database so library handlers cannot revive it
           await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
 
-          const response = NextResponse.json(
+          const response = noStoreJson(
             {
               error: isInactive
                 ? 'تم قفل الجلسة لعدم النشاط لمدة تتجاوز 30 دقيقة.'
@@ -170,7 +146,7 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
       }
     } catch {
       // Database not reachable or transient error: fail closed!
-      return NextResponse.json(
+      return noStoreJson(
         { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
         { status: 500 }
       );
@@ -183,10 +159,14 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
 async function privateAuthResponse(response: Response): Promise<Response> {
   const headers = new Headers(response.headers);
   headers.set('Cache-Control', 'no-store');
-  if (!response.body || !headers.get('content-type')?.includes('application/json')) {
+  if (response.status === 204 || !response.body || !headers.get('content-type')?.includes('application/json')) {
     return new Response(response.body, { status: response.status, headers });
   }
-  const data: unknown = await response.json();
+  const text = await response.text();
+  if (!text) {
+    return new Response(null, { status: response.status, headers });
+  }
+  const data: unknown = JSON.parse(text);
   headers.delete('content-length');
   headers.delete('content-encoding');
   return new Response(JSON.stringify(data, (key, value) => key === 'token' ? undefined : value), {
@@ -214,7 +194,7 @@ export async function POST(request: NextRequest) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
       if (request.headers.get('sec-fetch-site') === 'cross-site') {
-        return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
       }
 
       const origin = request.headers.get('origin');
@@ -222,7 +202,7 @@ export async function POST(request: NextRequest) {
 
       // Cookie-bearing requests strictly require Origin or Referer
       if (!origin && !referer) {
-        return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
       }
 
       const allowedOrigins = getTrustedOrigins();
@@ -237,7 +217,7 @@ export async function POST(request: NextRequest) {
           }
         });
         if (!isTrustedHost) {
-          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
       }
 
@@ -246,7 +226,7 @@ export async function POST(request: NextRequest) {
         try {
           reqOrigin = new URL(request.url).origin;
         } catch {
-          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
 
         // R12-04: Validate complete inferred destination origin (scheme, host, port) from request.url
@@ -256,7 +236,7 @@ export async function POST(request: NextRequest) {
           !allowedOrigins.has(reqOrigin) ||
           request.headers.get('sec-fetch-site') !== 'same-origin'
         ) {
-          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
       } else {
         let originToValidate: string | null = origin;
@@ -271,7 +251,7 @@ export async function POST(request: NextRequest) {
         // Do NOT synthesize origin from request.nextUrl.origin
         // Do NOT add request Host or forwarded headers (x-forwarded-proto) to allowed origins
         if (!originToValidate || !allowedOrigins.has(originToValidate)) {
-          return NextResponse.json({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
       }
     }
@@ -281,32 +261,32 @@ export async function POST(request: NextRequest) {
       const body = await request.clone().json().catch(() => ({}));
       const password = body.currentPassword || body.password;
       if (!password || typeof password !== 'string' || password.trim().length === 0) {
-        return NextResponse.json(
+        return noStoreJson(
           { error: 'كلمة المرور الحالية مطلوبة لتأكيد الهوية.' },
           { status: 400 }
         );
       }
 
       const backupCodes = await regenerateRecoveryCodes(actor, password);
-      return NextResponse.json({ backupCodes, status: true }, { status: 200 });
+      return noStoreJson({ backupCodes, status: true }, { status: 200 });
     } catch (err) {
       if (err instanceof AuthenticationError) {
         if (err.code === 'RATE_LIMITED') {
-          return NextResponse.json({ error: err.message }, { status: 429 });
+          return noStoreJson({ error: err.message }, { status: 429 });
         }
         if (
           err.code === 'UNAUTHENTICATED' ||
           err.code === 'SESSION_EXPIRED' ||
           err.code === 'SESSION_INACTIVE'
         ) {
-          return NextResponse.json({ error: err.message }, { status: 401 });
+          return noStoreJson({ error: err.message }, { status: 401 });
         }
-        return NextResponse.json({ error: err.message }, { status: 400 });
+        return noStoreJson({ error: err.message }, { status: 400 });
       }
       if (err instanceof AuthorizationError) {
-        return NextResponse.json({ error: err.message }, { status: 403 });
+        return noStoreJson({ error: err.message }, { status: 403 });
       }
-      return NextResponse.json(
+      return noStoreJson(
         { error: 'حدث خطأ غير متوقع أثناء معالجة رموز الاسترداد.' },
         { status: 500 }
       );
@@ -323,7 +303,7 @@ export async function POST(request: NextRequest) {
     if (contentType === 'application/x-www-form-urlencoded') {
       const emailFields = await request.clone().formData().then((body) => body.getAll('email')).catch(() => []);
       if (emailFields.length > 1) {
-        return NextResponse.json({ error: 'أدخل عنوان بريد إلكتروني واحداً.' }, { status: 400 });
+        return noStoreJson({ error: 'أدخل عنوان بريد إلكتروني واحداً.' }, { status: 400 });
       }
       email = emailFields[0];
     } else {
@@ -333,7 +313,7 @@ export async function POST(request: NextRequest) {
       try {
         signInUserCredentialVersion = await getUserCredentialVersionByEmail(email);
       } catch {
-        return NextResponse.json(
+        return noStoreJson(
           { error: 'فشل في قراءة حالة أمان الحساب. يرجى إعادة المحاولة.' },
           { status: 500 }
         );
@@ -392,7 +372,7 @@ export async function POST(request: NextRequest) {
                   ],
                 },
               }).catch(() => {});
-              const errRes = NextResponse.json(
+              const errRes = noStoreJson(
                 {
                   error:
                     'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
@@ -427,7 +407,7 @@ export async function POST(request: NextRequest) {
                 },
               }).catch(() => {});
 
-              const errRes = NextResponse.json(
+              const errRes = noStoreJson(
                 {
                   error:
                     'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
@@ -452,17 +432,22 @@ export async function POST(request: NextRequest) {
   if (pathname.includes('/change-password')) {
     const actor = await requireActor({ headers: request.headers, touchSession: false }).catch(() => null);
     passwordChangeActorId = actor?.id;
+    let parsedBody: unknown;
     try {
-      const body = await request.clone().json();
-      body.revokeOtherSessions = true;
-      reqToExecute = new NextRequest(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: JSON.stringify(body),
-      });
+      parsedBody = await request.clone().json();
     } catch {
-      // Pass original request if not JSON
+      return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
     }
+    if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+      return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
+    }
+    const nextHeaders = new Headers(request.headers);
+    nextHeaders.delete('content-length');
+    reqToExecute = new NextRequest(request.url, {
+      method: request.method,
+      headers: nextHeaders,
+      body: JSON.stringify({ ...(parsedBody as Record<string, unknown>), revokeOtherSessions: true }),
+    });
   }
 
   const response = await auth.handler(reqToExecute);
@@ -536,7 +521,7 @@ export async function POST(request: NextRequest) {
             },
           }).catch(() => {});
 
-          const errRes = NextResponse.json(
+          const errRes = noStoreJson(
             { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
             { status: 500 }
           );
@@ -555,20 +540,12 @@ export async function POST(request: NextRequest) {
     );
     if (sessionCookie && signInUserCredentialVersion !== null) {
       try {
-        const rawCookiePart = sessionCookie.split(';')[0];
-        const eqIdx = rawCookiePart.indexOf('=');
-        const cookieVal = eqIdx !== -1 ? rawCookiePart.slice(eqIdx + 1) : '';
-        const decodedVal = decodeURIComponent(cookieVal);
-        const rawToken = decodedVal.split('.')[0];
+        const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
         if (rawToken) {
           const prisma = getPrismaClient();
           const session = await prisma.session.findFirst({
             where: {
-              OR: [
-                { token: rawToken },
-                { token: decodedVal },
-                { token: cookieVal },
-              ],
+              OR: candidateIdentifiers.map((token) => ({ token })),
             },
           });
           if (session) {
@@ -627,7 +604,7 @@ export async function POST(request: NextRequest) {
           ) {
             // Credential was rotated while completing MFA or session version mismatch! Evict session and fail closed!
             await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
-            const errRes = NextResponse.json(
+            const errRes = noStoreJson(
               {
                 error:
                   'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
@@ -660,7 +637,7 @@ export async function POST(request: NextRequest) {
       if (newSessionId) {
         await prisma.session.delete({ where: { id: newSessionId } }).catch(() => {});
       }
-      const errRes = NextResponse.json(
+      const errRes = noStoreJson(
         { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
         { status: 500 }
       );

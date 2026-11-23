@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client';
 import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
-import { claimIdempotencyKey, completeIdempotencyKey, isIdempotencyUniqueConflict, resolveConcurrentIdempotency } from '@/lib/idempotency';
+import { claimIdempotencyKey, completeIdempotencyKey, resolveConcurrentIdempotency, runWithIdempotencyRetry } from '@/lib/idempotency';
 import {
   HearingDTO,
   HearingResultDTO,
@@ -271,14 +271,12 @@ async function hearingCommand<T>(
     await completeIdempotencyKey(tx, { ...params, resultType: 'HearingOperation', resultId, resultPayload: acknowledgment });
     return value;
   });
-  try {
-    return await execute();
-  } catch (error) {
-    if (!isIdempotencyUniqueConflict(error)) throw error;
+  return runWithIdempotencyRetry(execute, async () => {
     const claim = await resolveConcurrentIdempotency(prisma, params);
-    if (!claim?.resultId) return execute();
-    return prisma.$transaction((tx) => replay(tx, claim.resultPayload, claim.resultId!));
-  }
+    if (!claim?.resultId) return { resolved: false };
+    const value = await prisma.$transaction((tx) => replay(tx, claim.resultPayload, claim.resultId!));
+    return { resolved: true, value };
+  });
 }
 
 export async function scheduleHearing(
@@ -674,6 +672,10 @@ export async function correctHearingResult(
       throw new NotFoundError('لا توجد نتيجة مسجلة لهذه الجلسة لتصحيحها.');
     }
 
+    if (input.expectedVersion === undefined && !input.currentResultId) {
+      throw new SchedulingValidationError('يلزم تحديد إصدار النتيجة المعروضة قبل التصحيح.');
+    }
+
     if (input.expectedVersion !== undefined && latestResult.revision !== input.expectedVersion) {
       throw new ConcurrencyConflictError('تم تعديل نتيجة الجلسة بواسطة مستخدم آخر.');
     }
@@ -760,13 +762,20 @@ export async function rescheduleHearing(
 
   const normTime = validateAndNormalizeHearingTime(input.newHearingTime);
   const reason = input.reason.trim();
-  const courtHall = input.courtHall || input.locationRoom || null;
-  const purpose = input.purpose || null;
-  const rollNumber = input.rollNumber || null;
+  const hasCourtHall = input.courtHall !== undefined || input.locationRoom !== undefined;
+  const courtHall = hasCourtHall ? (input.courtHall || input.locationRoom || null) : undefined;
+  const hasPurpose = input.purpose !== undefined;
+  const purpose = hasPurpose ? (input.purpose || null) : undefined;
+  const hasRollNumber = input.rollNumber !== undefined;
+  const rollNumber = hasRollNumber ? (input.rollNumber || null) : undefined;
   const taskChanges = (input.taskChanges ?? []).toSorted((left, right) => left.taskId.localeCompare(right.taskId));
   const intent = {
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, newHearingDate: input.newHearingDate,
-    newHearingTime: normTime, reason, courtHall, purpose, rollNumber, taskChanges,
+    newHearingTime: normTime, reason,
+    ...(hasCourtHall ? { courtHall } : {}),
+    ...(hasPurpose ? { purpose } : {}),
+    ...(hasRollNumber ? { rollNumber } : {}),
+    taskChanges,
   };
 
   return hearingCommand(actor, 'rescheduleHearing', input.idempotencyKey, intent, async (tx) => {
@@ -810,9 +819,9 @@ export async function rescheduleHearing(
     });
 
     // 3. Create replacement Hearing
-    const replacementCourtHall = courtHall ?? hearing.courtHall;
-    const replacementPurpose = purpose ?? hearing.purpose;
-    const replacementRoll = rollNumber ?? hearing.rollNumber;
+    const replacementCourtHall = hasCourtHall ? (courtHall ?? null) : hearing.courtHall;
+    const replacementPurpose = hasPurpose ? (purpose ?? null) : hearing.purpose;
+    const replacementRoll = hasRollNumber ? (rollNumber ?? null) : hearing.rollNumber;
 
     const replacementHearing = await tx.hearing.create({
       data: {
@@ -847,11 +856,33 @@ export async function rescheduleHearing(
 
     const taskSources = [hearing.id];
     if (taskChanges.length) {
+      const rescheduleChain = new Set<string>([hearing.id]);
+      let frontier = [hearing.id];
+      for (let hop = 0; hop < 50 && frontier.length > 0; hop++) {
+        const reschedules = await tx.hearingLink.findMany({
+          where: { toHearingId: { in: frontier }, relation: 'RESCHEDULED_TO' },
+          select: { fromHearingId: true },
+        });
+        frontier = [];
+        for (const { fromHearingId } of reschedules) {
+          if (!rescheduleChain.has(fromHearingId)) {
+            rescheduleChain.add(fromHearingId);
+            taskSources.push(fromHearingId);
+            frontier.push(fromHearingId);
+          }
+        }
+      }
+      const seen = new Set(rescheduleChain);
       const adjournments = await tx.hearingLink.findMany({
-        where: { toHearingId: hearing.id, relation: 'ADJOURNED_TO' },
+        where: { toHearingId: { in: Array.from(rescheduleChain) }, relation: 'ADJOURNED_TO' },
         select: { fromHearingId: true },
       });
-      taskSources.push(...adjournments.map(({ fromHearingId }) => fromHearingId));
+      for (const { fromHearingId } of adjournments) {
+        if (!seen.has(fromHearingId)) {
+          seen.add(fromHearingId);
+          taskSources.push(fromHearingId);
+        }
+      }
     }
     for (const task of taskChanges) {
       const updated = await tx.task.updateMany({
@@ -1055,8 +1086,8 @@ export async function listHearingsForProceeding(
       },
       tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } },
       linksTo: {
-        where: { relation: 'ADJOURNED_TO' },
-        select: { fromHearing: { select: { tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } } } } },
+        where: { relation: { in: ['ADJOURNED_TO', 'RESCHEDULED_TO'] } },
+        select: { fromHearingId: true, relation: true },
       },
     },
     orderBy: [
@@ -1065,11 +1096,54 @@ export async function listHearingsForProceeding(
     ],
   });
 
+  const byId = new Map(hearings.map((hearing) => [hearing.id, hearing]));
+
+  const collectAncestorTasks = (rootId: string): TaskDTO[] => {
+    const rescheduleChain: string[] = [rootId];
+    const visited = new Set<string>([rootId]);
+
+    for (let i = 0; i < rescheduleChain.length && rescheduleChain.length < 50; i++) {
+      const current = byId.get(rescheduleChain[i]);
+      if (!current) continue;
+      for (const link of current.linksTo) {
+        if (link.relation === 'RESCHEDULED_TO' && !visited.has(link.fromHearingId)) {
+          visited.add(link.fromHearingId);
+          rescheduleChain.push(link.fromHearingId);
+          if (rescheduleChain.length >= 50) break;
+        }
+      }
+    }
+
+    const sourceIds = [...rescheduleChain];
+    for (const id of rescheduleChain) {
+      const node = byId.get(id);
+      if (!node) continue;
+      for (const link of node.linksTo) {
+        if (link.relation === 'ADJOURNED_TO' && !visited.has(link.fromHearingId)) {
+          visited.add(link.fromHearingId);
+          sourceIds.push(link.fromHearingId);
+        }
+      }
+    }
+
+    const tasks: typeof hearings[number]['tasks'] = [];
+    const seenTaskIds = new Set<string>();
+    for (const id of sourceIds) {
+      const node = byId.get(id);
+      if (!node) continue;
+      for (const task of node.tasks) {
+        if (!seenTaskIds.has(task.id)) {
+          seenTaskIds.add(task.id);
+          tasks.push(task);
+        }
+      }
+    }
+
+    return tasks.map(mapTaskToDTO);
+  };
+
   return hearings.map((hearing) => ({
     ...mapHearingToDTO(hearing),
-    followUpTasks: [
-      ...hearing.tasks,
-      ...hearing.linksTo.flatMap(({ fromHearing }) => fromHearing.tasks),
-    ].map(mapTaskToDTO),
+    followUpTasks: collectAncestorTasks(hearing.id),
   }));
 }

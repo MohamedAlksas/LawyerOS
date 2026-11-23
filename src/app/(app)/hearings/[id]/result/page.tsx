@@ -1,6 +1,7 @@
 import React from 'react';
 import { notFound, redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getPrismaClient } from '@/lib/auth';
 import { HearingResultClient } from './hearing-result-client';
@@ -21,10 +22,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/hearings/${id}/result`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/hearings/${id}/result`));
+      await redirectOnAuthError(error, `/hearings/${id}/result`);
     }
     if (error instanceof AuthorizationError) {
       return (

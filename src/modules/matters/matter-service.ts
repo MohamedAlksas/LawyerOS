@@ -10,7 +10,8 @@ import {
   claimIdempotencyKey,
   completeIdempotencyKey,
   resolveConcurrentIdempotency,
-  isIdempotencyUniqueConflict,
+  runWithIdempotencyRetry,
+  type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
 import {
@@ -102,6 +103,22 @@ function extractOperationVersion(payload: unknown, fallback: number): number {
 
 export interface ServiceExecutionOptions {
   prismaOverride?: PrismaClient;
+}
+
+async function runMatterCommand<T>(
+  prisma: PrismaClient,
+  params: { actorId: string; commandType: string; key: string; payload: unknown },
+  executeTx: (tx: Prisma.TransactionClient) => Promise<T>,
+  onConcurrentReplay: (resolved: ClaimReplayResult) => Promise<T>
+): Promise<T> {
+  return runWithIdempotencyRetry(
+    () => prisma.$transaction(executeTx),
+    async () => {
+      const resolved = await resolveConcurrentIdempotency(prisma, params);
+      if (!resolved) return { resolved: false };
+      return { resolved: true, value: await onConcurrentReplay(resolved) };
+    }
+  );
 }
 
 interface MinimalIdempotencyPayload {
@@ -653,8 +670,15 @@ export async function openMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'openMatter',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       // 1. Idempotency claim
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
@@ -779,29 +803,18 @@ export async function openMatter(
       });
 
       return result;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'openMatter',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const currentMatter = await getMatterInternal(prisma, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, 1);
-        return {
-          matter: currentMatter,
-          fileCode: currentMatter.fileCode,
-          operationVersion: opVersion,
-        };
-      }
-      return openMatter(actor, rawInput, options);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const currentMatter = await getMatterInternal(prisma, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, 1);
+      return {
+        matter: currentMatter,
+        fileCode: currentMatter.fileCode,
+        operationVersion: opVersion,
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function updateMatter(
@@ -829,8 +842,15 @@ export async function updateMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'updateMatter',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateMatter',
@@ -892,8 +912,8 @@ export async function updateMatter(
         }
       }
 
-      const openingDateVal = parseCalendarDateToUtc(input.openingDate);
-      const closingDateVal = parseCalendarDateToUtc(input.closingDate);
+      const openingDateVal = input.openingDate !== undefined ? parseCalendarDateToUtc(input.openingDate) : undefined;
+      const closingDateVal = input.closingDate !== undefined ? parseCalendarDateToUtc(input.closingDate) : undefined;
 
       const nextVersion = existing.version + 1;
       const notes = input.notes === undefined ? existing.notes : input.notes?.trim() || null;
@@ -919,10 +939,10 @@ export async function updateMatter(
           titleNormalized: normalizeArabicText(input.title),
           kind: input.kind,
           status: input.status,
-          practiceAreaId: input.practiceAreaId ?? null,
-          openingDate: openingDateVal,
-          closingDate: closingDateVal,
-          summary: input.summary?.trim() ?? null,
+          ...(input.practiceAreaId !== undefined ? { practiceAreaId: input.practiceAreaId ?? null } : {}),
+          ...(openingDateVal !== undefined ? { openingDate: openingDateVal } : {}),
+          ...(closingDateVal !== undefined ? { closingDate: closingDateVal } : {}),
+          ...(input.summary !== undefined ? { summary: input.summary?.trim() ?? null } : {}),
           notes,
           paperLocationId,
           version: nextVersion,
@@ -963,28 +983,17 @@ export async function updateMatter(
       });
 
       return result;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'updateMatter',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const currentMatter = await getMatterInternal(prisma, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, currentMatter.version);
-        return {
-          matter: currentMatter,
-          operationVersion: opVersion,
-        };
-      }
-      return updateMatter(actor, rawInput, options);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const currentMatter = await getMatterInternal(prisma, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, currentMatter.version);
+      return {
+        matter: currentMatter,
+        operationVersion: opVersion,
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function linkMatterParty(
@@ -1007,8 +1016,15 @@ export async function linkMatterParty(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'linkMatterParty',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'linkMatterParty',
@@ -1050,8 +1066,12 @@ export async function linkMatterParty(
 
       const party = await tx.party.findUnique({
         where: { id: input.partyId },
+        select: { id: true, archivedAt: true },
       });
       if (!party) throw new NotFoundError('الطرف غير موجود.');
+      if (party.archivedAt !== null) {
+        throw new MatterValidationError('الطرف المحدد مؤرشف ولا يمكن ربطه بالملف.');
+      }
 
       // Check unique triple (matterId, partyId, role)
       const existingTriple = await tx.matterParty.findUnique({
@@ -1136,40 +1156,29 @@ export async function linkMatterParty(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'linkMatterParty',
-        key: input.idempotencyKey,
-        payload: input,
+    },
+    async (resolved) => {
+      const partyId = extractResourceId(resolved);
+      const createdParty = await prisma.matterParty.findUnique({
+        where: { id: partyId },
+        include: { party: true },
       });
-      if (resolved) {
-        const partyId = extractResourceId(resolved);
-        const createdParty = await prisma.matterParty.findUnique({
-          where: { id: partyId },
-          include: { party: true },
-        });
-        if (!createdParty) throw new NotFoundError('طرف الملف غير موجود.');
-        return {
-          id: createdParty.id,
-          matterId: createdParty.matterId,
-          partyId: createdParty.partyId,
-          partyName: createdParty.party.name,
-          role: createdParty.role,
-          isPrimaryContact: createdParty.isPrimaryContact,
-          billingEnabled: createdParty.billingEnabled,
-          notes: createdParty.notes,
-          version: createdParty.version,
-          operationVersion: extractOperationVersion(resolved.resultPayload, createdParty.version),
-          createdAt: createdParty.createdAt.toISOString(),
-        };
-      }
-      return linkMatterParty(actor, rawInput, options);
+      if (!createdParty) throw new NotFoundError('طرف الملف غير موجود.');
+      return {
+        id: createdParty.id,
+        matterId: createdParty.matterId,
+        partyId: createdParty.partyId,
+        partyName: createdParty.party.name,
+        role: createdParty.role,
+        isPrimaryContact: createdParty.isPrimaryContact,
+        billingEnabled: createdParty.billingEnabled,
+        notes: createdParty.notes,
+        version: createdParty.version,
+        operationVersion: extractOperationVersion(resolved.resultPayload, createdParty.version),
+        createdAt: createdParty.createdAt.toISOString(),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function updateMatterParty(
@@ -1192,8 +1201,15 @@ export async function updateMatterParty(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'updateMatterParty',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateMatterParty',
@@ -1257,6 +1273,22 @@ export async function updateMatterParty(
 
       if (existing.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError();
+      }
+
+      if (input.role !== existing.role) {
+        const duplicateRole = await tx.matterParty.findUnique({
+          where: {
+            matterId_partyId_role: {
+              matterId: input.matterId,
+              partyId: existing.partyId,
+              role: input.role,
+            },
+          },
+          select: { id: true },
+        });
+        if (duplicateRole && duplicateRole.id !== input.id) {
+          throw new MatterValidationError('هذا الطرف مضاف بالفعل بهذه الصفة في الملف.');
+        }
       }
 
       // If demoting from CLIENT
@@ -1351,41 +1383,30 @@ export async function updateMatterParty(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'updateMatterParty',
-        key: input.idempotencyKey,
-        payload: input,
+    },
+    async (resolved) => {
+      const partyId = extractResourceId(resolved);
+      const currentParty = await prisma.matterParty.findUnique({
+        where: { id: partyId },
+        include: { party: true },
       });
-      if (resolved) {
-        const partyId = extractResourceId(resolved);
-        const currentParty = await prisma.matterParty.findUnique({
-          where: { id: partyId },
-          include: { party: true },
-        });
-        if (!currentParty) throw new NotFoundError('طرف الملف غير موجود.');
-        const opVersion = extractOperationVersion(resolved.resultPayload, currentParty.version);
-        return {
-          id: currentParty.id,
-          matterId: currentParty.matterId,
-          partyId: currentParty.partyId,
-          partyName: currentParty.party.name,
-          role: currentParty.role,
-          isPrimaryContact: currentParty.isPrimaryContact,
-          billingEnabled: currentParty.billingEnabled,
-          notes: currentParty.notes,
-          version: currentParty.version,
-          operationVersion: opVersion,
-          createdAt: currentParty.createdAt.toISOString(),
-        };
-      }
-      return updateMatterParty(actor, rawInput, options);
+      if (!currentParty) throw new NotFoundError('طرف الملف غير موجود.');
+      const opVersion = extractOperationVersion(resolved.resultPayload, currentParty.version);
+      return {
+        id: currentParty.id,
+        matterId: currentParty.matterId,
+        partyId: currentParty.partyId,
+        partyName: currentParty.party.name,
+        role: currentParty.role,
+        isPrimaryContact: currentParty.isPrimaryContact,
+        billingEnabled: currentParty.billingEnabled,
+        notes: currentParty.notes,
+        version: currentParty.version,
+        operationVersion: opVersion,
+        createdAt: currentParty.createdAt.toISOString(),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function unlinkMatterParty(
@@ -1407,8 +1428,15 @@ export async function unlinkMatterParty(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'unlinkMatterParty',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'unlinkMatterParty',
@@ -1563,22 +1591,9 @@ export async function unlinkMatterParty(
           acknowledgedAt: new Date().toISOString(),
         },
       });
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'unlinkMatterParty',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        return;
-      }
-      return unlinkMatterParty(actor, rawInput);
-    }
-    throw err;
-  }
+    },
+    async () => undefined
+  );
 }
 
 export async function addProceeding(
@@ -1601,8 +1616,15 @@ export async function addProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'addProceeding',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'addProceeding',
@@ -1753,25 +1775,14 @@ export async function addProceeding(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'addProceeding',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getProceedingDTO(prisma, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return addProceeding(actor, rawInput, options);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const dto = await getProceedingDTO(prisma, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+      return { ...dto, operationVersion: opVersion };
     }
-    throw err;
-  }
+  );
 }
 
 export async function updateProceeding(
@@ -1794,8 +1805,15 @@ export async function updateProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'updateProceeding',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateProceeding',
@@ -1825,11 +1843,15 @@ export async function updateProceeding(
         id: string;
         matterId: string;
         courtId: string;
+        registerType: string | null;
+        circuit: string | null;
+        numberText: string | null;
+        yearLabel: string | null;
         version: number;
         status: string;
         archivedAt: Date | null;
       }>>`
-        SELECT "id", "matterId", "courtId", "version", "status", "archivedAt"
+        SELECT "id", "matterId", "courtId", "registerType", "circuit", "numberText", "yearLabel", "version", "status", "archivedAt"
         FROM "proceeding"
         WHERE "id" = ${input.id}
         FOR UPDATE;
@@ -1854,22 +1876,40 @@ export async function updateProceeding(
         await validateProceedingHierarchy(tx, input.matterId, input.id, input.parentProceedingId);
       }
 
+      const effectiveRegisterType = input.registerType !== undefined ? (input.registerType?.trim() ?? null) : existing.registerType;
+      const effectiveCircuit = input.circuit !== undefined ? (input.circuit?.trim() ?? null) : existing.circuit;
+      const effectiveNumberText = input.numberText !== undefined ? (input.numberText?.trim() ?? null) : existing.numberText;
+      const effectiveYearLabel = input.yearLabel !== undefined ? (input.yearLabel?.trim() ?? null) : existing.yearLabel;
+
       // Validate completeness if status is ACTIVE
       validateProceedingCompleteness(
         input.status,
-        input.numberText,
-        input.yearLabel,
-        input.registerType,
+        effectiveNumberText,
+        effectiveYearLabel,
+        effectiveRegisterType,
         input.courtId
       );
 
       // Check advisory duplicate
-      const duplicateWarning = await checkProceedingCourtDuplicate(tx, input, input.id);
+      const duplicateWarning = await checkProceedingCourtDuplicate(
+        tx,
+        {
+          courtId: input.courtId,
+          numberText: effectiveNumberText,
+          yearLabel: effectiveYearLabel,
+          registerType: effectiveRegisterType,
+          circuit: effectiveCircuit,
+        },
+        input.id
+      );
 
-      const filingDateVal = parseCalendarDateToUtc(input.filingDate);
-
-      const normNumber = input.numberText?.trim() ? normalizeArabicDigits(input.numberText.trim()) : null;
-      const normYear = input.yearLabel?.trim() ? normalizeArabicDigits(input.yearLabel.trim()) : null;
+      const filingDateVal = input.filingDate !== undefined ? parseCalendarDateToUtc(input.filingDate) : undefined;
+      const normNumber = input.numberText !== undefined
+        ? (effectiveNumberText ? normalizeArabicDigits(effectiveNumberText) : null)
+        : undefined;
+      const normYear = input.yearLabel !== undefined
+        ? (effectiveYearLabel ? normalizeArabicDigits(effectiveYearLabel) : null)
+        : undefined;
 
       const nextVersion = existing.version + 1;
 
@@ -1878,15 +1918,13 @@ export async function updateProceeding(
         data: {
           courtId: input.courtId,
           instance: input.instance,
-          parentProceedingId: input.parentProceedingId ?? null,
-          registerType: input.registerType?.trim() ?? null,
-          circuit: input.circuit?.trim() ?? null,
-          numberText: input.numberText?.trim() ?? null,
-          yearLabel: input.yearLabel?.trim() ?? null,
-          numberNormalized: normNumber,
-          yearNormalized: normYear,
-          filingDate: filingDateVal,
-          claimAmount: input.claimAmount?.trim() ?? null,
+          ...(input.parentProceedingId !== undefined ? { parentProceedingId: input.parentProceedingId ?? null } : {}),
+          ...(input.registerType !== undefined ? { registerType: effectiveRegisterType } : {}),
+          ...(input.circuit !== undefined ? { circuit: effectiveCircuit } : {}),
+          ...(input.numberText !== undefined ? { numberText: effectiveNumberText, numberNormalized: normNumber } : {}),
+          ...(input.yearLabel !== undefined ? { yearLabel: effectiveYearLabel, yearNormalized: normYear } : {}),
+          ...(filingDateVal !== undefined ? { filingDate: filingDateVal } : {}),
+          ...(input.claimAmount !== undefined ? { claimAmount: input.claimAmount?.trim() ?? null } : {}),
           status: input.status,
           version: nextVersion,
           updatedById: actor.id,
@@ -2025,25 +2063,14 @@ export async function updateProceeding(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'updateProceeding',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getProceedingDTO(prisma, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return updateProceeding(actor, rawInput, options);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const dto = await getProceedingDTO(prisma, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+      return { ...dto, operationVersion: opVersion };
     }
-    throw err;
-  }
+  );
 }
 
 export async function linkProceedingParty(
@@ -2066,8 +2093,15 @@ export async function linkProceedingParty(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'linkProceedingParty',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'linkProceedingParty',
@@ -2218,25 +2252,14 @@ export async function linkProceedingParty(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'linkProceedingParty',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getProceedingPartyDTO(prisma, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version ?? 1);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return linkProceedingParty(actor, rawInput, options);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const dto = await getProceedingPartyDTO(prisma, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, dto.version ?? 1);
+      return { ...dto, operationVersion: opVersion };
     }
-    throw err;
-  }
+  );
 }
 
 export async function unlinkProceedingParty(
@@ -2258,8 +2281,15 @@ export async function unlinkProceedingParty(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'unlinkProceedingParty',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'unlinkProceedingParty',
@@ -2350,20 +2380,9 @@ export async function unlinkProceedingParty(
           acknowledgedAt: new Date().toISOString(),
         },
       });
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'unlinkProceedingParty',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) return;
-      return unlinkProceedingParty(actor, rawInput);
-    }
-    throw err;
-  }
+    },
+    async () => undefined
+  );
 }
 
 export async function linkMatterAuthorization(
@@ -2385,8 +2404,15 @@ export async function linkMatterAuthorization(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'linkMatterAuthorization',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'linkMatterAuthorization',
@@ -2430,6 +2456,19 @@ export async function linkMatterAuthorization(
 
       if (!clientRelation) {
         throw new ClientPoaDependencyError('لا يمكن ربط التوكيل إلا إذا كان صاحبه موكلاً في هذا الملف.');
+      }
+
+      const existingAuthorization = await tx.matterAuthorization.findUnique({
+        where: {
+          matterId_powerOfAttorneyId: {
+            matterId: input.matterId,
+            powerOfAttorneyId: input.powerOfAttorneyId,
+          },
+        },
+        select: { id: true },
+      });
+      if (existingAuthorization) {
+        throw new MatterValidationError('هذا التوكيل مرتبط بالفعل بهذا الملف.');
       }
 
       const auth = await tx.matterAuthorization.create({
@@ -2485,27 +2524,16 @@ export async function linkMatterAuthorization(
       });
 
       return dto;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'linkMatterAuthorization',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getMatterAuthorizationDTO(prisma, resourceId);
-        return {
-          ...dto,
-          operationVersion: extractOperationVersion(resolved.resultPayload, 1),
-        };
-      }
-      return linkMatterAuthorization(actor, rawInput);
+    },
+    async (resolved) => {
+      const resourceId = extractResourceId(resolved);
+      const dto = await getMatterAuthorizationDTO(prisma, resourceId);
+      return {
+        ...dto,
+        operationVersion: extractOperationVersion(resolved.resultPayload, 1),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function unlinkMatterAuthorization(
@@ -2527,8 +2555,15 @@ export async function unlinkMatterAuthorization(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'unlinkMatterAuthorization',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'unlinkMatterAuthorization',
@@ -2584,20 +2619,9 @@ export async function unlinkMatterAuthorization(
           acknowledgedAt: new Date().toISOString(),
         },
       });
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'unlinkMatterAuthorization',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) return;
-      return unlinkMatterAuthorization(actor, rawInput);
-    }
-    throw err;
-  }
+    },
+    async () => undefined
+  );
 }
 
 export async function getMatter(matterId: string, actor?: Actor, includeNoteHistory = false): Promise<MatterDTO> {
@@ -2729,9 +2753,11 @@ export async function searchMatters(
   }
 
   if (params.courtId) {
+    const includeArchivedProceedings = Boolean(params.includeArchived || params.status === 'ARCHIVED');
     where.proceedings = {
       some: {
         courtId: params.courtId,
+        ...(includeArchivedProceedings ? {} : { archivedAt: null }),
       },
     };
   }
@@ -2756,7 +2782,7 @@ export async function searchMatters(
     const incompleteClauses: Prisma.MatterWhereInput[] = [
       { status: 'ACTIVE', paperLocationId: null },
       { parties: { none: { role: 'CLIENT' } } },
-      { proceedings: { some: { status: 'DRAFT' } } },
+      { proceedings: { some: { status: 'DRAFT', archivedAt: null } } },
     ];
     if (where.AND) {
       if (Array.isArray(where.AND)) {
@@ -2938,8 +2964,10 @@ export async function getPartyMatterAssociations(
     ...(params.role ? { role: params.role } : {}),
   };
 
-  const limit = params.limit ?? 50;
-  const offset = params.offset ?? 0;
+  const rawLimit = params.limit ?? 50;
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 50;
+  const rawOffset = params.offset ?? 0;
+  const offset = Number.isFinite(rawOffset) ? Math.min(Math.max(Math.trunc(rawOffset), 0), MAX_SEARCH_PAGE * 100) : 0;
 
   const [associations, total] = await Promise.all([
     prisma.matterParty.findMany({
@@ -3025,8 +3053,15 @@ export async function archiveMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'archiveMatter',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'archiveMatter',
@@ -3148,40 +3183,28 @@ export async function archiveMatter(
         updatedAt: updated.updatedAt.toISOString(),
         operationVersion: updated.version,
       };
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'archiveMatter',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const replayResult = extractLifecycleResult(resolved);
-        if (replayResult) {
-          return replayResult;
-        }
-        const resourceId = extractResourceId(resolved);
-        const m = await prisma.matter.findUnique({
-          where: { id: resourceId },
-          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
-        });
-        if (m) {
-          return {
-            id: m.id,
-            version: m.version,
-            status: m.status,
-            archivedAt: m.archivedAt?.toISOString() ?? null,
-            updatedAt: m.updatedAt.toISOString(),
-            operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
-          };
-        }
+    },
+    async (resolved) => {
+      const replayResult = extractLifecycleResult(resolved);
+      if (replayResult) {
+        return replayResult;
       }
-      return archiveMatter(actor, rawInput, options);
+      const resourceId = extractResourceId(resolved);
+      const m = await prisma.matter.findUnique({
+        where: { id: resourceId },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+      if (!m) throw new NotFoundError('ملف القضية غير موجود.');
+      return {
+        id: m.id,
+        version: m.version,
+        status: m.status,
+        archivedAt: m.archivedAt?.toISOString() ?? null,
+        updatedAt: m.updatedAt.toISOString(),
+        operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function reopenMatter(
@@ -3204,8 +3227,15 @@ export async function reopenMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'reopenMatter',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'reopenMatter',
@@ -3307,24 +3337,16 @@ export async function reopenMatter(
         },
       });
 
-      return {
-        id: updated.id,
-        version: updated.version,
-        status: updated.status,
-        archivedAt: null,
-        updatedAt: updated.updatedAt.toISOString(),
-        operationVersion: updated.version,
-      };
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'reopenMatter',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
+        return {
+          id: updated.id,
+          version: updated.version,
+          status: updated.status,
+          archivedAt: null,
+          updatedAt: updated.updatedAt.toISOString(),
+          operationVersion: updated.version,
+        };
+      },
+      async (resolved) => {
         const replayResult = extractLifecycleResult(resolved);
         if (replayResult) {
           return replayResult;
@@ -3334,21 +3356,17 @@ export async function reopenMatter(
           where: { id: resourceId },
           select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
         });
-        if (m) {
-          return {
-            id: m.id,
-            version: m.version,
-            status: m.status,
-            archivedAt: m.archivedAt?.toISOString() ?? null,
-            updatedAt: m.updatedAt.toISOString(),
-            operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
-          };
-        }
+        if (!m) throw new NotFoundError('ملف القضية غير موجود.');
+        return {
+          id: m.id,
+          version: m.version,
+          status: m.status,
+          archivedAt: m.archivedAt?.toISOString() ?? null,
+          updatedAt: m.updatedAt.toISOString(),
+          operationVersion: extractOperationVersion(resolved.resultPayload, m.version),
+        };
       }
-      return reopenMatter(actor, rawInput, options);
-    }
-    throw err;
-  }
+    );
 }
 
 export async function archiveProceeding(
@@ -3371,8 +3389,15 @@ export async function archiveProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'archiveProceeding',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'archiveProceeding',
@@ -3520,40 +3545,28 @@ export async function archiveProceeding(
         updatedAt: updated.updatedAt.toISOString(),
         operationVersion: updated.version,
       };
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'archiveProceeding',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const replayResult = extractLifecycleResult(resolved);
-        if (replayResult) {
-          return replayResult;
-        }
-        const resourceId = extractResourceId(resolved);
-        const p = await prisma.proceeding.findUnique({
-          where: { id: resourceId },
-          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
-        });
-        if (p) {
-          return {
-            id: p.id,
-            version: p.version,
-            status: p.status,
-            archivedAt: p.archivedAt?.toISOString() ?? null,
-            updatedAt: p.updatedAt.toISOString(),
-            operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
-          };
-        }
+    },
+    async (resolved) => {
+      const replayResult = extractLifecycleResult(resolved);
+      if (replayResult) {
+        return replayResult;
       }
-      return archiveProceeding(actor, rawInput, options);
+      const resourceId = extractResourceId(resolved);
+      const p = await prisma.proceeding.findUnique({
+        where: { id: resourceId },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+      if (!p) throw new NotFoundError('القيد القضائي غير موجود.');
+      return {
+        id: p.id,
+        version: p.version,
+        status: p.status,
+        archivedAt: p.archivedAt?.toISOString() ?? null,
+        updatedAt: p.updatedAt.toISOString(),
+        operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function reopenProceeding(
@@ -3576,8 +3589,15 @@ export async function reopenProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
+  return runMatterCommand(
+    prisma,
+    {
+      actorId: actor.id,
+      commandType: 'reopenProceeding',
+      key: input.idempotencyKey,
+      payload: input,
+    },
+    async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'reopenProceeding',
@@ -3707,40 +3727,28 @@ export async function reopenProceeding(
         updatedAt: updated.updatedAt.toISOString(),
         operationVersion: updated.version,
       };
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
-      const resolved = await resolveConcurrentIdempotency(prisma, {
-        actorId: actor.id,
-        commandType: 'reopenProceeding',
-        key: input.idempotencyKey,
-        payload: input,
-      });
-      if (resolved) {
-        const replayResult = extractLifecycleResult(resolved);
-        if (replayResult) {
-          return replayResult;
-        }
-        const resourceId = extractResourceId(resolved);
-        const p = await prisma.proceeding.findUnique({
-          where: { id: resourceId },
-          select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
-        });
-        if (p) {
-          return {
-            id: p.id,
-            version: p.version,
-            status: p.status,
-            archivedAt: p.archivedAt?.toISOString() ?? null,
-            updatedAt: p.updatedAt.toISOString(),
-            operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
-          };
-        }
+    },
+    async (resolved) => {
+      const replayResult = extractLifecycleResult(resolved);
+      if (replayResult) {
+        return replayResult;
       }
-      return reopenProceeding(actor, rawInput, options);
+      const resourceId = extractResourceId(resolved);
+      const p = await prisma.proceeding.findUnique({
+        where: { id: resourceId },
+        select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
+      });
+      if (!p) throw new NotFoundError('القيد القضائي غير موجود.');
+      return {
+        id: p.id,
+        version: p.version,
+        status: p.status,
+        archivedAt: p.archivedAt?.toISOString() ?? null,
+        updatedAt: p.updatedAt.toISOString(),
+        operationVersion: extractOperationVersion(resolved.resultPayload, p.version),
+      };
     }
-    throw err;
-  }
+  );
 }
 
 export async function searchProceedings(
@@ -3810,7 +3818,8 @@ export async function searchProceedings(
   }
 
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
-  const page = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const rawPage = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
+  const page = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
   const skip = (page - 1) * limit;
 
   const [proceedings, total] = await Promise.all([
@@ -3989,6 +3998,7 @@ export async function unifiedSearch(
   }
   if (query) {
     const qDigits = normalizeArabicDigits(query);
+    const qPhone = normalizePhone(query);
     const qText = normalizeArabicText(query);
     const variants = expandSearchVariants(query);
 
@@ -3998,6 +4008,9 @@ export async function unifiedSearch(
       { primaryPhone: { contains: qDigits, mode: 'insensitive' } },
       { primaryPhoneNormalized: { contains: qDigits, mode: 'insensitive' } },
     ];
+    if (qPhone) {
+      orClauses.push({ primaryPhoneNormalized: { contains: qPhone, mode: 'insensitive' } });
+    }
     if (qText) {
       orClauses.push({ nameNormalized: { contains: qText, mode: 'insensitive' } });
     }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { searchParties } from '@/modules/parties/service';
 import { PartyKind } from '@/modules/parties/types';
@@ -24,10 +25,7 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent('/parties'));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/parties'));
+      await redirectOnAuthError(error, '/parties');
     }
     if (error instanceof AuthorizationError) {
       return (

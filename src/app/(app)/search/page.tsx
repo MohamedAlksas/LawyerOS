@@ -1,6 +1,6 @@
 ﻿import React from 'react';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { unifiedSearch } from '@/modules/matters/matter-service';
 import { readParam, unifiedSearchFilters } from '@/lib/search-params';
@@ -25,10 +25,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent('/search'));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/search'));
+      await redirectOnAuthError(error, '/search');
     }
     if (error instanceof AuthorizationError) {
       return (

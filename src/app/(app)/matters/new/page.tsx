@@ -1,6 +1,6 @@
 import React from 'react';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { listReferenceItems } from '@/modules/settings/reference-service';
 import { searchParties } from '@/modules/parties/service';
@@ -16,10 +16,7 @@ export default async function NewMatterPage() {
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent('/matters/new'));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent('/matters/new'));
+      await redirectOnAuthError(error, '/matters/new');
     }
     if (error instanceof AuthorizationError) {
       return (

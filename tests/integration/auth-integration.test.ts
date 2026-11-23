@@ -292,6 +292,36 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(await isBootstrapClosed()).toBe(true);
   });
 
+  it('rejects confirmOwnerProvisioning after bootstrap closure without mutating lockout counters or closedAt', async () => {
+    const prisma = getPrismaClient();
+    const beforeTf = await prisma.twoFactor.findFirstOrThrow({
+      where: { userId: provisionedOwner.userId },
+    });
+    const beforeBootstrap = await prisma.officeBootstrap.findUniqueOrThrow({
+      where: { id: 'singleton' },
+    });
+
+    let err: unknown;
+    try {
+      await confirmOwnerProvisioning(provisionedOwner.userId, '000000');
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(ProvisioningError);
+    expect((err as ProvisioningError).code).toBe('BOOTSTRAP_ALREADY_CLOSED');
+
+    const afterTf = await prisma.twoFactor.findFirstOrThrow({
+      where: { userId: provisionedOwner.userId },
+    });
+    const afterBootstrap = await prisma.officeBootstrap.findUniqueOrThrow({
+      where: { id: 'singleton' },
+    });
+    expect(afterTf.failedVerificationCount).toBe(beforeTf.failedVerificationCount);
+    expect(afterTf.lockedUntil).toEqual(beforeTf.lockedUntil);
+    expect(afterBootstrap.closedAt.getTime()).toBe(beforeBootstrap.closedAt.getTime());
+  });
+
   it('fails closed and rejects duplicate owner provisioning', async () => {
     expect(await hasAnyOwner()).toBe(true);
 
@@ -1065,12 +1095,13 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         clientDrop.release();
       }
 
-      // 3. Retry password change from Context A after fault removal
+      // 3. Retry password change from Context A after fault removal (including stale content-length header)
       const pwChangeRetryReq = new NextRequest('http://127.0.0.1:3000/api/auth/change-password', {
         method: 'POST',
         headers: {
           cookie: sessionACookie,
           'content-type': 'application/json',
+          'content-length': '2',
         },
         body: JSON.stringify({
           currentPassword: fcPassword,

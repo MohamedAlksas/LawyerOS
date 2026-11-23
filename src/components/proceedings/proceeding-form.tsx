@@ -7,10 +7,6 @@ import {
   addProceedingAction,
   updateProceedingAction,
   findSimilarProceedingsAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  linkProceedingPartyAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  unlinkProceedingPartyAction,
 } from '@/modules/matters/matter-actions';
 import {
   MatterDTO,
@@ -820,9 +816,9 @@ export function ProceedingForm({
                   rel="noopener noreferrer"
                   className="text-[#14566B] font-bold underline"
                 >
-                  <bdi dir="ltr" className="font-mono">
-                    {candidate.numberText || '—'} لسنة {candidate.yearLabel || '—'}
-                  </bdi>
+                  <span className="font-mono">
+                    <bdi dir="ltr">{candidate.numberText || '—'}</bdi> لسنة <bdi dir="ltr">{candidate.yearLabel || '—'}</bdi>
+                  </span>
                   {' '}— {candidate.matterFileCode} ({candidate.matterTitle}) ↗
                 </Link>
                 <span className="block text-[11px] text-amber-800">

@@ -308,7 +308,7 @@ export const recordHearingResultSchema = z.object({
   nextHearing: recordHearingResultNextHearingSchema.nullable().optional(),
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),
-  tasks: z.array(recordHearingResultTaskSchema).optional(),
+  tasks: z.array(recordHearingResultTaskSchema).max(50, 'الحد الأقصى لمهام المتابعة في الجلسة الواحدة 50 مهمة').optional(),
   proceedingStatusUpdate: z.null().optional(),
   idempotencyKey: z.string().trim().min(1).max(100),
 }).strict().refine(data => {

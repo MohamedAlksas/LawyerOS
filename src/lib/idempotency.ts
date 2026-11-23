@@ -279,4 +279,26 @@ export async function resolveConcurrentIdempotency(
   throw new IdempotencyConcurrentConflictError();
 }
 
+/**
+ * Executes a transactional command with bounded retry when a concurrent idempotency
+ * insert rolled back after raising P2002.
+ */
+export async function runWithIdempotencyRetry<T>(
+  run: () => Promise<T>,
+  resolveConflict: () => Promise<{ resolved: true; value: NoInfer<T> } | { resolved: false }>,
+  maxAttempts = 3
+): Promise<T> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!isIdempotencyUniqueConflict(error)) throw error;
+      const outcome = await resolveConflict();
+      if (outcome.resolved) return outcome.value;
+      if (attempt === maxAttempts - 1) throw new IdempotencyConcurrentConflictError();
+    }
+  }
+  throw new IdempotencyConcurrentConflictError();
+}
+
 

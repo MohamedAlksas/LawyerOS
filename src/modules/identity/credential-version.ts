@@ -86,6 +86,49 @@ export async function evictOlderSessions(
 }
 
 /**
+ * Extracts raw session / 2FA token and candidate verification identifiers from a Cookie or Set-Cookie entry.
+ * Strips cookie attributes before parsing signature dots and fails closed on malformed percent-encoding.
+ */
+export function extractRawTokens(cookiePart: string): {
+  rawToken: string;
+  candidateIdentifiers: string[];
+} {
+  const pair = cookiePart.split(';', 1)[0]?.trim() ?? '';
+  const eqIdx = pair.indexOf('=');
+  const cookieVal = eqIdx !== -1 ? pair.slice(eqIdx + 1).trim() : '';
+
+  let decodedVal: string;
+  try {
+    decodedVal = decodeURIComponent(cookieVal);
+  } catch {
+    return { rawToken: '', candidateIdentifiers: [] };
+  }
+
+  const withoutPrefix = decodedVal.startsWith('s:') ? decodedVal.slice(2) : decodedVal;
+  const dotIdx = withoutPrefix.lastIndexOf('.');
+  const rawToken = dotIdx !== -1 ? withoutPrefix.substring(0, dotIdx) : withoutPrefix.split('.')[0];
+  const bareToken = rawToken.startsWith('2fa-') ? rawToken.slice(4) : rawToken;
+
+  const candidateIdentifiers = Array.from(
+    new Set(
+      [
+        rawToken,
+        bareToken,
+        `2fa-${rawToken}`,
+        `2fa-${bareToken}`,
+        `two-factor-${rawToken}`,
+        `two-factor-${bareToken}`,
+        decodedVal,
+        withoutPrefix,
+        cookieVal,
+      ].filter(Boolean)
+    )
+  );
+
+  return { rawToken: bareToken || rawToken, candidateIdentifiers };
+}
+
+/**
  * Checks whether session.credentialVersion matches user.credentialVersion.
  * Returns true if there is a mismatch, or if user or session is missing / unversioned (fail-closed).
  * Throws on database failure so caller fails closed.

@@ -197,6 +197,32 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
     });
   });
 
+  describe('recordHearingResultSchema & correctHearingResultSchema bounds', () => {
+    it('caps tasks array at 50 items and rejects corrections missing both expectedVersion and currentResultId', () => {
+      const hearingId = crypto.randomUUID();
+      const baseResult = {
+        hearingId,
+        expectedVersion: 1,
+        courtDecision: 'تأجيل للاطلاع والرد',
+        nextDateDisposition: 'UNDETERMINED' as const,
+        idempotencyKey: 'result-task-bound',
+      };
+      const fiftyTasks = Array.from({ length: 50 }, (_, idx) => ({ title: `مهمة ${idx + 1}` }));
+      const fiftyOneTasks = Array.from({ length: 51 }, (_, idx) => ({ title: `مهمة ${idx + 1}` }));
+      expect(recordHearingResultSchema.safeParse({ ...baseResult, tasks: fiftyTasks }).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...baseResult, tasks: fiftyOneTasks }).success).toBe(false);
+
+      expect(
+        correctHearingResultSchema.safeParse({
+          hearingId,
+          courtDecision: 'القرار المصوب',
+          reason: 'تصحيح سبب مادي',
+          idempotencyKey: 'corr-no-ver',
+        }).success
+      ).toBe(false);
+    });
+  });
+
   describe('rescheduleHearingSchema & cancelHearingSchema', () => {
     it('enforces mandatory reason on rescheduling', () => {
       const hearingId = crypto.randomUUID();

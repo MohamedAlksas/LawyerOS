@@ -280,7 +280,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
                 >
                   <div className="flex items-center gap-2">
                     <span aria-hidden="true">⚖️</span>
-                    <span>الجلسات والنتائج</span>
+                    <span>جدول الجلسات العام</span>
                   </div>
                   <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
                 </div>

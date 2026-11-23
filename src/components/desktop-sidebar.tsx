@@ -41,10 +41,8 @@ export function DesktopSidebar() {
 
   return (
     <aside
-      role="navigation"
-      aria-label="التنقل الرئيسي"
       data-testid="desktop-sidebar"
-      className="hidden lg:flex flex-col justify-between w-[232px] shrink-0 fixed top-14 right-0 bottom-0 bg-white border-l border-[#D5DFE3] p-4 select-none z-10"
+      className="hidden lg:flex flex-col justify-between w-[232px] shrink-0 fixed top-[var(--shell-top-height,3.5rem)] right-0 bottom-0 overflow-y-auto bg-white border-l border-[#D5DFE3] p-4 select-none z-10"
     >
       <div className="space-y-6">
         <nav aria-label="التنقل الرئيسي" data-testid="desktop-nav" className="flex flex-col gap-1.5">
@@ -150,7 +148,7 @@ export function DesktopSidebar() {
               >
                 <div className="flex items-center gap-2">
                   <span aria-hidden="true">⚖️</span>
-                  <span>الجلسات والنتائج</span>
+                  <span>جدول الجلسات العام</span>
                 </div>
                 <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">قريباً</span>
               </div>

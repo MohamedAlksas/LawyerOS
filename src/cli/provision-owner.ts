@@ -81,7 +81,8 @@ async function main() {
     if (bootstrapClosed) {
       console.error('[خطأ أمني]: حساب المالك مهيأ بالفعل أو تم إغلاق مسار التهيئة الأولية بشكل دائم.');
       console.error('تم إغلاق مسار التهيئة تلقائياً لمنع إضافة حسابات مالك إضافية.');
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     const prisma = getPrismaClient();
@@ -94,7 +95,8 @@ async function main() {
 
     if (existingOwner && existingOwner.twoFactors[0]?.verified === true) {
       console.error('[خطأ أمني]: حساب المالك مهيأ ومكتمل بالفعل في النظام.');
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     const isInteractive = Boolean(process.stdin.isTTY);
@@ -113,7 +115,8 @@ async function main() {
 
       if (!password) {
         console.error('[خطأ]: كلمة المرور مطلوبة لاستئناف إعداد الحساب المعلق.');
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       console.log('\nجارٍ استئناف إعداد الحساب واسترجاع مفاتيح المصادقة الثنائية...\n');
@@ -134,7 +137,8 @@ async function main() {
 
       if (!name || !email || !password) {
         console.error('[خطأ]: جميع الحقول (الاسم، البريد الإلكتروني، كلمة المرور) مطلوبة.');
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       console.log('\nجارٍ إنشاء الحساب وتوليد مفاتيح المصادقة الثنائية...\n');
@@ -158,7 +162,8 @@ async function main() {
 
     if (!totpCode) {
       console.error('[خطأ أمني]: رمز التحقق (TOTP Code) مطلوب لتأكيد حيازة المفتاح وإتمام التهيئة.');
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     await confirmOwnerProvisioning(result.user.id, totpCode);
@@ -184,7 +189,8 @@ async function main() {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'خطأ غير متوقع';
     console.error(`\n[فشل التهيئة]: ${message}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   } finally {
     await closeDbPool().catch(() => {});
   }

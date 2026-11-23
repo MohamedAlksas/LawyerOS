@@ -51,6 +51,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Concurrency conflict state
   const [hasConcurrencyConflict, setHasConcurrencyConflict] = useState(false);
@@ -60,12 +61,14 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
   const [acknowledgedDuplicates, setAcknowledgedDuplicates] = useState(false);
 
   const savingRef = useRef(false);
+  const savedRef = useRef(false);
   const dirty = name !== (party?.name ?? '') || kind !== (party?.kind ?? 'PERSON') ||
     primaryPhone !== (party?.primaryPhone ?? '') || additionalPhones !== (party?.additionalPhones?.join(', ') ?? '') ||
     email !== (party?.email ?? '') || address !== (party?.address ?? '') || notes !== (party?.notes ?? '') || hasIdentity;
   useLeaveGuard(dirty && duplicateWarnings.length === 0, isSubmitting || Boolean(pending));
   useLayoutEffect(() => {
-    if (!dirty) editable.clear();
+    if (!draft.isCurrent()) return;
+    if (savedRef.current || !dirty) editable.clear();
     else if (!pending) editable.keep({
       id: party?.id, expectedVersion: editable.restored?.expectedVersion ?? party?.version,
       kind, name, primaryPhone, additionalPhones: additionalPhones.split(',').map((phone) => phone.trim()), email, address, notes,
@@ -73,7 +76,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
     });
   });
 
-  const validateClientSide = (): boolean => {
+  const validateClientSide = (): Record<string, string> => {
     const errors: Record<string, string> = {};
 
     if (!name.trim()) {
@@ -110,7 +113,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
     }
 
     setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
+    return errors;
   };
 
   const doSaveParty = async () => {
@@ -118,6 +121,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
     savingRef.current = true;
     setIsSubmitting(true);
     setGeneralError(null);
+    setSessionExpired(false);
     setHasConcurrencyConflict(false);
 
     const payload: SavePartyInput = pending ?? {
@@ -144,7 +148,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
       if (!draft.isCurrent()) return;
 
       if (!result.success) {
-        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN'].includes(result.code ?? '')) {
+        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN', 'IDEMPOTENCY_PAYLOAD_MISMATCH'].includes(result.code ?? '')) {
           setPending(null);
           draft.clear();
         }
@@ -157,6 +161,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
           setFieldErrors(result.fieldErrors);
           setGeneralError('يرجى مراجعة الأخطاء الموضحة أدناه.');
         } else if (isAuthRecoveryCode(result.code)) {
+          setSessionExpired(true);
           setGeneralError('انتهت الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد محاولة الحفظ الأصلي.');
         } else {
           setGeneralError(result.error || 'تعذر حفظ بيانات الطرف.');
@@ -164,6 +169,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
         return;
       }
 
+      savedRef.current = true;
       draft.clear();
       editable.clear();
       setPending(null);
@@ -188,11 +194,11 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
     setGeneralError(null);
     setHasConcurrencyConflict(false);
 
-    if (!validateClientSide()) {
+    const clientErrors = validateClientSide();
+    const firstErrorKey = Object.keys(clientErrors)[0];
+    if (firstErrorKey) {
       // Focus first error field for accessibility
-      const firstErrorKey = Object.keys(fieldErrors)[0] || 'name';
-      const el = document.getElementById(firstErrorKey);
-      el?.focus();
+      document.getElementById(firstErrorKey)?.focus();
       return;
     }
 
@@ -344,9 +350,22 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
         <div
           role="alert"
           data-testid="form-error-summary"
-          className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] space-y-1"
+          className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] space-y-2"
         >
           <div className="font-bold">{generalError}</div>
+          {sessionExpired && (
+            <div>
+              <a
+                href="/login"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="party-session-login-link"
+                className="inline-flex items-center px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] min-h-[44px]"
+              >
+                فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+              </a>
+            </div>
+          )}
           {Object.keys(fieldErrors).length > 0 && (
             <ul className="list-disc list-inside space-y-0.5 pt-1">
               {Object.entries(fieldErrors).map(([field, msg]) => (

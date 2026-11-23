@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getMatter } from '@/modules/matters/matter-service';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
@@ -34,10 +34,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/matters/${id}/proceedings/${proceedingId}`));
+      await redirectOnAuthError(error, `/matters/${id}/proceedings/${proceedingId}`);
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -197,7 +194,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
                 data-testid="edit-proceeding-button"
-                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[40px] flex items-center gap-1.5"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
               >
                 <span>✏️</span>
                 <span>تعديل بيانات القيد</span>
@@ -205,7 +202,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             )}
             <Link
               href={`/matters/${matter.id}`}
-              className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[40px] flex items-center"
+              className="px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center"
             >
               العودة للملف
             </Link>
@@ -223,9 +220,9 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           <div className="space-y-1">
             <span className="text-[#4D606A] block font-semibold">رقم الدعوى والسنة:</span>
             {proceeding.numberText && proceeding.yearLabel ? (
-              <bdi dir="ltr" className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2.5 py-1 rounded border border-slate-200 inline-block">
-                {proceeding.numberText} لسنة {proceeding.yearLabel}
-              </bdi>
+              <span className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2.5 py-1 rounded border border-slate-200 inline-block">
+                <bdi dir="ltr">{proceeding.numberText}</bdi> لسنة <bdi dir="ltr">{proceeding.yearLabel}</bdi>
+              </span>
             ) : (
               <span className="text-amber-800 font-semibold italic">لم يقيد برقم رسمي بعد</span>
             )}
@@ -366,7 +363,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
         </div>
         <p className="text-xs text-[#4D606A] leading-relaxed">
-          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام (المهمة T10).
+          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
         </p>
         <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
           قريباً في المرحلة القادمة

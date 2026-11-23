@@ -1,7 +1,7 @@
 import React from 'react';
 import { GuardedLink as Link } from '@/components/navigation-guard';
-import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getClientProfile, NotFoundError } from '@/modules/parties/service';
 import { PartyForm } from '@/components/parties/party-form';
@@ -22,10 +22,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/parties/${id}/edit`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/parties/${id}/edit`));
+      await redirectOnAuthError(error, `/parties/${id}/edit`);
     }
     if (error instanceof AuthorizationError) {
       return (

@@ -12,6 +12,7 @@ import {
   ProceedingSummaryDTO,
   MatterStatus,
   ProceedingStatus,
+  hasCompleteProceedingRegistration,
 } from '@/modules/matters/matter-types';
 import {
   linkMatterPartyAction,
@@ -23,8 +24,6 @@ import {
   reopenMatterAction,
   archiveProceedingAction,
   reopenProceedingAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  getMatterAction,
 } from '@/modules/matters/matter-actions';
 import { searchPartiesAction } from '@/modules/parties/actions';
 import { listMatterAuthorizationOptionsAction } from '@/modules/matters/matter-actions';
@@ -1632,7 +1631,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               target="_blank"
               rel="noopener noreferrer"
               data-testid="assoc-session-login-link"
-              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
             >
               فتح شاشة تسجيل الدخول في نافذة جديدة ↗
             </a>
@@ -1640,7 +1639,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               type="button"
               onClick={handleRetryPendingAssoc}
               data-testid="assoc-session-retry-button"
-              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
             >
               إعادة محاولة العملية
             </button>
@@ -1667,7 +1666,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               type="button"
               onClick={handleRetryPendingAssoc}
               data-testid="assoc-operation-retry-button"
-              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
             >
               إعادة محاولة العملية الأصلية
             </button>
@@ -1693,7 +1692,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           </div>
           <Link
             href={`/matters/${matter.id}/edit`}
-            className="px-3.5 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-[6px] shrink-0 self-start sm:self-center transition-colors min-h-[36px] flex items-center justify-center"
+            className="px-3.5 py-1.5 bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold rounded-[6px] shrink-0 self-start sm:self-center transition-colors min-h-[44px] flex items-center justify-center"
           >
             تحديد مكان الحفظ
           </Link>
@@ -2117,12 +2116,19 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                     className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-1"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="font-bold text-sm text-[#172A35]">{oth.partyName}</span>
+                      <Link
+                        href={`/parties/${oth.partyId}`}
+                        className="font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
+                      >
+                        {oth.partyName}
+                      </Link>
                       {!isMatterArchived && (
                         <button
                           type="button"
                           onClick={() => handleUnlinkParty(oth)}
                           disabled={isAssocSubmitting || !!pendingAssocOp}
+                          title="إزالة الطرف"
+                          aria-label="إزالة الطرف"
                           className={`text-xs text-red-600 hover:text-red-800 p-1 ${
                             isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
@@ -2182,7 +2188,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
           ) : (
             <div className="space-y-4">
               {proceedings.map((proc) => {
-                const isDraft = proc.status === 'DRAFT' || !proc.numberText || !proc.yearLabel;
+                const isDraft = proc.status === 'DRAFT' || !hasCompleteProceedingRegistration(proc);
                 const isProcArchived = Boolean(proc.archivedAt);
 
                 return (
@@ -2228,9 +2234,9 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                           {proc.numberText && proc.yearLabel ? (
                             <div className="flex items-center gap-1">
                               <span className="font-semibold text-[#172A35]">رقم الدعوى:</span>
-                              <bdi dir="ltr" className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                                {proc.numberText} لسنة {proc.yearLabel}
-                              </bdi>
+                              <span className="font-mono text-sm font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200 inline-flex items-center gap-1">
+                                <bdi dir="ltr">{proc.numberText}</bdi> لسنة <bdi dir="ltr">{proc.yearLabel}</bdi>
+                              </span>
                               {proc.registerType && <span>({proc.registerType})</span>}
                             </div>
                           ) : (
@@ -2507,9 +2513,9 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
                       </span>
                       <div className="flex items-center gap-1 text-xs text-[#4D606A]">
                         <span>رقم التوكيل:</span>
-                        <bdi dir="ltr" className="font-mono font-bold text-[#14566B]">
-                          {auth.poaNumberText} لسنة {auth.poaYearLabel}
-                        </bdi>
+                        <span className="font-mono font-bold text-[#14566B]">
+                          <bdi dir="ltr">{auth.poaNumberText}</bdi> لسنة <bdi dir="ltr">{auth.poaYearLabel}</bdi>
+                        </span>
                       </div>
                     </div>
 
@@ -2594,11 +2600,10 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
       {/* Future Modules Notice */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          📅 الجلسات والأجندة والمستندات والحسابات
+          📁 المستندات والحسابات
         </span>
         <p>
-          وحدات إدارة الجلسات وقرارات المحكمة (T08) وحفظ المستندات الرقمية (T11) وحسابات الأتعاب والمصروفات (T09/T10)
-          سيتم ربطها تلقائياً بهذا الملف فور إطلاقها في المراحل القادمة.
+          وحدات حفظ المستندات الرقمية وحسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها.
         </p>
       </div>
 
@@ -2858,7 +2863,7 @@ export function MatterDetailClient({ ownerId, initialMatter }: MatterDetailClien
               </h3>
               <button
                 type="button"
-                data-testid="cancel-proceeding-lifecycle-button"
+                data-testid="close-proceeding-lifecycle-modal-button"
                 disabled={isProceedingLifecycleSubmitting}
                 onClick={closeProceedingLifecycleModal}
                 className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"

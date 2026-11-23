@@ -12,7 +12,7 @@ import {
   HEARING_STATUS_LABELS,
   formatRecordResultSummary,
 } from '@/components/hearings/hearing-ui-types';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface FollowUpTaskItem {
   id: string;
@@ -99,6 +99,7 @@ export function HearingResultClient({
   // Execution states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(resultDraft.restored));
+  const [sessionExpiredFor, setSessionExpiredFor] = useState<'result' | 'correction' | null>(null);
   const unknownOutcome = 'تعذر استلام تأكيد الحفظ. يمكنك إعادة محاولة نفس الطلب.';
   const [uncertaintyError, setUncertaintyError] = useState<string | null>(resultDraft.restored ? unknownOutcome : null);
   const [conflictError, setConflictError] = useState<string | null>(null);
@@ -176,10 +177,16 @@ export function HearingResultClient({
     setValidationError(null);
     setUncertaintyError(null);
     setConflictError(null);
+    setSessionExpiredFor(null);
     setIsSubmitting(true);
     try {
       const response = await saveHearing<RecordHearingResultResult>(`${endpoint}/result`, pendingResult.current);
       if (!response.success) {
+        if (isAuthRecoveryCode(response.code)) {
+          setIsFrozenRetry(true);
+          setSessionExpiredFor('result');
+          return;
+        }
         if (isUncertainHearingOutcome(response.code)) throw new Error(unknownOutcome);
         pendingResult.current = undefined;
         resultDraft.clear();
@@ -195,6 +202,7 @@ export function HearingResultClient({
       pendingResult.current = undefined;
       resultDraft.clear();
       setIsFrozenRetry(false);
+      setSessionExpiredFor(null);
       setSavedSuccess(true);
       setSavedDecision(result.decisionText);
       setCurrentStatus(hearing.status);
@@ -227,10 +235,16 @@ export function HearingResultClient({
       correctionDraft.keep(pendingCorrection.current);
     }
     setCorrectionError(null);
+    setSessionExpiredFor(null);
     setCorrectionSubmitting(true);
     try {
       const response = await saveHearing<HearingResultDTO>(`${endpoint}/correct`, pendingCorrection.current);
       if (!response.success) {
+        if (isAuthRecoveryCode(response.code)) {
+          setCorrectionFrozen(true);
+          setSessionExpiredFor('correction');
+          return;
+        }
         if (isUncertainHearingOutcome(response.code)) throw new Error(unknownOutcome);
         pendingCorrection.current = undefined;
         correctionDraft.clear();
@@ -242,6 +256,7 @@ export function HearingResultClient({
       pendingCorrection.current = undefined;
       correctionDraft.clear();
       setCorrectionFrozen(false);
+      setSessionExpiredFor(null);
       setCorrectionSuccess(true);
       setIsCorrecting(false);
       setLatestResult({ ...response.data, correctionReason: response.data.correctionReason ?? null });
@@ -339,8 +354,45 @@ export function HearingResultClient({
         </div>
       )}
 
+      {/* Session Expiry Recovery Banner */}
+      {sessionExpiredFor && (
+        <div
+          role="alert"
+          data-testid="hearing-session-recovery-alert"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-[6px] text-amber-900 space-y-3 text-xs"
+        >
+          <div className="flex items-center gap-2 font-bold text-sm">
+            <span>🔒</span>
+            <span>انتهت صلاحية الجلسة أو يلزم استكمال التحقق</span>
+          </div>
+          <p className="leading-relaxed">
+            تم الاحتفاظ بالبيانات ومفتاح الطلب الأصلي لمنع التكرار. سجّل الدخول في نافذة جديدة ثم أعد المحاولة.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-testid="hearing-session-login-link"
+              className="px-3 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+            <button
+              type="button"
+              onClick={sessionExpiredFor === 'correction' ? handleSaveCorrection : handleSaveResult}
+              disabled={isSubmitting || correctionSubmitting}
+              data-testid="hearing-session-retry-btn"
+              className="px-3 py-2 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
+            >
+              إعادة المحاولة بنفس المفتاح
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Uncertainty / Network Disconnection Banner (T08-TC-03 & T08-TC-07) */}
-      {(uncertaintyError || isFrozenRetry) && (
+      {!sessionExpiredFor && (uncertaintyError || isFrozenRetry) && (
         <div
           role="alert"
           data-testid="uncertainty-error-banner"
@@ -534,6 +586,35 @@ export function HearingResultClient({
         </div>
       )}
 
+      {/* Unavailable Result Notice for Cancelled / Rescheduled Hearings */}
+      {!savedSuccess && !latestResult && !isFrozenRetry && (currentStatus === 'CANCELLED' || currentStatus === 'RESCHEDULED') && (
+        <div
+          data-testid="hearing-result-unavailable-banner"
+          className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-3 text-xs text-[#172A35]"
+        >
+          <p className="font-bold text-sm">
+            لا يمكن تسجيل نتيجة لهذه الجلسة لأن حالتها «{HEARING_STATUS_LABELS[currentStatus]}».
+          </p>
+          <p className="text-[#4D606A] leading-relaxed">
+            الجلسات الملغاة أو المعاد جدولتها لم تنعقد ولا يُسجل لها منطوق قرار.
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Link
+              href={`/hearings/${hearingId}`}
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] min-h-[40px] inline-flex items-center"
+            >
+              العودة لتفاصيل الجلسة
+            </Link>
+            <Link
+              href={`/matters/${matterId}/proceedings/${proceedingId}`}
+              className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] inline-flex items-center"
+            >
+              عرض القيد القضائي
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Main Result Entry Form (When not yet completed or submitting) */}
       {!savedSuccess && (currentStatus === 'SCHEDULED' || isFrozenRetry) && (
         <div className="bg-white rounded-[8px] border border-[#D5DFE3] p-6 shadow-xs space-y-5">
@@ -579,7 +660,7 @@ export function HearingResultClient({
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'KNOWN'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -598,7 +679,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'UNDETERMINED'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -617,7 +698,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'NONE'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -676,7 +757,7 @@ export function HearingResultClient({
                 onClick={handleAddTask}
                 disabled={resultFieldsDisabled}
                 data-testid="add-task-button"
-                className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] transition-colors min-h-[36px] flex items-center gap-1"
+                className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1"
               >
                 <span>➕</span>
                 <span>إضافة مهمة عمل مطلوبة</span>
@@ -697,7 +778,7 @@ export function HearingResultClient({
                         type="button"
                         onClick={() => handleRemoveTask(task.id)}
                         disabled={resultFieldsDisabled}
-                        className="text-red-600 hover:text-red-800 text-xs font-semibold p-1 min-h-[32px] flex items-center"
+                        className="text-red-600 hover:text-red-800 text-xs font-semibold p-1 min-h-[44px] flex items-center"
                       >
                         ✕ حذف
                       </button>
@@ -705,10 +786,11 @@ export function HearingResultClient({
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-[#172A35]">
+                        <label htmlFor={`task-title-${task.id}`} className="block text-[11px] font-semibold text-[#172A35]">
                           عنوان المهمة <span className="text-red-600">*</span>
                         </label>
                         <input
+                          id={`task-title-${task.id}`}
                           type="text"
                           name={`task_title_${idx}`}
                           required
@@ -717,22 +799,23 @@ export function HearingResultClient({
                           onChange={(e) => handleUpdateTaskTitle(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-title-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[40px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
 
                       <div className="space-y-1">
-                        <label className="block text-[11px] font-semibold text-[#172A35]">
+                        <label htmlFor={`task-due-${task.id}`} className="block text-[11px] font-semibold text-[#172A35]">
                           تاريخ الاستحقاق (اختياري)
                         </label>
                         <input
+                          id={`task-due-${task.id}`}
                           type="date"
                           name={`task_due_${idx}`}
                           value={task.dueDate}
                           onChange={(e) => handleUpdateTaskDue(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-due-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[40px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
                     </div>

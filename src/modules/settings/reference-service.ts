@@ -8,7 +8,7 @@ import {
   claimIdempotencyKey,
   completeIdempotencyKey,
   resolveConcurrentIdempotency,
-  isIdempotencyUniqueConflict,
+  runWithIdempotencyRetry,
 } from '@/lib/idempotency';
 import {
   ReferenceItemType,
@@ -149,134 +149,131 @@ export async function updateOfficeSettings(
 
   const prisma = options?.prisma || getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
-      // 1. Idempotency claim
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'updateOfficeSettings',
-        key: input.idempotencyKey,
-        payload: input,
-      });
+  return runWithIdempotencyRetry(
+    () =>
+      prisma.$transaction(async (tx) => {
+        // 1. Idempotency claim
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'updateOfficeSettings',
+          key: input.idempotencyKey,
+          payload: input,
+        });
 
-      if (claim.isReplay) {
-        const dto = await getOfficeSettingsInternal(tx);
-        const opVersion = extractOperationVersion(claim.resultPayload, dto.version);
-        return { ...dto, operationVersion: opVersion };
-      }
+        if (claim.isReplay) {
+          const dto = await getOfficeSettingsInternal(tx);
+          const opVersion = extractOperationVersion(claim.resultPayload, dto.version);
+          return { ...dto, operationVersion: opVersion };
+        }
 
-      // 2. Initialize the singleton before locking. SELECT ... FOR UPDATE cannot
-      // lock a row that does not exist, so two first writers would both choose
-      // version 1 and overwrite each other. ON CONFLICT makes initialization
-      // serializable: the second writer blocks until the first commits, then
-      // observes the committed version under the normal version comparison.
-      await tx.$executeRaw`
-        INSERT INTO "office_settings"
-          ("id", "officeName", "currency", "timeZone", "version", "updatedById", "updatedAt")
-        VALUES
-          (${SINGLETON_ID}, 'مكتب المحاماة', 'EGP', 'Africa/Cairo', 1, 'system', CURRENT_TIMESTAMP)
-        ON CONFLICT ("id") DO NOTHING;
-      `;
+        // 2. Initialize the singleton before locking. SELECT ... FOR UPDATE cannot
+        // lock a row that does not exist, so two first writers would both choose
+        // version 1 and overwrite each other. ON CONFLICT makes initialization
+        // serializable: the second writer blocks until the first commits, then
+        // observes the committed version under the normal version comparison.
+        await tx.$executeRaw`
+          INSERT INTO "office_settings"
+            ("id", "officeName", "currency", "timeZone", "version", "updatedById", "updatedAt")
+          VALUES
+            (${SINGLETON_ID}, 'مكتب المحاماة', 'EGP', 'Africa/Cairo', 1, 'system', CURRENT_TIMESTAMP)
+          ON CONFLICT ("id") DO NOTHING;
+        `;
 
-      // 3. Lock and retrieve current settings
-      const [current] = await tx.$queryRaw<Array<{
-        id: string;
-        version: number;
-      }>>`
-        SELECT "id", "version"
-        FROM "office_settings"
-        WHERE "id" = ${SINGLETON_ID}
-        FOR UPDATE;
-      `;
+        // 3. Lock and retrieve current settings
+        const [current] = await tx.$queryRaw<Array<{
+          id: string;
+          version: number;
+        }>>`
+          SELECT "id", "version"
+          FROM "office_settings"
+          WHERE "id" = ${SINGLETON_ID}
+          FOR UPDATE;
+        `;
 
-      if (!current) {
-        throw new ConcurrencyConflictError();
-      }
+        if (!current) {
+          throw new ConcurrencyConflictError();
+        }
 
-      if (current.version !== input.expectedVersion) {
-        throw new ConcurrencyConflictError();
-      }
+        if (current.version !== input.expectedVersion) {
+          throw new ConcurrencyConflictError();
+        }
 
-      const nextVersion = current.version + 1;
+        const nextVersion = current.version + 1;
 
-      const updated = await tx.officeSettings.upsert({
-        where: { id: SINGLETON_ID },
-        create: {
-          id: SINGLETON_ID,
-          officeName: input.officeName.trim(),
-          lawyerName: input.lawyerName?.trim() ?? null,
-          phone: input.phone?.trim() ?? null,
-          email: input.email?.trim() ?? null,
-          address: input.address?.trim() ?? null,
-          taxNumber: input.taxNumber?.trim() ?? null,
-          currency: 'EGP',
-          timeZone: 'Africa/Cairo',
-          version: nextVersion,
-          updatedById: actor.id,
-        },
-        update: {
-          officeName: input.officeName.trim(),
-          lawyerName: input.lawyerName?.trim() ?? null,
-          phone: input.phone?.trim() ?? null,
-          email: input.email?.trim() ?? null,
-          address: input.address?.trim() ?? null,
-          taxNumber: input.taxNumber?.trim() ?? null,
-          version: nextVersion,
-          updatedById: actor.id,
-        },
-      });
+        const updated = await tx.officeSettings.upsert({
+          where: { id: SINGLETON_ID },
+          create: {
+            id: SINGLETON_ID,
+            officeName: input.officeName.trim(),
+            lawyerName: input.lawyerName?.trim() ?? null,
+            phone: input.phone?.trim() ?? null,
+            email: input.email?.trim() ?? null,
+            address: input.address?.trim() ?? null,
+            taxNumber: input.taxNumber?.trim() ?? null,
+            currency: 'EGP',
+            timeZone: 'Africa/Cairo',
+            version: nextVersion,
+            updatedById: actor.id,
+          },
+          update: {
+            officeName: input.officeName.trim(),
+            ...(input.lawyerName !== undefined ? { lawyerName: input.lawyerName?.trim() ?? null } : {}),
+            ...(input.phone !== undefined ? { phone: input.phone?.trim() ?? null } : {}),
+            ...(input.email !== undefined ? { email: input.email?.trim() ?? null } : {}),
+            ...(input.address !== undefined ? { address: input.address?.trim() ?? null } : {}),
+            ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber?.trim() ?? null } : {}),
+            version: nextVersion,
+            updatedById: actor.id,
+          },
+        });
 
-      // 3. Record audit
-      await recordAuditEvent(tx, {
-        userId: actor.id,
-        action: 'UPDATE_OFFICE_SETTINGS',
-        entityType: 'OfficeSettings',
-        entityId: SINGLETON_ID,
-        changedFields: {
-          officeName: updated.officeName,
-          lawyerName: updated.lawyerName,
-          phone: updated.phone,
-          email: updated.email,
-        },
-      });
+        // 3. Record audit
+        await recordAuditEvent(tx, {
+          userId: actor.id,
+          action: 'UPDATE_OFFICE_SETTINGS',
+          entityType: 'OfficeSettings',
+          entityId: SINGLETON_ID,
+          changedFields: {
+            officeName: updated.officeName,
+            lawyerName: updated.lawyerName,
+            phone: updated.phone,
+            email: updated.email,
+          },
+        });
 
-      const resultDTO = mapOfficeSettingsToDTO(updated);
-      resultDTO.operationVersion = nextVersion;
+        const resultDTO = mapOfficeSettingsToDTO(updated);
+        resultDTO.operationVersion = nextVersion;
 
-      // 4. Complete idempotency with minimal safe metadata
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: 'updateOfficeSettings',
-        key: input.idempotencyKey,
-        resultType: 'OfficeSettingsDTO',
-        resultId: SINGLETON_ID,
-        resultPayload: {
-          operation: 'UPDATE_OFFICE_SETTINGS',
-          resourceId: SINGLETON_ID,
-          version: nextVersion,
-          acknowledgedAt: new Date().toISOString(),
-        },
-      });
+        // 4. Complete idempotency with minimal safe metadata
+        await completeIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: 'updateOfficeSettings',
+          key: input.idempotencyKey,
+          resultType: 'OfficeSettingsDTO',
+          resultId: SINGLETON_ID,
+          resultPayload: {
+            operation: 'UPDATE_OFFICE_SETTINGS',
+            resourceId: SINGLETON_ID,
+            version: nextVersion,
+            acknowledgedAt: new Date().toISOString(),
+          },
+        });
 
-      return resultDTO;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
+        return resultDTO;
+      }),
+    async () => {
       const resolved = await resolveConcurrentIdempotency(prisma, {
         actorId: actor.id,
         commandType: 'updateOfficeSettings',
         key: input.idempotencyKey,
         payload: input,
       });
-      if (resolved) {
-        const dto = await getOfficeSettingsInternal(prisma);
-        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return await updateOfficeSettings(actor, rawInput, options);
+      if (!resolved) return { resolved: false };
+      const dto = await getOfficeSettingsInternal(prisma);
+      const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+      return { resolved: true, value: { ...dto, operationVersion: opVersion } };
     }
-    throw err;
-  }
+  );
 }
 
 export async function listReferenceItems(
@@ -434,142 +431,139 @@ export async function createReferenceItem(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: `createReferenceItem:${input.type}`,
-        key: input.idempotencyKey,
-        payload: input,
-      });
+  return runWithIdempotencyRetry(
+    () =>
+      prisma.$transaction(async (tx) => {
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: `createReferenceItem:${input.type}`,
+          key: input.idempotencyKey,
+          payload: input,
+        });
 
-      if (claim.isReplay) {
-        const resourceId = extractResourceId(claim);
-        const dto = await getReferenceItemDTO(tx, input.type, resourceId);
-        const opVersion = extractOperationVersion(claim.resultPayload, 1);
-        return { ...dto, operationVersion: opVersion };
-      }
+        if (claim.isReplay) {
+          const resourceId = extractResourceId(claim);
+          const dto = await getReferenceItemDTO(tx, input.type, resourceId);
+          const opVersion = extractOperationVersion(claim.resultPayload, 1);
+          return { ...dto, operationVersion: opVersion };
+        }
 
-      let createdDTO: ReferenceItemDTO;
+        let createdDTO: ReferenceItemDTO;
 
-      if (input.type === 'COURT') {
-        const item = await tx.court.create({
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            circuitTypes: input.circuitTypes ?? [],
-            notes: input.notes?.trim() ?? null,
-            isActive: true,
+        if (input.type === 'COURT') {
+          const item = await tx.court.create({
+            data: {
+              name: input.name.trim(),
+              code: input.code?.trim() ?? null,
+              circuitTypes: input.circuitTypes ?? [],
+              notes: input.notes?.trim() ?? null,
+              isActive: true,
+              version: 1,
+              createdById: actor.id,
+              updatedById: actor.id,
+            },
+          });
+          createdDTO = {
+            id: item.id,
+            type: 'COURT',
+            name: item.name,
+            code: item.code,
+            circuitTypes: item.circuitTypes,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else if (input.type === 'PRACTICE_AREA') {
+          const item = await tx.practiceArea.create({
+            data: {
+              name: input.name.trim(),
+              code: input.code?.trim() ?? null,
+              notes: input.notes?.trim() ?? null,
+              isActive: true,
+              version: 1,
+              createdById: actor.id,
+              updatedById: actor.id,
+            },
+          });
+          createdDTO = {
+            id: item.id,
+            type: 'PRACTICE_AREA',
+            name: item.name,
+            code: item.code,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else if (input.type === 'STORAGE_LOCATION') {
+          const item = await tx.storageLocation.create({
+            data: {
+              name: input.name.trim(),
+              code: input.code?.trim() ?? null,
+              notes: input.notes?.trim() ?? null,
+              isActive: true,
+              version: 1,
+              createdById: actor.id,
+              updatedById: actor.id,
+            },
+          });
+          createdDTO = {
+            id: item.id,
+            type: 'STORAGE_LOCATION',
+            name: item.name,
+            code: item.code,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else {
+          throw new ReferenceValidationError('نوع العنصر المرجعي غير صالح.');
+        }
+
+        await recordAuditEvent(tx, {
+          userId: actor.id,
+          action: `CREATE_${input.type}`,
+          entityType: input.type,
+          entityId: createdDTO.id,
+          changedFields: { name: createdDTO.name, code: createdDTO.code },
+        });
+
+        await completeIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: `createReferenceItem:${input.type}`,
+          key: input.idempotencyKey,
+          resultType: 'ReferenceItemDTO',
+          resultId: createdDTO.id,
+          resultPayload: {
+            operation: `CREATE_${input.type}`,
+            resourceId: createdDTO.id,
             version: 1,
-            createdById: actor.id,
-            updatedById: actor.id,
+            acknowledgedAt: new Date().toISOString(),
           },
         });
-        createdDTO = {
-          id: item.id,
-          type: 'COURT',
-          name: item.name,
-          code: item.code,
-          circuitTypes: item.circuitTypes,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else if (input.type === 'PRACTICE_AREA') {
-        const item = await tx.practiceArea.create({
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            notes: input.notes?.trim() ?? null,
-            isActive: true,
-            version: 1,
-            createdById: actor.id,
-            updatedById: actor.id,
-          },
-        });
-        createdDTO = {
-          id: item.id,
-          type: 'PRACTICE_AREA',
-          name: item.name,
-          code: item.code,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else if (input.type === 'STORAGE_LOCATION') {
-        const item = await tx.storageLocation.create({
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            notes: input.notes?.trim() ?? null,
-            isActive: true,
-            version: 1,
-            createdById: actor.id,
-            updatedById: actor.id,
-          },
-        });
-        createdDTO = {
-          id: item.id,
-          type: 'STORAGE_LOCATION',
-          name: item.name,
-          code: item.code,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else {
-        throw new ReferenceValidationError('نوع العنصر المرجعي غير صالح.');
-      }
 
-      await recordAuditEvent(tx, {
-        userId: actor.id,
-        action: `CREATE_${input.type}`,
-        entityType: input.type,
-        entityId: createdDTO.id,
-        changedFields: { name: createdDTO.name, code: createdDTO.code },
-      });
-
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: `createReferenceItem:${input.type}`,
-        key: input.idempotencyKey,
-        resultType: 'ReferenceItemDTO',
-        resultId: createdDTO.id,
-        resultPayload: {
-          operation: `CREATE_${input.type}`,
-          resourceId: createdDTO.id,
-          version: 1,
-          acknowledgedAt: new Date().toISOString(),
-        },
-      });
-
-      createdDTO.operationVersion = 1;
-      return createdDTO;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
+        createdDTO.operationVersion = 1;
+        return createdDTO;
+      }),
+    async () => {
       const resolved = await resolveConcurrentIdempotency(prisma, {
         actorId: actor.id,
         commandType: `createReferenceItem:${input.type}`,
         key: input.idempotencyKey,
         payload: input,
       });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, 1);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return createReferenceItem(actor, rawInput);
+      if (!resolved) return { resolved: false };
+      const resourceId = extractResourceId(resolved);
+      const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, 1);
+      return { resolved: true, value: { ...dto, operationVersion: opVersion } };
     }
-    throw err;
-  }
+  );
 }
 
 export async function updateReferenceItem(
@@ -591,158 +585,156 @@ export async function updateReferenceItem(
 
   const prisma = getPrismaClient();
 
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const claim = await claimIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: `updateReferenceItem:${input.type}`,
-        key: input.idempotencyKey,
-        payload: input,
-      });
+  return runWithIdempotencyRetry(
+    () =>
+      prisma.$transaction(async (tx) => {
+        const claim = await claimIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: `updateReferenceItem:${input.type}`,
+          key: input.idempotencyKey,
+          payload: input,
+        });
 
-      if (claim.isReplay) {
-        const resourceId = extractResourceId(claim);
-        const dto = await getReferenceItemDTO(tx, input.type, resourceId);
-        const opVersion = extractOperationVersion(claim.resultPayload, 1);
-        return { ...dto, operationVersion: opVersion };
-      }
+        if (claim.isReplay) {
+          const resourceId = extractResourceId(claim);
+          const dto = await getReferenceItemDTO(tx, input.type, resourceId);
+          const opVersion = extractOperationVersion(claim.resultPayload, 1);
+          return { ...dto, operationVersion: opVersion };
+        }
 
-      let updatedDTO: ReferenceItemDTO;
+        let updatedDTO: ReferenceItemDTO;
+        const optionalFields = {
+          ...(input.code !== undefined ? { code: input.code?.trim() ?? null } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() ?? null } : {}),
+        };
 
-      if (input.type === 'COURT') {
-        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-          SELECT "id", "version" FROM "court" WHERE "id" = ${input.id} FOR UPDATE;
-        `;
-        if (!existing) throw new NotFoundError('المحكمة غير موجودة.');
-        if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
+        if (input.type === 'COURT') {
+          const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+            SELECT "id", "version" FROM "court" WHERE "id" = ${input.id} FOR UPDATE;
+          `;
+          if (!existing) throw new NotFoundError('المحكمة غير موجودة.');
+          if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
 
-        const item = await tx.court.update({
-          where: { id: input.id },
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            circuitTypes: input.circuitTypes ?? undefined,
-            notes: input.notes?.trim() ?? null,
-            isActive: input.isActive,
-            version: existing.version + 1,
-            updatedById: actor.id,
+          const item = await tx.court.update({
+            where: { id: input.id },
+            data: {
+              name: input.name.trim(),
+              ...optionalFields,
+              circuitTypes: input.circuitTypes ?? undefined,
+              isActive: input.isActive,
+              version: existing.version + 1,
+              updatedById: actor.id,
+            },
+          });
+          updatedDTO = {
+            id: item.id,
+            type: 'COURT',
+            name: item.name,
+            code: item.code,
+            circuitTypes: item.circuitTypes,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else if (input.type === 'PRACTICE_AREA') {
+          const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+            SELECT "id", "version" FROM "practice_area" WHERE "id" = ${input.id} FOR UPDATE;
+          `;
+          if (!existing) throw new NotFoundError('تصنيف العمل غير موجود.');
+          if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
+
+          const item = await tx.practiceArea.update({
+            where: { id: input.id },
+            data: {
+              name: input.name.trim(),
+              ...optionalFields,
+              isActive: input.isActive,
+              version: existing.version + 1,
+              updatedById: actor.id,
+            },
+          });
+          updatedDTO = {
+            id: item.id,
+            type: 'PRACTICE_AREA',
+            name: item.name,
+            code: item.code,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else if (input.type === 'STORAGE_LOCATION') {
+          const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
+            SELECT "id", "version" FROM "storage_location" WHERE "id" = ${input.id} FOR UPDATE;
+          `;
+          if (!existing) throw new NotFoundError('مكان الحفظ غير موجود.');
+          if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
+
+          const item = await tx.storageLocation.update({
+            where: { id: input.id },
+            data: {
+              name: input.name.trim(),
+              ...optionalFields,
+              isActive: input.isActive,
+              version: existing.version + 1,
+              updatedById: actor.id,
+            },
+          });
+          updatedDTO = {
+            id: item.id,
+            type: 'STORAGE_LOCATION',
+            name: item.name,
+            code: item.code,
+            notes: item.notes,
+            isActive: item.isActive,
+            version: item.version,
+            createdAt: item.createdAt.toISOString(),
+            updatedAt: item.updatedAt.toISOString(),
+          };
+        } else {
+          throw new ReferenceValidationError('نوع العنصر المرجعي غير صالح.');
+        }
+
+        await recordAuditEvent(tx, {
+          userId: actor.id,
+          action: `UPDATE_${input.type}`,
+          entityType: input.type,
+          entityId: updatedDTO.id,
+          changedFields: { name: updatedDTO.name, isActive: updatedDTO.isActive },
+        });
+
+        await completeIdempotencyKey(tx, {
+          actorId: actor.id,
+          commandType: `updateReferenceItem:${input.type}`,
+          key: input.idempotencyKey,
+          resultType: 'ReferenceItemDTO',
+          resultId: updatedDTO.id,
+          resultPayload: {
+            operation: `UPDATE_${input.type}`,
+            resourceId: updatedDTO.id,
+            version: updatedDTO.version,
+            acknowledgedAt: new Date().toISOString(),
           },
         });
-        updatedDTO = {
-          id: item.id,
-          type: 'COURT',
-          name: item.name,
-          code: item.code,
-          circuitTypes: item.circuitTypes,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else if (input.type === 'PRACTICE_AREA') {
-        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-          SELECT "id", "version" FROM "practice_area" WHERE "id" = ${input.id} FOR UPDATE;
-        `;
-        if (!existing) throw new NotFoundError('تصنيف العمل غير موجود.');
-        if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
 
-        const item = await tx.practiceArea.update({
-          where: { id: input.id },
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            notes: input.notes?.trim() ?? null,
-            isActive: input.isActive,
-            version: existing.version + 1,
-            updatedById: actor.id,
-          },
-        });
-        updatedDTO = {
-          id: item.id,
-          type: 'PRACTICE_AREA',
-          name: item.name,
-          code: item.code,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else if (input.type === 'STORAGE_LOCATION') {
-        const [existing] = await tx.$queryRaw<Array<{ id: string; version: number }>>`
-          SELECT "id", "version" FROM "storage_location" WHERE "id" = ${input.id} FOR UPDATE;
-        `;
-        if (!existing) throw new NotFoundError('مكان الحفظ غير موجود.');
-        if (existing.version !== input.expectedVersion) throw new ConcurrencyConflictError();
-
-        const item = await tx.storageLocation.update({
-          where: { id: input.id },
-          data: {
-            name: input.name.trim(),
-            code: input.code?.trim() ?? null,
-            notes: input.notes?.trim() ?? null,
-            isActive: input.isActive,
-            version: existing.version + 1,
-            updatedById: actor.id,
-          },
-        });
-        updatedDTO = {
-          id: item.id,
-          type: 'STORAGE_LOCATION',
-          name: item.name,
-          code: item.code,
-          notes: item.notes,
-          isActive: item.isActive,
-          version: item.version,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-        };
-      } else {
-        throw new ReferenceValidationError('نوع العنصر المرجعي غير صالح.');
-      }
-
-      await recordAuditEvent(tx, {
-        userId: actor.id,
-        action: `UPDATE_${input.type}`,
-        entityType: input.type,
-        entityId: updatedDTO.id,
-        changedFields: { name: updatedDTO.name, isActive: updatedDTO.isActive },
-      });
-
-      await completeIdempotencyKey(tx, {
-        actorId: actor.id,
-        commandType: `updateReferenceItem:${input.type}`,
-        key: input.idempotencyKey,
-        resultType: 'ReferenceItemDTO',
-        resultId: updatedDTO.id,
-        resultPayload: {
-          operation: `UPDATE_${input.type}`,
-          resourceId: updatedDTO.id,
-          version: updatedDTO.version,
-          acknowledgedAt: new Date().toISOString(),
-        },
-      });
-
-      updatedDTO.operationVersion = updatedDTO.version;
-      return updatedDTO;
-    });
-  } catch (err) {
-    if (isIdempotencyUniqueConflict(err)) {
+        updatedDTO.operationVersion = updatedDTO.version;
+        return updatedDTO;
+      }),
+    async () => {
       const resolved = await resolveConcurrentIdempotency(prisma, {
         actorId: actor.id,
         commandType: `updateReferenceItem:${input.type}`,
         key: input.idempotencyKey,
         payload: input,
       });
-      if (resolved) {
-        const resourceId = extractResourceId(resolved);
-        const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
-        const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
-        return { ...dto, operationVersion: opVersion };
-      }
-      return updateReferenceItem(actor, rawInput);
+      if (!resolved) return { resolved: false };
+      const resourceId = extractResourceId(resolved);
+      const dto = await getReferenceItemDTO(prisma, input.type, resourceId);
+      const opVersion = extractOperationVersion(resolved.resultPayload, dto.version);
+      return { resolved: true, value: { ...dto, operationVersion: opVersion } };
     }
-    throw err;
-  }
+  );
 }

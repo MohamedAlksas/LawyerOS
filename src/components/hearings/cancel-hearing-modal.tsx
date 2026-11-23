@@ -1,12 +1,17 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { cancelHearingAction } from '@/modules/scheduling/hearing-actions';
 import type { CancelHearingInput } from '@/modules/scheduling/hearing-types';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
-import { hearingDraftOwner, isUncertainHearingOutcome } from './hearing-recovery';
+import {
+  hearingDraftOwner,
+  isUncertainHearingOutcome,
+  renderHearingModalPortal,
+  useHearingModalEffects,
+} from './hearing-recovery';
 import { HearingDTO, formatHearingDateDisplay } from './hearing-ui-types';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface CancelHearingModalProps {
   actorId: string;
@@ -36,54 +41,17 @@ export function CancelHearingModal({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
-  useLeaveGuard(false, isSubmitting);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  useLeaveGuard(isOpen && Boolean(reason.trim()), isSubmitting || isFrozenRetry);
 
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => {
-        if (pending.current) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
-        else firstInputRef.current?.focus();
-      });
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (!isSubmitting) {
-          e.preventDefault();
-          onClose();
-        }
-        return;
-      }
-
-      if (e.key === 'Tab') {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-
-        const focusables = dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusables.length === 0) return;
-
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting, onClose]);
+  useHearingModalEffects({
+    isOpen,
+    isSubmitting,
+    hasPending: isFrozenRetry,
+    onClose,
+    dialogRef,
+    initialFocusRef: firstInputRef,
+  });
 
   if (!isOpen) return null;
 
@@ -97,6 +65,7 @@ export function CancelHearingModal({
     }
 
     setError(null);
+    setSessionExpired(false);
     setFieldErrors({});
     setIsSubmitting(true);
 
@@ -113,6 +82,12 @@ export function CancelHearingModal({
 
       if (!res.success) {
         setIsSubmitting(false);
+        if (isAuthRecoveryCode(res.code)) {
+          setSessionExpired(true);
+          setIsFrozenRetry(true);
+          setError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+          return;
+        }
         const uncertain = isUncertainHearingOutcome(res.code);
         setIsFrozenRetry(uncertain);
         if (!uncertain) { pending.current = undefined; draft.clear(); }
@@ -135,7 +110,7 @@ export function CancelHearingModal({
     }
   };
 
-  return (
+  return renderHearingModalPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
       role="presentation"
@@ -180,8 +155,27 @@ export function CancelHearingModal({
           </p>
         </div>
 
+        {sessionExpired && (
+          <div
+            role="alert"
+            data-testid="hearing-modal-session-recovery-alert"
+            className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
+          >
+            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p>أُبقيت بيانات إلغاء الجلسة ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] hover:bg-[#114252] min-h-[44px]"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+          </div>
+        )}
+
         {/* Frozen Retry Banner */}
-        {isFrozenRetry && (
+        {isFrozenRetry && !sessionExpired && (
           <div
             role="alert"
             data-testid="cancel-hearing-retry-banner"

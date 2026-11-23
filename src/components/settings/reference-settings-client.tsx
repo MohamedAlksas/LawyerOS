@@ -16,8 +16,6 @@ import {
   createReferenceItemAction,
   updateReferenceItemAction,
   getOfficeSettingsAction,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  listReferenceItemsAction,
 } from '@/modules/settings/reference-actions';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
@@ -350,7 +348,7 @@ export function ReferenceSettingsClient({
           setOfficePending(false);
           setOfficeConflictPending(true);
           setOfficeError(
-            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك محفوظة؛ يمكنك استعراض وتحديث بأحدث بيانات من الخادم واعتمادها ثم اعتمادها قبل إعادة التعديل.'
+            'تعارض في التعديل المتزامن: تم تحديث بيانات المكتب من مستخدم أو نافذة أخرى. مسودتك محفوظة؛ يمكنك استعراض وتحديث بأحدث بيانات من الخادم واعتمادها قبل إعادة التعديل.'
           );
         } else if (
           !res.code ||
@@ -823,7 +821,7 @@ export function ReferenceSettingsClient({
 
       {/* Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex space-x-2 sm:space-x-4 space-x-reverse" aria-label="أقسام الإعدادات">
+        <nav className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-1" aria-label="أقسام الإعدادات">
           <button
             type="button"
             data-testid="tab-office-profile"

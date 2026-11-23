@@ -8,14 +8,15 @@ interface AppHeaderProps {
   onToggleDrawer: () => void;
   isDrawerOpen: boolean;
   drawerTriggerRef?: React.RefObject<HTMLButtonElement | null>;
+  user?: { name?: string; email?: string } | null;
 }
 
-export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef }: AppHeaderProps) {
+export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef, user }: AppHeaderProps) {
   return (
     <header
       role="banner"
       data-testid="app-header"
-      className="sticky top-0 z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-4 py-2 flex items-center justify-between gap-[8px] sm:gap-3 shadow-xs min-h-[56px] max-w-full overflow-hidden"
+      className="relative z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-4 py-2 flex items-center justify-between gap-[8px] sm:gap-3 shadow-xs min-h-[56px] max-w-full overflow-hidden"
     >
       <div className="flex flex-1 items-center gap-[8px] sm:gap-3 min-w-0">
         {/* Mobile / Tablet Drawer Toggle Button */}
@@ -55,7 +56,7 @@ export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef }: Ap
       </div>
 
       <div className="flex min-w-0 max-w-[40%] items-center">
-        <UserIdentityBadge />
+        <UserIdentityBadge user={user} />
       </div>
     </header>
   );

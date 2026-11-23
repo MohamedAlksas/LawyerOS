@@ -38,6 +38,7 @@ export function HearingList({
   const hearings = initialHearings;
   const hasDraft = useHasFormDraft();
   const path = `/matters/${matterId}/proceedings/${proceedingId}`;
+  const pendingSchedule = hasDraft(`${actorId}:schedule-hearing`, path);
 
   // Modal active states
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -94,7 +95,7 @@ export function HearingList({
             className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] flex items-center justify-center gap-1.5 shrink-0"
           >
             <span>➕</span>
-            <span>إضافة وتحديد موعد جلسة</span>
+            <span>{pendingSchedule ? 'إعادة محاولة جدولة الجلسة' : 'إضافة وتحديد موعد جلسة'}</span>
           </button>
         )}
       </div>
@@ -177,7 +178,7 @@ export function HearingList({
                     </span>
                     {hearing.rollNumber && (
                       <span className="text-xs bg-slate-100 text-[#172A35] px-2 py-0.5 rounded border border-slate-200 font-semibold">
-                        رول {hearing.rollNumber}
+                        رول <bdi dir="ltr" className="font-mono">{hearing.rollNumber}</bdi>
                       </span>
                     )}
                   </div>
@@ -262,19 +263,27 @@ export function HearingList({
                 )}
 
                 {/* Action Buttons */}
-                {!isReadOnly && (
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#E8EEF1]">
-                    {isScheduled && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#E8EEF1]">
+                  <Link
+                    href={`/hearings/${hearing.id}`}
+                    data-testid={`view-hearing-detail-${hearing.id}`}
+                    className="px-3.5 py-1.5 bg-white hover:bg-[#F4F6F7] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center gap-1"
+                  >
+                    <span>عرض التفاصيل</span>
+                  </Link>
+                  {!isReadOnly && (
+                    <>
+                      {isScheduled && (
                         <Link
                           href={`/hearings/${hearing.id}/result`}
                           data-testid={`record-result-button-${hearing.id}`}
-                          className="px-3.5 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5"
+                          className="px-3.5 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5"
                         >
                           <span>⚖️</span>
                           <span>تسجيل النتيجة</span>
                         </Link>
-                    )}
-                    {(isScheduled || pendingReschedule) && (
+                      )}
+                      {(isScheduled || pendingReschedule) && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -282,13 +291,13 @@ export function HearingList({
                             setSelectedHearingForReschedule(hearing);
                           }}
                           data-testid={`reschedule-hearing-button-${hearing.id}`}
-                          className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[38px] flex items-center gap-1"
+                          className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center gap-1"
                         >
                           <span>🔄</span>
                           <span>{pendingReschedule ? 'إعادة محاولة تعديل الموعد' : 'تعديل الموعد'}</span>
                         </button>
-                    )}
-                    {(isScheduled || pendingCancel) && (
+                      )}
+                      {(isScheduled || pendingCancel) && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -296,25 +305,26 @@ export function HearingList({
                             setSelectedHearingForCancel(hearing);
                           }}
                           data-testid={`cancel-hearing-button-${hearing.id}`}
-                          className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold rounded-[6px] border border-red-200 transition-colors min-h-[38px] flex items-center gap-1"
+                          className="px-3 py-1.5 bg-white hover:bg-red-50 text-red-700 text-xs font-semibold rounded-[6px] border border-red-200 transition-colors min-h-[44px] flex items-center gap-1"
                         >
                           <span>🚫</span>
                           <span>{pendingCancel ? 'إعادة محاولة إلغاء الجلسة' : 'إلغاء'}</span>
                         </button>
-                    )}
+                      )}
 
-                    {isCompleted && (
-                      <Link
-                        href={`/hearings/${hearing.id}/result`}
-                        data-testid={`correct-result-button-${hearing.id}`}
-                        className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[38px] flex items-center gap-1"
-                      >
-                        <span>✏️</span>
-                        <span>تصحيح منطوق القرار</span>
-                      </Link>
-                    )}
-                  </div>
-                )}
+                      {isCompleted && (
+                        <Link
+                          href={`/hearings/${hearing.id}/result`}
+                          data-testid={`correct-result-button-${hearing.id}`}
+                          className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center gap-1"
+                        >
+                          <span>✏️</span>
+                          <span>تصحيح منطوق القرار</span>
+                        </Link>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}

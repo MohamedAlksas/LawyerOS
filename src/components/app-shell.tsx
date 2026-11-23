@@ -17,15 +17,17 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-type ViewSession = { actorId: string; sessionId: string; role: UserRole };
+type ViewSession = { actorId: string; sessionId: string; role: UserRole; name?: string; email?: string };
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'expired' | 'unavailable'>('checking');
+  const [viewUser, setViewUser] = useState<{ name?: string; email?: string } | null>(null);
   const [refreshingSession, startSessionRefresh] = useTransition();
   const privateViewRef = useRef<HTMLDivElement>(null);
+  const topBarRef = useRef<HTMLDivElement>(null);
   const mobileNavRef = useRef<HTMLElement>(null);
   const sessionRef = useRef<ViewSession | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -83,6 +85,21 @@ export function AppShell({ children }: AppShellProps) {
   }, [isPublicAuthPage]);
 
   useLayoutEffect(() => {
+    const topBar = topBarRef.current;
+    if (!topBar) return;
+
+    const rootStyle = document.documentElement.style;
+    const reserveTop = () => rootStyle.setProperty('--shell-top-height', `${topBar.offsetHeight}px`);
+    reserveTop();
+    const observer = new ResizeObserver(reserveTop);
+    observer.observe(topBar);
+    return () => {
+      observer.disconnect();
+      rootStyle.removeProperty('--shell-top-height');
+    };
+  }, [isPublicAuthPage, sessionStatus]);
+
+  useLayoutEffect(() => {
     // A return from the public auth screens needs a new check before the private shell paints.
     if (!isPublicAuthPage && privateViewRef.current) privateViewRef.current.hidden = true;
   }, [isPublicAuthPage]);
@@ -113,6 +130,7 @@ export function AppShell({ children }: AppShellProps) {
         if (request.signal.aborted) return;
         if (response.status === 401) {
           clearSearchSessionStore();
+          setViewUser(null);
           conceal();
           setSessionStatus('expired');
           return;
@@ -120,6 +138,7 @@ export function AppShell({ children }: AppShellProps) {
         if (!response.ok) throw new Error('Session check unavailable');
         const session: ViewSession = await response.json();
         if (request.signal.aborted) return;
+        setViewUser({ name: session.name, email: session.email });
         const previous = sessionRef.current;
         sessionRef.current = session;
         if (previous && (previous.actorId !== session.actorId || previous.role !== session.role || previous.sessionId !== session.sessionId)) {
@@ -223,23 +242,25 @@ export function AppShell({ children }: AppShellProps) {
         {/* 1. Skip to Content Link */}
         <SkipLink />
 
-        {/* 2. Disconnected Banner */}
-        <ConnectivityBanner />
+        {/* 2-4. Sticky Top Bar (Connectivity Banner + Accessible Header) */}
+        <div ref={topBarRef} className="sticky top-0 z-30">
+          <ConnectivityBanner sticky={false} />
 
-        {/* 3. Session Expiry Feedback if triggered */}
-        <Suspense fallback={null}>
-          <SessionExpiredAlert />
-        </Suspense>
+          {/* 3. Session Expiry Feedback if triggered */}
+          <Suspense fallback={null}>
+            <SessionExpiredAlert />
+          </Suspense>
 
-        {/* 4. Accessible Header */}
-        <AppHeader
-          onToggleDrawer={() => {
-            drawerOpenerRef.current = triggerRef.current;
-            setIsDrawerOpen((prev) => !prev);
-          }}
-          isDrawerOpen={isDrawerOpen}
-          drawerTriggerRef={triggerRef}
-        />
+          <AppHeader
+            onToggleDrawer={() => {
+              drawerOpenerRef.current = triggerRef.current;
+              setIsDrawerOpen((prev) => !prev);
+            }}
+            isDrawerOpen={isDrawerOpen}
+            drawerTriggerRef={triggerRef}
+            user={viewUser}
+          />
+        </div>
 
         {/* 5. Desktop Body: Main Content + Sidebar */}
         <div className="flex-1 flex flex-row">
@@ -269,12 +290,13 @@ export function AppShell({ children }: AppShellProps) {
         />
       </div>
 
-      {/* 7. Accessible Tablet/Mobile Drawer Modal (rendered outside #app-shell-content) */}
+      {/* 7. Accessible Tablet/Mobile Drawer Modal & Portal Target (outside #app-shell-content, inside auth-locked wrapper) */}
       <TabletDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
         triggerRef={drawerOpenerRef}
       />
+      <div id="app-shell-modal-root" />
     </NavigationGuardProvider>
       </div>
     </>

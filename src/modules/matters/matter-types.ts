@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
+
+const MAX_SEARCH_OFFSET = MAX_SEARCH_PAGE * 100;
 import {
   MatterKind,
   MatterStatus,
@@ -711,7 +713,7 @@ export const searchMattersParamsSchema = z
     includeArchived: z.boolean().optional(),
     page: z.number().int().min(1).max(MAX_SEARCH_PAGE).optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    offset: z.number().int().min(0).optional(),
+    offset: z.number().int().min(0).max(MAX_SEARCH_OFFSET).optional(),
     incompleteData: z.boolean().optional(),
   })
   .strict();
@@ -762,9 +764,9 @@ export const searchProceedingsParamsSchema = z
     status: z.nativeEnum(ProceedingStatus).optional(),
     matterId: z.string().uuid().optional(),
     includeArchived: z.boolean().optional(),
-    page: z.number().int().min(1).optional(),
+    page: z.number().int().min(1).max(MAX_SEARCH_PAGE).optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    offset: z.number().int().min(0).optional(),
+    offset: z.number().int().min(0).max(MAX_SEARCH_OFFSET).optional(),
   })
   .strict();
 
@@ -783,7 +785,7 @@ export const getPartyMatterAssociationsSchema = z
     partyId: z.string().uuid('معرف الطرف غير صالح'),
     role: z.nativeEnum(MatterPartyRole).optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    offset: z.number().int().min(0).optional(),
+    offset: z.number().int().min(0).max(MAX_SEARCH_OFFSET).optional(),
   })
   .strict();
 

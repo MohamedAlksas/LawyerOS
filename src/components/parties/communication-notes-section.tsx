@@ -50,12 +50,14 @@ export function CommunicationNotesSection({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const savingRef = useRef(false);
   const [communicationAtEdited, setCommunicationAtEdited] = useState(Boolean(editable.restored));
   const dirty = !readOnly && isFormOpen && Boolean(communicationAtEdited || summary || followUpRequired || followUpDate || channel !== 'PHONE');
   useLeaveGuard(dirty, isSubmitting || Boolean(pending));
   useLayoutEffect(() => {
+    if (readOnly || !draft.isCurrent()) return;
     if (!dirty) editable.clear();
     else if (!pending) editable.keep({ wallTime: communicationAt, payload: {
       partyId, communicationAt: '', channel, summary, followUpRequired, followUpDate, idempotencyKey: '',
@@ -70,6 +72,7 @@ export function CommunicationNotesSection({
     setFollowUpDate('');
     setCommunicationAtEdited(false);
     setError(null);
+    setSessionExpired(false);
     setIsFormOpen(false);
     editable.clear();
   };
@@ -78,6 +81,7 @@ export function CommunicationNotesSection({
     e.preventDefault();
     if (savingRef.current || !draft.isCurrent()) return;
     setError(null);
+    setSessionExpired(false);
 
     let operation = pending;
     if (!operation) {
@@ -113,17 +117,20 @@ export function CommunicationNotesSection({
       if (!draft.isCurrent()) return;
 
       if (!result.success) {
-        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN'].includes(result.code ?? '')) {
+        if (['VALIDATION_ERROR', 'CONCURRENCY_CONFLICT', 'NOT_FOUND', 'FORBIDDEN', 'IDEMPOTENCY_PAYLOAD_MISMATCH'].includes(result.code ?? '')) {
           setPending(null);
           draft.clear();
         }
-        setError(isAuthRecoveryCode(result.code)
+        const expired = isAuthRecoveryCode(result.code);
+        setSessionExpired(expired);
+        setError(expired
           ? 'انتهت الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد محاولة الحفظ الأصلي.'
           : result.error || 'تعذر حفظ ملاحظة التواصل.');
         return;
       }
 
       setNotes((prev) => [result.data, ...prev.filter((note) => note.id !== result.data.id)]);
+      setSessionExpired(false);
 
       setCommunicationAt(getCairoCurrentWallTime());
       setCommunicationAtEdited(false);
@@ -286,7 +293,18 @@ export function CommunicationNotesSection({
           </div>
           </fieldset>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+            {sessionExpired && pending && !isSubmitting && (
+              <a
+                href="/login"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="note-session-login-link"
+                className="min-h-[44px] inline-flex items-center px-3 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252]"
+              >
+                فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+              </a>
+            )}
             <button
               type="button"
               onClick={closeForm}

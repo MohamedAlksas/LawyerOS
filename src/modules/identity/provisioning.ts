@@ -421,6 +421,7 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
   const code = validation.normalizedCode;
 
   type ConfirmTxResult =
+    | { status: 'ALREADY_CLOSED' }
     | { status: 'LOCKED' }
     | { status: 'NO_RECORD' }
     | { status: 'DECRYPT_FAIL' }
@@ -440,6 +441,14 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
     const tfRecord = rows[0];
     if (!tfRecord) {
       return { status: 'NO_RECORD' };
+    }
+
+    const bootstrap = await tx.officeBootstrap.findUnique({
+      where: { id: 'singleton' },
+      select: { isClosed: true },
+    });
+    if (tfRecord.verified || bootstrap?.isClosed) {
+      return { status: 'ALREADY_CLOSED' };
     }
 
     const now = new Date();
@@ -511,6 +520,13 @@ export async function confirmOwnerProvisioning(userId: string, totpCode: string)
 
     return { status: 'SUCCESS' };
   });
+
+  if (outcome.status === 'ALREADY_CLOSED') {
+    throw new ProvisioningError(
+      'BOOTSTRAP_ALREADY_CLOSED',
+      'تم إغلاق مسار التهيئة الأولية مسبقاً وتأكيد حساب المالك.'
+    );
+  }
 
   if (outcome.status === 'LOCKED') {
     throw new AuthenticationError(

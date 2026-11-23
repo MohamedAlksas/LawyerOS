@@ -192,4 +192,40 @@ describe('Database Connection Pool Lifecycle & Timeout Bounds (R03, R04)', () =>
     expect(acquiredClients).toBe(totalWorkers);
     expect(releasedClients).toBe(totalWorkers);
   });
+
+  it('does not leak an unhandled rejection when client.release(true) rejects the stalled query', async () => {
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown) => rejections.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      let rejectQuery!: (err: Error) => void;
+      const mockClient = {
+        query: vi.fn().mockImplementation(
+          () =>
+            new Promise((_, reject) => {
+              rejectQuery = reject;
+            })
+        ),
+        release: vi.fn().mockImplementation((destroy?: boolean) => {
+          if (destroy && rejectQuery) {
+            rejectQuery(new Error('Connection terminated on eviction'));
+          }
+        }),
+      } as unknown as PoolClient;
+
+      const mockPool = {
+        connect: vi.fn().mockResolvedValue(mockClient),
+      } as unknown as Pool;
+
+      const result = await checkDatabaseReadiness(25, mockPool);
+      await new Promise((r) => setTimeout(r, 15));
+
+      expect(result.ok).toBe(false);
+      expect(mockClient.release).toHaveBeenCalledWith(true);
+      expect(rejections).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });

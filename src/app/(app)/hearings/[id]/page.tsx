@@ -1,13 +1,15 @@
 import React from 'react';
 import Link from 'next/link';
-import { notFound, redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
+import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getPrismaClient } from '@/lib/auth';
 import {
   HEARING_STATUS_LABELS,
   HEARING_STATUS_CLASSES,
 } from '@/components/hearings/hearing-ui-types';
+import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
 
 interface HearingDetailPageProps {
@@ -25,10 +27,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
     await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      if (error.code === 'MFA_REQUIRED') {
-        redirect('/verify?returnTo=' + encodeURIComponent(`/hearings/${id}`));
-      }
-      redirect('/login?error=session_expired&returnTo=' + encodeURIComponent(`/hearings/${id}`));
+      await redirectOnAuthError(error, `/hearings/${id}`);
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -63,10 +62,12 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
 
   const proceeding = hearing.proceeding;
   const matter = proceeding.matter;
-  const isProceedingComplete = Boolean(proceeding.numberText && proceeding.yearLabel);
-  const docketText = isProceedingComplete
+  const isProceedingComplete = hasCompleteProceedingRegistration(proceeding);
+  const docketText = proceeding.numberText && proceeding.yearLabel
     ? `${proceeding.numberText}/${proceeding.yearLabel}`
     : null;
+  const isArchived = Boolean(proceeding.archivedAt || matter.archivedAt || matter.status === 'ARCHIVED');
+  const canOpenResult = !isArchived && (hearing.status === 'SCHEDULED' || hearing.status === 'COMPLETED');
 
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
   const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());
@@ -113,12 +114,22 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
           </div>
 
           <div className="flex items-center gap-2">
-            <Link
-              href={`/hearings/${hearing.id}/result`}
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 shadow-xs"
-            >
-              <span>{hearing.status === 'COMPLETED' ? '📝 عرض النتيجة / تصحيح' : '✍️ تسجيل قرار ونتيجة الجلسة'}</span>
-            </Link>
+            {canOpenResult ? (
+              <Link
+                href={`/hearings/${hearing.id}/result`}
+                data-testid="hearing-result-link"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 shadow-xs"
+              >
+                <span>{hearing.status === 'COMPLETED' ? '📝 عرض النتيجة / تصحيح' : '✍️ تسجيل قرار ونتيجة الجلسة'}</span>
+              </Link>
+            ) : isArchived ? (
+              <span
+                data-testid="hearing-readonly-badge"
+                className="px-3 py-1.5 bg-stone-100 text-stone-700 border border-stone-300 rounded-[6px] text-xs font-semibold"
+              >
+                أرشيف (للقراءة فقط)
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -193,6 +204,20 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             </div>
           )}
         </div>
+
+        {hearing.status === 'RESCHEDULED' && hearing.rescheduleReason && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
+            <span className="font-bold">سبب تعديل الموعد: </span>
+            <span>{hearing.rescheduleReason}</span>
+          </div>
+        )}
+
+        {hearing.status === 'CANCELLED' && hearing.cancellationReason && (
+          <div className="p-3 bg-stone-100 border border-stone-300 rounded-[6px] text-xs text-stone-800">
+            <span className="font-bold">سبب الإلغاء: </span>
+            <span>{hearing.cancellationReason}</span>
+          </div>
+        )}
       </div>
 
       {/* Recorded Result & Revision History (if completed) */}

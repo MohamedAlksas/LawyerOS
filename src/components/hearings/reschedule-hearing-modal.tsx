@@ -1,12 +1,17 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { rescheduleHearingAction } from '@/modules/scheduling/hearing-actions';
 import type { RescheduleHearingInput } from '@/modules/scheduling/hearing-types';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
-import { hearingDraftOwner, isUncertainHearingOutcome } from './hearing-recovery';
+import {
+  hearingDraftOwner,
+  isUncertainHearingOutcome,
+  renderHearingModalPortal,
+  useHearingModalEffects,
+} from './hearing-recovery';
 import { HearingDTO, formatHearingDateDisplay } from './hearing-ui-types';
-import { generateClientRequestId, getCairoTodayDate } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, getCairoTodayDate, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 
 interface RescheduleHearingModalProps {
   actorId: string;
@@ -30,7 +35,8 @@ export function RescheduleHearingModal({
 
   const draft = useFormDraft<RescheduleHearingInput>(hearingDraftOwner(actorId, 'reschedule', hearing.id), `/matters/${hearing.matterId}/proceedings/${proceedingId}`);
   const pending = useRef(draft.restored);
-  const [newHearingDate, setNewHearingDate] = useState(() => draft.restored?.newHearingDate ?? getCairoTodayDate());
+  const [initialDate] = useState(() => getCairoTodayDate());
+  const [newHearingDate, setNewHearingDate] = useState(() => draft.restored?.newHearingDate ?? initialDate);
   const [hasSpecificTime, setHasSpecificTime] = useState(() => Boolean(draft.restored?.newHearingTime));
   const [newHearingTime, setNewHearingTime] = useState(() => draft.restored?.newHearingTime ?? '');
   const [reason, setReason] = useState(() => draft.restored?.reason ?? '');
@@ -41,54 +47,25 @@ export function RescheduleHearingModal({
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
-  useLeaveGuard(false, isSubmitting);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const dirty = isOpen && Boolean(
+    hasSpecificTime ||
+    newHearingTime ||
+    reason ||
+    locationRoom !== (hearing.locationRoom ?? '') ||
+    taskChanges.length > 0 ||
+    newHearingDate !== initialDate
+  );
+  useLeaveGuard(dirty, isSubmitting || isFrozenRetry);
 
-  useEffect(() => {
-    if (isOpen) {
-      requestAnimationFrame(() => {
-        if (pending.current) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
-        else firstInputRef.current?.focus();
-      });
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (!isSubmitting) {
-          e.preventDefault();
-          onClose();
-        }
-        return;
-      }
-
-      if (e.key === 'Tab') {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-
-        const focusables = dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusables.length === 0) return;
-
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting, onClose]);
+  useHearingModalEffects({
+    isOpen,
+    isSubmitting,
+    hasPending: isFrozenRetry,
+    onClose,
+    dialogRef,
+    initialFocusRef: firstInputRef,
+  });
 
   if (!isOpen) return null;
 
@@ -102,6 +79,7 @@ export function RescheduleHearingModal({
     }
 
     setError(null);
+    setSessionExpired(false);
     setFieldErrors({});
     setIsSubmitting(true);
 
@@ -122,6 +100,12 @@ export function RescheduleHearingModal({
 
       if (!res.success) {
         setIsSubmitting(false);
+        if (isAuthRecoveryCode(res.code)) {
+          setSessionExpired(true);
+          setIsFrozenRetry(true);
+          setError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+          return;
+        }
         const uncertain = isUncertainHearingOutcome(res.code);
         setIsFrozenRetry(uncertain);
         if (!uncertain) { pending.current = undefined; draft.clear(); }
@@ -144,7 +128,7 @@ export function RescheduleHearingModal({
     }
   };
 
-  return (
+  return renderHearingModalPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
       role="presentation"
@@ -193,8 +177,27 @@ export function RescheduleHearingModal({
           )}
         </div>
 
+        {sessionExpired && (
+          <div
+            role="alert"
+            data-testid="hearing-modal-session-recovery-alert"
+            className="p-3 bg-amber-50 border border-amber-300 rounded-[6px] text-xs text-amber-900 space-y-2"
+          >
+            <p className="font-bold">🔒 انتهت صلاحية الجلسة أو يلزم استكمال التحقق</p>
+            <p>أُبقيت بيانات تعديل الموعد ومفتاح الطلب مجمّدة لمنع التكرار. سجّل الدخول ثم أعد المحاولة.</p>
+            <a
+              href="/login"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] hover:bg-[#114252] min-h-[44px]"
+            >
+              فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+            </a>
+          </div>
+        )}
+
         {/* Frozen Retry Banner */}
-        {isFrozenRetry && (
+        {isFrozenRetry && !sessionExpired && (
           <div
             role="alert"
             data-testid="reschedule-hearing-retry-banner"
@@ -250,9 +253,15 @@ export function RescheduleHearingModal({
           {/* Time (Optional with Unknown Time indication) */}
           <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-[6px]">
             <div className="flex items-center justify-between">
-              <label className="font-bold text-[#172A35]">
-                تحديد وقت الجلسة الجديدة (اختياري)
-              </label>
+              {hasSpecificTime ? (
+                <label htmlFor="reschedule-new-time" className="font-bold text-[#172A35]">
+                  تحديد وقت الجلسة الجديدة (اختياري)
+                </label>
+              ) : (
+                <span className="font-bold text-[#172A35]">
+                  تحديد وقت الجلسة الجديدة (اختياري)
+                </span>
+              )}
               <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-[#14566B] font-semibold">
                 <input
                   type="checkbox"
@@ -344,11 +353,18 @@ export function RescheduleHearingModal({
                       }} />
                       نقل {task.title} (الموعد الحالي: {task.dueDate || 'غير محدد'})
                     </label>
-                    {selected && <input type="date" aria-label={`الموعد الجديد لمهمة ${task.title}`}
-                      value={selected.dueDate ?? ''} onChange={(event) => {
-                        setTaskChanges(taskChanges.map((change) => change.taskId === task.id
-                          ? { ...change, dueDate: event.target.value || null } : change));
-                      }} />}
+                    {selected && (
+                      <input
+                        type="date"
+                        aria-label={`الموعد الجديد لمهمة ${task.title}`}
+                        value={selected.dueDate ?? ''}
+                        onChange={(event) => {
+                          setTaskChanges(taskChanges.map((change) => change.taskId === task.id
+                            ? { ...change, dueDate: event.target.value || null } : change));
+                        }}
+                        className="mt-1.5 w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                      />
+                    )}
                   </div>
                 );
               })}

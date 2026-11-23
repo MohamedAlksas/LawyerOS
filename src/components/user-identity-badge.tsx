@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { GuardedLink as Link } from './navigation-guard';
 
 interface UserInfo {
@@ -8,18 +8,7 @@ interface UserInfo {
   email?: string;
 }
 
-export function UserIdentityBadge() {
-  const [user, setUser] = useState<UserInfo | null>(null);
-
-  useEffect(() => {
-    const request = new AbortController();
-    fetch('/api/auth/view-session', { cache: 'no-store', signal: request.signal })
-      .then((response) => response.ok ? response.json() : null)
-      .then((identity: UserInfo | null) => setUser(identity))
-      .catch(() => {});
-    return () => request.abort();
-  }, []);
-
+export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
   const name = user?.name || 'الأستاذ المحامي';
   const email = user?.email || '';
   const initial = name.trim().charAt(0) || 'م';
