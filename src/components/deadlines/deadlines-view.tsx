@@ -49,7 +49,17 @@ interface DeadlinesViewProps {
 type PendingDeadlineDraftOp =
   | { kind: 'createDraft'; payload: CreateDeadlineInput }
   | { kind: 'updateDraft'; payload: UpdateDeadlineDraftInput }
-  | { kind: 'confirm'; payload: ConfirmDeadlineInput };
+  | { kind: 'confirm'; payload: ConfirmDeadlineInput }
+  | {
+      kind: 'createAndConfirm';
+      createPayload: CreateDeadlineInput;
+      confirmIdempotencyKey: string;
+    }
+  | {
+      kind: 'updateAndConfirm';
+      updatePayload: UpdateDeadlineDraftInput;
+      confirmPayload: Omit<ConfirmDeadlineInput, 'expectedVersion'>;
+    };
 
 type PendingChangeDateOp = ChangeDeadlineDateInput;
 type PendingCompleteOp = CompleteDeadlineInput;
@@ -90,21 +100,98 @@ export function DeadlinesView({
     ? initialDeadlines.find((d) => d.id === initialReviewDeadlineId && d.status === 'DRAFT') ?? null
     : null;
 
+  const restoredDraftOp = draftModalDraft.restored;
+  const restoredTargetId =
+    restoredDraftOp?.kind === 'updateDraft'
+      ? restoredDraftOp.payload.deadlineId
+      : restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.deadlineId
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.updatePayload.deadlineId
+      : undefined;
+  const initialDraftTarget = restoredTargetId
+    ? initialDeadlines.find((d) => d.id === restoredTargetId) ?? initialReviewTarget
+    : restoredDraftOp
+    ? null
+    : initialReviewTarget;
+
   // Draft / Confirm Modal State
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(
-    Boolean(draftModalDraft.restored || initialReviewTarget)
+    Boolean(restoredDraftOp || initialReviewTarget)
   );
-  const [editingDeadline, setEditingDeadline] = useState<DeadlineDTO | null>(initialReviewTarget);
-  const [title, setTitle] = useState(initialReviewTarget?.title ?? '');
+  const [editingDeadline, setEditingDeadline] = useState<DeadlineDTO | null>(initialDraftTarget);
+  const [title, setTitle] = useState(
+    restoredDraftOp?.kind === 'createDraft'
+      ? restoredDraftOp.payload.title
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.title
+      : restoredDraftOp?.kind === 'updateDraft'
+      ? restoredDraftOp.payload.title ?? initialDraftTarget?.title ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.updatePayload.title ?? initialDraftTarget?.title ?? ''
+      : initialDraftTarget?.title ?? ''
+  );
   const [matterId, setMatterId] = useState(
-    lockedMatterId ?? initialReviewTarget?.matterId ?? ''
+    lockedMatterId ??
+      (restoredDraftOp?.kind === 'createDraft'
+        ? restoredDraftOp.payload.matterId
+        : restoredDraftOp?.kind === 'createAndConfirm'
+        ? restoredDraftOp.createPayload.matterId
+        : initialDraftTarget?.matterId) ??
+      ''
   );
-  const [proceedingId, setProceedingId] = useState(initialReviewTarget?.proceedingId ?? '');
-  const [dueDate, setDueDate] = useState(initialReviewTarget?.dueDate ?? '');
-  const [dueTime, setDueTime] = useState(initialReviewTarget?.dueTime ?? '');
-  const [source, setSource] = useState(initialReviewTarget?.source ?? '');
-  const [basisNotes, setBasisNotes] = useState(initialReviewTarget?.basisNotes ?? '');
-  const [lawyerReviewed, setLawyerReviewed] = useState(false);
+  const [proceedingId, setProceedingId] = useState(
+    restoredDraftOp?.kind === 'createDraft'
+      ? restoredDraftOp.payload.proceedingId ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.proceedingId ?? ''
+      : restoredDraftOp?.kind === 'updateDraft'
+      ? restoredDraftOp.payload.proceedingId ?? initialDraftTarget?.proceedingId ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.updatePayload.proceedingId ?? initialDraftTarget?.proceedingId ?? ''
+      : initialDraftTarget?.proceedingId ?? ''
+  );
+  const [dueDate, setDueDate] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.dueDate ?? initialDraftTarget?.dueDate ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.dueDate ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.dueDate ?? initialDraftTarget?.dueDate ?? ''
+      : initialDraftTarget?.dueDate ?? ''
+  );
+  const [dueTime, setDueTime] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.dueTime ?? initialDraftTarget?.dueTime ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.dueTime ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.dueTime ?? initialDraftTarget?.dueTime ?? ''
+      : initialDraftTarget?.dueTime ?? ''
+  );
+  const [source, setSource] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.source ?? initialDraftTarget?.source ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.source ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.source ?? initialDraftTarget?.source ?? ''
+      : initialDraftTarget?.source ?? ''
+  );
+  const [basisNotes, setBasisNotes] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.basisNotes ?? initialDraftTarget?.basisNotes ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.basisNotes ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.basisNotes ?? initialDraftTarget?.basisNotes ?? ''
+      : initialDraftTarget?.basisNotes ?? ''
+  );
+  const [lawyerReviewed, setLawyerReviewed] = useState(
+    restoredDraftOp?.kind === 'confirm' ||
+      restoredDraftOp?.kind === 'createAndConfirm' ||
+      restoredDraftOp?.kind === 'updateAndConfirm'
+  );
   const [isSubmittingDraftModal, setIsSubmittingDraftModal] = useState(false);
   const [isFrozenDraftRetry, setIsFrozenDraftRetry] = useState(Boolean(draftModalDraft.restored));
   const [draftSessionExpired, setDraftSessionExpired] = useState(false);
@@ -293,6 +380,11 @@ export function DeadlinesView({
 
   const openNewDeadlineModal = () => {
     setStatusNotice(null);
+    const pending = pendingDraftOpRef.current;
+    if (pending && (pending.kind === 'createDraft' || pending.kind === 'createAndConfirm')) {
+      setIsDraftModalOpen(true);
+      return;
+    }
     setEditingDeadline(null);
     pendingDraftOpRef.current = undefined;
     draftModalDraft.clear();
@@ -314,6 +406,17 @@ export function DeadlinesView({
 
   const openExistingDraftModal = (deadline: DeadlineDTO) => {
     setStatusNotice(null);
+    const pending = pendingDraftOpRef.current;
+    const pendingId =
+      pending?.kind === 'updateDraft' || pending?.kind === 'confirm'
+        ? pending.payload.deadlineId
+        : pending?.kind === 'updateAndConfirm'
+        ? pending.updatePayload.deadlineId
+        : undefined;
+    if (pending && pendingId === deadline.id) {
+      setIsDraftModalOpen(true);
+      return;
+    }
     setEditingDeadline(deadline);
     pendingDraftOpRef.current = undefined;
     draftModalDraft.clear();
@@ -340,13 +443,60 @@ export function DeadlinesView({
   const executePendingDraftOp = async (op: PendingDeadlineDraftOp) => {
     setIsSubmittingDraftModal(true);
     try {
+      let activeOp: PendingDeadlineDraftOp = op;
       let res: ActionResult<DeadlineDTO>;
-      if (op.kind === 'createDraft') {
-        res = await createDeadlineAction(op.payload);
-      } else if (op.kind === 'updateDraft') {
-        res = await updateDeadlineDraftAction(op.payload);
+
+      if (activeOp.kind === 'createAndConfirm') {
+        const createdRes = await createDeadlineAction(activeOp.createPayload);
+        if (!createdRes.success) {
+          res = createdRes;
+        } else {
+          setEditingDeadline(createdRes.data);
+          upsertDeadline(createdRes.data);
+          const nextConfirmOp: PendingDeadlineDraftOp = {
+            kind: 'confirm',
+            payload: {
+              deadlineId: createdRes.data.id,
+              expectedVersion: createdRes.data.version,
+              dueDate: activeOp.createPayload.dueDate!,
+              dueTime: activeOp.createPayload.dueTime ?? null,
+              source: activeOp.createPayload.source!,
+              basisNotes: activeOp.createPayload.basisNotes!,
+              lawyerReviewed: true,
+              confirmationAccepted: true,
+              idempotencyKey: activeOp.confirmIdempotencyKey,
+            },
+          };
+          activeOp = nextConfirmOp;
+          pendingDraftOpRef.current = nextConfirmOp;
+          draftModalDraft.keep(nextConfirmOp);
+          res = await confirmDeadlineAction(nextConfirmOp.payload);
+        }
+      } else if (activeOp.kind === 'updateAndConfirm') {
+        const updatedRes = await updateDeadlineDraftAction(activeOp.updatePayload);
+        if (!updatedRes.success) {
+          res = updatedRes;
+        } else {
+          setEditingDeadline(updatedRes.data);
+          upsertDeadline(updatedRes.data);
+          const nextConfirmOp: PendingDeadlineDraftOp = {
+            kind: 'confirm',
+            payload: {
+              ...activeOp.confirmPayload,
+              expectedVersion: updatedRes.data.version,
+            },
+          };
+          activeOp = nextConfirmOp;
+          pendingDraftOpRef.current = nextConfirmOp;
+          draftModalDraft.keep(nextConfirmOp);
+          res = await confirmDeadlineAction(nextConfirmOp.payload);
+        }
+      } else if (activeOp.kind === 'createDraft') {
+        res = await createDeadlineAction(activeOp.payload);
+      } else if (activeOp.kind === 'updateDraft') {
+        res = await updateDeadlineDraftAction(activeOp.payload);
       } else {
-        res = await confirmDeadlineAction(op.payload);
+        res = await confirmDeadlineAction(activeOp.payload);
       }
 
       if (!res.success) {
@@ -379,7 +529,7 @@ export function DeadlinesView({
       setIsDraftModalOpen(false);
       setEditingDeadline(null);
       setStatusNotice(
-        op.kind === 'confirm'
+        activeOp.kind === 'confirm'
           ? 'تمت مراجعة الموعد القانوني واعتماده وتسجيله في سجل التدقيق.'
           : 'تم حفظ مسودة الموعد القانوني (تحتاج مراجعة واعتماداً قبل التأكيد).'
       );
@@ -469,7 +619,7 @@ export function DeadlinesView({
     setDraftSessionExpired(false);
     setDraftFieldErrors({});
 
-    if (pendingDraftOpRef.current && pendingDraftOpRef.current.kind === 'confirm') {
+    if (pendingDraftOpRef.current) {
       await executePendingDraftOp(pendingDraftOpRef.current);
       return;
     }
@@ -517,13 +667,11 @@ export function DeadlinesView({
       return;
     }
 
-    setIsSubmittingDraftModal(true);
-    try {
-      let targetDeadline = editingDeadline;
-
-      // If creating new or if title/proceeding changed on an existing draft, persist draft first
-      if (!targetDeadline) {
-        const createdRes = await createDeadlineAction({
+    let op: PendingDeadlineDraftOp;
+    if (!editingDeadline) {
+      op = {
+        kind: 'createAndConfirm',
+        createPayload: {
           matterId: targetMatterId,
           proceedingId: proceedingId ? proceedingId : null,
           title: trimmedTitle,
@@ -532,45 +680,24 @@ export function DeadlinesView({
           source: trimmedSource,
           basisNotes: trimmedBasis,
           idempotencyKey: generateClientRequestId('dl-create-pre'),
-        });
-        if (!createdRes.success) {
-          setDraftFormError(createdRes.error || 'تعذر إنشاء مسودة الموعد قبل الاعتماد.');
-          setIsSubmittingDraftModal(false);
-          return;
-        }
-        targetDeadline = createdRes.data;
-        setEditingDeadline(targetDeadline);
-        upsertDeadline(targetDeadline);
-      } else if (
-        trimmedTitle !== targetDeadline.title ||
-        (proceedingId || null) !== (targetDeadline.proceedingId ?? null)
-      ) {
-        const updatedRes = await updateDeadlineDraftAction({
-          deadlineId: targetDeadline.id,
-          expectedVersion: targetDeadline.version,
+        },
+        confirmIdempotencyKey: generateClientRequestId('dl-confirm'),
+      };
+    } else if (
+      trimmedTitle !== editingDeadline.title ||
+      (proceedingId || null) !== (editingDeadline.proceedingId ?? null)
+    ) {
+      op = {
+        kind: 'updateAndConfirm',
+        updatePayload: {
+          deadlineId: editingDeadline.id,
+          expectedVersion: editingDeadline.version,
           title: trimmedTitle,
           proceedingId: proceedingId ? proceedingId : null,
           idempotencyKey: generateClientRequestId('dl-upd-pre'),
-        });
-        if (!updatedRes.success) {
-          if (updatedRes.code === 'CONCURRENCY_CONFLICT') {
-            setDraftConflictError('البيانات اتعدلت من شاشة تانية. يرجى تحديث القائمة والمراجعة.');
-          } else {
-            setDraftFormError(updatedRes.error || 'تعذر تحديث بيانات المسودة قبل الاعتماد.');
-          }
-          setIsSubmittingDraftModal(false);
-          return;
-        }
-        targetDeadline = updatedRes.data;
-        setEditingDeadline(targetDeadline);
-        upsertDeadline(targetDeadline);
-      }
-
-      const confirmOp: PendingDeadlineDraftOp = {
-        kind: 'confirm',
-        payload: {
-          deadlineId: targetDeadline.id,
-          expectedVersion: targetDeadline.version,
+        },
+        confirmPayload: {
+          deadlineId: editingDeadline.id,
           dueDate: trimmedDate,
           dueTime: trimmedTime || null,
           source: trimmedSource,
@@ -580,15 +707,26 @@ export function DeadlinesView({
           idempotencyKey: generateClientRequestId('dl-confirm'),
         },
       };
-      pendingDraftOpRef.current = confirmOp;
-      draftModalDraft.keep(confirmOp);
-
-      await executePendingDraftOp(confirmOp);
-    } catch {
-      setIsSubmittingDraftModal(false);
-      setIsFrozenDraftRetry(true);
-      setDraftFormError('تعذر تأكيد الاعتماد من الخادم. يمكنك إعادة المحاولة.');
+    } else {
+      op = {
+        kind: 'confirm',
+        payload: {
+          deadlineId: editingDeadline.id,
+          expectedVersion: editingDeadline.version,
+          dueDate: trimmedDate,
+          dueTime: trimmedTime || null,
+          source: trimmedSource,
+          basisNotes: trimmedBasis,
+          lawyerReviewed: true,
+          confirmationAccepted: true,
+          idempotencyKey: generateClientRequestId('dl-confirm'),
+        },
+      };
     }
+
+    pendingDraftOpRef.current = op;
+    draftModalDraft.keep(op);
+    await executePendingDraftOp(op);
   };
 
   const openChangeDateModal = (deadline: DeadlineDTO) => {

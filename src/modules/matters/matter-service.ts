@@ -4006,7 +4006,7 @@ export async function unifiedSearch(
       { primaryPhone: { contains: qDigits, mode: 'insensitive' } },
       { primaryPhoneNormalized: { contains: qDigits, mode: 'insensitive' } },
     ];
-    if (qPhone) {
+    if (qPhone && !/\p{L}/u.test(query)) {
       orClauses.push({ primaryPhoneNormalized: { contains: qPhone, mode: 'insensitive' } });
     }
     if (qText) {

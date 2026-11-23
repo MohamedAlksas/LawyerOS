@@ -1215,12 +1215,25 @@ export async function listAgenda(
     }
   }
 
+  let effectiveRangeEnd = rangeEnd;
+  if (view === 'list') {
+    for (const h of hearings) {
+      if (h.hearingDate > effectiveRangeEnd) effectiveRangeEnd = h.hearingDate;
+    }
+    for (const d of confirmedDeadlines) {
+      if (d.dueDate && d.dueDate > effectiveRangeEnd) effectiveRangeEnd = d.dueDate;
+    }
+    for (const t of datedTasks) {
+      if (t.dueDate && t.dueDate > effectiveRangeEnd) effectiveRangeEnd = t.dueDate;
+    }
+  }
+
   return {
     view,
     anchorDate,
     cairoToday,
     rangeStart,
-    rangeEnd,
+    rangeEnd: effectiveRangeEnd,
     hearings,
     timedHearings,
     untimedHearings,

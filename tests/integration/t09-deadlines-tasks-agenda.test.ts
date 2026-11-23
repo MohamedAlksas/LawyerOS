@@ -828,6 +828,15 @@ describe('T09 Integration Tests: Deadlines, Tasks, Agenda & Archive Guards (PG)'
       idempotencyKey: crypto.randomUUID(),
     });
 
+    // Global listDeadlines excludes archived proceedings, while matter-scoped listDeadlines retains historical deadlines
+    const globalWithClosed = await listDeadlines(owner, { includeClosed: true });
+    expect(globalWithClosed.map((d) => d.id)).not.toContain(confirmedDl.id);
+    const matterBDeadlines = await listDeadlines(owner, {
+      matterId: matterBId,
+      includeClosed: true,
+    });
+    expect(matterBDeadlines.map((d) => d.id)).toContain(confirmedDl.id);
+
     await expect(
       createDeadline(owner, {
         matterId: matterBId,

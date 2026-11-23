@@ -729,8 +729,9 @@ function AgendaResultsSection({
 
       {/* Active Range Label */}
       <div className="text-sm font-semibold text-[#4D606A] flex flex-wrap items-center gap-2">
-        <span>النطاق المعروض:</span>
+        <span>{view === 'list' ? 'النطاق المعروض (قائمة الأعمال القادمة):' : 'النطاق المعروض:'}</span>
         <span className="text-[#172A35]">
+          {view === 'list' ? 'بدايةً من ' : ''}
           {formatCairoDateArabic(agenda.rangeStart)} (<bdi dir="ltr">{agenda.rangeStart}</bdi>)
         </span>
         {agenda.rangeEnd !== agenda.rangeStart && (

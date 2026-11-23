@@ -1043,9 +1043,9 @@ export async function listDeadlines(
 
   if (!params.matterId) {
     where.matter = { archivedAt: null, status: { not: 'ARCHIVED' } };
-  }
-  if (!params.proceedingId) {
-    where.OR = [{ proceedingId: null }, { proceeding: { archivedAt: null } }];
+    if (!params.proceedingId) {
+      where.OR = [{ proceedingId: null }, { proceeding: { archivedAt: null } }];
+    }
   }
 
   if (params.needsReviewOnly) {
