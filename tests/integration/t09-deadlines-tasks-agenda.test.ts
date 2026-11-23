@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'child_process';
 import { getPrismaClient } from '@/lib/auth';
+import { getEnv } from '@/lib/env';
 import {
   addProceeding,
   archiveMatter,
@@ -929,23 +930,24 @@ describe('T09 Integration Tests: Deadlines, Tasks, Agenda & Archive Guards (PG)'
     expect(selectable.some((m) => m.id === matterBId)).toBe(false);
 
     // Real HTTP route handlers reject unauthenticated and untrusted-origin requests with private no-store headers
-    const unauthAgenda = await getAgendaRoute(new Request('http://127.0.0.1:3208/api/agenda'));
+    const trustedOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const unauthAgenda = await getAgendaRoute(new Request(`${trustedOrigin}/api/agenda`));
     expect(unauthAgenda.status).toBe(401);
     expect(unauthAgenda.headers.get('cache-control')).toBe('private, no-store');
 
-    const unauthToday = await getTodayRoute(new Request('http://127.0.0.1:3208/api/today'));
+    const unauthToday = await getTodayRoute(new Request(`${trustedOrigin}/api/today`));
     expect(unauthToday.status).toBe(401);
 
-    const unauthTasksGet = await getTasksRoute(new Request('http://127.0.0.1:3208/api/tasks'));
+    const unauthTasksGet = await getTasksRoute(new Request(`${trustedOrigin}/api/tasks`));
     expect(unauthTasksGet.status).toBe(401);
 
     const unauthDeadlinesGet = await getDeadlinesRoute(
-      new Request('http://127.0.0.1:3208/api/deadlines')
+      new Request(`${trustedOrigin}/api/deadlines`)
     );
     expect(unauthDeadlinesGet.status).toBe(401);
 
     const crossOriginTaskPost = await postTasksRoute(
-      new Request('http://127.0.0.1:3208/api/tasks', {
+      new Request(`${trustedOrigin}/api/tasks`, {
         method: 'POST',
         headers: {
           origin: 'https://evil.example',
@@ -958,10 +960,10 @@ describe('T09 Integration Tests: Deadlines, Tasks, Agenda & Archive Guards (PG)'
     expect(crossOriginTaskPost.headers.get('cache-control')).toBe('private, no-store');
 
     const crossSiteDeadlinePost = await postDeadlinesRoute(
-      new Request('http://127.0.0.1:3208/api/deadlines', {
+      new Request(`${trustedOrigin}/api/deadlines`, {
         method: 'POST',
         headers: {
-          origin: 'http://127.0.0.1:3208',
+          origin: trustedOrigin,
           'sec-fetch-site': 'cross-site',
           'content-type': 'application/json',
         },
@@ -971,10 +973,10 @@ describe('T09 Integration Tests: Deadlines, Tasks, Agenda & Archive Guards (PG)'
     expect(crossSiteDeadlinePost.status).toBe(403);
 
     const unauthConfirmPost = await postDeadlineConfirmRoute(
-      new Request('http://127.0.0.1:3208/api/deadlines/00000000-0000-4000-8000-000000000000/confirm', {
+      new Request(`${trustedOrigin}/api/deadlines/00000000-0000-4000-8000-000000000000/confirm`, {
         method: 'POST',
         headers: {
-          origin: 'http://127.0.0.1:3208',
+          origin: trustedOrigin,
           'content-type': 'application/json',
         },
         body: JSON.stringify({}),
