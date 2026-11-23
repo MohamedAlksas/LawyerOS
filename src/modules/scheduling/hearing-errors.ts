@@ -1,17 +1,27 @@
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { IdempotencyPayloadMismatchError, IdempotencyConcurrentConflictError } from '@/lib/idempotency';
+import { CalendarValidationError } from '@/lib/cairo-date';
+import { CrossMatterLinkForbiddenError } from '@/modules/matters/matter-types';
 import {
   SchedulingValidationError, ConcurrencyConflictError, NotFoundError, UnsupportedTransitionError,
   MatterArchivedError, ProceedingArchivedError, ActiveObligationError, UnauthorizedError, type ActionResult,
 } from './hearing-types';
 
 export function hearingError(error: unknown): ActionResult<never> {
-  if (error instanceof SchedulingValidationError) {
+  if (error instanceof SchedulingValidationError || error instanceof CalendarValidationError) {
     return {
       success: false,
       error: error.message,
       code: 'VALIDATION_ERROR',
       fieldErrors: error.fieldErrors,
+    };
+  }
+
+  if (error instanceof CrossMatterLinkForbiddenError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'CROSS_MATTER_LINK_FORBIDDEN',
     };
   }
 

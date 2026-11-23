@@ -139,7 +139,7 @@ export interface HearingResultSummaryDTO {
 
 export interface TaskDTO {
   id: string;
-  matterId: string;
+  matterId: string | null;
   proceedingId?: string | null;
   hearingId?: string | null;
   title: string;

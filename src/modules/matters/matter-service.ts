@@ -3122,11 +3122,10 @@ export async function archiveMatter(
         where: { proceeding: { matterId: input.matterId }, status: 'SCHEDULED' }
       });
       if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود جلسات مجدولة قائمة.');
-      // When T09 introduces Deadline:
-      //   const openDeadlines = await tx.deadline.count({
-      //     where: { matterId: input.matterId, status: 'CONFIRMED', completedAt: null }
-      //   });
-      //   if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود مواعيد قانونية مؤكدة غير مكتملة.');
+      const openDeadlines = await tx.deadline.count({
+        where: { matterId: input.matterId, status: 'CONFIRMED', completedAt: null }
+      });
+      if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة ملف القضية لوجود مواعيد قانونية مؤكدة غير مكتملة.');
       // =========================================================================
 
       const now = new Date();
@@ -3479,11 +3478,10 @@ export async function archiveProceeding(
         where: { proceedingId: input.proceedingId, status: 'SCHEDULED' }
       });
       if (scheduledHearings > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود جلسات مجدولة قائمة.');
-      // When T09 introduces Deadline:
-      //   const openDeadlines = await tx.deadline.count({
-      //     where: { proceedingId: input.proceedingId, status: 'CONFIRMED', completedAt: null }
-      //   });
-      //   if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود مواعيد قانونية مؤكدة غير مكتملة.');
+      const openDeadlines = await tx.deadline.count({
+        where: { proceedingId: input.proceedingId, status: 'CONFIRMED', completedAt: null }
+      });
+      if (openDeadlines > 0) throw new ActiveObligationError('لا يمكن أرشفة القيد القضائي لوجود مواعيد قانونية مؤكدة غير مكتملة.');
       // =========================================================================
 
       const now = new Date();
