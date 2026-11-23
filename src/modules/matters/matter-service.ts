@@ -2909,7 +2909,7 @@ export async function searchMatterClients(
     if (textNorm) {
       orClauses.push({ nameNormalized: { contains: textNorm } });
     }
-    if (phoneNorm) {
+    if (phoneNorm && !/\p{L}/u.test(rawQuery)) {
       orClauses.push({ primaryPhoneNormalized: { contains: phoneNorm } });
     }
     if (orClauses.length > 0) {
