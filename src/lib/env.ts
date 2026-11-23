@@ -227,6 +227,9 @@ const baseEnvSchema = z.object({
     .default('http://127.0.0.1:3000'),
   PARTY_IDENTITY_ENCRYPTION_KEY: z.string().optional(),
   PARTY_IDENTITY_KEY_ID: z.string().optional(),
+  RESTORE_MODE: z.string().optional(),
+  REMINDER_DISPATCH_DISABLED: z.string().optional(),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().optional(),
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;
@@ -389,4 +392,63 @@ export function getEnv(reload = false): AppEnv {
  */
 export function validateStartupEnv(): AppEnv {
   return validateEnv(process.env);
+}
+
+function isTruthyFlag(val: string | undefined): boolean {
+  if (!val) return false;
+  const norm = val.trim().toLowerCase();
+  return norm === 'true' || norm === '1';
+}
+
+/**
+ * Returns true when operational RESTORE_MODE or REMINDER_DISPATCH_DISABLED is active.
+ * In this mode, background reminder workers must not claim or dispatch any jobs.
+ */
+export function isWorkerDispatchDisabled(
+  envOverride: Record<string, string | undefined> = process.env
+): boolean {
+  return (
+    isTruthyFlag(envOverride.RESTORE_MODE) ||
+    isTruthyFlag(envOverride.REMINDER_DISPATCH_DISABLED)
+  );
+}
+
+/**
+ * Sanitizes error messages before persistence or UI/log exposure.
+ * Strips connection strings, credentials, bearer tokens, JWTs, hex/base64 blobs,
+ * and truncates length so secrets or document bytes never leak.
+ */
+export function redactErrorMessage(error: unknown, maxLength = 300): string {
+  const raw =
+    error instanceof Error
+      ? error.message || error.name
+      : typeof error === 'string'
+        ? error
+        : 'Unexpected worker error';
+
+  let sanitized = raw.replace(/[\r\n\t\u0000-\u001f\u007f]+/g, ' ').trim();
+  sanitized = sanitized
+    // Full URLs / PostgreSQL connection strings (may contain user:pass@host)
+    .replace(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+/g, '[REDACTED_URL]')
+    // Basic user:pass@host fragments without protocol
+    .replace(/[^\s/:@]+:[^\s/@]+@[^\s/:]+/g, '[REDACTED_CREDENTIALS]')
+    // Bearer / JWT tokens
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED_TOKEN]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
+    // Key-value secret assignments
+    .replace(
+      /\b(password|passwd|secret|token|api[_-]?key|encryption[_-]?key|auth[_-]?tag|ciphertext|cookie|session[_-]?id)\b(\s*[=:]\s*)([^\s,;]+)/gi,
+      '$1$2[REDACTED]'
+    )
+    // Long hex or base64 blobs (keys, encrypted bytes, raw file payloads)
+    .replace(/\b[0-9a-fA-F]{32,}\b/g, '[REDACTED_HEX]')
+    .replace(/[A-Za-z0-9+/=_-]{48,}/g, '[REDACTED_BLOB]');
+
+  if (!sanitized) {
+    sanitized = 'Unexpected error';
+  }
+  if (sanitized.length > maxLength) {
+    return `${sanitized.slice(0, Math.max(0, maxLength - 3))}...`;
+  }
+  return sanitized;
 }

@@ -212,3 +212,91 @@ export function formatTimeOrUnspecified(time: string | null | undefined): string
   const displayHours = hours % 12 === 0 ? 12 : hours % 12;
   return `${displayHours}:${minutes} ${isPM ? 'م' : 'ص'}`;
 }
+
+const cairoWallClockFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: CAIRO_TIMEZONE,
+  calendar: 'gregory',
+  numberingSystem: 'latn',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+function getCairoWallClockAsUtcMs(instantMs: number): number {
+  const parts = cairoWallClockFormatter.formatToParts(new Date(instantMs));
+  const map: Record<string, number> = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      map[part.type] = parseInt(part.value, 10);
+    }
+  }
+  const d = new Date(
+    Date.UTC(
+      2000,
+      (map.month ?? 1) - 1,
+      map.day ?? 1,
+      map.hour ?? 0,
+      map.minute ?? 0,
+      map.second ?? 0
+    )
+  );
+  d.setUTCFullYear(map.year ?? 2000);
+  return d.getTime();
+}
+
+/**
+ * Computes the UTC Date instant for (eventDateYmd - dayOffset days) at reminderTimeHHmm
+ * in Africa/Cairo local time, keeping wall-clock time accurate across DST transitions.
+ */
+export function computeCairoReminderInstant(
+  eventDateYmd: string,
+  dayOffset: number,
+  reminderTimeHHmm: string
+): Date {
+  if (!Number.isInteger(dayOffset) || dayOffset < 0 || dayOffset > 365) {
+    throw new CalendarValidationError('عدد أيام التذكير المسبق غير صالح (يجب أن يكون بين 0 و 365 يوماً).', {
+      dayOffset: 'عدد الأيام يجب أن يكون رقماً صحيحاً بين 0 و 365',
+    });
+  }
+
+  const trimmedTime = typeof reminderTimeHHmm === 'string' ? reminderTimeHHmm.trim() : '';
+  const match = trimmedTime.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    throw new CalendarValidationError('صيغة وقت التذكير غير صالحة (يجب أن تكون بصيغة HH:mm).', {
+      reminderTime: 'صيغة الوقت يجب أن تكون HH:mm',
+    });
+  }
+
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    throw new CalendarValidationError('قيمة وقت التذكير خارج النطاق المسموح (00:00 إلى 23:59).', {
+      reminderTime: 'قيمة الوقت خارج النطاق المسموح',
+    });
+  }
+
+  const targetYmd = addCairoDays(eventDateYmd, -dayOffset);
+  const { year, month, day } = parseDateParts(targetYmd);
+
+  const wallAsUtc = new Date(Date.UTC(2000, month - 1, day, hours, minutes, 0, 0));
+  wallAsUtc.setUTCFullYear(year);
+  const targetWallMs = wallAsUtc.getTime();
+
+  const offset1 = getCairoWallClockAsUtcMs(targetWallMs) - targetWallMs;
+  const candidate1 = targetWallMs - offset1;
+
+  const offset2 = getCairoWallClockAsUtcMs(candidate1) - candidate1;
+  const candidate2 = targetWallMs - offset2;
+
+  if (getCairoWallClockAsUtcMs(candidate2) === targetWallMs) {
+    return new Date(candidate2);
+  }
+  if (getCairoWallClockAsUtcMs(candidate1) === targetWallMs) {
+    return new Date(candidate1);
+  }
+  return new Date(candidate2);
+}

@@ -5,6 +5,7 @@ import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 import { signOutAndReset } from '@/lib/auth-client';
 import {
+  IconBell,
   IconCalendar,
   IconDashboard,
   IconDeadline,
@@ -134,6 +135,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
 
   const isHomeActive = pathname === '/';
   const isTodayActive = pathname === '/today' || pathname.startsWith('/today/');
+  const isInboxActive = pathname === '/inbox' || pathname.startsWith('/inbox/');
   const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
   const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
   const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
@@ -217,6 +219,17 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             >
               <IconToday className="w-5 h-5 shrink-0" />
               <span>أجندة اليوم</span>
+            </Link>
+
+            <Link
+              href="/inbox"
+              data-testid="nav-link-inbox"
+              aria-current={isInboxActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={navItemClass(isInboxActive)}
+            >
+              <IconBell className="w-5 h-5 shrink-0" />
+              <span>صندوق التنبيهات</span>
             </Link>
 
             <Link

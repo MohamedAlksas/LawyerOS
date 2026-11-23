@@ -16,6 +16,7 @@ import {
 } from '@/modules/matters/matter-types';
 import { strictDateSchema, type ActionResult } from '@/modules/scheduling/hearing-types';
 import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
+import type { WorkerHealthState } from '@/modules/reminders/reminder-types';
 
 export {
   TaskPriority,
@@ -158,6 +159,9 @@ export interface TodayOverviewDTO {
     overdueDeadlinesCount: number;
     overdueTasksCount: number;
     sameDayCourtConflictsCount: number;
+    unreadRemindersCount: number;
+    failedRemindersCount: number;
+    workerStatus: WorkerHealthState;
     notes: string[];
     workerStatusNote: string;
   };
