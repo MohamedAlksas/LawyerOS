@@ -11,9 +11,44 @@ import {
 
 const SAFE_KEY_SEGMENT_RE = /^[a-zA-Z0-9._-]+$/;
 
+function getRuntimeCwd(): string {
+  // Indirect lookup avoids Turbopack static-tracer whole-project bundling warnings on process.cwd()
+  return process['cwd']();
+}
+
 function normalizeForComparison(targetPath: string): string {
   const resolved = path.resolve(targetPath);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * Resolves symlinks along the deepest existing ancestor of `targetPath`
+ * so symlinked roots or parent directories cannot escape security boundaries.
+ */
+function resolveRealPathWithSuffix(targetPath: string): string {
+  const resolved = path.resolve(targetPath);
+  const trailingSegments: string[] = [];
+  let cursor = resolved;
+
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      return resolved;
+    }
+    trailingSegments.unshift(path.basename(cursor));
+    cursor = parent;
+  }
+
+  let realBase: string;
+  try {
+    realBase = fs.realpathSync(cursor);
+  } catch {
+    throw new DocumentStoragePathError('تعذر التحقق من المسار الحقيقي لمجلد التخزين.');
+  }
+
+  return trailingSegments.length > 0
+    ? path.resolve(realBase, ...trailingSegments)
+    : realBase;
 }
 
 function isSameOrInside(candidate: string, forbiddenDir: string): boolean {
@@ -25,42 +60,47 @@ function isSameOrInside(candidate: string, forbiddenDir: string): boolean {
 }
 
 export function resolveSafeStorageRoot(overrideRoot?: string): string {
+  const runtimeCwd = getRuntimeCwd();
   const configured = overrideRoot?.trim() || process.env.DOCUMENTS_STORAGE_ROOT?.trim();
-  const rootDir = configured
+  const rawRoot = configured
     ? path.resolve(configured)
-    : path.resolve(process.cwd(), 'storage');
+    : path.resolve(runtimeCwd, 'storage');
 
-  if (!rootDir || rootDir.includes('\0')) {
+  if (!rawRoot || rawRoot.includes('\0')) {
     throw new DocumentStoragePathError('مسار مجلد التخزين الخاص غير صالح.');
   }
 
-  const appRoot = path.resolve(process.cwd());
+  const realRoot = resolveRealPathWithSuffix(rawRoot);
+  const realAppRoot = resolveRealPathWithSuffix(runtimeCwd);
   const forbiddenDirs = [
-    path.resolve(appRoot, 'public'),
-    path.resolve(appRoot, '.next'),
-    path.resolve(appRoot, 'src'),
+    resolveRealPathWithSuffix(path.resolve(runtimeCwd, 'public')),
+    resolveRealPathWithSuffix(path.resolve(runtimeCwd, '.next')),
+    resolveRealPathWithSuffix(path.resolve(runtimeCwd, 'src')),
   ];
 
   for (const forbidden of forbiddenDirs) {
-    if (isSameOrInside(rootDir, forbidden)) {
+    if (isSameOrInside(realRoot, forbidden) || isSameOrInside(rawRoot, forbidden)) {
       throw new DocumentStoragePathError(
         'ممنوع تعيين مجلد تخزين المستندات داخل المجلدات العامة أو ملفات البناء.'
       );
     }
   }
 
-  if (normalizeForComparison(rootDir) === normalizeForComparison(appRoot)) {
+  if (
+    normalizeForComparison(realRoot) === normalizeForComparison(realAppRoot) ||
+    normalizeForComparison(rawRoot) === normalizeForComparison(runtimeCwd)
+  ) {
     throw new DocumentStoragePathError(
       'يجب أن يكون مجلد تخزين المستندات في مجلد مخصص ومنفصل عن جذر التطبيق.'
     );
   }
 
-  return rootDir;
+  return realRoot;
 }
 
 /**
  * Validates a relative storage key and resolves it inside baseDir.
- * Rejects traversal segments, backslashes, leading slashes, colons/drive letters, and null bytes.
+ * Rejects traversal segments, backslashes, leading slashes, colons/drive letters, null bytes, and symlink escapes.
  */
 export function resolveSafeKeyPath(baseDir: string, key: string): string {
   if (typeof key !== 'string' || key.length === 0 || key.trim() !== key) {
@@ -87,10 +127,10 @@ export function resolveSafeKeyPath(baseDir: string, key: string): string {
     }
   }
 
-  const resolvedBase = path.resolve(baseDir);
-  const resolvedTarget = path.resolve(resolvedBase, ...segments);
+  const realBase = resolveRealPathWithSuffix(baseDir);
+  const resolvedTarget = path.resolve(realBase, ...segments);
   const rel = path.relative(
-    normalizeForComparison(resolvedBase),
+    normalizeForComparison(realBase),
     normalizeForComparison(resolvedTarget)
   );
 
@@ -98,7 +138,17 @@ export function resolveSafeKeyPath(baseDir: string, key: string): string {
     throw new DocumentStoragePathError('تم رفض محاولة الخروج عن مسار التخزين الخاص.');
   }
 
-  return resolvedTarget;
+  // Also verify existing ancestors/target do not follow a symlink outside realBase
+  const realTarget = resolveRealPathWithSuffix(resolvedTarget);
+  const realRel = path.relative(
+    normalizeForComparison(realBase),
+    normalizeForComparison(realTarget)
+  );
+  if (!realRel || realRel.startsWith('..') || path.isAbsolute(realRel)) {
+    throw new DocumentStoragePathError('تم رفض محاولة الخروج عن مسار التخزين الخاص عبر رابط رمزي.');
+  }
+
+  return realTarget;
 }
 
 export type DocumentStorageSource = Buffer | Uint8Array | Readable | AsyncIterable<Uint8Array>;
@@ -120,6 +170,7 @@ export interface DocumentStorageAdapter {
     maxBytes?: number
   ): Promise<WriteQuarantineResult>;
   readQuarantineBytes(quarantineKey: string, maxBytes?: number): Promise<Buffer>;
+  writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void>;
   promoteToReady(quarantineKey: string, readyKey: string): Promise<void>;
   readReadyStream(readyKey: string): Readable;
   readReadyBytes(readyKey: string): Promise<Buffer>;
@@ -290,6 +341,30 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         );
       }
       return await fs.promises.readFile(targetPath);
+    },
+
+    async writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void> {
+      const destPath = resolveSafeKeyPath(readyDir, readyKey);
+      const destDir = path.dirname(destPath);
+      await fs.promises.mkdir(destDir, { recursive: true });
+
+      const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
+      let handle: fs.promises.FileHandle | null = null;
+      try {
+        handle = await fs.promises.open(tempPartPath, 'w');
+        await handle.write(bytes);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        await fs.promises.rename(tempPartPath, destPath);
+      } catch (err) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          handle = null;
+        }
+        await unlinkIfExists(tempPartPath).catch(() => {});
+        throw err;
+      }
     },
 
     async promoteToReady(quarantineKey: string, readyKey: string): Promise<void> {

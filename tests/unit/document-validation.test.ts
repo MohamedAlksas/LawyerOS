@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { validateEnv } from '@/lib/env';
 import {
@@ -41,16 +42,37 @@ function buildSyntheticJpeg(): Buffer {
   ]);
 }
 
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc ^= buf[i];
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makePngChunk(type: string, data: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, 'ascii');
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(data.length, 0);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
+}
+
 function buildSyntheticPng(): Buffer {
+  const ihdr = Buffer.from([
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x02, 0x00, 0x00, 0x00,
+  ]);
+  const idat = zlib.deflateSync(Buffer.from([0x00, 0xff, 0x00, 0x00]));
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    Buffer.from([0x00, 0x00, 0x00, 0x0d]),
-    Buffer.from('IHDR', 'ascii'),
-    Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00]),
-    Buffer.from([0x90, 0x77, 0x53, 0xde]),
-    Buffer.from([0x00, 0x00, 0x00, 0x00]),
-    Buffer.from('IEND', 'ascii'),
-    Buffer.from([0xae, 0x42, 0x60, 0x82]),
+    makePngChunk('IHDR', ihdr),
+    makePngChunk('IDAT', idat),
+    makePngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
@@ -182,6 +204,66 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
           declaredMime: 'application/pdf',
         })
       ).toThrow(DocumentValidationError);
+
+      // Rejects truncated JPEG without EOI, JPEG with trailing script payload after EOI
+      expect(() =>
+        inspectFileContent(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00]), {
+          originalFilename: 'truncated.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
+      expect(() =>
+        inspectFileContent(
+          Buffer.concat([buildSyntheticJpeg(), Buffer.from('<script>alert(1)</script>', 'ascii')]),
+          {
+            originalFilename: 'trailing-payload.jpg',
+            declaredMime: 'image/jpeg',
+          }
+        )
+      ).toThrow(DocumentValidationError);
+
+      // Rejects PNG missing IDAT, PNG with trailing bytes after IEND, or fake embedded IEND
+      const pngWithoutIdat = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        makePngChunk('IHDR', Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])),
+        makePngChunk('IEND', Buffer.alloc(0)),
+      ]);
+      expect(() =>
+        inspectFileContent(pngWithoutIdat, {
+          originalFilename: 'no-idat.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      expect(() =>
+        inspectFileContent(
+          Buffer.concat([buildSyntheticPng(), Buffer.from('TRAILING', 'ascii')]),
+          {
+            originalFilename: 'trailing.png',
+            declaredMime: 'image/png',
+          }
+        )
+      ).toThrow(DocumentValidationError);
+
+      // Rejects PDF with trailing HTML/script/binary after %%EOF (while allowing trailing EOL whitespace)
+      expect(() =>
+        inspectFileContent(
+          Buffer.concat([buildSyntheticPdf(), Buffer.from('\n<script>alert(1)</script>', 'ascii')]),
+          {
+            originalFilename: 'trailing-script.pdf',
+            declaredMime: 'application/pdf',
+          }
+        )
+      ).toThrow(DocumentValidationError);
+
+      const pdfWithTrailingNewline = Buffer.concat([buildSyntheticPdf(), Buffer.from('\r\n', 'ascii')]);
+      expect(
+        inspectFileContent(pdfWithTrailingNewline, {
+          originalFilename: 'clean-eol.pdf',
+          declaredMime: 'application/pdf',
+        }).detectedMime
+      ).toBe('application/pdf');
     });
 
     it('accepts exact 25 MiB (26,214,400 bytes) and rejects 25 MiB + 1 byte (26,214,401 bytes)', () => {
@@ -221,6 +303,9 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         'macro.docx',
         'page.html',
         'vector.svg',
+        'invoice\u202efdp.exe',
+        'doc\u2066test\u2069.pdf',
+        'dir\u200fmark.png',
       ];
       for (const name of unsafeNames) {
         expect(() => sanitizeDisplayFilename(name)).toThrow(DocumentValidationError);
@@ -266,6 +351,24 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), 'src'))).toThrow(
         DocumentStoragePathError
       );
+
+      // Symlink / NTFS junction pointing into public/ must also be blocked fail-closed
+      const symlinkContainer = makeTempStorageRoot();
+      const linkToPublic = path.join(symlinkContainer, 'linked-public');
+      let linkCreated = false;
+      try {
+        fs.symlinkSync(
+          path.resolve(process.cwd(), 'public'),
+          linkToPublic,
+          process.platform === 'win32' ? 'junction' : 'dir'
+        );
+        linkCreated = true;
+      } catch {
+        // Ignore if environment forbids symlink/junction creation
+      }
+      if (linkCreated) {
+        expect(() => resolveSafeStorageRoot(linkToPublic)).toThrow(DocumentStoragePathError);
+      }
     });
 
     it('aborts stream upload exceeding maxBytes without leaving partial files on disk', async () => {

@@ -67,9 +67,20 @@ export function DocumentsView({
   const [selectedType, setSelectedType] = useState<string>(initialFilters.documentType ?? '');
   const [selectedMatterId, setSelectedMatterId] = useState<string>(initialFilters.matterId ?? '');
   const [selectedPartyId, setSelectedPartyId] = useState<string>(initialFilters.partyId ?? '');
+  const [appliedFilters, setAppliedFilters] = useState({
+    q: (initialFilters.q ?? '').trim(),
+    documentType: initialFilters.documentType ?? '',
+    matterId: initialFilters.matterId ?? '',
+    partyId: initialFilters.partyId ?? '',
+  });
 
+  const documentsRef = useRef<DocumentDTO[]>(initialDocuments);
   const abortRef = useRef<AbortController | null>(null);
   const reqSeqRef = useRef(0);
+
+  useEffect(() => {
+    documentsRef.current = documents;
+  }, [documents]);
 
   useEffect(() => {
     return () => {
@@ -94,7 +105,8 @@ export function DocumentsView({
 
       try {
         const sp = new URLSearchParams();
-        if (filters.q.trim()) sp.set('q', filters.q.trim());
+        const trimmedQ = filters.q.trim();
+        if (trimmedQ) sp.set('q', trimmedQ);
         if (filters.documentType) sp.set('documentType', filters.documentType);
         if (filters.matterId) sp.set('matterId', filters.matterId);
         if (filters.partyId) sp.set('partyId', filters.partyId);
@@ -123,8 +135,15 @@ export function DocumentsView({
           );
         }
 
+        documentsRef.current = body.data.documents;
         setDocuments(body.data.documents);
         setTotal(body.data.total);
+        setAppliedFilters({
+          q: trimmedQ,
+          documentType: filters.documentType,
+          matterId: filters.matterId,
+          partyId: filters.partyId,
+        });
       } catch (err) {
         if (controller.signal.aborted || seq !== reqSeqRef.current) return;
         setLoadError(
@@ -168,29 +187,32 @@ export function DocumentsView({
   };
 
   const hasActiveFilters = Boolean(
-    query.trim() || selectedType || selectedMatterId || selectedPartyId
+    appliedFilters.q ||
+      appliedFilters.documentType ||
+      appliedFilters.matterId ||
+      appliedFilters.partyId
   );
+
+  const hasFilterControlInput = hasActiveFilters || Boolean(query.trim());
 
   const handleDocumentUploaded = useCallback(
     (doc: DocumentDTO) => {
       if (hasActiveFilters) {
-        void fetchDocuments({
-          q: query,
-          documentType: selectedType,
-          matterId: selectedMatterId,
-          partyId: selectedPartyId,
-        });
+        void fetchDocuments(appliedFilters);
         return;
       }
-      setDocuments((prev) => {
-        if (prev.some((existing) => existing.id === doc.id)) {
-          return prev.map((existing) => (existing.id === doc.id ? doc : existing));
-        }
-        return [doc, ...prev];
-      });
-      setTotal((prev) => prev + 1);
+      const prev = documentsRef.current;
+      const alreadyExists = prev.some((existing) => existing.id === doc.id);
+      const next = alreadyExists
+        ? prev.map((existing) => (existing.id === doc.id ? doc : existing))
+        : [doc, ...prev];
+      documentsRef.current = next;
+      setDocuments(next);
+      if (!alreadyExists) {
+        setTotal((currentTotal) => currentTotal + 1);
+      }
     },
-    [fetchDocuments, hasActiveFilters, query, selectedMatterId, selectedPartyId, selectedType]
+    [appliedFilters, fetchDocuments, hasActiveFilters]
   );
 
   return (
@@ -358,7 +380,7 @@ export function DocumentsView({
               <IconSearch className="w-4 h-4" />
               <span>بحث</span>
             </button>
-            {hasActiveFilters && (
+            {hasFilterControlInput && (
               <button
                 type="button"
                 data-testid="documents-clear-filters"

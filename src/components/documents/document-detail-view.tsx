@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import type { DocumentDTO } from '@/modules/documents/document-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
@@ -255,12 +256,14 @@ export function DocumentDetailView({ document }: DocumentDetailViewProps) {
           </div>
         ) : isImage ? (
           <div className="bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] p-3 sm:p-4 flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src={inlineUrl}
               alt={`معاينة المستند: ${document.title}`}
+              width={960}
+              height={540}
+              unoptimized
               data-testid="document-preview-image"
-              className="max-w-full max-h-[540px] object-contain rounded-[4px]"
+              className="w-auto h-auto max-w-full max-h-[540px] object-contain rounded-[4px]"
             />
           </div>
         ) : isPdf ? (

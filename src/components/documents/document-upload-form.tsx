@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import type {
   DocumentActionResult,
@@ -815,10 +816,12 @@ export function DocumentUploadForm({
                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 min-w-0">
                       <div className="flex flex-wrap items-start gap-3 min-w-0 flex-1">
                         {item.previewUrl && !item.previewError ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                          <Image
                             src={item.previewUrl}
                             alt={`معاينة الصورة المحددة: ${item.file.name}`}
+                            width={88}
+                            height={88}
+                            unoptimized
                             data-testid={`queue-image-preview-${idx}`}
                             onError={() => updateQueueItem(item.queueId, { previewError: true })}
                             className="w-[72px] h-[72px] sm:w-[88px] sm:h-[88px] shrink-0 object-contain rounded-[4px] border border-[#D5DFE3] bg-white"

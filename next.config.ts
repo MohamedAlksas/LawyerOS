@@ -35,6 +35,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: '/(.*)', headers: SECURITY_HEADERS },
+      {
+        source: '/api/documents/:id/content',
+        headers: [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }],
+      },
       ...NO_STORE_PATHS.map((source) => ({ source, headers: NO_STORE_HEADER })),
     ];
   },

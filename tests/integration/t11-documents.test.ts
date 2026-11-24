@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import zlib from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import nextConfig from '../../next.config';
 import { getAuth, getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { AuthorizationError } from '@/modules/identity/types';
@@ -63,16 +65,37 @@ function buildSyntheticJpeg(marker: number): Buffer {
   ]);
 }
 
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc ^= buf[i];
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makePngChunk(type: string, data: Buffer): Buffer {
+  const typeBuf = Buffer.from(type, 'ascii');
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(data.length, 0);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
+}
+
 function buildSyntheticPng(markerByte: number): Buffer {
+  const ihdr = Buffer.from([
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x02, 0x00, 0x00, 0x00,
+  ]);
+  const idat = zlib.deflateSync(Buffer.from([0x00, markerByte & 0xff, 0x10, 0x20]));
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    Buffer.from([0x00, 0x00, 0x00, 0x0d]),
-    Buffer.from('IHDR', 'ascii'),
-    Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, markerByte & 0xff]),
-    Buffer.from([0x90, 0x77, 0x53, 0xde]),
-    Buffer.from([0x00, 0x00, 0x00, 0x00]),
-    Buffer.from('IEND', 'ascii'),
-    Buffer.from([0xae, 0x42, 0x60, 0x82]),
+    makePngChunk('IHDR', ihdr),
+    makePngChunk('IDAT', idat),
+    makePngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
@@ -856,6 +879,39 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
         idempotencyKey: crypto.randomUUID(),
       })
     ).rejects.toThrow(CrossMatterLinkForbiddenError);
+
+    // Transactional assertValidParentLinks inside finalizeUpload rejects if parent matter is archived before commit
+    const tempMatter = await openMatter(owner, {
+      title: 'ملف مؤقت لاختبار أرشفة الأب أثناء الاعتماد',
+      kind: 'CONSULTATION',
+      initialClientId: partyId,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(tempMatter.matter.id);
+    const archivedPdf = buildSyntheticPdf('TC03-ARCHIVED-TX');
+    const archivedAttempt = await beginUpload(owner, {
+      matterId: tempMatter.matter.id,
+      title: 'مستند ملف سيُؤرشف قبل الاعتماد',
+      documentType: 'OTHER',
+      originalFilename: 'archived-tx.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: archivedPdf.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(archivedAttempt.id);
+    await uploadAttemptBytes(owner, archivedAttempt.id, archivedPdf);
+
+    await prisma.matter.update({
+      where: { id: tempMatter.matter.id },
+      data: { archivedAt: new Date() },
+    });
+
+    await expect(
+      finalizeUpload(owner, { attemptId: archivedAttempt.id })
+    ).rejects.toThrow(DocumentValidationError);
+    expect(
+      await prisma.document.count({ where: { matterId: tempMatter.matter.id } })
+    ).toBe(0);
   });
 
   it('T11-TC-04: Leaves no READY artifact on interrupted upload or simulated DB failure, and idempotently recovers on retry', async () => {
@@ -887,6 +943,9 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     });
     expect(afterInterrupt.status).toBe('FAILED');
     expect(afterInterrupt.bytesWritten).toBe(0);
+    // Sanitized failureReason never leaks raw OS/internal error strings
+    expect(afterInterrupt.failureReason).toBe('تعذر إتمام معالجة الملف بسبب خطأ تقني مؤقت.');
+    expect(afterInterrupt.failureReason).not.toContain('ECONNRESET_SIMULATED');
     expect(await storage.exists('quarantine', afterInterrupt.quarantineKey)).toBe(false);
     await expect(finalizeUpload(owner, { attemptId: interruptedAttempt.id })).rejects.toThrow(
       DocumentValidationError
@@ -921,6 +980,9 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
 
     const failedAttempt = await prisma.uploadAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
     expect(failedAttempt.status).toBe('FAILED');
+    expect(failedAttempt.failureReason).toBe('تعذر إتمام معالجة الملف بسبب خطأ تقني مؤقت.');
+    expect(failedAttempt.failureReason).not.toContain('SIMULATED_DB_FINALIZATION_FAILURE');
+    expect(failedAttempt.failureReason).not.toContain(storageRoot);
     expect(failedAttempt.documentId).toBeNull();
     expect(failedAttempt.targetDocumentVersionId).toBeNull();
     expect(await storage.exists('quarantine', failedAttempt.quarantineKey)).toBe(true);
@@ -933,7 +995,34 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
       await prisma.document.count({ where: { matterId: matterAId, title: attempt.title } })
     ).toBe(0);
 
-    // 3. Retry with same attemptId & idempotencyKey -> succeeds cleanly with exactly 1 Document, 1 Version, 1 AuditEvent
+    // 3. Concurrent finalizeUpload race on the same attempt -> 1 winner, 1 clean ConcurrencyConflictError (zero ENOENT 500)
+    const racePdfBytes = buildSyntheticPdf('TC04-CONCURRENT-FINALIZE-RACE');
+    const raceAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'اختبار تزامن اعتماد الرفع',
+      documentType: 'MEMORANDUM',
+      originalFilename: 'race-check.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: racePdfBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(raceAttempt.id);
+    await uploadAttemptBytes(owner, raceAttempt.id, racePdfBytes);
+
+    const raceOutcomes = await Promise.allSettled([
+      finalizeUpload(owner, { attemptId: raceAttempt.id, idempotencyKey: crypto.randomUUID() }),
+      finalizeUpload(owner, { attemptId: raceAttempt.id, idempotencyKey: crypto.randomUUID() }),
+    ]);
+    const raceSuccesses = raceOutcomes.filter((r) => r.status === 'fulfilled');
+    const raceFailures = raceOutcomes.filter((r) => r.status === 'rejected');
+    expect(raceSuccesses).toHaveLength(1);
+    expect(raceFailures).toHaveLength(1);
+    expect((raceFailures[0] as PromiseRejectedResult).reason).toBeInstanceOf(ConcurrencyConflictError);
+    createdDocumentIds.push(
+      (raceSuccesses[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof getDocument>>>).value.id
+    );
+
+    // 4. Retry with same attemptId & idempotencyKey -> succeeds cleanly with exactly 1 Document, 1 Version, 1 AuditEvent
     const recoveredDoc = await finalizeUpload(owner, {
       attemptId: attempt.id,
       idempotencyKey: finalizeKey,
@@ -997,12 +1086,33 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(ownerInlineRes.headers.get('cache-control')).toBe('private, no-store, max-age=0');
     expect(ownerInlineRes.headers.get('x-content-type-options')).toBe('nosniff');
     expect(ownerInlineRes.headers.get('content-security-policy')).toBe(
-      "default-src 'none'; sandbox; frame-ancestors 'self'"
+      "default-src 'none'; object-src 'self'; frame-ancestors 'self'"
     );
     expect(ownerInlineRes.headers.get('content-disposition')).toContain('inline;');
     expect(ownerInlineRes.headers.get('content-disposition')).toContain("filename*=UTF-8''");
     const streamedBytes = Buffer.from(await ownerInlineRes.arrayBuffer());
     expect(streamedBytes).toEqual(pdfBytes);
+
+    // Attachment download keeps sandbox CSP, and next.config.ts scopes X-Frame-Options: SAMEORIGIN solely to /api/documents/:id/content
+    const ownerAttachmentRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${readyDoc.id}/content?disposition=attachment`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: readyDoc.id }) }
+    );
+    expect(ownerAttachmentRes.status).toBe(200);
+    expect(ownerAttachmentRes.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; sandbox; frame-ancestors 'self'"
+    );
+    expect(ownerAttachmentRes.headers.get('content-disposition')).toContain('attachment;');
+
+    const headerRules = await nextConfig.headers!();
+    const globalRule = headerRules.find((r) => r.source === '/(.*)');
+    const contentFrameRule = headerRules.find((r) => r.source === '/api/documents/:id/content');
+    expect(globalRule?.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('DENY');
+    expect(contentFrameRule?.headers.find((h) => h.key === 'X-Frame-Options')?.value).toBe('SAMEORIGIN');
+    expect(headerRules.some((r) => r.source === '/documents')).toBe(true);
+    expect(headerRules.some((r) => r.source === '/documents/:path*')).toBe(true);
 
     // Unauthenticated requests -> 401 with private no-store
     const unauthContent = await getDocumentContentRoute(

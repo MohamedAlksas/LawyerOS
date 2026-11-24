@@ -353,11 +353,38 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       );
       await expect(page.getByTestId('queue-item-scan-badge-0')).not.toContainText('سليم');
 
-      // Open detail view for uploaded PDF
+      // Open detail view for uploaded PDF and verify live iframe loading without frame blocking
+      const frameConsoleErrors: string[] = [];
+      const onConsole = (msg: import('@playwright/test').ConsoleMessage) => {
+        if (msg.type() === 'error') {
+          frameConsoleErrors.push(msg.text());
+        }
+      };
+      page.on('console', onConsole);
+
+      const inlineNavResponsePromise = page.waitForResponse(
+        (res) =>
+          res.url().includes('/api/documents/') &&
+          res.url().includes('/content?disposition=inline')
+      );
+      const inlineDownloadPromise = page.waitForEvent('download', {
+        predicate: (dl) => dl.url().includes('/content?disposition=inline'),
+        timeout: 5_000,
+      }).catch(() => null);
       await page.getByTestId('queue-ready-link-0').click();
       await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+$/);
       const pdfDocId = page.url().split('/').pop()!;
       localDocIds.push(pdfDocId);
+
+      const iframeInlineResponse = await inlineNavResponsePromise;
+      expect(iframeInlineResponse.status()).toBe(200);
+      expect(iframeInlineResponse.headers()['x-frame-options']).toBe('SAMEORIGIN');
+      expect(iframeInlineResponse.headers()['content-security-policy']).toContain(
+        "frame-ancestors 'self'"
+      );
+      expect(iframeInlineResponse.headers()['content-security-policy']).toContain(
+        "object-src 'self'"
+      );
 
       await expect(page.getByTestId('document-detail-title')).toHaveText(pdfTitle);
       await expect(page.getByTestId('detail-scan-status-badge')).toContainText(
@@ -370,7 +397,36 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
         DOWNLOAD_DEVICE_RETENTION_NOTICE_AR
       );
       await expect(page.getByTestId('detail-sha256')).toContainText(pdfHash);
-      await expect(page.getByTestId('document-preview-iframe')).toBeVisible();
+
+      const previewIframe = page.getByTestId('document-preview-iframe');
+      await expect(previewIframe).toBeVisible();
+      await expect(previewIframe).toHaveAttribute(
+        'src',
+        new RegExp(`/api/documents/${pdfDocId}/content\\?disposition=inline`)
+      );
+      const iframeHandle = await previewIframe.elementHandle();
+      const contentFrame = await iframeHandle?.contentFrame();
+      expect(contentFrame).not.toBeNull();
+
+      const pdfViewerEnabled = await page.evaluate(() => navigator.pdfViewerEnabled);
+      if (pdfViewerEnabled) {
+        await expect
+          .poll(() => contentFrame!.url())
+          .toContain(`/api/documents/${pdfDocId}/content?disposition=inline`);
+        expect(contentFrame!.url()).not.toContain('chrome-error://');
+      } else {
+        const inlineDownload = await inlineDownloadPromise;
+        expect(inlineDownload, 'Headless shell without PDFium should receive the unblocked 200 inline PDF').not.toBeNull();
+        expect(inlineDownload!.url()).toContain(`/api/documents/${pdfDocId}/content?disposition=inline`);
+        await inlineDownload!.cancel().catch(() => {});
+      }
+
+      page.off('console', onConsole);
+      expect(
+        frameConsoleErrors.filter((msg) =>
+          /x-frame-options|refused to display|content security policy/i.test(msg)
+        )
+      ).toEqual([]);
 
       // Verify no raw objectKey or filesystem path leaked
       const detailText = await page.getByTestId('document-detail-view').innerText();
@@ -383,11 +439,9 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       );
       expect(inlineRes.status()).toBe(200);
       expect(inlineRes.headers()['content-disposition']).toContain('inline');
+      expect(inlineRes.headers()['x-frame-options']).toBe('SAMEORIGIN');
       expect(inlineRes.headers()['content-security-policy']).toContain("frame-ancestors 'self'");
-      const xfo = inlineRes.headers()['x-frame-options'];
-      if (xfo && xfo.toUpperCase() === 'DENY') {
-        console.warn('[T11 OBSERVATION] /api/documents/[id]/content carries X-Frame-Options: DENY from next.config.ts');
-      }
+      expect(inlineRes.headers()['content-security-policy']).toContain("object-src 'self'");
 
       const downloadRes = await page.request.get(
         `/api/documents/${pdfDocId}/content?disposition=attachment`
