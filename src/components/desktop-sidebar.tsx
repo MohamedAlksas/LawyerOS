@@ -5,7 +5,6 @@ import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 import { signOutAndReset } from '@/lib/auth-client';
 import {
-  IconBell,
   IconCalendar,
   IconDashboard,
   IconDeadline,
@@ -49,7 +48,6 @@ export function DesktopSidebar() {
 
   const isHomeActive = pathname === '/';
   const isTodayActive = pathname === '/today' || pathname.startsWith('/today/');
-  const isInboxActive = pathname === '/inbox' || pathname.startsWith('/inbox/');
   const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
   const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
   const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
@@ -91,16 +89,6 @@ export function DesktopSidebar() {
           >
             <IconToday className={`w-5 h-5 shrink-0 ${isTodayActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
             <span>أجندة اليوم</span>
-          </Link>
-
-          <Link
-            href="/inbox"
-            data-testid="nav-link-inbox"
-            aria-current={isInboxActive ? 'page' : undefined}
-            className={navItemClass(isInboxActive)}
-          >
-            <IconBell className={`w-5 h-5 shrink-0 ${isInboxActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
-            <span>صندوق التنبيهات</span>
           </Link>
 
           <Link

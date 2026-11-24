@@ -3,22 +3,30 @@
 import React from 'react';
 import { GuardedLink as Link } from './navigation-guard';
 import { UserIdentityBadge } from './user-identity-badge';
+import { HeaderNotificationsMenu } from './reminders/header-notifications-menu';
 
 interface AppHeaderProps {
   onToggleDrawer: () => void;
   isDrawerOpen: boolean;
   drawerTriggerRef?: React.RefObject<HTMLButtonElement | null>;
   user?: { name?: string; email?: string } | null;
+  showNotifications?: boolean;
 }
 
-export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef, user }: AppHeaderProps) {
+export function AppHeader({
+  onToggleDrawer,
+  isDrawerOpen,
+  drawerTriggerRef,
+  user,
+  showNotifications = false,
+}: AppHeaderProps) {
   return (
     <header
       role="banner"
       data-testid="app-header"
-      className="relative z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-6 py-2 flex items-center justify-between gap-[8px] sm:gap-4 min-h-[64px] max-w-full overflow-hidden"
+      className="relative z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-6 py-2 flex flex-wrap items-center justify-between gap-[8px] sm:gap-4 min-h-[64px] max-w-full overflow-visible"
     >
-      <div className="flex flex-1 items-center gap-[8px] sm:gap-3 min-w-0">
+      <div className="flex shrink-0 max-w-full items-center gap-[8px] sm:gap-3 min-w-0">
         {/* Mobile / Tablet Drawer Toggle Button */}
         <button
           ref={drawerTriggerRef}
@@ -59,7 +67,8 @@ export function AppHeader({ onToggleDrawer, isDrawerOpen, drawerTriggerRef, user
         </Link>
       </div>
 
-      <div className="flex min-w-0 max-w-[44%] items-center">
+      <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2 shrink-0 ms-auto">
+        <HeaderNotificationsMenu enabled={Boolean(showNotifications)} />
         <UserIdentityBadge user={user} />
       </div>
     </header>
