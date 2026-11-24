@@ -408,6 +408,8 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
 
       await maintPage.goto('/inbox');
       await expect(maintPage.getByRole('heading', { level: 1 })).toHaveText('وصول مرفوض');
+      await expect(maintPage.getByTestId('app-header')).toBeVisible();
+      await expect(maintPage.getByTestId('header-notifications-button')).toHaveCount(0);
 
       const maintInboxApi = await maintPage.request.get('/api/reminders/inbox');
       expect(maintInboxApi.status()).toBe(403);
@@ -697,6 +699,142 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
         deadlineIds: localDeadlineIds,
         deliveryIds: localDeliveryIds,
         jobIds: localJobIds,
+      });
+    }
+  });
+
+  test('Header notification bell popover replaces sidebar link, marks read, links to /inbox, and stays within viewport at 390/768/1440px @t10 @inbox @responsive', async ({
+    page,
+  }, testInfo) => {
+    const width = testInfo.project.use.viewport?.width ?? 1440;
+    const tag = `${runId}-hdr-${width}`;
+    const localMatterIds: string[] = [];
+    const localDeadlineIds: string[] = [];
+    const localDeliveryIds: string[] = [];
+
+    try {
+      const matter = await prisma.matter.create({
+        data: {
+          fileCode: `LO-2027-${tag}`,
+          title: `ملف جرس التنبيهات ${tag}`,
+          kind: 'LITIGATION',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localMatterIds.push(matter.id);
+
+      const proceeding = await prisma.proceeding.create({
+        data: {
+          matterId: matter.id,
+          courtId: testCourtId,
+          instance: 'FIRST_INSTANCE',
+          numberText: `888-${width}`,
+          yearLabel: '2027',
+          registerType: 'مدني كلي',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+
+      const deadline = await prisma.deadline.create({
+        data: {
+          matterId: matter.id,
+          proceedingId: proceeding.id,
+          title: `موعد تذكير الجرس ${tag}`,
+          dueDate: new Date('2027-09-10T00:00:00.000Z'),
+          source: 'قرار المحكمة',
+          basisNotes: 'اختبار قائمة الهيدر',
+          status: 'CONFIRMED',
+          confirmedById: owner.id,
+          confirmedByName: owner.name,
+          confirmedAt: new Date(),
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localDeadlineIds.push(deadline.id);
+
+      const sentDelivery = await prisma.reminderDelivery.create({
+        data: {
+          sourceType: 'Deadline',
+          sourceId: deadline.id,
+          sourceVersion: 1,
+          ruleKey: 'offset_1',
+          scheduledAt: new Date('2027-09-09T06:00:00.000Z'),
+          channel: 'IN_APP',
+          recipientUserId: owner.id,
+          status: 'SENT',
+          title: `تذكير عبر الجرس — ${matter.fileCode}`,
+          body: `${deadline.title} • ${matter.title}`,
+          matterId: matter.id,
+          deliveredAt: new Date('2027-09-09T06:00:05.000Z'),
+          readAt: null,
+        },
+      });
+      localDeliveryIds.push(sentDelivery.id);
+
+      await signInWithTotp(page, owner);
+      await page.goto('/today');
+      await expectShellReady(page);
+
+      // Sidebar/drawer must no longer contain nav-link-inbox
+      await expect(page.getByTestId('nav-link-inbox')).toHaveCount(0);
+      if (width < 1024) {
+        await page.getByTestId('drawer-toggle-button').click();
+        const drawer = page.getByTestId('tablet-drawer');
+        await expect(drawer).toBeVisible();
+        await expect(drawer.getByTestId('nav-link-inbox')).toHaveCount(0);
+        await page.getByTestId('drawer-close-button').click();
+        await expect(drawer).toHaveCount(0);
+      }
+
+      const bellButton = page.getByTestId('header-notifications-button');
+      await expect(bellButton).toBeVisible();
+      await expect(page.getByTestId('header-notifications-badge')).toHaveText('1');
+
+      await bellButton.click();
+      const popover = page.getByTestId('header-notifications-popover');
+      await expect(popover).toBeVisible();
+      await expect(page.getByTestId(`header-notification-item-${sentDelivery.id}`)).toBeVisible();
+
+      // Zero horizontal overflow while popover is open at 390/768/1440px
+      await expectNoPageOverflow(page);
+      const popoverBox = await popover.boundingBox();
+      expect(popoverBox).not.toBeNull();
+      expect(popoverBox!.x).toBeGreaterThanOrEqual(-1);
+      expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(width + 1);
+
+      // Mark read directly from the header popover
+      await page.getByTestId(`header-notification-read-${sentDelivery.id}`).click();
+      await expect(page.getByTestId(`header-notification-read-${sentDelivery.id}`)).toHaveCount(0);
+      await expect(page.getByTestId('header-notifications-badge')).toHaveCount(0);
+
+      const persisted = await prisma.reminderDelivery.findUniqueOrThrow({
+        where: { id: sentDelivery.id },
+      });
+      expect(persisted.status).toBe('SENT');
+      expect(persisted.readAt).not.toBeNull();
+
+      // Escape closes the popover and returns focus to bell button
+      await page.keyboard.press('Escape');
+      await expect(popover).toHaveCount(0);
+      await expect(bellButton).toBeFocused();
+
+      // Settings footer link inside popover still navigates to /inbox
+      await bellButton.click();
+      await expect(popover).toBeVisible();
+      await page.getByTestId('header-notifications-settings-link').click();
+      await expect(page).toHaveURL(/\/inbox$/);
+      await expect(popover).toHaveCount(0);
+    } finally {
+      await cleanupScopedT10Data({
+        ownerIds: [owner.id],
+        matterIds: localMatterIds,
+        deadlineIds: localDeadlineIds,
+        deliveryIds: localDeliveryIds,
       });
     }
   });

@@ -24,7 +24,7 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'expired' | 'unavailable'>('checking');
-  const [viewUser, setViewUser] = useState<{ name?: string; email?: string } | null>(null);
+  const [viewUser, setViewUser] = useState<{ name?: string; email?: string; role?: UserRole } | null>(null);
   const [refreshingSession, startSessionRefresh] = useTransition();
   const privateViewRef = useRef<HTMLDivElement>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -138,7 +138,7 @@ export function AppShell({ children }: AppShellProps) {
         if (!response.ok) throw new Error('Session check unavailable');
         const session: ViewSession = await response.json();
         if (request.signal.aborted) return;
-        setViewUser({ name: session.name, email: session.email });
+        setViewUser({ name: session.name, email: session.email, role: session.role });
         const previous = sessionRef.current;
         sessionRef.current = session;
         if (previous && (previous.actorId !== session.actorId || previous.role !== session.role || previous.sessionId !== session.sessionId)) {
@@ -259,6 +259,7 @@ export function AppShell({ children }: AppShellProps) {
             isDrawerOpen={isDrawerOpen}
             drawerTriggerRef={triggerRef}
             user={viewUser}
+            showNotifications={sessionStatus === 'ready' && viewUser?.role !== 'MAINTAINER'}
           />
         </div>
 
