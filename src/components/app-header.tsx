@@ -24,9 +24,9 @@ export function AppHeader({
     <header
       role="banner"
       data-testid="app-header"
-      className="relative z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-6 py-2 flex items-center justify-between gap-[8px] sm:gap-4 min-h-[64px] max-w-full overflow-visible"
+      className="relative z-20 bg-white border-b border-[#D5DFE3] px-[12px] sm:px-6 py-2 flex flex-wrap items-center justify-between gap-[8px] sm:gap-4 min-h-[64px] max-w-full overflow-visible"
     >
-      <div className="flex flex-1 items-center gap-[8px] sm:gap-3 min-w-0">
+      <div className="flex shrink-0 max-w-full items-center gap-[8px] sm:gap-3 min-w-0">
         {/* Mobile / Tablet Drawer Toggle Button */}
         <button
           ref={drawerTriggerRef}
@@ -67,7 +67,7 @@ export function AppHeader({
         </Link>
       </div>
 
-      <div className="flex min-w-0 max-w-[52%] sm:max-w-none items-center gap-1.5 sm:gap-2">
+      <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2 shrink-0 ms-auto">
         <HeaderNotificationsMenu enabled={Boolean(showNotifications)} />
         <UserIdentityBadge user={user} />
       </div>
