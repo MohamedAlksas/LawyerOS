@@ -1,4 +1,6 @@
 import {
+  ALLOWED_DOCUMENT_EXTENSIONS,
+  ALLOWED_DOCUMENT_MIMES,
   DOCUMENT_TYPE_LABELS_AR,
   DOWNLOAD_DEVICE_RETENTION_NOTICE_AR,
   DocumentOriginalPresence,
@@ -126,16 +128,28 @@ export function formatFileSizeArabic(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} ميجابايت`;
 }
 
+export const MAX_DOCUMENT_TITLE_LENGTH = 200;
+
+export function clampTitle(value: string): string {
+  return value.slice(0, MAX_DOCUMENT_TITLE_LENGTH).replace(/[\uD800-\uDBFF]$/, '').trim();
+}
+
 export function suggestTitleFromFilename(filename: string): string {
   const withoutExt = filename.replace(/\.[^./\\]+$/, '');
   const cleaned = withoutExt.replace(/_+/g, ' ').trim();
-  return cleaned || filename.trim() || 'مستند جديد';
+  return clampTitle(cleaned || filename.trim()) || 'مستند جديد';
 }
+
+const LEGACY_MIME_ALIASES: Record<string, string> = {
+  'image/jpg': 'image/jpeg',
+  'image/pjpeg': 'image/jpeg',
+  'image/x-png': 'image/png',
+};
 
 export function resolveDeclaredMime(file: File): string {
   const explicit = file.type?.trim().toLowerCase();
-  if (explicit) {
-    return explicit;
+  if (explicit && explicit !== 'application/octet-stream') {
+    return LEGACY_MIME_ALIASES[explicit] ?? explicit;
   }
   const lower = file.name.toLowerCase();
   if (lower.endsWith('.pdf')) return 'application/pdf';
@@ -144,17 +158,30 @@ export function resolveDeclaredMime(file: File): string {
   return 'application/octet-stream';
 }
 
-export function isPreviewableImageFile(file: File): boolean {
-  const mime = file.type?.trim().toLowerCase();
-  if (mime === 'image/jpeg' || mime === 'image/png') return true;
+/** Returns an Arabic rejection reason, or null when the file may be sent to the server. */
+export function validateClientFile(file: File): string | null {
+  if (file.size === 0) return 'الملف فارغ (0 بايت) ولا يمكن رفعه.';
+  if (file.size > MAX_DOCUMENT_BYTES) {
+    return 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).';
+  }
   const lower = file.name.toLowerCase();
-  return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png');
+  const extensionAllowed = ALLOWED_DOCUMENT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  const mimeAllowed = (ALLOWED_DOCUMENT_MIMES as readonly string[]).includes(
+    resolveDeclaredMime(file)
+  );
+  if (!extensionAllowed || !mimeAllowed) {
+    return 'صيغة الملف غير مسموحة. الصيغ المسموحة: PDF أو JPEG أو PNG.';
+  }
+  return null;
+}
+
+export function isPreviewableImageFile(file: File): boolean {
+  const mime = resolveDeclaredMime(file);
+  return mime === 'image/jpeg' || mime === 'image/png';
 }
 
 export function isPdfFile(file: File): boolean {
-  const mime = file.type?.trim().toLowerCase();
-  if (mime === 'application/pdf') return true;
-  return file.name.toLowerCase().endsWith('.pdf');
+  return resolveDeclaredMime(file) === 'application/pdf';
 }
 
 export function formatCairoInstantArabic(isoString?: string | null): string {

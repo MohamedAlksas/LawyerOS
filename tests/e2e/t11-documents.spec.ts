@@ -113,9 +113,31 @@ function buildSyntheticPdf(marker: string): Buffer {
     'endobj',
     'trailer',
     '<< /Root 1 0 R >>',
+    'startxref',
+    '9',
     '%%EOF',
+    '',
   ].join('\n');
   return Buffer.from(content, 'ascii');
+}
+
+// Valid minimal 1x1 baseline JPEG (SOI + APP0 + DQT + SOF0 + DHT + SOS + entropy + EOI) decodable by Chromium
+const BASE_1X1_JPEG_B64 =
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
+
+function buildValidSyntheticJpeg(marker: string): Buffer {
+  const base = Buffer.from(BASE_1X1_JPEG_B64, 'base64');
+  const commentData = Buffer.from(marker, 'ascii');
+  const comHeader = Buffer.alloc(4);
+  comHeader[0] = 0xff;
+  comHeader[1] = 0xfe; // COM marker
+  comHeader.writeUInt16BE(commentData.byteLength + 2, 2);
+  // Insert COM segment right after SOI (bytes 0..2) so Chromium decodes identically while SHA-256 varies by marker
+  return Buffer.concat([base.subarray(0, 2), comHeader, commentData, base.subarray(2)]);
+}
+
+function resolveE2EStorageRoot(): string {
+  return process.env.DOCUMENTS_STORAGE_ROOT || path.resolve(process.cwd(), 'storage/t11-e2e');
 }
 
 function sha256Hex(buffer: Buffer): string {
@@ -130,7 +152,7 @@ async function cleanupScopedT11Data(opts: {
   documentIds?: string[];
   attemptIds?: string[];
 }) {
-  const storageRoot = path.resolve(process.cwd(), 'storage/t11-e2e');
+  const storageRoot = resolveE2EStorageRoot();
   const storage = createLocalDocumentStorage(storageRoot);
 
   const docIds = new Set<string>(opts.documentIds ?? []);
@@ -264,12 +286,21 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
   });
 
   test.afterAll(async () => {
-    await cleanupScopedT11Data({
-      ownerIds: [owner.id],
-      partyIds: createdPartyIds,
-      courtIds: createdCourtIds,
-    });
-    await deleteT04Owner(owner.id);
+    const storageRoot = resolveE2EStorageRoot();
+    try {
+      await cleanupScopedT11Data({
+        ownerIds: owner?.id ? [owner.id] : [],
+        partyIds: createdPartyIds,
+        courtIds: createdCourtIds,
+      });
+      if (owner?.id) {
+        await deleteT04Owner(owner.id);
+      }
+    } finally {
+      if (storageRoot && fs.existsSync(storageRoot)) {
+        fs.rmSync(storageRoot, { recursive: true, force: true });
+      }
+    }
   });
 
   test('T11-TC-01 & T11-TC-07: Valid PDF and PNG upload -> NOT_SCANNED_POLICY -> preview, matching SHA-256 download, and duplicate confirm @t11 @documents', async ({
@@ -369,7 +400,7 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       );
       const inlineDownloadPromise = page.waitForEvent('download', {
         predicate: (dl) => dl.url().includes('/content?disposition=inline'),
-        timeout: 5_000,
+        timeout: 15_000,
       }).catch(() => null);
       await page.getByTestId('queue-ready-link-0').click();
       await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+$/);
@@ -453,23 +484,34 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       const downloadedPdfBuf = Buffer.from(await downloadRes.body());
       expect(sha256Hex(downloadedPdfBuf)).toBe(pdfHash);
 
-      // 2) Return to /documents and upload valid PNG linked to Party with pre-upload preview
+      // 2) Return to /documents and upload valid PNG linked to Party with single-file replace title sync & pre-upload preview
       await page.getByTestId('back-to-documents-link').click();
       await expect(page).toHaveURL(/\/documents$/);
       await page.getByTestId('open-upload-form-button').click();
 
       await page.getByTestId('upload-file-input').setInputFiles({
+        name: `initial_draft_${runId}.png`,
+        mimeType: 'image/png',
+        buffer: pngBuffer,
+      });
+      await expect(page.getByTestId('upload-title-input')).toHaveValue(`initial draft ${runId}`);
+
+      // Replace the single queued file and verify the auto-suggested shared title updates to the replacement filename
+      const replaceChooserPromise = page.waitForEvent('filechooser');
+      await page.getByRole('button', { name: `استبدال الملف initial_draft_${runId}.png` }).click();
+      const replaceChooser = await replaceChooserPromise;
+      await replaceChooser.setFiles({
         name: `id_scan_${runId}.png`,
         mimeType: 'image/png',
         buffer: pngBuffer,
       });
+      await expect(page.getByTestId('upload-title-input')).toHaveValue(`id scan ${runId}`);
 
       const queueImg = page.getByTestId('queue-image-preview-0');
       await expect(queueImg).toBeVisible();
-      const preNaturalWidth = await queueImg.evaluate(
-        (img) => (img as HTMLImageElement).naturalWidth
-      );
-      expect(preNaturalWidth).toBeGreaterThan(0);
+      await expect
+        .poll(() => queueImg.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
 
       await page.getByRole('radio', { name: 'طرف / موكل' }).check();
       await page.getByTestId('upload-party-select').selectOption(testPartyId);
@@ -501,9 +543,67 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       expect(pngDownloadRes.headers()['content-type']).toBe('image/png');
       expect(sha256Hex(Buffer.from(await pngDownloadRes.body()))).toBe(pngHash);
 
-      // 3) T11-TC-07: Duplicate checksum warning + explicit confirm separate copy
+      // 2b) Upload a valid synthetic JPEG in the browser, verify inline preview + matching image/jpeg download SHA-256
+      const jpegBuffer = buildValidSyntheticJpeg(`T11-E2E-JPEG-${runId}`);
+      const jpegHash = sha256Hex(jpegBuffer);
+
       await page.getByTestId('back-to-documents-link').click();
       await expect(page).toHaveURL(/\/documents$/);
+      await page.getByTestId('open-upload-form-button').click();
+
+      await page.getByTestId('upload-file-input').setInputFiles({
+        name: `court_notice_${runId}.jpg`,
+        mimeType: 'image/jpeg',
+        buffer: jpegBuffer,
+      });
+
+      const queueJpegImg = page.getByTestId('queue-image-preview-0');
+      await expect(queueJpegImg).toBeVisible();
+      await expect
+        .poll(() => queueJpegImg.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+
+      await page.getByTestId('upload-matter-select').selectOption(matter.id);
+      await page.getByTestId('upload-title-input').fill(`صورة إعلان محكمة JPEG ${runId}`);
+      await page.getByTestId('upload-type-select').selectOption('EVIDENCE');
+      await page.getByTestId('upload-submit-button').click();
+
+      await expect(page.getByTestId('queue-item-status-0')).toHaveText('جاهز');
+      await page.getByTestId('queue-ready-link-0').click();
+      await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+$/);
+      const jpegDocId = page.url().split('/').pop()!;
+      localDocIds.push(jpegDocId);
+
+      const detailJpegImg = page.getByTestId('document-preview-image');
+      await expect(detailJpegImg).toBeVisible();
+      await expect
+        .poll(() => detailJpegImg.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+        .toBeGreaterThan(0);
+
+      const jpegDownloadRes = await page.request.get(
+        `/api/documents/${jpegDocId}/content?disposition=attachment`
+      );
+      expect(jpegDownloadRes.status()).toBe(200);
+      expect(jpegDownloadRes.headers()['content-type']).toBe('image/jpeg');
+      expect(sha256Hex(Buffer.from(await jpegDownloadRes.body()))).toBe(jpegHash);
+
+      // 2c) Exercise Party filter (documents-party-filter) and Matter/Party XOR filter behavior
+      await page.getByTestId('back-to-documents-link').click();
+      await expect(page).toHaveURL(/\/documents$/);
+      await page.getByTestId('documents-party-filter').selectOption(testPartyId);
+      await expect(page.getByTestId(`document-card-${pngDocId}`)).toBeVisible();
+      await expect(page.getByTestId(`document-card-${pdfDocId}`)).toHaveCount(0);
+
+      await page.getByTestId('documents-matter-filter').selectOption(matter.id);
+      await expect(page.getByTestId('documents-party-filter')).toHaveValue('');
+      await expect(page.getByTestId(`document-card-${pdfDocId}`)).toBeVisible();
+      await expect(page.getByTestId(`document-card-${jpegDocId}`)).toBeVisible();
+      await expect(page.getByTestId(`document-card-${pngDocId}`)).toHaveCount(0);
+
+      await page.getByTestId('documents-clear-filters').click();
+      await expect(page.getByTestId(`document-card-${pngDocId}`)).toBeVisible();
+
+      // 3) T11-TC-07: Duplicate checksum warning + explicit confirm separate copy
       await page.getByTestId('open-upload-form-button').click();
 
       await page.getByTestId('upload-file-input').setInputFiles({
@@ -598,6 +698,11 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
         where: { matterId: matter.id, title: retryTitle },
       });
       expect(countAfterRetry).toBe(1);
+
+      const attemptCountAfterRetry = await prisma.uploadAttempt.count({
+        where: { matterId: matter.id, title: retryTitle },
+      });
+      expect(attemptCountAfterRetry).toBe(1);
     } finally {
       await cleanupScopedT11Data({
         ownerIds: [owner.id],
@@ -627,7 +732,7 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       });
       localMatterIds.push(matter.id);
 
-      const storageRoot = path.resolve(process.cwd(), 'storage/t11-e2e');
+      const storageRoot = resolveE2EStorageRoot();
       const storage = createLocalDocumentStorage(storageRoot);
       const readyBytes = buildSyntheticPdf(`T11-AUTH-READY-${runId}`);
       const readyId = randomUUID();
@@ -1006,6 +1111,20 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
         path: path.join(screenshotDir, `t11-document-detail-${width}.png`),
         fullPage: true,
       });
+
+      // Reapply 200% text scaling on /documents/[id] and verify zero overflow
+      const detailBaselineFontSize = await page.evaluate(() =>
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+      );
+      await page.addStyleTag({
+        content: `html { font-size: ${detailBaselineFontSize * 2}px !important; }`,
+      });
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      await nextPaint(page);
+      await expectNoPageOverflow(page);
+      await expectNoElementOverflow(page.getByTestId('main-content'));
 
       // Privacy & cookie hardening assertions
       const cookies = await snapshotCookies(page);

@@ -21,6 +21,17 @@ function normalizeForComparison(targetPath: string): string {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+/** lstat (not existsSync) so dangling symlinks count as existing and fail realpath below. */
+function pathEntryExists(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new DocumentStoragePathError('تعذر التحقق من المسار الحقيقي لمجلد التخزين.');
+  }
+}
+
 /**
  * Resolves symlinks along the deepest existing ancestor of `targetPath`
  * so symlinked roots or parent directories cannot escape security boundaries.
@@ -30,7 +41,7 @@ function resolveRealPathWithSuffix(targetPath: string): string {
   const trailingSegments: string[] = [];
   let cursor = resolved;
 
-  while (!fs.existsSync(cursor)) {
+  while (!pathEntryExists(cursor)) {
     const parent = path.dirname(cursor);
     if (parent === cursor) {
       return resolved;
@@ -51,12 +62,18 @@ function resolveRealPathWithSuffix(targetPath: string): string {
     : realBase;
 }
 
+/** True when el (from path.relative) stays inside its base; a segment merely starting with .. (e.g. ..uploads) is inside. */
+function isRelInside(rel: string, allowSame: boolean): boolean {
+  if (rel === '') return allowSame;
+  return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+}
+
 function isSameOrInside(candidate: string, forbiddenDir: string): boolean {
   const rel = path.relative(
     normalizeForComparison(forbiddenDir),
     normalizeForComparison(candidate)
   );
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return isRelInside(rel, true);
 }
 
 export function resolveSafeStorageRoot(overrideRoot?: string): string {
@@ -134,7 +151,7 @@ export function resolveSafeKeyPath(baseDir: string, key: string): string {
     normalizeForComparison(resolvedTarget)
   );
 
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (!isRelInside(rel, false)) {
     throw new DocumentStoragePathError('تم رفض محاولة الخروج عن مسار التخزين الخاص.');
   }
 
@@ -144,7 +161,7 @@ export function resolveSafeKeyPath(baseDir: string, key: string): string {
     normalizeForComparison(realBase),
     normalizeForComparison(realTarget)
   );
-  if (!realRel || realRel.startsWith('..') || path.isAbsolute(realRel)) {
+  if (!isRelInside(realRel, false)) {
     throw new DocumentStoragePathError('تم رفض محاولة الخروج عن مسار التخزين الخاص عبر رابط رمزي.');
   }
 
@@ -178,6 +195,18 @@ export interface DocumentStorageAdapter {
   stat(zone: 'quarantine' | 'ready', key: string): Promise<{ sizeBytes: number } | null>;
   deleteQuarantine(quarantineKey: string): Promise<boolean>;
   deleteReady(readyKey: string): Promise<boolean>;
+}
+
+/** FileHandle.write may write fewer bytes than requested; loop until the whole buffer is written. */
+async function writeAll(handle: fs.promises.FileHandle, buf: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < buf.byteLength) {
+    const { bytesWritten } = await handle.write(buf, offset, buf.byteLength - offset);
+    if (bytesWritten <= 0) {
+      throw new DocumentStoragePathError('تعذر كتابة الملف كاملاً في التخزين الخاص.');
+    }
+    offset += bytesWritten;
+  }
 }
 
 function normalizeCanonicalExt(ext: string): string {
@@ -269,7 +298,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
               'PAYLOAD_TOO_LARGE'
             );
           }
-          await handle.write(buf);
+          await writeAll(handle, buf);
           hash.update(buf);
           bytesWritten = buf.byteLength;
         } else {
@@ -287,7 +316,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
                 'PAYLOAD_TOO_LARGE'
               );
             }
-            await handle.write(buf);
+            await writeAll(handle, buf);
             hash.update(buf);
           }
 
@@ -352,7 +381,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       let handle: fs.promises.FileHandle | null = null;
       try {
         handle = await fs.promises.open(tempPartPath, 'w');
-        await handle.write(bytes);
+        await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
         handle = null;

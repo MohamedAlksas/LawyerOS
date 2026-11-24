@@ -46,3 +46,11 @@ export async function GET(
     return documentHttpErrorResponse(error);
   }
 }
+
+// HEAD must not run the download audit or open a file stream.
+export function HEAD() {
+  return new NextResponse(null, {
+    status: 405,
+    headers: { Allow: 'GET', 'Cache-Control': 'private, no-store' },
+  });
+}

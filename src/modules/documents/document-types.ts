@@ -144,6 +144,7 @@ export class DocumentStoragePathError extends Error {
 
 export type DocumentErrorCode =
   | 'VALIDATION_ERROR'
+  | 'PAYLOAD_TOO_LARGE'
   | 'NOT_FOUND'
   | 'DOCUMENT_NOT_READY'
   | 'CROSS_MATTER_LINK_FORBIDDEN'

@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import type { Readable } from 'node:stream';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient, type UploadAttemptStatus } from '@prisma/client';
 import { z } from 'zod';
 import { getPrismaClient } from '@/lib/auth';
-import { recordAuditEvent } from '@/lib/audit';
+import { recordAuditEvent, sanitizeAuditPayload } from '@/lib/audit';
 import { formatUtcDateToIsoDate, parseCalendarDateToUtcDate } from '@/lib/cairo-date';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
 import {
@@ -29,7 +29,6 @@ import {
   type DocumentStorageSource,
 } from './document-storage';
 import {
-  ADR_0003_POLICY_CODE,
   ALLOWED_DOCUMENT_MIMES,
   ConcurrencyConflictError,
   CrossMatterLinkForbiddenError,
@@ -215,7 +214,8 @@ type DocumentWithRelations = Prisma.DocumentGetPayload<{
   };
 }>;
 
-const documentInclude = {
+/** List rows need the current version only; skip loading every version of every document. */
+const documentListInclude = {
   matter: { select: { id: true, fileCode: true, title: true } },
   party: { select: { id: true, name: true } },
   proceeding: {
@@ -228,6 +228,10 @@ const documentInclude = {
   },
   hearing: { select: { id: true, hearingDate: true } },
   currentVersion: true,
+} satisfies Prisma.DocumentInclude;
+
+const documentInclude = {
+  ...documentListInclude,
   versions: {
     orderBy: { versionNumber: 'desc' as const },
   },
@@ -260,7 +264,10 @@ function mapVersionToDTO(ver: DocumentVersionRow): DocumentVersionDTO {
   };
 }
 
-function mapDocumentToDTO(doc: DocumentWithRelations, includeVersions = true): DocumentDTO {
+function mapDocumentToDTO(
+  doc: Omit<DocumentWithRelations, 'versions'> & { versions?: DocumentVersionRow[] },
+  includeVersions = true
+): DocumentDTO {
   return {
     id: doc.id,
     matterId: doc.matterId,
@@ -429,13 +436,80 @@ function buildContentDisposition(
   const safeBase = originalFilename
     .replace(/[\r\n\u0000-\u001f\u007f"/\\;]/g, '_')
     .trim();
-  const asciiFallback =
-    safeBase.replace(/[^\x20-\x7e]/g, '_').replace(/^_+|_+$/g, '') || 'document';
+  const dot = safeBase.lastIndexOf('.');
+  const stem = dot > 0 ? safeBase.slice(0, dot) : safeBase;
+  const ext = dot > 0 ? safeBase.slice(dot).replace(/[^A-Za-z0-9.]/g, '') : '';
+  const asciiStem = stem.replace(/[^\x20-\x7e]/g, '_').replace(/^[_ ]+|[_ ]+$/g, '');
+  const asciiFallback = `${/[A-Za-z0-9]/.test(asciiStem) ? asciiStem : 'document'}${ext}`;
   const encodedUtf8 = encodeURIComponent(safeBase || 'document').replace(
     /['()*!]/g,
     (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
   );
   return `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encodedUtf8}`;
+}
+
+/** Attempt states that may still receive bytes and be expired/failed/rejected by an upload or cleanup. */
+const OPEN_UPLOAD_STATUSES: UploadAttemptStatus[] = ['INITIATED', 'UPLOADED', 'FAILED'];
+
+/**
+ * Moves an open attempt to a terminal state, and unlinks its quarantine file ONLY when this call
+ * made the transition, so a late failing upload can never delete bytes out from under a
+ * concurrent VALIDATING finalize (or a FINALIZED/REJECTED attempt).
+ */
+async function closeOpenAttempt(
+  db: PrismaClient,
+  storage: DocumentStorageAdapter,
+  attempt: { id: string; quarantineKey: string },
+  data: Prisma.UploadAttemptUpdateManyMutationInput
+): Promise<boolean> {
+  const res = await db.uploadAttempt.updateMany({
+    where: { id: attempt.id, status: { in: OPEN_UPLOAD_STATUSES } },
+    data,
+  });
+  if (res.count > 0) {
+    await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+  }
+  return res.count > 0;
+}
+
+const EXPIRED_ATTEMPT_REASON_AR = 'انتهت صلاحية محاولة الرفع.';
+
+async function loadOwnedAttempt(db: PrismaClient, actor: Actor, attemptId: string) {
+  const attempt = await db.uploadAttempt.findUnique({ where: { id: attemptId } });
+  if (!attempt) {
+    throw new DocumentNotFoundError('محاولة الرفع غير موجودة.');
+  }
+  if (attempt.actorId !== actor.id && actor.role !== 'OWNER') {
+    assertAuthorized(actor, 'MANAGE_SECURITY');
+  }
+  return attempt;
+}
+
+/**
+ * Records an oversized `Content-Length` pre-check as a REJECTED attempt (same state a streamed
+ * oversize produces) and throws the 413 `PAYLOAD_TOO_LARGE` validation error.
+ */
+export async function rejectOversizedUpload(
+  actor: Actor,
+  attemptId: string,
+  options?: DocumentServiceOptions
+): Promise<never> {
+  assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
+  const validAttemptId = assertUuidOrThrow(attemptId, 'محاولة الرفع');
+  const db = getDb(options);
+  const attempt = await loadOwnedAttempt(db, actor, validAttemptId);
+  const err = new DocumentValidationError(
+    'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+    { file: 'حجم الملف يتجاوز 25 ميجابايت' },
+    'PAYLOAD_TOO_LARGE'
+  );
+  await closeOpenAttempt(db, getStorage(options), attempt, {
+    status: 'REJECTED',
+    bytesWritten: 0,
+    sha256: null,
+    failureReason: toSafeFailureReason(err),
+  });
+  throw err;
 }
 
 export async function beginUpload(
@@ -600,25 +674,9 @@ export async function uploadAttemptBytes(
   const storage = getStorage(options);
   const now = options?.now ?? new Date();
 
-  const attempt = await db.uploadAttempt.findUnique({ where: { id: validAttemptId } });
-  if (!attempt) {
-    throw new DocumentNotFoundError('محاولة الرفع غير موجودة.');
-  }
+  const attempt = await loadOwnedAttempt(db, actor, validAttemptId);
 
-  if (attempt.actorId !== actor.id && actor.role !== 'OWNER') {
-    assertAuthorized(actor, 'MANAGE_SECURITY');
-  }
-
-  if (attempt.status === 'EXPIRED' || attempt.expiresAt.getTime() <= now.getTime()) {
-    if (attempt.status !== 'EXPIRED' && attempt.status !== 'FINALIZED') {
-      await db.uploadAttempt.update({
-        where: { id: attempt.id },
-        data: { status: 'EXPIRED', failureReason: 'انتهت صلاحية محاولة الرفع.' },
-      });
-    }
-    throw new DocumentValidationError('انتهت صلاحية محاولة الرفع. يرجى بدء محاولة رفع جديدة.');
-  }
-
+  // Terminal/in-flight states win over expiry so lazy expiry never overwrites them.
   if (attempt.status === 'FINALIZED') {
     throw new ConcurrencyConflictError('تم اعتماد محاولة الرفع هذه مسبقاً ولا يمكن تعديل بياناتها.');
   }
@@ -633,11 +691,15 @@ export async function uploadAttemptBytes(
     );
   }
 
-  if (
-    attempt.status !== 'INITIATED' &&
-    attempt.status !== 'UPLOADED' &&
-    attempt.status !== 'FAILED'
-  ) {
+  if (attempt.status === 'EXPIRED' || attempt.expiresAt.getTime() <= now.getTime()) {
+    await closeOpenAttempt(db, storage, attempt, {
+      status: 'EXPIRED',
+      failureReason: EXPIRED_ATTEMPT_REASON_AR,
+    });
+    throw new DocumentValidationError('انتهت صلاحية محاولة الرفع. يرجى بدء محاولة رفع جديدة.');
+  }
+
+  if (!OPEN_UPLOAD_STATUSES.includes(attempt.status)) {
     throw new DocumentValidationError('حالة محاولة الرفع لا تسمح باستقبال البيانات حالياً.');
   }
 
@@ -650,22 +712,15 @@ export async function uploadAttemptBytes(
     );
 
     if (written.bytesWritten !== attempt.expectedSizeBytes) {
-      await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
       const mismatchMsg =
         written.bytesWritten < attempt.expectedSizeBytes
           ? 'انقطع الرفع أو لم يكتمل حجم الملف المتوقع في الحجر.'
           : 'حجم البيانات المستلمة لا يطابق الحجم المتوقع للملف.';
-      await db.uploadAttempt.updateMany({
-        where: {
-          id: attempt.id,
-          status: { in: ['INITIATED', 'UPLOADED', 'FAILED'] },
-        },
-        data: {
-          status: 'FAILED',
-          bytesWritten: 0,
-          sha256: null,
-          failureReason: mismatchMsg,
-        },
+      await closeOpenAttempt(db, storage, attempt, {
+        status: 'FAILED',
+        bytesWritten: 0,
+        sha256: null,
+        failureReason: mismatchMsg,
       });
       alreadyRecordedFailure = true;
       throw new DocumentValidationError(mismatchMsg, { file: mismatchMsg });
@@ -674,7 +729,7 @@ export async function uploadAttemptBytes(
     const updatedRes = await db.uploadAttempt.updateMany({
       where: {
         id: attempt.id,
-        status: { in: ['INITIATED', 'UPLOADED', 'FAILED'] },
+        status: { in: OPEN_UPLOAD_STATUSES },
         expiresAt: { gt: now },
       },
       data: {
@@ -696,29 +751,19 @@ export async function uploadAttemptBytes(
       throw err;
     }
 
-    await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
     const isOversized =
       err instanceof DocumentValidationError && err.reasonCode === 'PAYLOAD_TOO_LARGE';
 
-    await db.uploadAttempt
-      .updateMany({
-        where: {
-          id: attempt.id,
-          status: { in: ['INITIATED', 'UPLOADED', 'FAILED'] },
-        },
-        data: {
-          status: isOversized ? 'REJECTED' : 'FAILED',
-          bytesWritten: 0,
-          sha256: null,
-          failureReason: toSafeFailureReason(err),
-        },
-      })
-      .catch(() => {});
+    await closeOpenAttempt(db, storage, attempt, {
+      status: isOversized ? 'REJECTED' : 'FAILED',
+      bytesWritten: 0,
+      sha256: null,
+      failureReason: toSafeFailureReason(err),
+    }).catch(() => false);
 
     throw err;
   }
 }
-
 export async function finalizeUpload(
   actor: Actor,
   input: FinalizeUploadInput,
@@ -782,37 +827,17 @@ export async function finalizeUpload(
     );
   }
 
-  if (attempt.status === 'EXPIRED' || attempt.expiresAt.getTime() <= now.getTime()) {
-    if (attempt.status !== 'EXPIRED') {
-      await db.uploadAttempt.updateMany({
-        where: { id: attempt.id, status: { not: 'FINALIZED' } },
-        data: { status: 'EXPIRED', failureReason: 'انتهت صلاحية محاولة الرفع.' },
-      });
-    }
-    throw new DocumentValidationError('انتهت صلاحية محاولة الرفع. يرجى بدء رفع جديد.');
-  }
-
   if (attempt.status === 'VALIDATING') {
-    if (existingIdem?.status === 'IN_PROGRESS') {
-      const resolved = await resolveConcurrentIdempotency(db, {
-        actorId: actor.id,
-        commandType: 'finalizeDocumentUpload',
-        key: idemKey,
-        payload: payloadForIdempotency,
-      });
-      if (resolved?.resultId) {
-        const existingDoc = await db.document.findUnique({
-          where: { id: resolved.resultId },
-          include: documentInclude,
-        });
-        if (existingDoc) {
-          return mapDocumentToDTO(existingDoc);
-        }
-      }
-    }
     throw new ConcurrencyConflictError('محاولة الرفع قيد التحقق والاعتماد حالياً، يرجى الانتظار.');
   }
 
+  if (attempt.status === 'EXPIRED' || attempt.expiresAt.getTime() <= now.getTime()) {
+    await closeOpenAttempt(db, storage, attempt, {
+      status: 'EXPIRED',
+      failureReason: EXPIRED_ATTEMPT_REASON_AR,
+    });
+    throw new DocumentValidationError('انتهت صلاحية محاولة الرفع. يرجى بدء رفع جديد.');
+  }
   if (attempt.status !== 'UPLOADED' && attempt.status !== 'FAILED') {
     throw new DocumentValidationError(
       'لم يكتمل رفع بيانات الملف إلى الحجر بعد (الرفع غير مكتمل).'
@@ -1111,7 +1136,7 @@ export async function finalizeUpload(
               versionId,
               sha256: inspected.sha256,
               scanStatus: scanPolicy.scanStatus,
-              scanPolicyCode: ADR_0003_POLICY_CODE,
+              scanPolicyCode: scanPolicy.policyCode,
             },
           });
 
@@ -1138,8 +1163,11 @@ export async function finalizeUpload(
 
     statusFinalizedOrReverted = true;
 
+    // Committed: from here no failure may delete the ready/ file this transaction (or its replay winner) owns.
+    const promotedReadyKey = readyKey;
+    readyKey = null;
     if (txResult.isReplay && txResult.documentId !== documentId) {
-      await storage.deleteReady(readyKey).catch(() => false);
+      await storage.deleteReady(promotedReadyKey).catch(() => false);
     } else {
       await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
     }
@@ -1155,19 +1183,17 @@ export async function finalizeUpload(
       await storage.deleteReady(readyKey).catch(() => false);
     }
 
-    const isConflictOrIdempotency =
-      err instanceof ConcurrencyConflictError ||
-      err instanceof IdempotencyPayloadMismatchError ||
-      err instanceof IdempotencyConcurrentConflictError;
-
-    if (!statusFinalizedOrReverted && !isConflictOrIdempotency) {
+    if (!statusFinalizedOrReverted && !(err instanceof ConcurrencyConflictError)) {
+      // Idempotency conflicts say nothing about the bytes: return the attempt to UPLOADED so the caller can retry.
+      const retryable =
+        err instanceof IdempotencyPayloadMismatchError ||
+        err instanceof IdempotencyConcurrentConflictError;
       await db.uploadAttempt
         .updateMany({
           where: { id: attempt.id, status: 'VALIDATING' },
-          data: {
-            status: 'FAILED',
-            failureReason: toSafeFailureReason(err),
-          },
+          data: retryable
+            ? { status: 'UPLOADED' }
+            : { status: 'FAILED', failureReason: toSafeFailureReason(err) },
         })
         .catch(() => {});
     }
@@ -1233,7 +1259,7 @@ export async function authorizeDownload(
       action: 'DOWNLOAD_DOCUMENT',
       entityType: 'Document',
       entityId: doc.id,
-      changedFields: {
+      changedFields: sanitizeAuditPayload({
         versionId: targetVersion.id,
         versionNumber: targetVersion.versionNumber,
         disposition: effectiveDisposition,
@@ -1241,7 +1267,7 @@ export async function authorizeDownload(
         sizeBytes: targetVersion.sizeBytes,
         scanStatus: targetVersion.scanStatus,
         scanPolicyCode: targetVersion.scanPolicyCode,
-      },
+      }),
       requestId: options?.requestId ?? null,
     },
   });
@@ -1313,7 +1339,7 @@ export async function listDocuments(
     db.document.count({ where }),
     db.document.findMany({
       where,
-      include: documentInclude,
+      include: documentListInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       skip,
       take: parsed.limit,
@@ -1374,14 +1400,23 @@ export async function getUploadAttempt(
   return mapUploadAttemptToDTO(attempt);
 }
 
+/** Open + REJECTED, plus EXPIRED (leftover quarantine files) and VALIDATING (crashed finalize) past expiry. */
+const CLEANUP_ATTEMPT_STATUSES: UploadAttemptStatus[] = [
+  ...OPEN_UPLOAD_STATUSES,
+  'REJECTED',
+  'EXPIRED',
+  'VALIDATING',
+];
+
 export async function cleanupExpiredUploadAttempts(
   storage: DocumentStorageAdapter = createLocalDocumentStorage(),
   nowOrOptions?: Date | { now?: Date; gracePeriodMs?: number; prismaOverride?: PrismaClient }
 ): Promise<CleanupExpiredUploadsResult> {
   if (isWorkerDispatchDisabled()) {
+    const restoreMode = isWorkerDispatchDisabled({ RESTORE_MODE: process.env.RESTORE_MODE });
     return {
       skipped: true,
-      reason: 'RESTORE_MODE',
+      reason: restoreMode ? 'RESTORE_MODE' : 'REMINDER_DISPATCH_DISABLED',
       expiredAttemptCount: 0,
       deletedQuarantineCount: 0,
       skippedProtectedCount: 0,
@@ -1415,7 +1450,7 @@ export async function cleanupExpiredUploadAttempts(
 
   let skippedProtectedCount = await db.uploadAttempt.count({
     where: {
-      status: { in: ['INITIATED', 'UPLOADED', 'FAILED', 'REJECTED'] },
+      status: { in: CLEANUP_ATTEMPT_STATUSES },
       expiresAt: { lte: cutoff },
       ...protectedFilter,
     },
@@ -1423,11 +1458,12 @@ export async function cleanupExpiredUploadAttempts(
 
   const candidates = await db.uploadAttempt.findMany({
     where: {
-      status: { in: ['INITIATED', 'UPLOADED', 'FAILED', 'REJECTED'] },
+      status: { in: CLEANUP_ATTEMPT_STATUSES },
       expiresAt: { lte: cutoff },
       NOT: protectedFilter,
     },
-    orderBy: { expiresAt: 'asc' },
+    // updatedAt: the claim below touches EXPIRED rows too, so already-clean ones rotate to the back.
+    orderBy: { updatedAt: 'asc' },
     take: 200,
   });
 
@@ -1455,7 +1491,7 @@ export async function cleanupExpiredUploadAttempts(
     const claimed = await db.uploadAttempt.updateMany({
       where: {
         id: attempt.id,
-        status: { in: ['INITIATED', 'UPLOADED', 'FAILED', 'REJECTED'] },
+        status: { in: CLEANUP_ATTEMPT_STATUSES },
         expiresAt: { lte: cutoff },
       },
       data: {
@@ -1471,7 +1507,9 @@ export async function cleanupExpiredUploadAttempts(
     if (deleted) {
       deletedQuarantineCount++;
     }
-    expiredAttemptCount++;
+    if (attempt.status !== 'EXPIRED') {
+      expiredAttemptCount++;
+    }
   }
 
   return {

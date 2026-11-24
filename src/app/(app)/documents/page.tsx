@@ -50,15 +50,22 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
   const rawQ = readParam(params, 'q')?.trim();
 
   const matterId = rawMatterId && UUID_REGEX.test(rawMatterId) ? rawMatterId : undefined;
-  const partyId = rawPartyId && UUID_REGEX.test(rawPartyId) ? rawPartyId : undefined;
+  // A document is linked to a matter or a party, never both; the matter filter wins.
+  const partyId = !matterId && rawPartyId && UUID_REGEX.test(rawPartyId) ? rawPartyId : undefined;
   const documentType =
     rawDocType && (Object.values(DocumentType) as string[]).includes(rawDocType)
       ? (rawDocType as DocumentType)
       : undefined;
   const q = rawQ ? rawQ.slice(0, 200) : undefined;
 
+  const rawPage = Number(readParam(params, 'page')?.trim());
+  const requestedPage =
+    Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, 1000) : 1;
+
   let initialDocuments: DocumentDTO[] = [];
   let initialTotal = 0;
+  let initialPage = requestedPage;
+  let initialTotalPages = 1;
   let selectableMatters: SelectableMatterOptionDTO[] = [];
   let selectableParties: SelectablePartyOption[] = [];
   let initialError: string | undefined;
@@ -70,6 +77,7 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
         ...(partyId ? { partyId } : {}),
         ...(documentType ? { documentType } : {}),
         ...(q ? { q } : {}),
+        page: requestedPage,
         limit: 50,
       }),
       listSelectableMatters(actor),
@@ -78,6 +86,8 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
 
     initialDocuments = docsResult.documents;
     initialTotal = docsResult.total;
+    initialPage = docsResult.page;
+    initialTotalPages = Math.max(1, docsResult.totalPages);
     selectableMatters = matters;
     selectableParties = partiesResult.parties.map((party) => ({
       id: party.id,
@@ -92,9 +102,11 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
   return (
     <div className="max-w-5xl mx-auto">
       <DocumentsView
-        key={actor.sessionId}
+        key={actor.id}
         initialDocuments={initialDocuments}
         initialTotal={initialTotal}
+        initialPage={initialPage}
+        initialTotalPages={initialTotalPages}
         selectableMatters={selectableMatters}
         selectableParties={selectableParties}
         initialFilters={{

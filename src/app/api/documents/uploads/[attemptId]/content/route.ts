@@ -6,7 +6,7 @@ import {
   requireDocumentActor,
   verifyDocumentMutationOrigin,
 } from '@/modules/documents/document-http';
-import { uploadAttemptBytes } from '@/modules/documents/document-service';
+import { rejectOversizedUpload, uploadAttemptBytes } from '@/modules/documents/document-service';
 import { DocumentValidationError, MAX_DOCUMENT_BYTES } from '@/modules/documents/document-types';
 
 export async function PUT(
@@ -40,11 +40,8 @@ export async function PUT(
         throw new DocumentValidationError('محتوى الملف فارغ (0 بايت).');
       }
       if (parsedLength > MAX_DOCUMENT_BYTES) {
-        throw new DocumentValidationError(
-          'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
-          { file: 'حجم الملف يتجاوز 25 ميجابايت' },
-          'PAYLOAD_TOO_LARGE'
-        );
+        // Records the attempt as REJECTED (not stuck INITIATED) and throws 413 PAYLOAD_TOO_LARGE.
+        await rejectOversizedUpload(actor, attemptId);
       }
     }
 

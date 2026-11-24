@@ -1,7 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import {
+  GuardedLink as Link,
+  useCanLeavePage,
+} from '@/components/navigation-guard';
 import type {
   DocumentActionResult,
   DocumentDTO,
@@ -16,6 +19,7 @@ import {
   LoadingIndicator,
 } from '@/components/presentation-state';
 import {
+  IconCheck,
   IconDocument,
   IconDownload,
   IconPlus,
@@ -38,6 +42,8 @@ import {
 export interface DocumentsViewProps {
   initialDocuments: DocumentDTO[];
   initialTotal: number;
+  initialPage: number;
+  initialTotalPages: number;
   selectableMatters: SelectableMatterOptionDTO[];
   selectableParties: SelectablePartyOption[];
   initialFilters: {
@@ -49,9 +55,40 @@ export interface DocumentsViewProps {
   initialError?: string;
 }
 
+interface DocumentFilters {
+  q: string;
+  documentType: string;
+  matterId: string;
+  partyId: string;
+}
+
+const PAGE_SIZE = 50;
+
+const SELECT_CLASS =
+  'w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]';
+const LINK_CLASS =
+  'text-[#14566B] hover:underline font-medium rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]';
+
+function syncUrl(filters: DocumentFilters, page: number) {
+  const sp = new URLSearchParams();
+  if (filters.q) sp.set('q', filters.q);
+  if (filters.documentType) sp.set('documentType', filters.documentType);
+  if (filters.matterId) sp.set('matterId', filters.matterId);
+  if (filters.partyId) sp.set('partyId', filters.partyId);
+  if (page > 1) sp.set('page', String(page));
+  const qs = sp.toString();
+  window.history.replaceState(
+    window.history.state,
+    '',
+    qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+  );
+}
+
 export function DocumentsView({
   initialDocuments,
   initialTotal,
+  initialPage,
+  initialTotalPages,
   selectableMatters,
   selectableParties,
   initialFilters,
@@ -59,15 +96,18 @@ export function DocumentsView({
 }: DocumentsViewProps) {
   const [documents, setDocuments] = useState<DocumentDTO[]>(initialDocuments);
   const [total, setTotal] = useState<number>(initialTotal);
+  const [page, setPage] = useState<number>(initialPage);
+  const [totalPages, setTotalPages] = useState<number>(initialTotalPages);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(initialError ?? null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const canLeavePage = useCanLeavePage();
 
   const [query, setQuery] = useState<string>(initialFilters.q ?? '');
   const [selectedType, setSelectedType] = useState<string>(initialFilters.documentType ?? '');
   const [selectedMatterId, setSelectedMatterId] = useState<string>(initialFilters.matterId ?? '');
   const [selectedPartyId, setSelectedPartyId] = useState<string>(initialFilters.partyId ?? '');
-  const [appliedFilters, setAppliedFilters] = useState({
+  const [appliedFilters, setAppliedFilters] = useState<DocumentFilters>({
     q: (initialFilters.q ?? '').trim(),
     documentType: initialFilters.documentType ?? '',
     matterId: initialFilters.matterId ?? '',
@@ -88,89 +128,79 @@ export function DocumentsView({
     };
   }, []);
 
-  const fetchDocuments = useCallback(
-    async (filters: {
-      q: string;
-      documentType: string;
-      matterId: string;
-      partyId: string;
-    }) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      const seq = ++reqSeqRef.current;
+  const fetchDocuments = useCallback(async (filters: DocumentFilters, targetPage = 1) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = ++reqSeqRef.current;
 
-      setIsLoading(true);
-      setLoadError(null);
+    setIsLoading(true);
+    setLoadError(null);
 
-      try {
-        const sp = new URLSearchParams();
-        const trimmedQ = filters.q.trim();
-        if (trimmedQ) sp.set('q', trimmedQ);
-        if (filters.documentType) sp.set('documentType', filters.documentType);
-        if (filters.matterId) sp.set('matterId', filters.matterId);
-        if (filters.partyId) sp.set('partyId', filters.partyId);
-        sp.set('limit', '50');
+    try {
+      const sp = new URLSearchParams();
+      const trimmedQ = filters.q.trim();
+      if (trimmedQ) sp.set('q', trimmedQ);
+      if (filters.documentType) sp.set('documentType', filters.documentType);
+      if (filters.matterId) sp.set('matterId', filters.matterId);
+      if (filters.partyId) sp.set('partyId', filters.partyId);
+      sp.set('page', String(targetPage));
+      sp.set('limit', String(PAGE_SIZE));
 
-        const res = await fetch(`/api/documents?${sp.toString()}`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
+      const res = await fetch(`/api/documents?${sp.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
 
-        if (res.status === 401 && typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('lawoffice:recheck-session'));
-        }
-
-        const body = (await res.json().catch(() => null)) as
-          | DocumentActionResult<ListDocumentsResult>
-          | null;
-
-        if (seq !== reqSeqRef.current) return;
-
-        if (!res.ok || !body || !body.success) {
-          throw new Error(
-            body && !body.success
-              ? body.error
-              : 'تعذر تحميل قائمة المستندات من الخادم.'
-          );
-        }
-
-        documentsRef.current = body.data.documents;
-        setDocuments(body.data.documents);
-        setTotal(body.data.total);
-        setAppliedFilters({
-          q: trimmedQ,
-          documentType: filters.documentType,
-          matterId: filters.matterId,
-          partyId: filters.partyId,
-        });
-      } catch (err) {
-        if (controller.signal.aborted || seq !== reqSeqRef.current) return;
-        setLoadError(
-          err instanceof Error
-            ? err.message
-            : 'تعذر الاتصال بالخادم لتحميل المستندات.'
-        );
-      } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-        }
-        if (seq === reqSeqRef.current) {
-          setIsLoading(false);
-        }
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
       }
-    },
-    []
-  );
+
+      const body = (await res.json().catch(() => null)) as
+        | DocumentActionResult<ListDocumentsResult>
+        | null;
+
+      if (seq !== reqSeqRef.current) return;
+
+      if (!res.ok || !body || !body.success) {
+        throw new Error(
+          body && !body.success ? body.error : 'تعذر تحميل قائمة المستندات من الخادم.'
+        );
+      }
+
+      const applied = { ...filters, q: trimmedQ };
+      documentsRef.current = body.data.documents;
+      setDocuments(body.data.documents);
+      setTotal(body.data.total);
+      setPage(body.data.page);
+      setTotalPages(Math.max(1, body.data.totalPages));
+      setAppliedFilters(applied);
+      syncUrl(applied, body.data.page);
+    } catch (err) {
+      if (controller.signal.aborted || seq !== reqSeqRef.current) return;
+      setLoadError(
+        err instanceof Error ? err.message : 'تعذر الاتصال بالخادم لتحميل المستندات.'
+      );
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (seq === reqSeqRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  const currentInputFilters = (): DocumentFilters => ({
+    q: query,
+    documentType: selectedType,
+    matterId: selectedMatterId,
+    partyId: selectedPartyId,
+  });
 
   const handleFilterSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    void fetchDocuments({
-      q: query,
-      documentType: selectedType,
-      matterId: selectedMatterId,
-      partyId: selectedPartyId,
-    });
+    void fetchDocuments(currentInputFilters());
   };
 
   const handleClearFilters = () => {
@@ -178,12 +208,7 @@ export function DocumentsView({
     setSelectedType('');
     setSelectedMatterId('');
     setSelectedPartyId('');
-    void fetchDocuments({
-      q: '',
-      documentType: '',
-      matterId: '',
-      partyId: '',
-    });
+    void fetchDocuments({ q: '', documentType: '', matterId: '', partyId: '' });
   };
 
   const hasActiveFilters = Boolean(
@@ -193,27 +218,44 @@ export function DocumentsView({
       appliedFilters.partyId
   );
 
-  const hasFilterControlInput = hasActiveFilters || Boolean(query.trim());
+  const hasFilterControlInput = Boolean(
+    hasActiveFilters || query.trim() || selectedType || selectedMatterId || selectedPartyId
+  );
 
+  const latestViewRef = useRef({ appliedFilters, page });
+  useEffect(() => {
+    latestViewRef.current = { appliedFilters, page };
+  }, [appliedFilters, page]);
+
+  // The upload form keeps the callback captured by an in-flight batch, so read live state via ref.
   const handleDocumentUploaded = useCallback(
     (doc: DocumentDTO) => {
-      if (hasActiveFilters) {
-        void fetchDocuments(appliedFilters);
+      const { appliedFilters: filters, page: currentPage } = latestViewRef.current;
+      setLoadError(null);
+      if (filters.q || filters.documentType || filters.matterId || filters.partyId || currentPage > 1) {
+        void fetchDocuments(filters, currentPage);
         return;
       }
       const prev = documentsRef.current;
       const alreadyExists = prev.some((existing) => existing.id === doc.id);
       const next = alreadyExists
         ? prev.map((existing) => (existing.id === doc.id ? doc : existing))
-        : [doc, ...prev];
+        : [doc, ...prev].slice(0, PAGE_SIZE);
       documentsRef.current = next;
       setDocuments(next);
       if (!alreadyExists) {
         setTotal((currentTotal) => currentTotal + 1);
       }
     },
-    [appliedFilters, fetchDocuments, hasActiveFilters]
+    [fetchDocuments]
   );
+
+  const lastPage = Math.max(totalPages, Math.ceil(total / PAGE_SIZE), 1);
+
+  const handleToggleUpload = () => {
+    if (isUploadOpen && !canLeavePage()) return;
+    setIsUploadOpen((prev) => !prev);
+  };
 
   return (
     <div className="space-y-6 min-w-0 max-w-full" data-testid="documents-view">
@@ -230,14 +272,7 @@ export function DocumentsView({
           <button
             type="button"
             data-testid="documents-refresh-button"
-            onClick={() =>
-              void fetchDocuments({
-                q: query,
-                documentType: selectedType,
-                matterId: selectedMatterId,
-                partyId: selectedPartyId,
-              })
-            }
+            onClick={() => void fetchDocuments(appliedFilters, page)}
             disabled={isLoading}
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-sm font-medium rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
           >
@@ -249,7 +284,8 @@ export function DocumentsView({
             type="button"
             data-testid="open-upload-form-button"
             aria-expanded={isUploadOpen}
-            onClick={() => setIsUploadOpen((prev) => !prev)}
+            aria-controls="document-upload-section"
+            onClick={handleToggleUpload}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
           >
             <IconPlus className="w-4 h-4" />
@@ -265,7 +301,7 @@ export function DocumentsView({
       >
         <IconWarning className="w-5 h-5 shrink-0 mt-0.5" />
         <p className="leading-relaxed">
-          تنبيه السياسة المعتمدة (ADR 0003): المستندات المرفوعة تُفحص من حيث الصيغة والحجم والتوقيع الرقمي دون فحص فيروسات تلقائي، وتظهر بحالة{' '}
+          تنبيه السياسة المعتمدة (<bdi dir="ltr">ADR 0003</bdi>): المستندات المرفوعة تُفحص من حيث الصيغة والحجم والتوقيع الرقمي دون فحص فيروسات تلقائي، وتظهر بحالة{' '}
           <strong>«{UNSCANNED_POLICY_NOTICE_AR}»</strong>.
         </p>
       </div>
@@ -288,7 +324,7 @@ export function DocumentsView({
         data-testid="documents-filter-form"
         className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-3 min-w-0 max-w-full"
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 min-w-0">
           <div className="min-w-0">
             <label
               htmlFor="documents-search-input"
@@ -321,14 +357,9 @@ export function DocumentsView({
               onChange={(e) => {
                 const nextType = e.target.value;
                 setSelectedType(nextType);
-                void fetchDocuments({
-                  q: query,
-                  documentType: nextType,
-                  matterId: selectedMatterId,
-                  partyId: selectedPartyId,
-                });
+                void fetchDocuments({ ...currentInputFilters(), documentType: nextType });
               }}
-              className="w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              className={SELECT_CLASS}
             >
               <option value="">كل الأنواع</option>
               {DOCUMENT_TYPE_OPTIONS.map((opt) => (
@@ -353,19 +384,51 @@ export function DocumentsView({
               onChange={(e) => {
                 const nextMatter = e.target.value;
                 setSelectedMatterId(nextMatter);
+                if (nextMatter) setSelectedPartyId('');
                 void fetchDocuments({
-                  q: query,
-                  documentType: selectedType,
+                  ...currentInputFilters(),
                   matterId: nextMatter,
-                  partyId: selectedPartyId,
+                  partyId: nextMatter ? '' : selectedPartyId,
                 });
               }}
-              className="w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              className={SELECT_CLASS}
             >
               <option value="">كل القضايا</option>
               {selectableMatters.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.fileCode} — {m.title}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="min-w-0">
+            <label
+              htmlFor="documents-party-filter"
+              className="block text-xs font-semibold text-[#4D606A] mb-1"
+            >
+              الطرف / الموكل
+            </label>
+            <select
+              id="documents-party-filter"
+              data-testid="documents-party-filter"
+              value={selectedPartyId}
+              onChange={(e) => {
+                const nextParty = e.target.value;
+                setSelectedPartyId(nextParty);
+                if (nextParty) setSelectedMatterId('');
+                void fetchDocuments({
+                  ...currentInputFilters(),
+                  partyId: nextParty,
+                  matterId: nextParty ? '' : selectedMatterId,
+                });
+              }}
+              className={SELECT_CLASS}
+            >
+              <option value="">كل الأطراف</option>
+              {selectableParties.map((party) => (
+                <option key={party.id} value={party.id}>
+                  {party.name}
                 </option>
               ))}
             </select>
@@ -394,7 +457,11 @@ export function DocumentsView({
         </div>
 
         <div className="flex items-center justify-between text-xs text-[#4D606A] pt-1">
-          <span data-testid="documents-total-count">
+          <span
+            data-testid="documents-total-count"
+            role="status"
+            aria-live="polite"
+          >
             إجمالي النتائج المعروضة: {documents.length} من {total}
           </span>
         </div>
@@ -411,14 +478,7 @@ export function DocumentsView({
         <ErrorContainer
           title="تعذر تحميل المستندات"
           message={loadError}
-          onRetry={() =>
-            void fetchDocuments({
-              q: query,
-              documentType: selectedType,
-              matterId: selectedMatterId,
-              partyId: selectedPartyId,
-            })
-          }
+          onRetry={() => void fetchDocuments(appliedFilters, page)}
         />
       )}
 
@@ -438,7 +498,7 @@ export function DocumentsView({
                 onClick={handleClearFilters}
                 className="inline-flex items-center justify-center px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
               >
-                غيّر الفلاتر
+                مسح الفلاتر
               </button>
             ) : (
               <button
@@ -497,7 +557,11 @@ export function DocumentsView({
                         data-testid={`document-scan-badge-${doc.id}`}
                         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] border font-semibold ${scanBadgeClass}`}
                       >
-                        <IconWarning className="w-3.5 h-3.5 shrink-0" />
+                        {ver?.scanStatus === 'CLEAN' ? (
+                          <IconCheck className="w-3.5 h-3.5 shrink-0" />
+                        ) : (
+                          <IconWarning className="w-3.5 h-3.5 shrink-0" />
+                        )}
                         <span>{scanLabel}</span>
                       </span>
                     </div>
@@ -530,25 +594,35 @@ export function DocumentsView({
                   <div className="min-w-0 break-words">
                     <span className="font-semibold text-[#172A35]">الربط: </span>
                     {doc.matterId ? (
-                      <Link
-                        href={`/matters/${doc.matterId}`}
-                        className="text-[#14566B] hover:underline font-medium"
-                      >
+                      <Link href={`/matters/${doc.matterId}`} className={LINK_CLASS}>
                         <bdi dir="ltr">{doc.matterFileCode}</bdi> — {doc.matterTitle}
                       </Link>
                     ) : doc.partyId ? (
-                      <Link
-                        href={`/parties/${doc.partyId}`}
-                        className="text-[#14566B] hover:underline font-medium"
-                      >
+                      <Link href={`/parties/${doc.partyId}`} className={LINK_CLASS}>
                         {doc.partyName}
                       </Link>
                     ) : (
                       '—'
                     )}
-                    {doc.proceedingLabel && (
+                    {doc.matterId && doc.proceedingId && doc.proceedingLabel && (
                       <span className="block mt-0.5 text-[#4D606A]">
-                        القيد: {doc.proceedingLabel}
+                        القيد:{' '}
+                        <Link
+                          href={`/matters/${doc.matterId}/proceedings/${doc.proceedingId}`}
+                          className={LINK_CLASS}
+                        >
+                          <bdi>{doc.proceedingLabel}</bdi>
+                        </Link>
+                      </span>
+                    )}
+                    {doc.hearingId && (
+                      <span className="block mt-0.5 text-[#4D606A]">
+                        الجلسة:{' '}
+                        <Link href={`/hearings/${doc.hearingId}`} className={LINK_CLASS}>
+                          <bdi>
+                            {doc.hearingDate ? formatCairoDateArabic(doc.hearingDate) : 'عرض الجلسة'}
+                          </bdi>
+                        </Link>
                       </span>
                     )}
                   </div>
@@ -573,6 +647,36 @@ export function DocumentsView({
             );
           })}
         </div>
+      )}
+
+      {!isLoading && !loadError && lastPage > 1 && (
+        <nav
+          aria-label="التنقل بين صفحات المستندات"
+          data-testid="documents-pagination"
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
+          <button
+            type="button"
+            data-testid="documents-prev-page"
+            disabled={page <= 1}
+            onClick={() => void fetchDocuments(appliedFilters, Math.min(page - 1, lastPage))}
+            className="inline-flex items-center justify-center px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-sm font-medium rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+          >
+            السابق
+          </button>
+          <span data-testid="documents-page-indicator" role="status" aria-live="polite" className="text-sm text-[#4D606A]">
+            صفحة {page} من {lastPage}
+          </span>
+          <button
+            type="button"
+            data-testid="documents-next-page"
+            disabled={page >= lastPage}
+            onClick={() => void fetchDocuments(appliedFilters, page + 1)}
+            className="inline-flex items-center justify-center px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-sm font-medium rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+          >
+            التالي
+          </button>
+        </nav>
       )}
     </div>
   );

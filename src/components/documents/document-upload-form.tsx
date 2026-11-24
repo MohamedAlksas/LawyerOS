@@ -2,7 +2,6 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import type {
   DocumentActionResult,
   DocumentDTO,
@@ -14,7 +13,7 @@ import type {
 } from '@/modules/documents/document-types';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
-import { useLeaveGuard } from '@/components/navigation-guard';
+import { GuardedLink as Link, useCanLeavePage, useLeaveGuard } from '@/components/navigation-guard';
 import {
   IconCheck,
   IconDocument,
@@ -24,16 +23,19 @@ import {
 } from '@/components/stitch-icons';
 import {
   DOCUMENT_TYPE_OPTIONS,
-  MAX_DOCUMENT_BYTES,
+  MAX_DOCUMENT_TITLE_LENGTH,
   ORIGINAL_PRESENCE_OPTIONS,
   QUEUE_STATUS_META,
+  SCAN_STATUS_BADGE_CLASSES,
   SENSITIVITY_OPTIONS,
   UNSCANNED_POLICY_NOTICE_AR,
+  clampTitle,
   formatFileSizeArabic,
   isPdfFile,
   isPreviewableImageFile,
   resolveDeclaredMime,
   suggestTitleFromFilename,
+  validateClientFile,
   type QueueUploadStatus,
   type SelectablePartyOption,
 } from './document-ui-helpers';
@@ -45,6 +47,8 @@ interface QueueItem {
   previewError: boolean;
   itemTitle: string;
   itemTitleEdited: boolean;
+  /** Title sent with the begin request; frozen so an idempotent replay never changes payload. */
+  sentTitle?: string;
   status: QueueUploadStatus;
   errorMessage: string | null;
   attemptId?: string;
@@ -67,9 +71,67 @@ export interface DocumentUploadFormProps {
 }
 
 type LinkTargetMode = 'MATTER' | 'PARTY';
+type UploadOutcome = 'READY' | 'DUPLICATE_WARNING' | 'REJECTED' | 'INCOMPLETE';
+type UploadFailureBody = Extract<DocumentActionResult<unknown>, { success: false }>;
 
 const INPUT_CLASS =
   'w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70';
+const FIELD_ERROR_CLASS = 'text-xs text-[#A4262C] mt-1 font-medium min-w-0 break-words [overflow-wrap:anywhere]';
+const MESSAGE_CLASS = 'min-w-0 break-words [overflow-wrap:anywhere]';
+const INLINE_LINK_CLASS =
+  'font-semibold text-[#14566B] underline rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]';
+const RADIO_LABEL_CLASS =
+  'inline-flex items-center gap-2 px-3 py-2 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] min-h-[44px] cursor-pointer focus-within:ring-2 focus-within:ring-[#14566B]';
+
+const SESSION_EXPIRED_MESSAGE =
+  'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.';
+const NETWORK_ERROR_MESSAGE = 'الاتصال انقطع، البيانات لسه ما اتحفظتش';
+const SIZE_EXCEEDED_MESSAGE = 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).';
+const CONFLICT_CODES = new Set<string>(['CONCURRENCY_CONFLICT', 'IDEMPOTENCY_CONCURRENT_CONFLICT']);
+
+const isPending = (item: QueueItem) => item.status !== 'READY' && item.status !== 'CANCELLED';
+const pendingOf = (items: QueueItem[]) => items.filter(isPending);
+
+/** Conflicts and server/session faults keep the attempt (and its idempotency keys) for a safe replay. */
+function classifyFailure(
+  httpStatus: number,
+  body: UploadFailureBody | null,
+  fallback: string
+): { status: 'INCOMPLETE' | 'REJECTED'; message: string } {
+  const message = body?.error ?? fallback;
+  if (httpStatus === 401) return { status: 'INCOMPLETE', message: SESSION_EXPIRED_MESSAGE };
+  if (httpStatus === 409 && body && CONFLICT_CODES.has(body.code)) {
+    return { status: 'INCOMPLETE', message };
+  }
+  if (httpStatus >= 500 && body?.code !== 'SCAN_POLICY_UNAVAILABLE') {
+    return { status: 'INCOMPLETE', message };
+  }
+  if (httpStatus === 413) return { status: 'REJECTED', message: SIZE_EXCEEDED_MESSAGE };
+  return { status: 'REJECTED', message };
+}
+
+type AttemptState = Pick<
+  QueueItem,
+  | 'attemptId'
+  | 'sentTitle'
+  | 'contentUploaded'
+  | 'pendingConfirmDuplicate'
+  | 'duplicateMatches'
+  | 'beginIdempotencyKey'
+  | 'finalizeIdempotencyKey'
+  | 'confirmDuplicateIdempotencyKey'
+>;
+
+const freshAttemptPatch = (): AttemptState => ({
+  attemptId: undefined,
+  sentTitle: undefined,
+  contentUploaded: false,
+  pendingConfirmDuplicate: false,
+  duplicateMatches: [],
+  beginIdempotencyKey: generateClientRequestId('doc-begin'),
+  finalizeIdempotencyKey: generateClientRequestId('doc-fin'),
+  confirmDuplicateIdempotencyKey: generateClientRequestId('doc-dup'),
+});
 
 export function DocumentUploadForm({
   selectableMatters,
@@ -100,6 +162,8 @@ export function DocumentUploadForm({
 
   const queueRef = useRef<QueueItem[]>([]);
   const objectUrlsRef = useRef<Set<string>>(new Set());
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(false);
   const titleEditedManuallyRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
@@ -111,12 +175,35 @@ export function DocumentUploadForm({
   const selectedMatter = selectableMatters.find((m) => m.id === matterId) ?? null;
   const availableProceedings = selectedMatter?.proceedings ?? [];
 
-  const hasUnsavedItems = queue.some((item) => item.status !== 'READY' && item.status !== 'CANCELLED');
-  useLeaveGuard(hasUnsavedItems || Boolean(title.trim() || description.trim()), isUploading);
+  const canLeavePage = useCanLeavePage();
+  const pendingQueue = pendingOf(queue);
+  const hasReadyOrCancelled = queue.some(
+    (item) => item.status === 'READY' || item.status === 'CANCELLED'
+  );
+  // Shared metadata is already bound to a live attempt awaiting retry or duplicate confirmation.
+  const metadataLocked = queue.some(
+    (item) =>
+      Boolean(item.attemptId) &&
+      (item.status === 'INCOMPLETE' || item.status === 'DUPLICATE_WARNING')
+  );
+  const metadataDisabled = isUploading || metadataLocked;
+  const onlyDuplicateWarnings =
+    pendingQueue.length > 0 &&
+    pendingQueue.every((item) => item.status === 'DUPLICATE_WARNING');
+
+  const hasUnsavedItems = pendingQueue.length > 0;
+  useLeaveGuard(
+    hasUnsavedItems || (queue.length === 0 && Boolean(title.trim() || description.trim())),
+    isUploading
+  );
 
   useEffect(() => {
     const urls = objectUrlsRef.current;
+    isMountedRef.current = true;
+    uploadAbortRef.current = new AbortController();
     return () => {
+      isMountedRef.current = false;
+      uploadAbortRef.current?.abort();
       for (const url of urls) {
         URL.revokeObjectURL(url);
       }
@@ -152,24 +239,36 @@ export function DocumentUploadForm({
     );
   };
 
-  const buildQueueItem = (file: File): QueueItem => ({
-    queueId: generateClientRequestId('doc-q'),
-    file,
-    previewUrl: createObjectPreviewUrl(file),
-    previewError: false,
-    itemTitle: suggestTitleFromFilename(file.name),
-    itemTitleEdited: false,
-    status: 'QUEUED',
-    errorMessage: null,
-    attemptId: undefined,
-    contentUploaded: false,
-    pendingConfirmDuplicate: false,
-    beginIdempotencyKey: generateClientRequestId('doc-begin'),
-    finalizeIdempotencyKey: generateClientRequestId('doc-fin'),
-    confirmDuplicateIdempotencyKey: generateClientRequestId('doc-dup'),
-    duplicateMatches: [],
-    createdDocument: null,
-  });
+  const clearFieldError = (key: string) =>
+    setFieldErrors((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+  // The shared title mirrors the only pending file's name until the user types their own.
+  const syncSharedTitle = (items: QueueItem[]) => {
+    if (titleEditedManuallyRef.current) return;
+    const pending = pendingOf(items);
+    setTitle(pending.length === 1 ? pending[0].itemTitle : '');
+  };
+
+  const buildQueueItem = (file: File): QueueItem => {
+    const rejection = validateClientFile(file);
+    return {
+      queueId: generateClientRequestId('doc-q'),
+      file,
+      previewUrl: rejection ? null : createObjectPreviewUrl(file),
+      previewError: false,
+      itemTitle: suggestTitleFromFilename(file.name),
+      itemTitleEdited: false,
+      status: rejection ? 'REJECTED' : 'QUEUED',
+      errorMessage: rejection,
+      createdDocument: null,
+      ...freshAttemptPatch(),
+    };
+  };
 
   const handleFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []);
@@ -177,24 +276,10 @@ export function DocumentUploadForm({
     if (selected.length === 0) return;
 
     setFormError(null);
-    setFieldErrors((prev) => {
-      const next = { ...prev };
-      delete next.files;
-      return next;
-    });
+    clearFieldError('files');
 
     const newItems = selected.map(buildQueueItem);
-    const updated = setQueueSynced((prev) => [...prev, ...newItems]);
-    const activeCount = updated.filter((item) => item.status !== 'CANCELLED').length;
-
-    if (activeCount === 1 && !titleEditedManuallyRef.current) {
-      const onlyItem = updated.find((item) => item.status !== 'CANCELLED');
-      if (onlyItem) {
-        setTitle(onlyItem.itemTitle);
-      }
-    } else if (activeCount > 1 && !titleEditedManuallyRef.current) {
-      setTitle('');
-    }
+    syncSharedTitle(setQueueSynced((prev) => [...prev, ...newItems]));
   };
 
   const handleRemoveQueueItem = (queueId: string) => {
@@ -203,13 +288,7 @@ export function DocumentUploadForm({
     if (target) {
       revokePreviewUrl(target.previewUrl);
     }
-    const updated = setQueueSynced((prev) => prev.filter((item) => item.queueId !== queueId));
-    const active = updated.filter((item) => item.status !== 'CANCELLED');
-    if (active.length === 1 && !titleEditedManuallyRef.current) {
-      setTitle(active[0].itemTitle);
-    } else if (active.length === 0 && !titleEditedManuallyRef.current) {
-      setTitle('');
-    }
+    syncSharedTitle(setQueueSynced((prev) => prev.filter((item) => item.queueId !== queueId)));
   };
 
   const handleTriggerReplaceFile = (queueId: string) => {
@@ -230,56 +309,52 @@ export function DocumentUploadForm({
       revokePreviewUrl(existing.previewUrl);
     }
 
-    const nextPreview = createObjectPreviewUrl(replacement);
+    const rejection = validateClientFile(replacement);
+    const nextPreview = rejection ? null : createObjectPreviewUrl(replacement);
     const suggested = suggestTitleFromFilename(replacement.name);
 
-    setQueueSynced((prev) =>
-      prev.map((item) =>
-        item.queueId === targetId
-          ? {
-              ...item,
-              file: replacement,
-              previewUrl: nextPreview,
-              previewError: false,
-              itemTitle: item.itemTitleEdited ? item.itemTitle : suggested,
-              status: 'QUEUED',
-              errorMessage: null,
-              attemptId: undefined,
-              contentUploaded: false,
-              pendingConfirmDuplicate: false,
-              beginIdempotencyKey: generateClientRequestId('doc-begin'),
-              finalizeIdempotencyKey: generateClientRequestId('doc-fin'),
-              confirmDuplicateIdempotencyKey: generateClientRequestId('doc-dup'),
-              duplicateMatches: [],
-              createdDocument: null,
-            }
-          : item
+    syncSharedTitle(
+      setQueueSynced((prev) =>
+        prev.map((item) =>
+          item.queueId === targetId
+            ? {
+                ...item,
+                ...freshAttemptPatch(),
+                file: replacement,
+                previewUrl: nextPreview,
+                previewError: false,
+                itemTitle: item.itemTitleEdited ? item.itemTitle : suggested,
+                status: rejection ? 'REJECTED' : 'QUEUED',
+                errorMessage: rejection,
+                createdDocument: null,
+              }
+            : item
+        )
       )
     );
   };
 
-  const resolveEffectiveTitle = (item: QueueItem, activeList: QueueItem[]): string => {
+  const resolveEffectiveTitle = (item: QueueItem, pending: QueueItem[]): string => {
+    if (item.sentTitle) return item.sentTitle;
     if (item.itemTitleEdited && item.itemTitle.trim()) {
-      return item.itemTitle.trim();
+      return clampTitle(item.itemTitle);
     }
-    if (activeList.length === 1) {
-      return title.trim() || item.itemTitle.trim() || suggestTitleFromFilename(item.file.name);
-    }
-    const index = activeList.findIndex((entry) => entry.queueId === item.queueId);
     const base = title.trim();
-    if (base) {
-      return `${base} (${index + 1})`;
+    if (pending.length <= 1) {
+      return clampTitle(base || item.itemTitle) || suggestTitleFromFilename(item.file.name);
     }
-    return item.itemTitle.trim() || suggestTitleFromFilename(item.file.name);
+    if (base) {
+      const suffix = ` (${pending.findIndex((entry) => entry.queueId === item.queueId) + 1})`;
+      return clampTitle(base.slice(0, MAX_DOCUMENT_TITLE_LENGTH - suffix.length)) + suffix;
+    }
+    return clampTitle(item.itemTitle) || suggestTitleFromFilename(item.file.name);
   };
 
   const validateBeforeUpload = (): boolean => {
-    const activeItems = queueRef.current.filter(
-      (item) => item.status !== 'READY' && item.status !== 'CANCELLED'
-    );
+    const pending = pendingOf(queueRef.current);
     const nextFieldErrors: Record<string, string> = {};
 
-    if (activeItems.length === 0) {
+    if (pending.length === 0) {
       nextFieldErrors.files = 'اختر ملفاً واحداً على الأقل لرفعه.';
     }
     if (linkMode === 'MATTER' && !matterId) {
@@ -289,9 +364,8 @@ export function DocumentUploadForm({
       nextFieldErrors.partyId = 'يجب اختيار الطرف / الموكل المرتبط بالمستند.';
     }
 
-    const allActive = queueRef.current.filter((item) => item.status !== 'CANCELLED');
-    for (const item of activeItems) {
-      if (!resolveEffectiveTitle(item, allActive)) {
+    for (const item of pending) {
+      if (!resolveEffectiveTitle(item, pending)) {
         nextFieldErrors.title = 'عنوان المستند مطلوب.';
         break;
       }
@@ -316,7 +390,7 @@ export function DocumentUploadForm({
     attemptId: string,
     confirmDuplicate: boolean,
     finalizeKey: string
-  ): Promise<'READY' | 'DUPLICATE_WARNING' | 'REJECTED' | 'INCOMPLETE'> => {
+  ): Promise<UploadOutcome> => {
     updateQueueItem(queueId, {
       status: 'VALIDATING',
       errorMessage: null,
@@ -327,6 +401,7 @@ export function DocumentUploadForm({
       const response = await fetch(`/api/documents/uploads/${attemptId}/finalize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: uploadAbortRef.current?.signal,
         body: JSON.stringify({
           confirmDuplicate,
           idempotencyKey: finalizeKey,
@@ -352,29 +427,17 @@ export function DocumentUploadForm({
       }
 
       if (!response.ok || !body || !body.success) {
-        const errCode = body && !body.success ? body.code : 'INTERNAL_ERROR';
-        const errMsg =
-          body && !body.success
-            ? body.error
-            : 'تعذر إتمام التحقق من الملف على الخادم.';
-
-        if (response.status === 401 || (response.status >= 500 && errCode !== 'SCAN_POLICY_UNAVAILABLE')) {
-          updateQueueItem(queueId, {
-            status: 'INCOMPLETE',
-            errorMessage:
-              response.status === 401
-                ? 'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.'
-                : errMsg,
-          });
-          return 'INCOMPLETE';
-        }
-
+        const failure = classifyFailure(
+          response.status,
+          body && !body.success ? body : null,
+          'تعذر إتمام التحقق من الملف على الخادم.'
+        );
         updateQueueItem(queueId, {
-          status: 'REJECTED',
-          errorMessage: errMsg,
-          pendingConfirmDuplicate: false,
+          status: failure.status,
+          errorMessage: failure.message,
+          ...(failure.status === 'REJECTED' ? { pendingConfirmDuplicate: false } : {}),
         });
-        return 'REJECTED';
+        return failure.status;
       }
 
       updateQueueItem(queueId, {
@@ -387,10 +450,8 @@ export function DocumentUploadForm({
       onDocumentUploaded(body.data);
       return 'READY';
     } catch {
-      updateQueueItem(queueId, {
-        status: 'INCOMPLETE',
-        errorMessage: 'الاتصال انقطع، البيانات لسه ما اتحفظتش',
-      });
+      if (!isMountedRef.current) return 'INCOMPLETE';
+      updateQueueItem(queueId, { status: 'INCOMPLETE', errorMessage: NETWORK_ERROR_MESSAGE });
       return 'INCOMPLETE';
     }
   };
@@ -398,7 +459,7 @@ export function DocumentUploadForm({
   const processSingleQueueItem = async (
     queueId: string,
     effectiveTitle: string
-  ): Promise<'READY' | 'DUPLICATE_WARNING' | 'REJECTED' | 'INCOMPLETE'> => {
+  ): Promise<UploadOutcome> => {
     const current = queueRef.current.find((item) => item.queueId === queueId);
     if (!current) return 'INCOMPLETE';
 
@@ -415,28 +476,22 @@ export function DocumentUploadForm({
     }
 
     if (!attemptId) {
-      updateQueueItem(queueId, { status: 'UPLOADING', errorMessage: null });
-
-      if (current.file.size === 0) {
-        updateQueueItem(queueId, {
-          status: 'REJECTED',
-          errorMessage: 'الملف فارغ (0 بايت) ولا يمكن رفعه.',
-        });
+      const rejection = validateClientFile(current.file);
+      if (rejection) {
+        updateQueueItem(queueId, { status: 'REJECTED', errorMessage: rejection });
         return 'REJECTED';
       }
 
-      if (current.file.size > MAX_DOCUMENT_BYTES) {
-        updateQueueItem(queueId, {
-          status: 'REJECTED',
-          errorMessage: 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
-        });
-        return 'REJECTED';
-      }
+      updateQueueItem(queueId, {
+        status: 'UPLOADING',
+        errorMessage: null,
+      });
 
       try {
         const beginRes = await fetch('/api/documents/uploads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: uploadAbortRef.current?.signal,
           body: JSON.stringify({
             matterId: linkMode === 'MATTER' ? matterId : null,
             partyId: linkMode === 'PARTY' ? partyId : null,
@@ -464,34 +519,27 @@ export function DocumentUploadForm({
           | null;
 
         if (!beginRes.ok || !beginBody || !beginBody.success) {
-          const errMsg =
-            beginBody && !beginBody.success
-              ? beginBody.error
-              : 'تعذر بدء محاولة رفع الملف.';
-          if (beginRes.status === 401 || beginRes.status >= 500) {
-            updateQueueItem(queueId, {
-              status: 'INCOMPLETE',
-              errorMessage:
-                beginRes.status === 401
-                  ? 'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.'
-                  : errMsg,
-            });
-            return 'INCOMPLETE';
+          const failureBody = beginBody && !beginBody.success ? beginBody : null;
+          const failure = classifyFailure(beginRes.status, failureBody, 'تعذر بدء محاولة رفع الملف.');
+          const serverFieldErrors = failureBody?.fieldErrors;
+          if (serverFieldErrors && Object.keys(serverFieldErrors).length > 0) {
+            setFieldErrors((prev) => ({ ...prev, ...serverFieldErrors }));
           }
           updateQueueItem(queueId, {
-            status: 'REJECTED',
-            errorMessage: errMsg,
+            status: failure.status,
+            errorMessage:
+              (failure.status === 'REJECTED' && serverFieldErrors
+                ? Object.values(serverFieldErrors)[0]
+                : undefined) ?? failure.message,
           });
-          return 'REJECTED';
+          return failure.status;
         }
 
         attemptId = beginBody.data.id;
-        updateQueueItem(queueId, { attemptId });
+        updateQueueItem(queueId, { attemptId, sentTitle: effectiveTitle });
       } catch {
-        updateQueueItem(queueId, {
-          status: 'INCOMPLETE',
-          errorMessage: 'الاتصال انقطع، البيانات لسه ما اتحفظتش',
-        });
+        if (!isMountedRef.current) return 'INCOMPLETE';
+        updateQueueItem(queueId, { status: 'INCOMPLETE', errorMessage: NETWORK_ERROR_MESSAGE });
         return 'INCOMPLETE';
       }
     }
@@ -502,9 +550,8 @@ export function DocumentUploadForm({
       try {
         const putRes = await fetch(`/api/documents/uploads/${attemptId}/content`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': current.file.type || 'application/octet-stream',
-          },
+          headers: { 'Content-Type': resolveDeclaredMime(current.file) },
+          signal: uploadAbortRef.current?.signal,
           body: current.file,
         });
 
@@ -517,34 +564,20 @@ export function DocumentUploadForm({
           | null;
 
         if (!putRes.ok || !putBody || !putBody.success) {
-          const errMsg =
-            putBody && !putBody.success
-              ? putBody.error
-              : 'تعذر رفع محتوى الملف إلى الحجر الخاص.';
-          if (putRes.status === 401 || putRes.status >= 500) {
-            updateQueueItem(queueId, {
-              status: 'INCOMPLETE',
-              errorMessage:
-                putRes.status === 401
-                  ? 'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.'
-                  : errMsg,
-            });
-            return 'INCOMPLETE';
-          }
-          updateQueueItem(queueId, {
-            status: 'REJECTED',
-            errorMessage: errMsg,
-          });
-          return 'REJECTED';
+          const failure = classifyFailure(
+            putRes.status,
+            putBody && !putBody.success ? putBody : null,
+            'تعذر رفع محتوى الملف إلى الحجر الخاص.'
+          );
+          updateQueueItem(queueId, { status: failure.status, errorMessage: failure.message });
+          return failure.status;
         }
 
         contentUploaded = true;
         updateQueueItem(queueId, { contentUploaded: true });
       } catch {
-        updateQueueItem(queueId, {
-          status: 'INCOMPLETE',
-          errorMessage: 'الاتصال انقطع، البيانات لسه ما اتحفظتش',
-        });
+        if (!isMountedRef.current) return 'INCOMPLETE';
+        updateQueueItem(queueId, { status: 'INCOMPLETE', errorMessage: NETWORK_ERROR_MESSAGE });
         return 'INCOMPLETE';
       }
     }
@@ -554,39 +587,45 @@ export function DocumentUploadForm({
     return await runFinalizeStep(queueId, attemptId, false, finKey);
   };
 
+  const runUploads = async (work: () => Promise<void>) => {
+    setIsUploading(true);
+    try {
+      await work();
+    } finally {
+      if (isMountedRef.current) setIsUploading(false);
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (isUploading) return;
     if (!validateBeforeUpload()) return;
 
-    const allActive = queueRef.current.filter((item) => item.status !== 'CANCELLED');
-    const itemsToRun = allActive.filter(
-      (item) => item.status !== 'READY' && item.status !== 'DUPLICATE_WARNING'
-    );
-    if (itemsToRun.length === 0) return;
+    const pending = pendingOf(queueRef.current);
+    const itemsToRun = pending.filter((item) => item.status !== 'DUPLICATE_WARNING');
+    if (itemsToRun.length === 0) {
+      setFormError(
+        'الملفات المتبقية تنتظر قرارك بشأن تطابق البصمة. أكّد رفع نسخة منفصلة أو ألغِ الملف أولاً.'
+      );
+      return;
+    }
 
-    setIsUploading(true);
-    try {
+    await runUploads(async () => {
       for (const item of itemsToRun) {
+        if (!isMountedRef.current || uploadAbortRef.current?.signal.aborted) break;
         if (item.status === 'REJECTED') {
-          updateQueueItem(item.queueId, {
-            attemptId: undefined,
-            contentUploaded: false,
-            pendingConfirmDuplicate: false,
-            beginIdempotencyKey: generateClientRequestId('doc-begin'),
-            finalizeIdempotencyKey: generateClientRequestId('doc-fin'),
-            confirmDuplicateIdempotencyKey: generateClientRequestId('doc-dup'),
-          });
+          updateQueueItem(item.queueId, freshAttemptPatch());
         }
-        const effectiveTitle = resolveEffectiveTitle(item, allActive);
-        const outcome = await processSingleQueueItem(item.queueId, effectiveTitle);
+        const current = queueRef.current.find((entry) => entry.queueId === item.queueId) ?? item;
+        const outcome = await processSingleQueueItem(
+          item.queueId,
+          resolveEffectiveTitle(current, pending)
+        );
         if (outcome === 'INCOMPLETE') {
           break;
         }
       }
-    } finally {
-      setIsUploading(false);
-    }
+    });
   };
 
   const handleRetryQueueItem = async (queueId: string) => {
@@ -605,76 +644,60 @@ export function DocumentUploadForm({
 
     setFormError(null);
     setFieldErrors({});
-    setIsUploading(true);
-    try {
+    await runUploads(async () => {
       if (item.status === 'REJECTED') {
-        updateQueueItem(queueId, {
-          attemptId: undefined,
-          contentUploaded: false,
-          pendingConfirmDuplicate: false,
-          beginIdempotencyKey: generateClientRequestId('doc-begin'),
-          finalizeIdempotencyKey: generateClientRequestId('doc-fin'),
-          confirmDuplicateIdempotencyKey: generateClientRequestId('doc-dup'),
-        });
+        updateQueueItem(queueId, freshAttemptPatch());
       }
-      const allActive = queueRef.current.filter((entry) => entry.status !== 'CANCELLED');
-      const effectiveTitle = resolveEffectiveTitle(item, allActive);
-      await processSingleQueueItem(queueId, effectiveTitle);
-    } finally {
-      setIsUploading(false);
-    }
+      const current = queueRef.current.find((entry) => entry.queueId === queueId) ?? item;
+      await processSingleQueueItem(
+        queueId,
+        resolveEffectiveTitle(current, pendingOf(queueRef.current))
+      );
+    });
   };
 
   const handleConfirmDuplicate = async (queueId: string) => {
     if (isUploading) return;
     const item = queueRef.current.find((entry) => entry.queueId === queueId);
     if (!item?.attemptId) return;
+    const attemptId = item.attemptId;
 
-    setIsUploading(true);
-    try {
-      await runFinalizeStep(
-        queueId,
-        item.attemptId,
-        true,
-        item.confirmDuplicateIdempotencyKey
-      );
-    } finally {
-      setIsUploading(false);
-    }
+    await runUploads(async () => {
+      await runFinalizeStep(queueId, attemptId, true, item.confirmDuplicateIdempotencyKey);
+    });
   };
 
   const handleCancelDuplicate = (queueId: string) => {
     if (isUploading) return;
-    updateQueueItem(queueId, {
-      status: 'CANCELLED',
-      errorMessage: null,
-      duplicateMatches: [],
-    });
+    syncSharedTitle(
+      setQueueSynced((prev) =>
+        prev.map((item) =>
+          item.queueId === queueId
+            ? { ...item, status: 'CANCELLED', errorMessage: null, duplicateMatches: [] }
+            : item
+        )
+      )
+    );
   };
 
   const handleClearCompleted = () => {
     if (isUploading) return;
-    const remaining = setQueueSynced((prev) =>
-      prev.filter((item) => {
-        if (item.status === 'READY' || item.status === 'CANCELLED') {
-          revokePreviewUrl(item.previewUrl);
-          return false;
-        }
-        return true;
-      })
+    syncSharedTitle(
+      setQueueSynced((prev) =>
+        prev.filter((item) => {
+          if (item.status === 'READY' || item.status === 'CANCELLED') {
+            revokePreviewUrl(item.previewUrl);
+            return false;
+          }
+          return true;
+        })
+      )
     );
-    if (remaining.length === 0 && !titleEditedManuallyRef.current) {
-      setTitle('');
-    }
   };
-
-  const activeQueue = queue.filter((item) => item.status !== 'CANCELLED');
-  const hasReadyOrCancelled = queue.some(
-    (item) => item.status === 'READY' || item.status === 'CANCELLED'
-  );
 
   return (
     <section
+      id="document-upload-section"
       aria-labelledby="upload-form-heading"
       data-testid="document-upload-section"
       className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 sm:p-6 shadow-xs space-y-5 min-w-0 max-w-full"
@@ -691,7 +714,9 @@ export function DocumentUploadForm({
         {onClose && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              if (canLeavePage()) onClose();
+            }}
             disabled={isUploading}
             data-testid="close-upload-form-button"
             className="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-[#4D606A] hover:text-[#172A35] bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -716,7 +741,7 @@ export function DocumentUploadForm({
             الصور المتعددة تُرفع كمستندات منفصلة (بدون دمج تلقائي في ملف واحد).
           </li>
           <li>
-            وفق سياسة المرحلة الأولى (ADR 0003)، لا يُجرى فحص تلقائي ضد الفيروسات وتُعرض حالة الملف بوضوح بعبارة:{' '}
+            وفق سياسة المرحلة الأولى (<bdi dir="ltr">ADR 0003</bdi>)، لا يُجرى فحص تلقائي ضد الفيروسات وتُعرض حالة الملف بوضوح بعبارة:{' '}
             <strong className="text-[#7A4A00]">{UNSCANNED_POLICY_NOTICE_AR}</strong>.
           </li>
         </ul>
@@ -729,7 +754,7 @@ export function DocumentUploadForm({
           className="p-3 rounded-[6px] bg-red-50 border border-red-200 text-sm text-[#A4262C] flex items-start gap-2"
         >
           <IconWarning className="w-5 h-5 shrink-0 mt-0.5" />
-          <span>{formError}</span>
+          <span className={MESSAGE_CLASS}>{formError}</span>
         </div>
       )}
 
@@ -749,11 +774,13 @@ export function DocumentUploadForm({
               multiple
               disabled={isUploading}
               onChange={handleFilesSelected}
+              aria-invalid={Boolean(fieldErrors.files)}
+              aria-describedby={fieldErrors.files ? 'upload-files-error' : undefined}
               className="sr-only peer"
             />
             <label
               htmlFor="document-files-input"
-              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[6px] border border-[#14566B] text-sm font-semibold bg-[#E9F2F5] text-[#14566B] hover:bg-[#DCEAF0] min-h-[44px] max-w-full cursor-pointer peer-focus-visible:ring-2 peer-focus-visible:ring-[#14566B] peer-focus-visible:ring-offset-2 ${
+              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-[6px] border border-[#14566B] text-sm font-semibold bg-[#E9F2F5] text-[#14566B] hover:bg-[#DCEAF0] min-h-[44px] max-w-full cursor-pointer peer-focus:ring-2 peer-focus:ring-[#14566B] peer-focus:ring-offset-2 ${
                 isUploading ? 'opacity-50 pointer-events-none' : ''
               }`}
             >
@@ -761,7 +788,7 @@ export function DocumentUploadForm({
               <span>اختيار ملفات أو صور</span>
             </label>
             <span className="text-xs text-[#4D606A]">
-              {queue.length > 0 ? `تم اختيار ${queue.length} ملف` : 'لم يتم اختيار ملفات بعد'}
+              {queue.length > 0 ? `عدد الملفات المختارة: ${queue.length}` : 'لم يتم اختيار ملفات بعد'}
             </span>
             <input
               ref={replaceInputRef}
@@ -774,7 +801,9 @@ export function DocumentUploadForm({
             />
           </div>
           {fieldErrors.files && (
-            <p className="text-sm text-[#A4262C] font-medium">{fieldErrors.files}</p>
+            <p id="upload-files-error" className={`text-sm text-[#A4262C] font-medium ${MESSAGE_CLASS}`}>
+              {fieldErrors.files}
+            </p>
           )}
         </div>
 
@@ -790,7 +819,7 @@ export function DocumentUploadForm({
                   type="button"
                   onClick={handleClearCompleted}
                   disabled={isUploading}
-                  className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] px-2"
+                  className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] px-2 rounded-[4px] disabled:opacity-50 disabled:no-underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   إزالة المكتملة من القائمة
                 </button>
@@ -800,6 +829,7 @@ export function DocumentUploadForm({
             <div className="space-y-3">
               {queue.map((item, idx) => {
                 const statusMeta = QUEUE_STATUS_META[item.status];
+                const clientRejection = validateClientFile(item.file);
                 const canRemoveOrEdit =
                   !isUploading &&
                   item.status !== 'UPLOADING' &&
@@ -849,15 +879,17 @@ export function DocumentUploadForm({
                                 تعذر عرض معاينة محلية للصورة — قد لا يكون محتوى الملف صورة صالحة.
                               </span>
                             )}
-                            {isPdfFile(item.file) && item.file.size > 0 && item.file.size <= MAX_DOCUMENT_BYTES && (
+                            {isPdfFile(item.file) && !clientRejection && item.status !== 'REJECTED' && (
                               <span className="block text-[#176449] mt-0.5">
-                                ملف PDF جاهز للإرسال والتحقق
+                                ملف <bdi dir="ltr">PDF</bdi> جاهز للإرسال والتحقق
                               </span>
                             )}
                           </p>
                           <div className="flex flex-wrap items-center gap-2 pt-1">
                             <span
                               data-testid={`queue-item-status-${idx}`}
+                              role="status"
+                              aria-live="polite"
                               className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-[4px] border ${statusMeta.badgeClass}`}
                             >
                               {item.status === 'READY' && <IconCheck className="w-3.5 h-3.5" />}
@@ -870,9 +902,13 @@ export function DocumentUploadForm({
                             {item.status === 'READY' && item.createdDocument?.currentVersion && (
                               <span
                                 data-testid={`queue-item-scan-badge-${idx}`}
-                                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-[4px] border bg-[#FFF7E6] text-[#7A4A00] border-[#E0B46A]"
+                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-[4px] border ${SCAN_STATUS_BADGE_CLASSES[item.createdDocument.currentVersion.scanStatus]}`}
                               >
-                                <IconWarning className="w-3.5 h-3.5" />
+                                {item.createdDocument.currentVersion.scanStatus === 'CLEAN' ? (
+                                  <IconCheck className="w-3.5 h-3.5" />
+                                ) : (
+                                  <IconWarning className="w-3.5 h-3.5" />
+                                )}
                                 <span>{item.createdDocument.currentVersion.scanStatusLabel}</span>
                               </span>
                             )}
@@ -884,6 +920,7 @@ export function DocumentUploadForm({
                         <div className="flex flex-wrap items-center gap-2 shrink-0">
                           <button
                             type="button"
+                            aria-label={`استبدال الملف ${item.file.name}`}
                             onClick={() => handleTriggerReplaceFile(item.queueId)}
                             className="inline-flex items-center justify-center px-3 py-2 text-xs font-semibold text-[#14566B] bg-white hover:bg-[#E9F2F5] border border-[#D5DFE3] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                           >
@@ -892,6 +929,7 @@ export function DocumentUploadForm({
                           <button
                             type="button"
                             data-testid={`queue-remove-${idx}`}
+                            aria-label={`إزالة ${item.file.name}`}
                             onClick={() => handleRemoveQueueItem(item.queueId)}
                             className="inline-flex items-center justify-center px-3 py-2 text-xs font-semibold text-[#A4262C] bg-white hover:bg-red-50 border border-red-200 rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
                           >
@@ -901,8 +939,8 @@ export function DocumentUploadForm({
                       )}
                     </div>
 
-                    {/* Individual editable title when multiple files are queued */}
-                    {activeQueue.length > 1 && item.status !== 'READY' && item.status !== 'CANCELLED' && (
+                    {/* Individual editable title when multiple files are pending */}
+                    {pendingQueue.length > 1 && isPending(item) && (
                       <div className="pt-1">
                         <label
                           htmlFor={`queue-title-${item.queueId}`}
@@ -913,19 +951,20 @@ export function DocumentUploadForm({
                         <input
                           id={`queue-title-${item.queueId}`}
                           type="text"
+                          maxLength={MAX_DOCUMENT_TITLE_LENGTH}
                           value={
                             item.itemTitleEdited
                               ? item.itemTitle
-                              : resolveEffectiveTitle(item, activeQueue)
+                              : resolveEffectiveTitle(item, pendingQueue)
                           }
-                          disabled={isUploading}
+                          disabled={isUploading || Boolean(item.attemptId)}
                           onChange={(e) =>
                             updateQueueItem(item.queueId, {
                               itemTitle: e.target.value,
                               itemTitleEdited: true,
                             })
                           }
-                          className="w-full min-h-[44px] px-3 py-2 text-sm bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                          className="w-full min-h-[44px] px-3 py-2 text-sm bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
                         />
                       </div>
                     )}
@@ -937,17 +976,20 @@ export function DocumentUploadForm({
                         data-testid={`queue-item-error-${idx}`}
                         className="p-3 rounded-[6px] bg-red-50 border border-red-200 text-sm text-[#A4262C] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                       >
-                        <span>{item.errorMessage}</span>
-                        <button
-                          type="button"
-                          data-testid={`queue-retry-${idx}`}
-                          onClick={() => handleRetryQueueItem(item.queueId)}
-                          disabled={isUploading}
-                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
-                        >
-                          <IconRefresh className="w-4 h-4" />
-                          <span>إعادة المحاولة</span>
-                        </button>
+                        <span className={MESSAGE_CLASS}>{item.errorMessage}</span>
+                        {!clientRejection && (
+                          <button
+                            type="button"
+                            data-testid={`queue-retry-${idx}`}
+                            aria-label={`إعادة المحاولة للملف ${item.file.name}`}
+                            onClick={() => handleRetryQueueItem(item.queueId)}
+                            disabled={isUploading}
+                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                          >
+                            <IconRefresh className="w-4 h-4" />
+                            <span>إعادة المحاولة</span>
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -958,15 +1000,12 @@ export function DocumentUploadForm({
                         data-testid={`queue-duplicate-warning-${idx}`}
                         className="p-3 rounded-[6px] bg-[#FFF7E6] border border-[#E0B46A] text-sm text-[#7A4A00] space-y-2.5"
                       >
-                        <p className="font-bold">{item.errorMessage}</p>
+                        <p className={`font-bold ${MESSAGE_CLASS}`}>{item.errorMessage}</p>
                         {item.duplicateMatches.length > 0 && (
                           <ul className="list-disc list-inside space-y-1 text-xs text-[#172A35]">
                             {item.duplicateMatches.map((match) => (
-                              <li key={match.versionId}>
-                                <Link
-                                  href={`/documents/${match.documentId}`}
-                                  className="font-semibold text-[#14566B] underline"
-                                >
+                              <li key={match.versionId} className={MESSAGE_CLASS}>
+                                <Link href={`/documents/${match.documentId}`} className={INLINE_LINK_CLASS}>
                                   {match.title}
                                 </Link>{' '}
                                 (<bdi dir="ltr">{match.originalFilename}</bdi>)
@@ -986,6 +1025,7 @@ export function DocumentUploadForm({
                           <button
                             type="button"
                             data-testid={`queue-confirm-duplicate-${idx}`}
+                            aria-label={`تأكيد رفع نسخة منفصلة من الملف ${item.file.name}`}
                             onClick={() => handleConfirmDuplicate(item.queueId)}
                             disabled={isUploading}
                             className="inline-flex items-center justify-center px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -995,6 +1035,7 @@ export function DocumentUploadForm({
                           <button
                             type="button"
                             data-testid={`queue-cancel-duplicate-${idx}`}
+                            aria-label={`إلغاء رفع الملف ${item.file.name}`}
                             onClick={() => handleCancelDuplicate(item.queueId)}
                             disabled={isUploading}
                             className="inline-flex items-center justify-center px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -1009,9 +1050,11 @@ export function DocumentUploadForm({
                     {item.status === 'READY' && item.createdDocument && (
                       <div
                         data-testid={`queue-ready-summary-${idx}`}
+                        role="status"
+                        aria-live="polite"
                         className="p-3 rounded-[6px] bg-emerald-50 border border-emerald-200 text-sm text-[#176449] flex flex-wrap items-center justify-between gap-2"
                       >
-                        <span>
+                        <span className={MESSAGE_CLASS}>
                           تم اعتماد المستند وحفظه في الأرشيف الخاص ({item.createdDocument.title}).
                         </span>
                         <Link
@@ -1030,49 +1073,51 @@ export function DocumentUploadForm({
           </div>
         )}
 
+        {metadataLocked && (
+          <div
+            role="status"
+            data-testid="upload-metadata-locked-note"
+            className={`rounded-[6px] bg-[#FFF7E6] border border-[#E0B46A] px-3 py-2 text-xs text-[#7A4A00] ${MESSAGE_CLASS}`}
+          >
+            البيانات الأساسية مقفلة مؤقتاً لوجود محاولة رفع تنتظر إعادة المحاولة أو تأكيد التطابق. أكمل الإجراء أو أزِل الملف لتعديل البيانات.
+          </div>
+        )}
+
         {/* Link Target Selection */}
         <fieldset className="space-y-3 pt-2 border-t border-[#D5DFE3] min-w-0">
           <legend className="text-sm font-bold text-[#172A35] px-1">
             ربط المستند بجهة محفوظة *
           </legend>
           <div className="flex flex-wrap gap-3">
-            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] min-h-[44px] cursor-pointer">
+            <label className={RADIO_LABEL_CLASS}>
               <input
                 type="radio"
                 name="document-link-mode"
                 value="MATTER"
                 checked={linkMode === 'MATTER'}
-                disabled={isUploading}
+                disabled={metadataDisabled}
                 onChange={() => {
                   setLinkMode('MATTER');
                   setPartyId('');
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.partyId;
-                    return next;
-                  });
+                  clearFieldError('partyId');
                 }}
                 className="w-4 h-4 accent-[#14566B]"
               />
               <span className="text-sm font-semibold text-[#172A35]">قضية</span>
             </label>
 
-            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] min-h-[44px] cursor-pointer">
+            <label className={RADIO_LABEL_CLASS}>
               <input
                 type="radio"
                 name="document-link-mode"
                 value="PARTY"
                 checked={linkMode === 'PARTY'}
-                disabled={isUploading}
+                disabled={metadataDisabled}
                 onChange={() => {
                   setLinkMode('PARTY');
                   setMatterId('');
                   setProceedingId('');
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.matterId;
-                    return next;
-                  });
+                  clearFieldError('matterId');
                 }}
                 className="w-4 h-4 accent-[#14566B]"
               />
@@ -1094,15 +1139,13 @@ export function DocumentUploadForm({
                   id="upload-matter-select"
                   data-testid="upload-matter-select"
                   value={matterId}
-                  disabled={isUploading}
+                  disabled={metadataDisabled}
+                  aria-invalid={Boolean(fieldErrors.matterId)}
+                  aria-describedby={fieldErrors.matterId ? 'upload-matter-error' : undefined}
                   onChange={(e) => {
                     setMatterId(e.target.value);
                     setProceedingId('');
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.matterId;
-                      return next;
-                    });
+                    clearFieldError('matterId');
                   }}
                   className={INPUT_CLASS}
                 >
@@ -1114,7 +1157,9 @@ export function DocumentUploadForm({
                   ))}
                 </select>
                 {fieldErrors.matterId && (
-                  <p className="text-xs text-[#A4262C] mt-1 font-medium">{fieldErrors.matterId}</p>
+                  <p id="upload-matter-error" className={FIELD_ERROR_CLASS}>
+                    {fieldErrors.matterId}
+                  </p>
                 )}
               </div>
 
@@ -1129,7 +1174,7 @@ export function DocumentUploadForm({
                   id="upload-proceeding-select"
                   data-testid="upload-proceeding-select"
                   value={proceedingId}
-                  disabled={isUploading || !matterId || availableProceedings.length === 0}
+                  disabled={metadataDisabled || !matterId || availableProceedings.length === 0}
                   onChange={(e) => setProceedingId(e.target.value)}
                   className={INPUT_CLASS}
                 >
@@ -1161,14 +1206,12 @@ export function DocumentUploadForm({
                 id="upload-party-select"
                 data-testid="upload-party-select"
                 value={partyId}
-                disabled={isUploading}
+                disabled={metadataDisabled}
+                aria-invalid={Boolean(fieldErrors.partyId)}
+                aria-describedby={fieldErrors.partyId ? 'upload-party-error' : undefined}
                 onChange={(e) => {
                   setPartyId(e.target.value);
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.partyId;
-                    return next;
-                  });
+                  clearFieldError('partyId');
                 }}
                 className={INPUT_CLASS}
               >
@@ -1180,7 +1223,9 @@ export function DocumentUploadForm({
                 ))}
               </select>
               {fieldErrors.partyId && (
-                <p className="text-xs text-[#A4262C] mt-1 font-medium">{fieldErrors.partyId}</p>
+                <p id="upload-party-error" className={FIELD_ERROR_CLASS}>
+                  {fieldErrors.partyId}
+                </p>
               )}
             </div>
           )}
@@ -1193,7 +1238,7 @@ export function DocumentUploadForm({
               htmlFor="upload-title-input"
               className="block text-sm font-semibold text-[#172A35] mb-1.5"
             >
-              عنوان المستند {activeQueue.length > 1 ? '(عنوان أساسي اختياري للدفعة)' : '*'}
+              عنوان المستند {pendingQueue.length > 1 ? '(عنوان أساسي اختياري للدفعة)' : '*'}
             </label>
             <input
               ref={titleInputRef}
@@ -1201,26 +1246,26 @@ export function DocumentUploadForm({
               data-testid="upload-title-input"
               type="text"
               value={title}
-              disabled={isUploading}
-              maxLength={200}
+              disabled={metadataDisabled}
+              maxLength={MAX_DOCUMENT_TITLE_LENGTH}
+              aria-invalid={Boolean(fieldErrors.title)}
+              aria-describedby={fieldErrors.title ? 'upload-title-error' : undefined}
               placeholder={
-                activeQueue.length > 1
+                pendingQueue.length > 1
                   ? 'اختياري: يُستخدم كأساس مرقّم أو اسم كل ملف'
                   : 'يُقترح تلقائياً من اسم الملف عند اختياره'
               }
               onChange={(e) => {
                 titleEditedManuallyRef.current = e.target.value.trim().length > 0;
                 setTitle(e.target.value);
-                setFieldErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.title;
-                  return next;
-                });
+                clearFieldError('title');
               }}
               className={INPUT_CLASS}
             />
             {fieldErrors.title && (
-              <p className="text-xs text-[#A4262C] mt-1 font-medium">{fieldErrors.title}</p>
+              <p id="upload-title-error" className={FIELD_ERROR_CLASS}>
+                {fieldErrors.title}
+              </p>
             )}
           </div>
 
@@ -1235,7 +1280,7 @@ export function DocumentUploadForm({
               id="upload-type-select"
               data-testid="upload-type-select"
               value={documentType}
-              disabled={isUploading}
+              disabled={metadataDisabled}
               onChange={(e) => setDocumentType(e.target.value as DocumentType)}
               className={INPUT_CLASS}
             >
@@ -1260,7 +1305,7 @@ export function DocumentUploadForm({
               type="date"
               dir="ltr"
               value={documentDate}
-              disabled={isUploading}
+              disabled={metadataDisabled}
               onChange={(e) => setDocumentDate(e.target.value)}
               className={INPUT_CLASS}
             />
@@ -1277,7 +1322,7 @@ export function DocumentUploadForm({
               id="upload-sensitivity-select"
               data-testid="upload-sensitivity-select"
               value={sensitivity}
-              disabled={isUploading}
+              disabled={metadataDisabled}
               onChange={(e) => setSensitivity(e.target.value as DocumentSensitivity)}
               className={INPUT_CLASS}
             >
@@ -1300,7 +1345,7 @@ export function DocumentUploadForm({
               id="upload-original-present-select"
               data-testid="upload-original-present-select"
               value={originalPresent}
-              disabled={isUploading}
+              disabled={metadataDisabled}
               onChange={(e) => setOriginalPresent(e.target.value as DocumentOriginalPresence)}
               className={INPUT_CLASS}
             >
@@ -1325,7 +1370,7 @@ export function DocumentUploadForm({
               type="text"
               maxLength={300}
               value={originalLocation}
-              disabled={isUploading}
+              disabled={metadataDisabled}
               placeholder="مثال: دولاب القضايا المدني — رف 3"
               onChange={(e) => setOriginalLocation(e.target.value)}
               className={INPUT_CLASS}
@@ -1346,17 +1391,26 @@ export function DocumentUploadForm({
             rows={2}
             maxLength={2000}
             value={description}
-            disabled={isUploading}
+            disabled={metadataDisabled}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7]"
+            className="w-full px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
           />
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-[#D5DFE3]">
+          {onlyDuplicateWarnings && (
+            <p
+              role="status"
+              data-testid="upload-duplicate-pending-note"
+              className={`text-xs text-[#7A4A00] me-auto ${MESSAGE_CLASS}`}
+            >
+              الملفات المتبقية بانتظار قرارك بشأن تطابق بصمة <bdi dir="ltr">SHA-256</bdi> أعلاه.
+            </p>
+          )}
           <button
             type="submit"
             data-testid="upload-submit-button"
-            disabled={isUploading}
+            disabled={isUploading || onlyDuplicateWarnings}
             aria-busy={isUploading}
             className="inline-flex items-center justify-center gap-2 px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-semibold text-sm rounded-[6px] shadow-xs transition-colors min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
           >

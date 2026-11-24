@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { crc32 } from 'node:zlib';
 import {
   ALLOWED_DOCUMENT_MIMES,
   DocumentValidationError,
@@ -8,7 +9,6 @@ import {
 } from './document-types';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const PNG_IEND_CRC = Buffer.from([0xae, 0x42, 0x60, 0x82]);
 const BIDI_AND_CONTROL_RE = /[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 export interface SanitizedFilenameResult {
@@ -127,11 +127,14 @@ export function validateMimeAndExtension(
   return mime;
 }
 
+/**
+ * PDF structural gate (not a full parser): `%PDF-1.x|2.x` + EOL at byte 0, at least one
+ * `obj`/`endobj` pair, `startxref` and a final `%%EOF` in the tail followed only by whitespace.
+ */
 function isValidPdfBytes(buffer: Buffer): boolean {
   if (buffer.byteLength < 12) return false;
-  // Must start strictly at byte 0 with %PDF-1.x or %PDF-2.x (blocks polyglot HTML/EXE headers)
   const headerSlice = buffer.subarray(0, Math.min(16, buffer.byteLength)).toString('ascii');
-  if (!/^%PDF-[12]\.\d/.test(headerSlice)) {
+  if (!/^%PDF-[12]\.\d(?:\r\n|\r|\n)/.test(headerSlice)) {
     return false;
   }
   const tailStart = Math.max(0, buffer.byteLength - 2048);
@@ -140,11 +143,27 @@ function isValidPdfBytes(buffer: Buffer): boolean {
   if (lastEofIdx === -1) {
     return false;
   }
-  const afterEof = tailSlice.slice(lastEofIdx + 5);
   // Only optional EOL/whitespace may follow the final %%EOF (rejects trailing scripts/payloads)
-  return /^[\r\n\t ]*$/.test(afterEof);
+  if (!/^[\r\n\t ]*$/.test(tailSlice.slice(lastEofIdx + 5))) {
+    return false;
+  }
+  if (!tailSlice.slice(0, lastEofIdx).includes('startxref')) {
+    return false;
+  }
+  const body = buffer.toString('latin1');
+  return /\bobj\b/.test(body) && /\bendobj\b/.test(body);
 }
 
+function isJpegSof(marker: number): boolean {
+  return (
+    (marker >= 0xc0 && marker <= 0xc3) ||
+    (marker >= 0xc5 && marker <= 0xc7) ||
+    (marker >= 0xc9 && marker <= 0xcb) ||
+    (marker >= 0xcd && marker <= 0xcf)
+  );
+}
+
+/** Structural JPEG walk: needs SOI, a SOF and an SOS before EOI; entropy data may contain RSTn markers. */
 function isValidJpegBytes(buffer: Buffer): boolean {
   if (buffer.byteLength < 8) return false;
   if (buffer[0] !== 0xff || buffer[1] !== 0xd8) {
@@ -153,6 +172,8 @@ function isValidJpegBytes(buffer: Buffer): boolean {
 
   let pos = 2;
   let seenSegment = false;
+  let seenSof = false;
+  let seenSos = false;
 
   while (pos < buffer.byteLength) {
     if (buffer[pos] !== 0xff) {
@@ -172,7 +193,7 @@ function isValidJpegBytes(buffer: Buffer): boolean {
 
     // EOI (End of Image)
     if (marker === 0xd9) {
-      if (!seenSegment) return false;
+      if (!seenSegment || !seenSof || !seenSos) return false;
       const trailingLen = buffer.byteLength - pos;
       if (trailingLen > 16) return false;
       for (let i = pos; i < buffer.byteLength; i++) {
@@ -197,18 +218,28 @@ function isValidJpegBytes(buffer: Buffer): boolean {
       return false;
     }
     seenSegment = true;
+    if (isJpegSof(marker)) seenSof = true;
     pos += segLen;
 
-    // SOS (Start of Scan): skip entropy-coded scan stream until the next non-RST marker
+    // SOS: skip entropy-coded data; FF00 is a stuffed byte and (fill FFs +) RST0..RST7 stay in the scan (T.81 B.1.1.2)
     if (marker === 0xda) {
+      if (!seenSof) return false;
+      seenSos = true;
       while (pos < buffer.byteLength) {
         const nextFf = buffer.indexOf(0xff, pos);
         if (nextFf === -1 || nextFf + 1 >= buffer.byteLength) {
           return false;
         }
-        const nextByte = buffer[nextFf + 1];
-        if (nextByte === 0x00 || (nextByte >= 0xd0 && nextByte <= 0xd7)) {
+        if (buffer[nextFf + 1] === 0x00) {
           pos = nextFf + 2;
+          continue;
+        }
+        let markerPos = nextFf + 1;
+        while (markerPos < buffer.byteLength && buffer[markerPos] === 0xff) {
+          markerPos++;
+        }
+        if (markerPos < buffer.byteLength && buffer[markerPos] >= 0xd0 && buffer[markerPos] <= 0xd7) {
+          pos = markerPos + 1;
           continue;
         }
         pos = nextFf;
@@ -220,6 +251,31 @@ function isValidJpegBytes(buffer: Buffer): boolean {
   return false;
 }
 
+const PNG_VALID_BIT_DEPTHS: Record<number, readonly number[]> = {
+  0: [1, 2, 4, 8, 16],
+  2: [8, 16],
+  3: [1, 2, 4, 8],
+  4: [8, 16],
+  6: [8, 16],
+};
+
+function isValidPngIhdr(buffer: Buffer, dataStart: number): boolean {
+  const width = buffer.readUInt32BE(dataStart);
+  const height = buffer.readUInt32BE(dataStart + 4);
+  if (width === 0 || width > 0x7fffffff || height === 0 || height > 0x7fffffff) {
+    return false;
+  }
+  const bitDepth = buffer[dataStart + 8];
+  const colorType = buffer[dataStart + 9];
+  return (
+    (PNG_VALID_BIT_DEPTHS[colorType]?.includes(bitDepth) ?? false) &&
+    buffer[dataStart + 10] === 0 && // compression
+    buffer[dataStart + 11] === 0 && // filter
+    buffer[dataStart + 12] <= 1 // interlace
+  );
+}
+
+/** Walks every chunk: CRC-32 of type+data, single valid IHDR first, non-empty IDAT, IEND last with no trailing bytes. */
 function isValidPngBytes(buffer: Buffer): boolean {
   if (buffer.byteLength < 33) return false;
   if (!buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
@@ -227,8 +283,7 @@ function isValidPngBytes(buffer: Buffer): boolean {
   }
 
   let offset = 8;
-  let hasIhdr = false;
-  let hasIdat = false;
+  let idatBytes = 0;
 
   while (offset + 12 <= buffer.byteLength) {
     const length = buffer.readUInt32BE(offset);
@@ -244,28 +299,21 @@ function isValidPngBytes(buffer: Buffer): boolean {
     if (chunkEnd > buffer.byteLength) {
       return false;
     }
+    if (crc32(buffer.subarray(offset + 4, chunkEnd - 4)) !== buffer.readUInt32BE(chunkEnd - 4)) {
+      return false;
+    }
 
     if (offset === 8) {
-      if (chunkType !== 'IHDR' || length !== 13) {
+      if (chunkType !== 'IHDR' || length !== 13 || !isValidPngIhdr(buffer, offset + 8)) {
         return false;
       }
-      const width = buffer.readUInt32BE(offset + 8);
-      const height = buffer.readUInt32BE(offset + 12);
-      if (width === 0 || height === 0) {
-        return false;
-      }
-      hasIhdr = true;
+    } else if (chunkType === 'IHDR') {
+      return false;
     } else if (chunkType === 'IDAT') {
-      hasIdat = true;
+      idatBytes += length;
     } else if (chunkType === 'IEND') {
-      if (length !== 0) {
-        return false;
-      }
-      if (!buffer.subarray(offset + 8, offset + 12).equals(PNG_IEND_CRC)) {
-        return false;
-      }
       // Must terminate cleanly at buffer end with no trailing bytes
-      return hasIhdr && hasIdat && chunkEnd === buffer.byteLength;
+      return length === 0 && idatBytes > 0 && chunkEnd === buffer.byteLength;
     }
 
     offset = chunkEnd;
@@ -273,7 +321,6 @@ function isValidPngBytes(buffer: Buffer): boolean {
 
   return false;
 }
-
 export function detectDocumentMimeFromBytes(buffer: Buffer): AllowedDocumentMime | null {
   if (isValidPdfBytes(buffer)) {
     return 'application/pdf';

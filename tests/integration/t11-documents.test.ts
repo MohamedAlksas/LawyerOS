@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import zlib from 'node:zlib';
+import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import nextConfig from '../../next.config';
 import { getAuth, getPrismaClient } from '@/lib/auth';
@@ -38,7 +39,10 @@ import { GET as getUploadAttemptRoute } from '@/app/api/documents/uploads/[attem
 import { PUT as putUploadContentRoute } from '@/app/api/documents/uploads/[attemptId]/content/route';
 import { POST as postFinalizeUploadRoute } from '@/app/api/documents/uploads/[attemptId]/finalize/route';
 import { GET as getDocumentRoute } from '@/app/api/documents/[id]/route';
-import { GET as getDocumentContentRoute } from '@/app/api/documents/[id]/content/route';
+import {
+  GET as getDocumentContentRoute,
+  HEAD as headDocumentContentRoute,
+} from '@/app/api/documents/[id]/content/route';
 import {
   cleanupPartyFixtures,
   createSyntheticActor,
@@ -49,8 +53,8 @@ import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matt
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 
 function buildSyntheticPdf(marker: string, padBytes = 0): Buffer {
-  const header = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Marker (${marker}) >>\nendobj\n`, 'ascii');
-  const footer = Buffer.from('\ntrailer\n<<>>\n%%EOF', 'ascii');
+  const header = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Marker (${marker}) >>\nendobj\n`, 'ascii');
+  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
   if (padBytes <= 0) {
     return Buffer.concat([header, footer]);
   }
@@ -59,9 +63,12 @@ function buildSyntheticPdf(marker: string, padBytes = 0): Buffer {
 
 function buildSyntheticJpeg(marker: number): Buffer {
   return Buffer.from([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
-    0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-    0x00, 0x01, marker & 0xff, (marker >> 8) & 0xff, 0xff, 0xd9,
+    0xff, 0xd8, // SOI
+    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
+    marker & 0xff, (marker >> 8) & 0xff, 0x11, 0x22, // entropy
+    0xff, 0xd9, // EOI
   ]);
 }
 
@@ -350,26 +357,66 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
       process.env.DOCUMENTS_STORAGE_ROOT = prevStorageRootEnv;
     }
 
-    // Release any backup file pins created during cleanup tests so versions can be cleaned up
-    if (createdDocumentIds.length > 0) {
-      await prisma.backupFilePin.deleteMany({
-        where: { documentVersion: { documentId: { in: createdDocumentIds } } },
-      });
-      await prisma.document.deleteMany({ where: { id: { in: createdDocumentIds } } });
-      await prisma.auditEvent.deleteMany({
-        where: { entityType: 'Document', entityId: { in: createdDocumentIds } },
+    const actorIds = [owner.id, maintainer.id];
+
+    // Delete jobRun rows created by scheduleHearing so zero rows leak into lawoffice_test
+    const hearingIds = [hearingA1Id, hearingA2Id, hearingBId].filter(Boolean);
+    if (hearingIds.length > 0) {
+      await prisma.jobRun.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: { in: hearingIds } },
       });
     }
 
-    if (createdAttemptIds.length > 0) {
-      await prisma.uploadAttempt.deleteMany({ where: { id: { in: createdAttemptIds } } });
-      await prisma.auditEvent.deleteMany({
-        where: { entityType: 'UploadAttempt', entityId: { in: createdAttemptIds } },
+    // Collect every document created by this suite (explicitly tracked or owned by synthetic actors)
+    const ownedDocs = await prisma.document.findMany({
+      where: {
+        OR: [
+          ...(createdDocumentIds.length > 0 ? [{ id: { in: createdDocumentIds } }] : []),
+          { createdById: { in: actorIds } },
+        ],
+      },
+      select: { id: true },
+    });
+    const allDocIds = ownedDocs.map((d) => d.id);
+
+    // Release backupFilePin rows first (FK Restrict on DocumentVersion), then delete uploadAttempts and documents
+    if (allDocIds.length > 0) {
+      await prisma.backupFilePin.deleteMany({
+        where: { documentVersion: { documentId: { in: allDocIds } } },
       });
     }
+    await prisma.uploadAttempt.deleteMany({
+      where: {
+        OR: [
+          ...(createdAttemptIds.length > 0 ? [{ id: { in: createdAttemptIds } }] : []),
+          ...(allDocIds.length > 0 ? [{ documentId: { in: allDocIds } }] : []),
+          { actorId: { in: actorIds } },
+        ],
+      },
+    });
+    if (allDocIds.length > 0) {
+      await prisma.document.updateMany({
+        where: { id: { in: allDocIds } },
+        data: { currentVersionId: null },
+      });
+      await prisma.documentVersion.deleteMany({ where: { documentId: { in: allDocIds } } });
+      await prisma.document.deleteMany({ where: { id: { in: allDocIds } } });
+    }
+
+    await prisma.auditEvent.deleteMany({
+      where: {
+        OR: [
+          { userId: { in: actorIds } },
+          ...(allDocIds.length > 0 ? [{ entityType: 'Document', entityId: { in: allDocIds } }] : []),
+          ...(createdAttemptIds.length > 0
+            ? [{ entityType: 'UploadAttempt', entityId: { in: createdAttemptIds } }]
+            : []),
+        ],
+      },
+    });
 
     await prisma.idempotencyRecord.deleteMany({
-      where: { actorId: { in: [owner.id, maintainer.id] } },
+      where: { actorId: { in: actorIds } },
     });
     await cleanupMatterFixtures(prisma, createdMatterIds);
     await cleanupPartyFixtures(prisma, createdPartyIds);
@@ -653,10 +700,12 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(listRes.status).toBe(200);
     const listJson = (await listRes.json()) as {
       success: true;
-      data: { documents: Array<{ id: string }>; total: number };
+      data: { documents: Array<{ id: string; versions?: unknown }>; total: number };
     };
     expect(listJson.data.documents.map((d) => d.id)).toContain(pdfDoc.id);
     expect(listJson.data.documents.map((d) => d.id)).not.toContain(pngDoc.id);
+    const listedPdf = listJson.data.documents.find((d) => d.id === pdfDoc.id)!;
+    expect(Object.hasOwn(listedPdf, 'versions')).toBe(false);
 
     const docMetaRes = await getDocumentRoute(
       new Request(`${trustedOrigin}/api/documents/${pdfDoc.id}`, {
@@ -668,6 +717,8 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
 
     const dl = await authorizeDownload(owner, pngDoc.id, undefined, { disposition: 'inline' });
     expect(await dl.readBytes()).toEqual(pngBytes);
+    expect(dl.headers['Content-Disposition']).toContain('inline; filename="document.png";');
+    expect(dl.headers['Content-Disposition']).not.toContain('filename=".png"');
 
     const dlAudit = await prisma.auditEvent.findFirst({
       where: { entityType: 'Document', entityId: pngDoc.id, action: 'DOWNLOAD_DOCUMENT' },
@@ -698,7 +749,7 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(exactDoc.currentVersion!.sizeBytes).toBe(MAX_DOCUMENT_BYTES);
     expect(exactDoc.currentVersion!.uploadStatus).toBe('READY');
 
-    // 25 MiB + 1 byte rejected on beginUpload
+    // 25 MiB + 1 byte rejected on beginUpload (service + HTTP)
     await expect(
       beginUpload(owner, {
         matterId: matterAId,
@@ -711,7 +762,44 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
       })
     ).rejects.toThrow(DocumentValidationError);
 
-    // Forged small expectedSizeBytes followed by > 25 MiB stream over HTTP PUT fails closed
+    const storage = createLocalDocumentStorage(storageRoot);
+
+    // Explicit oversized Content-Length header on PUT /content -> HTTP 413 PAYLOAD_TOO_LARGE & DB REJECTED
+    const clOversizeAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'ملف بترويسة طول تتجاوز الحد',
+      documentType: 'OTHER',
+      originalFilename: 'cl-oversize.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: 512,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(clOversizeAttempt.id);
+
+    const clOverPutRes = await putUploadContentRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads/${clOversizeAttempt.id}/content`, {
+        method: 'PUT',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/pdf',
+          'content-length': String(MAX_DOCUMENT_BYTES + 1),
+        },
+        body: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      }),
+      { params: Promise.resolve({ attemptId: clOversizeAttempt.id }) }
+    );
+    expect(clOverPutRes.status).toBe(413);
+    const clOverBody = (await clOverPutRes.json()) as { code: string };
+    expect(clOverBody.code).toBe('PAYLOAD_TOO_LARGE');
+    const clOversizeRow = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: clOversizeAttempt.id },
+    });
+    expect(clOversizeRow.status).toBe('REJECTED');
+    expect(clOversizeRow.documentId).toBeNull();
+    expect(await storage.exists('quarantine', clOversizeRow.quarantineKey)).toBe(false);
+
+    // Forged small expectedSizeBytes followed by > 25 MiB stream over HTTP PUT fails closed with HTTP 413
     const forgedAttempt = await beginUpload(owner, {
       matterId: matterAId,
       title: 'ملف يزور الحجم المعلن',
@@ -743,10 +831,13 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
       } as RequestInit),
       { params: Promise.resolve({ attemptId: forgedAttempt.id }) }
     );
-    expect(overPutRes.status).toBe(400);
+    expect(overPutRes.status).toBe(413);
+    const overPutBody = (await overPutRes.json()) as { code: string };
+    expect(overPutBody.code).toBe('PAYLOAD_TOO_LARGE');
     const forgedRow = await prisma.uploadAttempt.findUniqueOrThrow({ where: { id: forgedAttempt.id } });
     expect(forgedRow.status).toBe('REJECTED');
     expect(forgedRow.documentId).toBeNull();
+    expect(await storage.exists('quarantine', forgedRow.quarantineKey)).toBe(false);
 
     // Disguised HTML pretending to be PDF -> rejected at finalizeUpload and audited as REJECT_DOCUMENT_UPLOAD
     const htmlDisguised = Buffer.from('<html><body><script>alert(1)</script></body></html>', 'utf8');
@@ -796,6 +887,11 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     await expect(finalizeUpload(owner, { attemptId: mismatchAttempt.id })).rejects.toThrow(
       DocumentValidationError
     );
+    const mismatchRow = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: mismatchAttempt.id },
+    });
+    expect(mismatchRow.status).toBe('REJECTED');
+    expect(mismatchRow.documentId).toBeNull();
 
     // ADR 0003 fail-closed when DOCUMENT_SCAN_POLICY_MODE=REQUIRED
     const validPdf = buildSyntheticPdf('REQUIRED-POLICY-FAIL-CLOSED');
@@ -966,7 +1062,7 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     await uploadAttemptBytes(owner, attempt.id, pdfBytes);
 
     const readyDirSnapshotBefore = fs.existsSync(storage.readyDir)
-      ? fs.readdirSync(storage.readyDir, { recursive: true })
+      ? fs.readdirSync(storage.readyDir, { recursive: true }).map(String).sort()
       : [];
 
     const finalizeKey = crypto.randomUUID();
@@ -988,7 +1084,7 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(await storage.exists('quarantine', failedAttempt.quarantineKey)).toBe(true);
 
     const readyDirSnapshotDuringFail = fs.existsSync(storage.readyDir)
-      ? fs.readdirSync(storage.readyDir, { recursive: true }).filter((p) => !String(p).includes('part-'))
+      ? fs.readdirSync(storage.readyDir, { recursive: true }).map(String).sort()
       : [];
     expect(readyDirSnapshotDuringFail).toEqual(readyDirSnapshotBefore);
     expect(
@@ -1054,6 +1150,60 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     await expect(
       finalizeUpload(owner, { attemptId: attempt.id, idempotencyKey: crypto.randomUUID() })
     ).rejects.toThrow(ConcurrencyConflictError);
+
+    // 5. Post-commit read failure after DB commit MUST NOT delete the committed ready/ file
+    const postCommitBytes = buildSyntheticPdf('TC04-POST-COMMIT-READ-FAIL');
+    const postCommitAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'اختبار الحفاظ على الملف المعتمد عند فشل القراءة بعد الحفظ',
+      documentType: 'CONTRACT',
+      originalFilename: 'post-commit-preserve.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: postCommitBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(postCommitAttempt.id);
+    await uploadAttemptBytes(owner, postCommitAttempt.id, postCommitBytes);
+
+    const failingPostCommitPrisma = new Proxy(prisma, {
+      get(target, prop, receiver) {
+        if (prop === 'document') {
+          return new Proxy(target.document, {
+            get(docTarget, docProp, docReceiver) {
+              if (docProp === 'findUniqueOrThrow') {
+                return async () => {
+                  throw new Error('SIMULATED_POST_COMMIT_READ_FAILURE');
+                };
+              }
+              return Reflect.get(docTarget, docProp, docReceiver);
+            },
+          });
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as PrismaClient;
+
+    await expect(
+      finalizeUpload(
+        owner,
+        { attemptId: postCommitAttempt.id, idempotencyKey: crypto.randomUUID() },
+        { prismaOverride: failingPostCommitPrisma, storage }
+      )
+    ).rejects.toThrow(/SIMULATED_POST_COMMIT_READ_FAILURE/);
+
+    const postCommitAttemptAfter = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: postCommitAttempt.id },
+    });
+    expect(postCommitAttemptAfter.status).toBe('FINALIZED');
+    expect(postCommitAttemptAfter.documentId).not.toBeNull();
+    createdDocumentIds.push(postCommitAttemptAfter.documentId!);
+
+    const committedVer = await prisma.documentVersion.findUniqueOrThrow({
+      where: { id: postCommitAttemptAfter.targetDocumentVersionId! },
+    });
+    expect(committedVer.uploadStatus).toBe('READY');
+    expect(await storage.exists('ready', committedVer.objectKey)).toBe(true);
+    expect(await storage.readReadyBytes(committedVer.objectKey)).toEqual(postCommitBytes);
   });
 
   it('T11-TC-05: Enforces Owner-only access, rejects unauth/revoked/Maintainer/cross-origin/quarantined content, and sets strict security headers', async () => {
@@ -1114,16 +1264,126 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(headerRules.some((r) => r.source === '/documents')).toBe(true);
     expect(headerRules.some((r) => r.source === '/documents/:path*')).toBe(true);
 
-    // Unauthenticated requests -> 401 with private no-store
-    const unauthContent = await getDocumentContentRoute(
-      new Request(`${trustedOrigin}/api/documents/${readyDoc.id}/content`),
-      { params: Promise.resolve({ id: readyDoc.id }) }
-    );
-    expect(unauthContent.status).toBe(401);
-    expect(unauthContent.headers.get('cache-control')).toBe('private, no-store');
+    // Complete 7-route auth & Origin matrix:
+    // 401 unauthenticated (+ private, no-store), 403 MAINTAINER (+ private, no-store), 403 cross-site / missing/untrusted Origin
+    const dummyAttemptId = readyAttempt.id;
+    const allSevenRoutes: Array<{
+      name: string;
+      isMutation: boolean;
+      invoke: (headers: Record<string, string>) => Promise<Response>;
+    }> = [
+      {
+        name: 'GET /api/documents',
+        isMutation: false,
+        invoke: (headers) => listDocumentsRoute(new Request(`${trustedOrigin}/api/documents`, { headers })),
+      },
+      {
+        name: 'POST /api/documents/uploads',
+        isMutation: true,
+        invoke: (headers) =>
+          beginUploadRoute(
+            new Request(`${trustedOrigin}/api/documents/uploads`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...headers },
+              body: JSON.stringify({}),
+            })
+          ),
+      },
+      {
+        name: 'GET /api/documents/uploads/[attemptId]',
+        isMutation: false,
+        invoke: (headers) =>
+          getUploadAttemptRoute(
+            new Request(`${trustedOrigin}/api/documents/uploads/${dummyAttemptId}`, { headers }),
+            { params: Promise.resolve({ attemptId: dummyAttemptId }) }
+          ),
+      },
+      {
+        name: 'PUT /api/documents/uploads/[attemptId]/content',
+        isMutation: true,
+        invoke: (headers) =>
+          putUploadContentRoute(
+            new Request(`${trustedOrigin}/api/documents/uploads/${dummyAttemptId}/content`, {
+              method: 'PUT',
+              headers: { 'content-type': 'application/pdf', ...headers },
+              body: new Uint8Array([0x25, 0x50]),
+            }),
+            { params: Promise.resolve({ attemptId: dummyAttemptId }) }
+          ),
+      },
+      {
+        name: 'POST /api/documents/uploads/[attemptId]/finalize',
+        isMutation: true,
+        invoke: (headers) =>
+          postFinalizeUploadRoute(
+            new Request(`${trustedOrigin}/api/documents/uploads/${dummyAttemptId}/finalize`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...headers },
+              body: JSON.stringify({}),
+            }),
+            { params: Promise.resolve({ attemptId: dummyAttemptId }) }
+          ),
+      },
+      {
+        name: 'GET /api/documents/[id]',
+        isMutation: false,
+        invoke: (headers) =>
+          getDocumentRoute(
+            new Request(`${trustedOrigin}/api/documents/${readyDoc.id}`, { headers }),
+            { params: Promise.resolve({ id: readyDoc.id }) }
+          ),
+      },
+      {
+        name: 'GET /api/documents/[id]/content',
+        isMutation: false,
+        invoke: (headers) =>
+          getDocumentContentRoute(
+            new Request(`${trustedOrigin}/api/documents/${readyDoc.id}/content`, { headers }),
+            { params: Promise.resolve({ id: readyDoc.id }) }
+          ),
+      },
+    ];
 
-    const unauthList = await listDocumentsRoute(new Request(`${trustedOrigin}/api/documents`));
-    expect(unauthList.status).toBe(401);
+    for (const route of allSevenRoutes) {
+      const originHeaders: Record<string, string> = route.isMutation
+        ? { origin: trustedOrigin }
+        : {};
+
+      // 1) Unauthenticated -> 401 + Cache-Control: private, no-store
+      const unauthRes = await route.invoke(originHeaders);
+      expect(unauthRes.status, `${route.name} unauth status`).toBe(401);
+      expect(unauthRes.headers.get('cache-control'), `${route.name} unauth cache-control`).toBe(
+        'private, no-store'
+      );
+
+      // 2) Maintainer -> 403 + Cache-Control: private, no-store
+      const maintRes = await route.invoke({ ...originHeaders, cookie: maintainerCookie });
+      expect(maintRes.status, `${route.name} maintainer status`).toBe(403);
+      expect(maintRes.headers.get('cache-control'), `${route.name} maintainer cache-control`).toBe(
+        'private, no-store'
+      );
+
+      // 3) Cross-origin / missing Origin -> 403 + Cache-Control: private, no-store
+      if (route.isMutation) {
+        const missingOriginRes = await route.invoke({ cookie: ownerCookie });
+        expect(missingOriginRes.status, `${route.name} missing origin`).toBe(403);
+        expect(missingOriginRes.headers.get('cache-control')).toBe('private, no-store');
+
+        const evilOriginRes = await route.invoke({
+          cookie: ownerCookie,
+          origin: 'https://evil.example',
+        });
+        expect(evilOriginRes.status, `${route.name} untrusted origin`).toBe(403);
+        expect(evilOriginRes.headers.get('cache-control')).toBe('private, no-store');
+      } else {
+        const crossSiteRes = await route.invoke({
+          cookie: ownerCookie,
+          'sec-fetch-site': 'cross-site',
+        });
+        expect(crossSiteRes.status, `${route.name} cross-site read`).toBe(403);
+        expect(crossSiteRes.headers.get('cache-control')).toBe('private, no-store');
+      }
+    }
 
     // Revoked session -> 401
     const revokedContent = await getDocumentContentRoute(
@@ -1134,7 +1394,32 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     );
     expect(revokedContent.status).toBe(401);
 
-    // Maintainer -> 403 FORBIDDEN on service and HTTP routes
+    // HEAD /api/documents/[id]/content -> 405 (Allow: GET, private no-store, ZERO extra audit rows)
+    const auditCountBeforeHead = await prisma.auditEvent.count({
+      where: { entityType: 'Document', entityId: readyDoc.id, action: 'DOWNLOAD_DOCUMENT' },
+    });
+    const headRes = headDocumentContentRoute();
+    expect(headRes.status).toBe(405);
+    expect(headRes.headers.get('allow')).toBe('GET');
+    expect(headRes.headers.get('cache-control')).toBe('private, no-store');
+    const auditCountAfterHead = await prisma.auditEvent.count({
+      where: { entityType: 'Document', entityId: readyDoc.id, action: 'DOWNLOAD_DOCUMENT' },
+    });
+    expect(auditCountAfterHead).toBe(auditCountBeforeHead);
+
+    // Strict query parameter validation on GET /api/documents -> 400 VALIDATION_ERROR
+    for (const badQs of ['page=abc', 'page=0', 'limit=abc', 'limit=0', 'includeArchived=maybe']) {
+      const badQueryRes = await listDocumentsRoute(
+        new Request(`${trustedOrigin}/api/documents?${badQs}`, {
+          headers: { cookie: ownerCookie },
+        })
+      );
+      expect(badQueryRes.status, `GET /api/documents?${badQs}`).toBe(400);
+      const badQueryBody = (await badQueryRes.json()) as { code: string };
+      expect(badQueryBody.code).toBe('VALIDATION_ERROR');
+    }
+
+    // Maintainer -> 403 FORBIDDEN on service calls as well
     await expect(listDocuments(maintainer)).rejects.toThrow(AuthorizationError);
     await expect(authorizeDownload(maintainer, readyDoc.id)).rejects.toThrow(AuthorizationError);
     await expect(
@@ -1151,32 +1436,6 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     await expect(
       authorizeDownload(null as unknown as typeof owner, readyDoc.id)
     ).rejects.toThrow(UnauthorizedError);
-
-    const maintContentRes = await getDocumentContentRoute(
-      new Request(`${trustedOrigin}/api/documents/${readyDoc.id}/content`, {
-        headers: { cookie: maintainerCookie },
-      }),
-      { params: Promise.resolve({ id: readyDoc.id }) }
-    );
-    expect(maintContentRes.status).toBe(403);
-    expect(maintContentRes.headers.get('cache-control')).toBe('private, no-store');
-
-    const maintMetaRes = await getDocumentRoute(
-      new Request(`${trustedOrigin}/api/documents/${readyDoc.id}`, {
-        headers: { cookie: maintainerCookie },
-      }),
-      { params: Promise.resolve({ id: readyDoc.id }) }
-    );
-    expect(maintMetaRes.status).toBe(403);
-
-    // Cross-origin / cross-site rejection -> 403
-    const crossSiteContent = await getDocumentContentRoute(
-      new Request(`${trustedOrigin}/api/documents/${readyDoc.id}/content`, {
-        headers: { cookie: ownerCookie, 'sec-fetch-site': 'cross-site' },
-      }),
-      { params: Promise.resolve({ id: readyDoc.id }) }
-    );
-    expect(crossSiteContent.status).toBe(403);
 
     // Quarantined DocumentVersion must NEVER be downloadable even by Owner
     const quarantinedDocId = crypto.randomUUID();
@@ -1502,5 +1761,70 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     });
     expect(await storage.exists('ready', pinnedVer.objectKey)).toBe(true);
     expect(await storage.exists('quarantine', pinnedQKey)).toBe(true);
+
+    // 5. Lazy-expiry quarantine deletion on both uploadAttemptBytes and finalizeUpload
+    const lazyFinBytes = buildSyntheticPdf('LAZY-EXPIRY-FINALIZE');
+    const lazyFinAttempt = await beginUpload(
+      owner,
+      {
+        matterId: matterAId,
+        title: 'اختبار حذف الحجر عند انتهاء الصلاحية قبل الاعتماد',
+        documentType: 'OTHER',
+        originalFilename: 'lazy-expiry-fin.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: lazyFinBytes.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { now }
+    );
+    createdAttemptIds.push(lazyFinAttempt.id);
+    await uploadAttemptBytes(owner, lazyFinAttempt.id, lazyFinBytes, { now });
+    const lazyFinRowBefore = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: lazyFinAttempt.id },
+    });
+    expect(await storage.exists('quarantine', lazyFinRowBefore.quarantineKey)).toBe(true);
+
+    const afterExpiry = new Date(lazyFinRowBefore.expiresAt.getTime() + 60_000);
+    await expect(
+      finalizeUpload(owner, { attemptId: lazyFinAttempt.id }, { now: afterExpiry })
+    ).rejects.toThrow(DocumentValidationError);
+
+    const lazyFinRowAfter = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: lazyFinAttempt.id },
+    });
+    expect(lazyFinRowAfter.status).toBe('EXPIRED');
+    expect(await storage.exists('quarantine', lazyFinRowAfter.quarantineKey)).toBe(false);
+
+    // Also test lazy-expiry via uploadAttemptBytes on an already-uploaded expired attempt
+    const lazyPutBytes = buildSyntheticPdf('LAZY-EXPIRY-PUT');
+    const lazyPutAttempt = await beginUpload(
+      owner,
+      {
+        matterId: matterAId,
+        title: 'اختبار حذف الحجر عند انتهاء الصلاحية أثناء البث',
+        documentType: 'OTHER',
+        originalFilename: 'lazy-expiry-put.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: lazyPutBytes.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { now }
+    );
+    createdAttemptIds.push(lazyPutAttempt.id);
+    await uploadAttemptBytes(owner, lazyPutAttempt.id, lazyPutBytes, { now });
+    const lazyPutRowBefore = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: lazyPutAttempt.id },
+    });
+    expect(await storage.exists('quarantine', lazyPutRowBefore.quarantineKey)).toBe(true);
+
+    await expect(
+      uploadAttemptBytes(owner, lazyPutAttempt.id, lazyPutBytes, { now: afterExpiry })
+    ).rejects.toThrow(DocumentValidationError);
+
+    const lazyPutRowAfter = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: lazyPutAttempt.id },
+    });
+    expect(lazyPutRowAfter.status).toBe('EXPIRED');
+    expect(await storage.exists('quarantine', lazyPutRowAfter.quarantineKey)).toBe(false);
   });
 });

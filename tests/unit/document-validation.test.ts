@@ -5,7 +5,9 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { PrismaClient } from '@prisma/client';
 import { validateEnv } from '@/lib/env';
+import type { Actor } from '@/modules/identity/types';
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
@@ -14,6 +16,7 @@ import {
   DocumentValidationError,
   MAX_DOCUMENT_BYTES,
   UNSCANNED_POLICY_NOTICE_AR,
+  authorizeDownload,
   createLocalDocumentStorage,
   documentError,
   documentStatusFromErrorCode,
@@ -25,8 +28,8 @@ import {
 } from '@/modules/documents';
 
 function buildSyntheticPdf(extraBytes = 0): Buffer {
-  const header = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n', 'ascii');
-  const footer = Buffer.from('\ntrailer\n<<>>\n%%EOF', 'ascii');
+  const header = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n', 'ascii');
+  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
   if (extraBytes <= 0) {
     return Buffer.concat([header, footer]);
   }
@@ -34,11 +37,14 @@ function buildSyntheticPdf(extraBytes = 0): Buffer {
   return Buffer.concat([header, pad, footer]);
 }
 
-function buildSyntheticJpeg(): Buffer {
+function buildSyntheticJpeg(entropyBytes: number[] = [0x11, 0x22, 0x33, 0x44]): Buffer {
   return Buffer.from([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
-    0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-    0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+    0xff, 0xd8, // SOI
+    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
+    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
+    ...entropyBytes,
+    0xff, 0xd9, // EOI
   ]);
 }
 
@@ -266,6 +272,95 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       ).toBe('application/pdf');
     });
 
+    it('accepts JPEG with 0xFF fill bytes before RST0 inside SOS and rejects structurally invalid PDF/JPEG/PNG', () => {
+      // Valid JPEG with stuffed 0xFF 0x00 and 0xFF fill byte before RST0 (0xFF 0xFF 0xD0) inside SOS
+      const jpegWithFillRst0 = buildSyntheticJpeg([
+        0x12, 0xff, 0x00, 0x34, 0xff, 0xff, 0xd0, 0x56, 0x78,
+      ]);
+      expect(
+        inspectFileContent(jpegWithFillRst0, {
+          originalFilename: 'scan_rst0.jpg',
+          declaredMime: 'image/jpeg',
+        }).detectedMime
+      ).toBe('image/jpeg');
+
+      // JPEG missing SOF/SOS (APP0 -> EOI only) is rejected
+      const jpegWithoutSofSos = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+        0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+      ]);
+      expect(() =>
+        inspectFileContent(jpegWithoutSofSos, {
+          originalFilename: 'no-sof.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // PNG with truncated chunk, bad CRC-32, or zero-length IDAT is rejected
+      const validPng = buildSyntheticPng();
+      const truncatedPng = validPng.subarray(0, validPng.byteLength - 6);
+      expect(() =>
+        inspectFileContent(truncatedPng, {
+          originalFilename: 'truncated.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const badCrcPng = Buffer.from(validPng);
+      badCrcPng[badCrcPng.byteLength - 1] ^= 0xff;
+      expect(() =>
+        inspectFileContent(badCrcPng, {
+          originalFilename: 'bad-crc.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const zeroIdatPng = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        makePngChunk('IHDR', Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0])),
+        makePngChunk('IDAT', Buffer.alloc(0)),
+        makePngChunk('IEND', Buffer.alloc(0)),
+      ]);
+      expect(() =>
+        inspectFileContent(zeroIdatPng, {
+          originalFilename: 'zero-idat.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // PDF without EOL after header version, without obj/endobj, or without startxref is rejected
+      const pdfNoHeaderEol = Buffer.from(
+        '%PDF-1.4<script>alert(1)</script>\n1 0 obj\n<<>>\nendobj\nstartxref\n9\n%%EOF\n',
+        'ascii'
+      );
+      expect(() =>
+        inspectFileContent(pdfNoHeaderEol, {
+          originalFilename: 'no-eol.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const pdfNoObjects = Buffer.from('%PDF-1.4\ntrailer\n<<>>\nstartxref\n9\n%%EOF\n', 'ascii');
+      expect(() =>
+        inspectFileContent(pdfNoObjects, {
+          originalFilename: 'no-obj.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const pdfNoStartxref = Buffer.from(
+        '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n',
+        'ascii'
+      );
+      expect(() =>
+        inspectFileContent(pdfNoStartxref, {
+          originalFilename: 'no-startxref.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+    });
+
     it('accepts exact 25 MiB (26,214,400 bytes) and rejects 25 MiB + 1 byte (26,214,401 bytes)', () => {
       const overhead = buildSyntheticPdf(0).byteLength;
       const exact25MiB = buildSyntheticPdf(MAX_DOCUMENT_BYTES - overhead);
@@ -345,6 +440,9 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), 'public', 'uploads'))).toThrow(
         DocumentStoragePathError
       );
+      expect(() =>
+        resolveSafeStorageRoot(path.resolve(process.cwd(), 'public', '..uploads'))
+      ).toThrow(DocumentStoragePathError);
       expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), '.next', 'cache'))).toThrow(
         DocumentStoragePathError
       );
@@ -386,11 +484,95 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       ).rejects.toThrow(DocumentValidationError);
 
       expect(await storage.exists('quarantine', qKey)).toBe(false);
-      const yearDir = path.join(storage.quarantineDir, String(new Date().getUTCFullYear()));
-      if (fs.existsSync(yearDir)) {
-        const files = fs.readdirSync(yearDir, { recursive: true });
-        expect(files.filter((f) => String(f).includes('.part-'))).toHaveLength(0);
-      }
+      expect(fs.existsSync(storage.quarantineDir)).toBe(true);
+      const files = fs.readdirSync(storage.quarantineDir, { recursive: true });
+      expect(files.filter((f) => String(f).includes('.part-'))).toHaveLength(0);
+    });
+
+    it('builds safe ASCII Content-Disposition fallback (document.pdf, never .pdf) for pure-Arabic filenames', async () => {
+      const root = makeTempStorageRoot();
+      const storage = createLocalDocumentStorage(root);
+      const docId = crypto.randomUUID();
+      const verId = crypto.randomUUID();
+      const readyKey = storage.generateReadyKey(docId, 1, '.pdf');
+      const pdfBytes = buildSyntheticPdf();
+      await storage.writeReadyBytes(readyKey, pdfBytes);
+
+      const now = new Date('2026-11-24T12:00:00.000Z');
+      const fakeActor: Actor = {
+        id: crypto.randomUUID(),
+        email: 'owner@lawoffice.test',
+        name: 'المحامي',
+        role: 'OWNER',
+        sessionId: crypto.randomUUID(),
+        twoFactorVerified: true,
+      };
+      const fakeVersion = {
+        id: verId,
+        documentId: docId,
+        versionNumber: 1,
+        objectKey: readyKey,
+        originalFilename: 'عقد_بيع.pdf',
+        declaredMime: 'application/pdf',
+        detectedMime: 'application/pdf',
+        sizeBytes: pdfBytes.byteLength,
+        sha256: crypto.createHash('sha256').update(pdfBytes).digest('hex'),
+        uploadStatus: 'READY',
+        scanStatus: 'NOT_SCANNED_POLICY',
+        scanPolicyCode: ADR_0003_POLICY_CODE,
+        scanPolicyVersion: ADR_0003_POLICY_VERSION,
+        scanCheckedAt: now,
+        scanError: null,
+        createdAt: now,
+        createdById: fakeActor.id,
+      };
+      const fakeDoc = {
+        id: docId,
+        matterId: crypto.randomUUID(),
+        partyId: null,
+        proceedingId: null,
+        hearingId: null,
+        matter: { id: crypto.randomUUID(), fileCode: 'LO-2026-0001', title: 'قضية' },
+        party: null,
+        proceeding: null,
+        hearing: null,
+        title: 'عقد بيع',
+        titleNormalized: 'عقد بيع',
+        documentType: 'CONTRACT',
+        documentDate: null,
+        description: null,
+        tags: [],
+        originalLocation: null,
+        originalPresent: 'UNKNOWN',
+        sensitivity: 'CONFIDENTIAL',
+        currentVersionId: verId,
+        currentVersion: fakeVersion,
+        versions: [fakeVersion],
+        archivedAt: null,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        createdById: fakeActor.id,
+        updatedById: fakeActor.id,
+      };
+      const mockPrisma = {
+        document: {
+          findUnique: async () => fakeDoc,
+        },
+        auditEvent: {
+          create: async () => ({ id: crypto.randomUUID() }),
+        },
+      } as unknown as PrismaClient;
+
+      const authorized = await authorizeDownload(fakeActor, docId, undefined, {
+        disposition: 'attachment',
+        storage,
+        prismaOverride: mockPrisma,
+      });
+      const cd = authorized.headers['Content-Disposition'];
+      expect(cd).toContain('attachment; filename="document.pdf";');
+      expect(cd).not.toContain('filename=".pdf"');
+      expect(cd).toContain(`filename*=UTF-8''${encodeURIComponent('عقد_بيع.pdf')}`);
     });
   });
 
@@ -427,6 +609,15 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       if (!scanErr.success) {
         expect(scanErr.code).toBe('SCAN_POLICY_UNAVAILABLE');
         expect(documentStatusFromErrorCode(scanErr.code)).toBe(503);
+      }
+
+      const oversizeErr = documentError(
+        new DocumentValidationError('حجم الملف يتجاوز الحد.', { file: 'كبير جداً' }, 'PAYLOAD_TOO_LARGE')
+      );
+      expect(oversizeErr.success).toBe(false);
+      if (!oversizeErr.success) {
+        expect(oversizeErr.code).toBe('PAYLOAD_TOO_LARGE');
+        expect(documentStatusFromErrorCode(oversizeErr.code)).toBe(413);
       }
 
       const internal = documentError(new Error('secret db string leaked?'));

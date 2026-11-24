@@ -20,7 +20,10 @@ export function documentError(error: unknown): DocumentActionResult<never> {
     return {
       success: false,
       error: error.message,
-      code: 'VALIDATION_ERROR',
+      code:
+        error instanceof DocumentValidationError && error.reasonCode === 'PAYLOAD_TOO_LARGE'
+          ? 'PAYLOAD_TOO_LARGE'
+          : 'VALIDATION_ERROR',
       fieldErrors: error.fieldErrors,
     };
   }
@@ -138,6 +141,7 @@ export function documentStatusFromErrorCode(code: DocumentErrorCode | string | u
     return 401;
   }
   if (code === 'NOT_FOUND') return 404;
+  if (code === 'PAYLOAD_TOO_LARGE') return 413;
   if (
     [
       'CONCURRENCY_CONFLICT',
