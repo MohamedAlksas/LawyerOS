@@ -105,18 +105,23 @@ async function resolveRecipientUserId(
   throw new Error('NO_OWNER_RECIPIENT_AVAILABLE');
 }
 
-/**
- * Atomically claims at most one due or lease-expired REMINDER_DELIVERY JobRun
- * using FOR UPDATE SKIP LOCKED. Returns null if no eligible job is ready.
- */
-export async function claimNextReminderJob(
+const MAX_EXPIRED_LEASE_RETIRES_PER_TICK = 25;
+const EXPIRED_LEASE_TERMINAL_ERROR =
+  'انتهت مهلة القفل بعد استنفاد الحد الأقصى لمحاولات التشغيل.';
+
+type ClaimOrRetireAttempt =
+  | { kind: 'empty' }
+  | { kind: 'retired_failed'; jobId: string; error: string }
+  | { kind: 'claimed'; job: ClaimedReminderJob };
+
+async function claimOrRetireNextReminderJob(
   prisma: PrismaClient,
   options: {
     now?: Date;
     workerId: string;
     leaseDurationMs?: number;
   }
-): Promise<ClaimedReminderJob | null> {
+): Promise<ClaimOrRetireAttempt> {
   const now = options.now ?? new Date();
   const leaseDurationMs = Math.max(1000, options.leaseDurationMs ?? DEFAULT_LEASE_MS);
   const leaseUntil = new Date(now.getTime() + leaseDurationMs);
@@ -171,7 +176,7 @@ export async function claimNextReminderJob(
 
     const row = candidates[0];
     if (!row) {
-      return null;
+      return { kind: 'empty' as const };
     }
 
     // If an expired RUNNING job had already reached max_attempts, move directly to terminal FAILED
@@ -183,10 +188,14 @@ export async function claimNextReminderJob(
           completedAt: now,
           leaseUntil: null,
           lockedBy: null,
-          lastError: 'انتهت مهلة القفل بعد استنفاد الحد الأقصى لمحاولات التشغيل.',
+          lastError: EXPIRED_LEASE_TERMINAL_ERROR,
         },
       });
-      return null;
+      return {
+        kind: 'retired_failed' as const,
+        jobId: row.id,
+        error: EXPIRED_LEASE_TERMINAL_ERROR,
+      };
     }
 
     const nextAttempt = row.attempt_count + 1;
@@ -201,20 +210,48 @@ export async function claimNextReminderJob(
     });
 
     return {
-      id: row.id,
-      sourceType: row.source_type,
-      sourceId: row.source_id,
-      sourceVersion: row.source_version,
-      payloadVersion: row.payload_version,
-      scheduledAt: row.scheduled_at,
-      availableAt: row.available_at,
-      attemptCount: nextAttempt,
-      maxAttempts: row.max_attempts,
-      leaseUntil,
-      lockedBy: options.workerId,
-      payload: asPayloadObject(row.payload),
+      kind: 'claimed' as const,
+      job: {
+        id: row.id,
+        sourceType: row.source_type,
+        sourceId: row.source_id,
+        sourceVersion: row.source_version,
+        payloadVersion: row.payload_version,
+        scheduledAt: row.scheduled_at,
+        availableAt: row.available_at,
+        attemptCount: nextAttempt,
+        maxAttempts: row.max_attempts,
+        leaseUntil,
+        lockedBy: options.workerId,
+        payload: asPayloadObject(row.payload),
+      },
     };
   });
+}
+
+/**
+ * Atomically claims at most one due or lease-expired REMINDER_DELIVERY JobRun
+ * using FOR UPDATE SKIP LOCKED. Retires any expired max-attempt poison-pill jobs
+ * encountered along a bounded scan, returning null if no eligible job is ready.
+ */
+export async function claimNextReminderJob(
+  prisma: PrismaClient,
+  options: {
+    now?: Date;
+    workerId: string;
+    leaseDurationMs?: number;
+  }
+): Promise<ClaimedReminderJob | null> {
+  for (let scan = 0; scan < MAX_EXPIRED_LEASE_RETIRES_PER_TICK; scan++) {
+    const attempt = await claimOrRetireNextReminderJob(prisma, options);
+    if (attempt.kind === 'claimed') {
+      return attempt.job;
+    }
+    if (attempt.kind === 'empty') {
+      return null;
+    }
+  }
+  return null;
 }
 
 interface SourceEligibilityResult {
@@ -383,14 +420,26 @@ async function evaluateLiveSourceEligibility(
     ) {
       return { eligible: false };
     }
-    if (task.version !== job.sourceVersion) {
-      return { eligible: false };
-    }
     if (
       (task.matter &&
         (task.matter.archivedAt !== null || task.matter.status === 'ARCHIVED')) ||
       (task.proceeding && task.proceeding.archivedAt !== null)
     ) {
+      return { eligible: false };
+    }
+
+    // Non-date edits (e.g. OPEN -> IN_PROGRESS, title, priority, dueTime) increment task.version
+    // without replacing the active reminder JobRun. Only supersede if a newer Task reminder version exists.
+    const newerTaskJob = await tx.jobRun.findFirst({
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType: 'Task',
+        sourceId: task.id,
+        sourceVersion: { gt: job.sourceVersion },
+      },
+      select: { id: true },
+    });
+    if (newerTaskJob) {
       return { eligible: false };
     }
 
@@ -783,17 +832,27 @@ export async function runReminderWorkerTick(
   const deliveredIds: string[] = [];
   let lastRedactedError: string | undefined;
 
-  for (let i = 0; i < pollLimit; i++) {
-    const claimed = await claimNextReminderJob(prisma, {
+  const maxScans = pollLimit + MAX_EXPIRED_LEASE_RETIRES_PER_TICK;
+  for (let scan = 0; scan < maxScans && claimedCount < pollLimit; scan++) {
+    const attempt = await claimOrRetireNextReminderJob(prisma, {
       now,
       workerId,
       leaseDurationMs: options.leaseDurationMs,
     });
 
-    if (!claimed) {
+    if (attempt.kind === 'empty') {
       break;
     }
 
+    if (attempt.kind === 'retired_failed') {
+      failedCount += 1;
+      terminalFailedCount += 1;
+      processedJobIds.push(attempt.jobId);
+      lastRedactedError = attempt.error;
+      continue;
+    }
+
+    const claimed = attempt.job;
     claimedCount += 1;
     processedJobIds.push(claimed.id);
 

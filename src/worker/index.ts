@@ -70,4 +70,9 @@ async function main() {
   });
 }
 
-void main();
+main().catch((error) => {
+  process.stderr.write(
+    `[ReminderWorker] fatal startup error: ${redactErrorMessage(error)}\n`
+  );
+  process.exitCode = 1;
+});

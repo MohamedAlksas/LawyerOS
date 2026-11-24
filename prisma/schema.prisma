@@ -838,7 +838,7 @@ model ReminderDelivery {
   jobRun          JobRun?                @relation(fields: [jobRunId], references: [id], onDelete: SetNull)
   matter          Matter?                @relation(fields: [matterId], references: [id], onDelete: SetNull)
 
-  @@unique([sourceType, sourceId, sourceVersion, ruleKey, channel, recipientUserId])
+  @@unique([sourceType, sourceId, sourceVersion, ruleKey, channel, recipientUserId], map: "reminder_delivery_source_rule_channel_recipient_key")
   @@index([recipientUserId, status, scheduledAt])
   @@index([status, scheduledAt])
   @@index([matterId])

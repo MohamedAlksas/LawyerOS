@@ -8,6 +8,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
+import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { AuthorizationError } from '@/modules/identity/types';
 import { addProceeding, openMatter } from '@/modules/matters/matter-service';
 import {
@@ -20,13 +21,17 @@ import {
   rescheduleHearing,
   scheduleHearing,
 } from '@/modules/scheduling';
-import { completeTask, createTask, getTask } from '@/modules/productivity';
+import { completeTask, createTask, getTask, updateTask } from '@/modules/productivity';
 import {
+  ConcurrencyConflictError,
   listInbox,
   listReminderRules,
   markReminderRead,
+  NotFoundError,
+  ReminderValidationError,
   retryFailedReminderJob,
   UnauthorizedError,
+  UnsupportedTransitionError,
   updateReminderRule,
 } from '@/modules/reminders';
 import {
@@ -962,6 +967,35 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     });
     expect(updatedRule.reminderTime).toBe('10:00');
     expect(updatedRule.version).toBe(taskRule.version + 1);
+
+    await expect(
+      updateReminderRule(owner, {
+        ruleId: taskRule.id,
+        expectedVersion: taskRule.version, // stale version
+        reminderTime: '11:00',
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(ConcurrencyConflictError);
+
+    await expect(
+      updateReminderRule(owner, {
+        ruleId: updatedRule.id,
+        expectedVersion: updatedRule.version,
+        reminderTime: '25:00',
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(ReminderValidationError);
+
+    const hearingRule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7)!;
+    await expect(
+      updateReminderRule(owner, {
+        ruleId: hearingRule7.id,
+        expectedVersion: hearingRule7.version,
+        dayOffset: 3, // duplicates existing HEARING dayOffset=3 rule
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(ReminderValidationError);
+
     // Restore original rule time
     await updateReminderRule(owner, {
       ruleId: updatedRule.id,
@@ -969,6 +1003,237 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
       reminderTime: '09:00',
       idempotencyKey: crypto.randomUUID(),
     });
+
+    // REMINDER_DISPATCH_DISABLED blocks all dispatch without advancing deliveries
+    const blockedTask = await createTask(owner, {
+      title: 'مهمة فحص تعطيل الإرسال REMINDER_DISPATCH_DISABLED',
+      matterId,
+      dueDate: '2027-07-12',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(blockedTask.id);
+    const prevDisabled = process.env.REMINDER_DISPATCH_DISABLED;
+    process.env.REMINDER_DISPATCH_DISABLED = 'true';
+    try {
+      const disabledTick = await runReminderWorkerTick({
+        now: new Date('2027-07-11T08:00:00.000Z'),
+        workerId: 'worker-dispatch-disabled-check',
+      });
+      expect(disabledTick.restoreMode).toBe(true);
+      expect(disabledTick.claimedCount).toBe(0);
+      expect(disabledTick.deliveredCount).toBe(0);
+      const pendingBlockedJob = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `task_reminder_${blockedTask.id}_v1` },
+      });
+      expect(pendingBlockedJob.status).toBe('PENDING');
+    } finally {
+      if (prevDisabled === undefined) delete process.env.REMINDER_DISPATCH_DISABLED;
+      else process.env.REMINDER_DISPATCH_DISABLED = prevDisabled;
+    }
+
+    // Complete secretDl/blockedTask cleanup vs full redaction verification across DB, inbox, and AuditEvent
+    // Drive secretJob to terminal FAILED (4 more transient failures after attempt 1)
+    let secretClock = new Date('2027-07-08T08:00:00.000Z');
+    for (let i = 0; i < 4; i++) {
+      await runReminderWorkerTick({
+        now: secretClock,
+        workerId: `worker-secret-fail-${i}`,
+        baseBackoffMs: 1_000,
+        maxBackoffMs: 5_000,
+        _faultInject: 'beforeCommit',
+        _faultErrorMessage:
+          'Connect error postgresql://admin:SuperSecretDbPass99@10.20.30.40:5432/prod Bearer secret_tok_abc123',
+      });
+      secretClock = new Date(secretClock.getTime() + 10_000);
+    }
+    const terminalSecretJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { id: secretJob.id },
+    });
+    expect(terminalSecretJob.status).toBe('FAILED');
+
+    const hbSecret = await prisma.workerHeartbeat.findUniqueOrThrow({
+      where: { id: 'reminder-worker' },
+    });
+    expect(hbSecret.lastError ?? '').not.toContain('SuperSecretDbPass99');
+    expect(hbSecret.lastError ?? '').not.toContain('secret_tok_abc123');
+    expect(JSON.stringify(terminalSecretJob.payload)).not.toContain('SuperSecretDbPass99');
+
+    const secretInbox = await listInbox(owner, {}, { now: secretClock });
+    expect(secretInbox.workerHealth.lastError ?? '').not.toContain('SuperSecretDbPass99');
+    expect(secretInbox.workerHealth.lastError ?? '').not.toContain('secret_tok_abc123');
+    const exposedSecretFailed = secretInbox.failedJobs.find((j) => j.id === secretJob.id);
+    expect(exposedSecretFailed).toBeDefined();
+    expect(exposedSecretFailed!.lastError).not.toContain('SuperSecretDbPass99');
+    expect(exposedSecretFailed!.lastError).not.toContain('secret_tok_abc123');
+
+    const recentAudits = await prisma.auditEvent.findMany({
+      where: { entityId: { in: [secretJob.id, secretDl.id] } },
+    });
+    expect(JSON.stringify(recentAudits)).not.toContain('SuperSecretDbPass99');
+    expect(JSON.stringify(recentAudits)).not.toContain('secret_tok_abc123');
+
+    // Terminal FAILED job stays idle across an extra worker poll (when no other jobs are due)
+    await prisma.jobRun.updateMany({
+      where: { sourceType: 'Task', sourceId: blockedTask.id },
+      data: { status: 'CANCELLED' },
+    });
+    const idleTick = await runReminderWorkerTick({
+      now: new Date(secretClock.getTime() + 60_000),
+      workerId: 'worker-terminal-idle',
+    });
+    expect(idleTick.claimedCount).toBe(0);
+    expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: secretJob.id } })).status).toBe(
+      'FAILED'
+    );
+
+    // Negative reminder-service edge cases: NotFoundError on unknown/other-user markReminderRead,
+    // UnsupportedTransitionError on retrying non-FAILED job, IdempotencyPayloadMismatchError on mismatched retry
+    await expect(
+      markReminderRead(owner, { deliveryId: crypto.randomUUID() })
+    ).rejects.toThrow(NotFoundError);
+
+    const pendingJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `task_reminder_${blockedTask.id}_v1` },
+    });
+    await expect(
+      retryFailedReminderJob(owner, {
+        jobRunId: pendingJob.id,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(UnsupportedTransitionError);
+
+    const retryIdemKey = crypto.randomUUID();
+    await retryFailedReminderJob(owner, {
+      jobRunId: secretJob.id,
+      idempotencyKey: retryIdemKey,
+    });
+    await expect(
+      retryFailedReminderJob(owner, {
+        jobRunId: crypto.randomUUID(), // different jobRunId with same idempotencyKey
+        idempotencyKey: retryIdemKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+  });
+
+  it('Preserves dated Task reminders across non-date updates, supersedes on dueDate change, and drains healthy jobs past expired max-attempt poison pills', async () => {
+    // 1. Create dated Task -> update status to IN_PROGRESS + edit title/dueTime -> reminder still fires
+    const taskA = await createTask(owner, {
+      title: 'مهمة إجرائية أولية',
+      matterId,
+      proceedingId,
+      dueDate: '2027-08-10',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(taskA.id);
+
+    const progressedTaskA = await updateTask(owner, {
+      taskId: taskA.id,
+      expectedVersion: taskA.version,
+      status: 'IN_PROGRESS',
+      title: 'مهمة قيد التنفيذ بعد التحديث',
+      dueTime: '14:30',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(progressedTaskA.version).toBe(taskA.version + 1);
+    expect(progressedTaskA.status).toBe('IN_PROGRESS');
+
+    await runReminderWorkerTick({
+      now: new Date('2027-08-09T06:05:00.000Z'), // 1 day before 2027-08-10 @ 09:00 Cairo (UTC+3)
+      workerId: 'worker-task-progress',
+    });
+
+    const taskADeliveries = await prisma.reminderDelivery.findMany({
+      where: { sourceType: 'Task', sourceId: taskA.id },
+    });
+    expect(taskADeliveries).toHaveLength(1);
+    expect(taskADeliveries[0]!.status).toBe('SENT');
+    expect(taskADeliveries[0]!.body).toContain('مهمة قيد التنفيذ بعد التحديث');
+    expect(taskADeliveries[0]!.body).toContain('2:30 م');
+
+    // 2. Changing Task dueDate cancels old reminder JobRun and creates new versioned reminder
+    const taskB = await createTask(owner, {
+      title: 'مهمة سيتغير موعدها',
+      matterId,
+      dueDate: '2027-08-15',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(taskB.id);
+
+    const rescheduledTaskB = await updateTask(owner, {
+      taskId: taskB.id,
+      expectedVersion: taskB.version,
+      dueDate: '2027-08-22',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const oldTaskBJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `task_reminder_${taskB.id}_v1` },
+    });
+    expect(oldTaskBJob.status).toBe('CANCELLED');
+    const newTaskBJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `task_reminder_${taskB.id}_v${rescheduledTaskB.version}` },
+    });
+    expect(newTaskBJob.status).toBe('PENDING');
+
+    // Firing at the old date delivers 0; firing at new date delivers 1
+    await runReminderWorkerTick({
+      now: new Date('2027-08-14T06:05:00.000Z'),
+      workerId: 'worker-task-old-date',
+    });
+    expect(
+      await prisma.reminderDelivery.count({ where: { sourceType: 'Task', sourceId: taskB.id } })
+    ).toBe(0);
+
+    await runReminderWorkerTick({
+      now: new Date('2027-08-21T06:05:00.000Z'),
+      workerId: 'worker-task-new-date',
+    });
+    expect(
+      await prisma.reminderDelivery.count({ where: { sourceType: 'Task', sourceId: taskB.id } })
+    ).toBe(1);
+
+    // 3. Expired RUNNING job at maxAttempts (poison pill) retires to FAILED without stalling healthy job behind it
+    const poisonTask = await createTask(owner, {
+      title: 'مهمة قفل منتهٍ عند الحد الأقصى',
+      matterId,
+      dueDate: '2027-09-02',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(poisonTask.id);
+    const healthyTask = await createTask(owner, {
+      title: 'مهمة سليمة خلف المهمة المتعثرة',
+      matterId,
+      dueDate: '2027-09-03',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(healthyTask.id);
+
+    const poisonJob = await prisma.jobRun.update({
+      where: { deduplicationKey: `task_reminder_${poisonTask.id}_v1` },
+      data: {
+        status: 'RUNNING',
+        attemptCount: 5,
+        maxAttempts: 5,
+        lockedBy: 'crashed-worker-poison',
+        leaseUntil: new Date('2027-09-01T05:00:00.000Z'),
+      },
+    });
+
+    const tickWithPoison = await runReminderWorkerTick({
+      now: new Date('2027-09-02T07:00:00.000Z'), // both poisonJob and healthyTask are due
+      workerId: 'worker-past-poison',
+    });
+    expect(tickWithPoison.terminalFailedCount).toBe(1);
+    expect(tickWithPoison.deliveredCount).toBe(1);
+
+    const retiredPoison = await prisma.jobRun.findUniqueOrThrow({ where: { id: poisonJob.id } });
+    expect(retiredPoison.status).toBe('FAILED');
+    expect(retiredPoison.lockedBy).toBeNull();
+
+    const healthyDeliveries = await prisma.reminderDelivery.findMany({
+      where: { sourceType: 'Task', sourceId: healthyTask.id },
+    });
+    expect(healthyDeliveries).toHaveLength(1);
+    expect(healthyDeliveries[0]!.status).toBe('SENT');
   });
 
   it('Migration verification: fresh deploy, SQL CHECK constraints, and populated T09-to-T10 upgrade with available_at backfill', async () => {

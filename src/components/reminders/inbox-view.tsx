@@ -314,7 +314,11 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <p className="text-sm text-[#4D606A] [overflow-wrap:anywhere]">
               متابعة تنبيهات الجلسات والمواعيد القانونية المؤكدة والمهام داخل التطبيق بتوقيت القاهرة
             </p>
-            <p className="text-xs text-[#4D606A] [overflow-wrap:anywhere]" data-testid="inbox-last-refresh">
+            <p
+              className="text-xs text-[#4D606A] [overflow-wrap:anywhere]"
+              data-testid="inbox-last-refresh"
+              data-refreshed-at={overview.workerHealth.lastRefreshedAt}
+            >
               آخر تحديث للقائمة:{' '}
               <strong className="text-[#172A35]">
                 {formatCairoInstantArabic(overview.workerHealth.lastRefreshedAt)}
@@ -546,7 +550,11 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         <div className="p-4 border-b border-[#D5DFE3] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <IconBell className="w-5 h-5 text-[#14566B]" />
-            <h2 id="inbox-items-heading" className="text-lg font-bold text-[#172A35]">
+            <h2
+              id="inbox-items-heading"
+              data-testid="inbox-items-heading"
+              className="text-lg font-bold text-[#172A35]"
+            >
               التنبيهات الواردة ({filteredItems.length})
             </h2>
           </div>

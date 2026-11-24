@@ -102,11 +102,8 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
   let testPartyId: string;
   let testCourtId: string;
 
-  const createdMatterIds: string[] = [];
-  const createdTaskIds: string[] = [];
-  const createdDeadlineIds: string[] = [];
-  const createdDeliveryIds: string[] = [];
-  const createdJobIds: string[] = [];
+  const createdCourtIds: string[] = [];
+  const createdPartyIds: string[] = [];
 
   test.beforeAll(async () => {
     setupTestEncryptionKeys();
@@ -122,6 +119,7 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       },
     });
     testCourtId = court.id;
+    createdCourtIds.push(court.id);
 
     const party = await prisma.party.create({
       data: {
@@ -133,172 +131,222 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       },
     });
     testPartyId = party.id;
+    createdPartyIds.push(party.id);
   });
 
   test.afterAll(async () => {
     await prisma.workerHeartbeat.deleteMany({ where: { id: 'reminder-worker' } });
     await cleanupScopedT10Data({
       ownerIds: [owner.id],
-      matterIds: createdMatterIds,
-      partyIds: [testPartyId],
-      courtIds: [testCourtId],
-      taskIds: createdTaskIds,
-      deadlineIds: createdDeadlineIds,
-      deliveryIds: createdDeliveryIds,
-      jobIds: createdJobIds,
+      partyIds: createdPartyIds,
+      courtIds: createdCourtIds,
     });
     await deleteT04Owner(owner.id);
   });
 
-  test('T10-TC-05: Terminal failure retry in browser and mark-read without completing Task or Deadline @t10 @inbox', async ({
+  test('T10-TC-05: Terminal failure retry in browser, mark-read without completing Task/Deadline, filter tabs, and rule save @t10 @inbox', async ({
     page,
   }) => {
-    const matter = await prisma.matter.create({
-      data: {
-        fileCode: `LO-2027-T10-${runId}-05`,
-        title: `ملف تذكير الإخفاق والقراءة ${runId}`,
-        kind: 'LITIGATION',
-        status: 'ACTIVE',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    createdMatterIds.push(matter.id);
-    await prisma.matterParty.create({
-      data: {
-        matterId: matter.id,
-        partyId: testPartyId,
-        role: 'CLIENT',
-        isPrimaryContact: true,
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    const proceeding = await prisma.proceeding.create({
-      data: {
-        matterId: matter.id,
-        courtId: testCourtId,
-        instance: 'FIRST_INSTANCE',
-        numberText: `510-${runId}`,
-        yearLabel: '2027',
-        registerType: 'مدني كلي',
-        status: 'ACTIVE',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
+    const localMatterIds: string[] = [];
+    const localDeadlineIds: string[] = [];
+    const localTaskIds: string[] = [];
+    const localDeliveryIds: string[] = [];
+    const localJobIds: string[] = [];
 
-    const deadline = await prisma.deadline.create({
-      data: {
-        matterId: matter.id,
-        proceedingId: proceeding.id,
-        title: `موعد مذكرة استئناف حاسم ${runId}`,
-        dueDate: new Date('2027-08-15T00:00:00.000Z'),
-        source: 'قرار المحكمة بالجلسة',
-        basisNotes: 'اعتماد يدوي',
-        status: 'CONFIRMED',
-        confirmedById: owner.id,
-        confirmedByName: owner.name,
-        confirmedAt: new Date(),
-        version: 2,
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    createdDeadlineIds.push(deadline.id);
+    try {
+      const matter = await prisma.matter.create({
+        data: {
+          fileCode: `LO-2027-T10-${runId}-05`,
+          title: `ملف تذكير الإخفاق والقراءة ${runId}`,
+          kind: 'LITIGATION',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localMatterIds.push(matter.id);
+      await prisma.matterParty.create({
+        data: {
+          matterId: matter.id,
+          partyId: testPartyId,
+          role: 'CLIENT',
+          isPrimaryContact: true,
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      const proceeding = await prisma.proceeding.create({
+        data: {
+          matterId: matter.id,
+          courtId: testCourtId,
+          instance: 'FIRST_INSTANCE',
+          numberText: `510-${runId}`,
+          yearLabel: '2027',
+          registerType: 'مدني كلي',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
 
-    const linkedTask = await prisma.task.create({
-      data: {
-        matterId: matter.id,
-        proceedingId: proceeding.id,
-        deadlineId: deadline.id,
-        title: `مهمة إعداد المذكرة المرتبطة ${runId}`,
-        dueDate: new Date('2027-08-10T00:00:00.000Z'),
-        status: 'OPEN',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    createdTaskIds.push(linkedTask.id);
+      const deadline = await prisma.deadline.create({
+        data: {
+          matterId: matter.id,
+          proceedingId: proceeding.id,
+          title: `موعد مذكرة استئناف حاسم ${runId}`,
+          dueDate: new Date('2027-08-15T00:00:00.000Z'),
+          source: 'قرار المحكمة بالجلسة',
+          basisNotes: 'اعتماد يدوي',
+          status: 'CONFIRMED',
+          confirmedById: owner.id,
+          confirmedByName: owner.name,
+          confirmedAt: new Date(),
+          version: 2,
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localDeadlineIds.push(deadline.id);
 
-    const failedJob = await prisma.jobRun.create({
-      data: {
-        jobType: 'REMINDER_DELIVERY',
-        sourceType: 'Deadline',
-        sourceId: deadline.id,
-        sourceVersion: deadline.version,
-        scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
-        availableAt: new Date('2027-08-08T06:00:00.000Z'),
-        status: 'FAILED',
-        attemptCount: 5,
-        maxAttempts: 5,
-        completedAt: new Date(),
-        lastError: 'انقطع الاتصال مؤقتاً بقاعدة البيانات أثناء معالجة التنبيه',
-        deduplicationKey: `t10_e2e_failed_${deadline.id}`,
-        payload: { deadlineId: deadline.id, version: deadline.version },
-      },
-    });
-    createdJobIds.push(failedJob.id);
+      const linkedTask = await prisma.task.create({
+        data: {
+          matterId: matter.id,
+          proceedingId: proceeding.id,
+          deadlineId: deadline.id,
+          title: `مهمة إعداد المذكرة المرتبطة ${runId}`,
+          dueDate: new Date('2027-08-10T00:00:00.000Z'),
+          status: 'OPEN',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localTaskIds.push(linkedTask.id);
 
-    const sentDelivery = await prisma.reminderDelivery.create({
-      data: {
-        sourceType: 'Deadline',
-        sourceId: deadline.id,
-        sourceVersion: deadline.version,
-        ruleKey: 'offset_7',
-        scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
-        channel: 'IN_APP',
-        recipientUserId: owner.id,
-        status: 'SENT',
-        title: `تذكير بموعد قانوني مؤكد — ${matter.fileCode}`,
-        body: `${deadline.title} • ${matter.title} (الساعة غير محددة)`,
-        matterId: matter.id,
-        deliveredAt: new Date('2027-08-08T06:00:05.000Z'),
-        readAt: null,
-      },
-    });
-    createdDeliveryIds.push(sentDelivery.id);
+      const failedJob = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Deadline',
+          sourceId: deadline.id,
+          sourceVersion: deadline.version,
+          scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
+          availableAt: new Date('2027-08-08T06:00:00.000Z'),
+          status: 'FAILED',
+          attemptCount: 5,
+          maxAttempts: 5,
+          completedAt: new Date(),
+          lastError: 'انقطع الاتصال مؤقتاً بقاعدة البيانات أثناء معالجة التنبيه',
+          deduplicationKey: `t10_e2e_failed_${deadline.id}`,
+          payload: { deadlineId: deadline.id, version: deadline.version },
+        },
+      });
+      localJobIds.push(failedJob.id);
 
-    await signInWithTotp(page, owner);
-    await page.goto('/inbox');
-    await expectShellReady(page);
+      const sentDelivery = await prisma.reminderDelivery.create({
+        data: {
+          sourceType: 'Deadline',
+          sourceId: deadline.id,
+          sourceVersion: deadline.version,
+          ruleKey: 'offset_7',
+          scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
+          channel: 'IN_APP',
+          recipientUserId: owner.id,
+          status: 'SENT',
+          title: `تذكير بموعد قانوني مؤكد — ${matter.fileCode}`,
+          body: `${deadline.title} • ${matter.title} (الساعة غير محددة)`,
+          matterId: matter.id,
+          deliveredAt: new Date('2027-08-08T06:00:05.000Z'),
+          readAt: null,
+        },
+      });
+      localDeliveryIds.push(sentDelivery.id);
 
-    await expect(page.getByTestId('worker-health-badge')).toContainText('متعطل');
-    await expect(page.getByTestId(`failed-job-card-${failedJob.id}`)).toBeVisible();
-    await expect(page.getByTestId(`failed-job-error-${failedJob.id}`)).toContainText(
-      'انقطع الاتصال مؤقتاً'
-    );
+      await signInWithTotp(page, owner);
+      await page.goto('/inbox');
+      await expectShellReady(page);
 
-    // Deliberate retry resets FAILED job to PENDING
-    await page.getByTestId(`retry-failed-job-${failedJob.id}`).click();
-    await expect(page.getByTestId('inbox-action-notice')).toContainText('تمت إعادة جدولة مهمة التذكير');
-    await expect(page.getByTestId(`failed-job-card-${failedJob.id}`)).toHaveCount(0);
+      await expect(page.getByTestId('worker-health-badge')).toContainText('متعطل');
+      await expect(page.getByTestId(`failed-job-card-${failedJob.id}`)).toBeVisible();
+      await expect(page.getByTestId(`failed-job-error-${failedJob.id}`)).toContainText(
+        'انقطع الاتصال مؤقتاً'
+      );
 
-    const jobAfterRetry = await prisma.jobRun.findUniqueOrThrow({ where: { id: failedJob.id } });
-    expect(jobAfterRetry.status).toBe('PENDING');
-    expect(jobAfterRetry.attemptCount).toBe(0);
+      // Exercise filter tabs while item is unread & non-overdue
+      await page.getByTestId('inbox-filter-unread').click();
+      await expect(page.getByTestId('inbox-items-heading')).toHaveText('التنبيهات الواردة (1)');
+      await expect(page.getByTestId(`inbox-item-${sentDelivery.id}`)).toBeVisible();
 
-    // Mark SENT unread delivery as read
-    await expect(page.getByTestId(`inbox-read-badge-${sentDelivery.id}`)).toContainText('غير مقروء');
-    await page.getByTestId(`mark-reminder-read-${sentDelivery.id}`).click();
-    await expect(page.getByTestId('inbox-action-notice')).toContainText(
-      'ولم تتغير حالة المهمة أو الموعد القانوني المرتبط'
-    );
-    await expect(page.getByTestId(`inbox-read-badge-${sentDelivery.id}`)).toContainText('مقروء');
+      await page.getByTestId('inbox-filter-overdue').click();
+      await expect(page.getByTestId('inbox-items-heading')).toHaveText('التنبيهات الواردة (0)');
+      await expect(page.getByTestId('inbox-empty-state')).toBeVisible();
 
-    // Verify DB: status remains SENT, readAt set, Task remains OPEN, Deadline remains CONFIRMED
-    const updatedDelivery = await prisma.reminderDelivery.findUniqueOrThrow({
-      where: { id: sentDelivery.id },
-    });
-    expect(updatedDelivery.status).toBe('SENT');
-    expect(updatedDelivery.readAt).not.toBeNull();
+      await page.getByTestId('inbox-filter-all').click();
+      await expect(page.getByTestId(`inbox-item-${sentDelivery.id}`)).toBeVisible();
 
-    const persistedTask = await prisma.task.findUniqueOrThrow({ where: { id: linkedTask.id } });
-    expect(persistedTask.status).toBe('OPEN');
-    const persistedDeadline = await prisma.deadline.findUniqueOrThrow({
-      where: { id: deadline.id },
-    });
-    expect(persistedDeadline.status).toBe('CONFIRMED');
+      // Deliberate retry resets FAILED job to PENDING
+      await page.getByTestId(`retry-failed-job-${failedJob.id}`).click();
+      await expect(page.getByTestId('inbox-action-notice')).toContainText(
+        'تمت إعادة جدولة مهمة التذكير'
+      );
+      await expect(page.getByTestId(`failed-job-card-${failedJob.id}`)).toHaveCount(0);
+
+      const jobAfterRetry = await prisma.jobRun.findUniqueOrThrow({ where: { id: failedJob.id } });
+      expect(jobAfterRetry.status).toBe('PENDING');
+      expect(jobAfterRetry.attemptCount).toBe(0);
+
+      // Mark SENT unread delivery as read
+      await expect(page.getByTestId(`inbox-read-badge-${sentDelivery.id}`)).toContainText(
+        'غير مقروء'
+      );
+      await page.getByTestId(`mark-reminder-read-${sentDelivery.id}`).click();
+      await expect(page.getByTestId('inbox-action-notice')).toContainText(
+        'ولم تتغير حالة المهمة أو الموعد القانوني المرتبط'
+      );
+      await expect(page.getByTestId(`inbox-read-badge-${sentDelivery.id}`)).toContainText('مقروء');
+
+      // Exercise reminder rule toggle & save via UI, then restore enabled=true
+      const taskRule = await prisma.reminderRule.findFirstOrThrow({
+        where: { eventType: 'TASK', channel: 'IN_APP' },
+      });
+      const taskRuleRow = page.getByTestId(`reminder-rule-row-${taskRule.id}`);
+      await taskRuleRow.getByRole('checkbox').uncheck();
+      await page.getByTestId(`save-rule-${taskRule.id}`).click();
+      await expect(page.getByTestId('inbox-action-notice')).toContainText(
+        'تم تحديث سياسة التذكير بنجاح.'
+      );
+      await expect(taskRuleRow).toContainText(`الإصدار ${taskRule.version + 1}`);
+
+      await taskRuleRow.getByRole('checkbox').check();
+      await page.getByTestId(`save-rule-${taskRule.id}`).click();
+      await expect(taskRuleRow).toContainText(`الإصدار ${taskRule.version + 2}`);
+
+      // Verify DB: status remains SENT, readAt set, Task remains OPEN, Deadline remains CONFIRMED
+      const updatedDelivery = await prisma.reminderDelivery.findUniqueOrThrow({
+        where: { id: sentDelivery.id },
+      });
+      expect(updatedDelivery.status).toBe('SENT');
+      expect(updatedDelivery.readAt).not.toBeNull();
+
+      const persistedTask = await prisma.task.findUniqueOrThrow({ where: { id: linkedTask.id } });
+      expect(persistedTask.status).toBe('OPEN');
+      const persistedDeadline = await prisma.deadline.findUniqueOrThrow({
+        where: { id: deadline.id },
+      });
+      expect(persistedDeadline.status).toBe('CONFIRMED');
+    } finally {
+      await prisma.workerHeartbeat.deleteMany({ where: { id: 'reminder-worker' } });
+      await prisma.reminderRule.updateMany({
+        where: { eventType: 'TASK', channel: 'IN_APP' },
+        data: { enabled: true, dayOffset: 1, reminderTime: '09:00' },
+      });
+      await cleanupScopedT10Data({
+        ownerIds: [owner.id],
+        matterIds: localMatterIds,
+        deadlineIds: localDeadlineIds,
+        taskIds: localTaskIds,
+        deliveryIds: localDeliveryIds,
+        jobIds: localJobIds,
+      });
+    }
   });
 
   test('T10-TC-06: Unauthenticated and MAINTAINER authorization boundaries on /inbox and /api/reminders/* @t10', async ({
@@ -318,6 +366,12 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
 
       const rulesRes = await unauthPage.request.get('/api/reminders/rules');
       expect(rulesRes.status()).toBe(401);
+
+      const retryRes = await unauthPage.request.post(`/api/reminders/jobs/${randomUUID()}/retry`, {
+        headers: { Origin: baseURL, 'Content-Type': 'application/json' },
+        data: { idempotencyKey: randomUUID() },
+      });
+      expect(retryRes.status()).toBe(401);
     } finally {
       await unauthCtx.close();
     }
@@ -369,6 +423,26 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
         }
       );
       expect(maintReadApi.status()).toBe(403);
+
+      const maintRetryApi = await maintPage.request.post(
+        `/api/reminders/jobs/${randomUUID()}/retry`,
+        {
+          headers: { Origin: baseURL, 'Content-Type': 'application/json' },
+          data: { idempotencyKey: randomUUID() },
+        }
+      );
+      expect(maintRetryApi.status()).toBe(403);
+
+      const maintPatchRulesApi = await maintPage.request.patch('/api/reminders/rules', {
+        headers: { Origin: baseURL, 'Content-Type': 'application/json' },
+        data: {
+          ruleId: randomUUID(),
+          expectedVersion: 1,
+          enabled: false,
+          idempotencyKey: randomUUID(),
+        },
+      });
+      expect(maintPatchRulesApi.status()).toBe(403);
     } finally {
       await maintCtx.close();
       const { pool: cleanupPool } = createValidatedTestPool();
@@ -387,112 +461,116 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
     const tag = `${runId}-w${width}`;
     const secretMatterTitle = `ملف سري لاختبار الصندوق ${tag}`;
     const secretOverdueTitle = `موعد متأخر سري ${tag}`;
-
-    const matter = await prisma.matter.create({
-      data: {
-        fileCode: `LO-2027-${tag}`,
-        title: secretMatterTitle,
-        kind: 'LITIGATION',
-        status: 'ACTIVE',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    createdMatterIds.push(matter.id);
-
-    const proceeding = await prisma.proceeding.create({
-      data: {
-        matterId: matter.id,
-        courtId: testCourtId,
-        instance: 'FIRST_INSTANCE',
-        numberText: `777-${width}`,
-        yearLabel: '2027',
-        registerType: 'مدني كلي',
-        status: 'ACTIVE',
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-
-    const overdueDeadline = await prisma.deadline.create({
-      data: {
-        matterId: matter.id,
-        proceedingId: proceeding.id,
-        title: secretOverdueTitle,
-        dueDate: new Date('2026-04-20T00:00:00.000Z'),
-        source: 'قرار المحكمة',
-        basisNotes: 'تاريخ منقضي للاختبار',
-        status: 'CONFIRMED',
-        confirmedById: owner.id,
-        confirmedByName: owner.name,
-        confirmedAt: new Date(),
-        createdById: owner.id,
-        updatedById: owner.id,
-      },
-    });
-    createdDeadlineIds.push(overdueDeadline.id);
-
-    const overdueDelivery = await prisma.reminderDelivery.create({
-      data: {
-        sourceType: 'Deadline',
-        sourceId: overdueDeadline.id,
-        sourceVersion: 1,
-        ruleKey: 'offset_1',
-        scheduledAt: new Date('2026-04-19T07:00:00.000Z'),
-        channel: 'IN_APP',
-        recipientUserId: owner.id,
-        status: 'SENT',
-        title: `تذكير بموعد قانوني متأخر — ${matter.fileCode}`,
-        body: `${secretOverdueTitle} • ${secretMatterTitle}`,
-        matterId: matter.id,
-        deliveredAt: new Date('2026-04-20T12:00:00.000Z'), // late delivery -> missed & overdue
-        readAt: null,
-      },
-    });
-    createdDeliveryIds.push(overdueDelivery.id);
-
-    const failedJob = await prisma.jobRun.create({
-      data: {
-        jobType: 'REMINDER_DELIVERY',
-        sourceType: 'Deadline',
-        sourceId: overdueDeadline.id,
-        sourceVersion: 1,
-        scheduledAt: new Date('2026-04-13T07:00:00.000Z'),
-        availableAt: new Date('2026-04-13T07:00:00.000Z'),
-        status: 'FAILED',
-        attemptCount: 5,
-        maxAttempts: 5,
-        completedAt: new Date(),
-        lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
-        deduplicationKey: `t10_tc07_fail_${tag}`,
-        payload: { deadlineId: overdueDeadline.id },
-      },
-    });
-    createdJobIds.push(failedJob.id);
-
-    await prisma.workerHeartbeat.upsert({
-      where: { id: 'reminder-worker' },
-      create: {
-        id: 'reminder-worker',
-        workerId: `worker-e2e-${tag}`,
-        lastPollAt: new Date(),
-        lastErrorAt: new Date(),
-        lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
-        restoreMode: false,
-      },
-      update: {
-        workerId: `worker-e2e-${tag}`,
-        lastPollAt: new Date(),
-        lastErrorAt: new Date(),
-        lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
-        restoreMode: false,
-      },
-    });
-
     const screenshotDir = path.resolve(process.cwd(), 'test-results/t10');
     fs.mkdirSync(screenshotDir, { recursive: true });
 
+    const localMatterIds: string[] = [];
+    const localDeadlineIds: string[] = [];
+    const localDeliveryIds: string[] = [];
+    const localJobIds: string[] = [];
+
     try {
+      const matter = await prisma.matter.create({
+        data: {
+          fileCode: `LO-2027-${tag}`,
+          title: secretMatterTitle,
+          kind: 'LITIGATION',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localMatterIds.push(matter.id);
+
+      const proceeding = await prisma.proceeding.create({
+        data: {
+          matterId: matter.id,
+          courtId: testCourtId,
+          instance: 'FIRST_INSTANCE',
+          numberText: `777-${width}`,
+          yearLabel: '2027',
+          registerType: 'مدني كلي',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+
+      const overdueDeadline = await prisma.deadline.create({
+        data: {
+          matterId: matter.id,
+          proceedingId: proceeding.id,
+          title: secretOverdueTitle,
+          dueDate: new Date('2026-04-20T00:00:00.000Z'),
+          source: 'قرار المحكمة',
+          basisNotes: 'تاريخ منقضي للاختبار',
+          status: 'CONFIRMED',
+          confirmedById: owner.id,
+          confirmedByName: owner.name,
+          confirmedAt: new Date(),
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localDeadlineIds.push(overdueDeadline.id);
+
+      const overdueDelivery = await prisma.reminderDelivery.create({
+        data: {
+          sourceType: 'Deadline',
+          sourceId: overdueDeadline.id,
+          sourceVersion: 1,
+          ruleKey: 'offset_1',
+          scheduledAt: new Date('2026-04-19T07:00:00.000Z'),
+          channel: 'IN_APP',
+          recipientUserId: owner.id,
+          status: 'SENT',
+          title: `تذكير بموعد قانوني متأخر — ${matter.fileCode}`,
+          body: `${secretOverdueTitle} • ${secretMatterTitle}`,
+          matterId: matter.id,
+          deliveredAt: new Date('2026-04-20T12:00:00.000Z'), // late delivery -> missed & overdue
+          readAt: null,
+        },
+      });
+      localDeliveryIds.push(overdueDelivery.id);
+
+      const failedJob = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Deadline',
+          sourceId: overdueDeadline.id,
+          sourceVersion: 1,
+          scheduledAt: new Date('2026-04-13T07:00:00.000Z'),
+          availableAt: new Date('2026-04-13T07:00:00.000Z'),
+          status: 'FAILED',
+          attemptCount: 5,
+          maxAttempts: 5,
+          completedAt: new Date(),
+          lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
+          deduplicationKey: `t10_tc07_fail_${tag}`,
+          payload: { deadlineId: overdueDeadline.id },
+        },
+      });
+      localJobIds.push(failedJob.id);
+
+      await prisma.workerHeartbeat.upsert({
+        where: { id: 'reminder-worker' },
+        create: {
+          id: 'reminder-worker',
+          workerId: `worker-e2e-${tag}`,
+          lastPollAt: new Date(),
+          lastErrorAt: new Date(),
+          lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
+          restoreMode: false,
+        },
+        update: {
+          workerId: `worker-e2e-${tag}`,
+          lastPollAt: new Date(),
+          lastErrorAt: new Date(),
+          lastError: 'فشل مؤقت بعد استنفاد محاولات الإرسال',
+          restoreMode: false,
+        },
+      });
+
       await signInWithTotp(page, owner);
 
       // Verify /today links truthfully to /inbox
@@ -508,6 +586,12 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       await expect(page.getByTestId('worker-health-badge')).toBeVisible();
       await expect(page.getByTestId('inbox-last-refresh')).toBeVisible();
 
+      // Confirm clean fixture isolation: exactly (1) inbox item and (1) failed job
+      await expect(page.getByTestId('inbox-items-heading')).toHaveText('التنبيهات الواردة (1)');
+      await expect(page.getByTestId('inbox-failed-jobs-section')).toContainText(
+        'مهام تذكير متعثرة (1)'
+      );
+
       const limitNotice = page.getByTestId('inbox-delivery-limit-notice');
       await expect(limitNotice).toBeVisible();
       await expect(limitNotice).toContainText('إغلاق التطبيق');
@@ -516,6 +600,19 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       await expect(page.getByTestId(`inbox-item-${overdueDelivery.id}`)).toBeVisible();
       await expect(page.getByTestId(`inbox-overdue-badge-${overdueDelivery.id}`)).toBeVisible();
       await expect(page.getByTestId(`failed-job-card-${failedJob.id}`)).toBeVisible();
+
+      // Keyboard focus indicator check on inbox refresh button
+      const refreshBtn = page.getByTestId('inbox-refresh-button');
+      await page.getByRole('link', { name: 'العودة إلى اليوم' }).focus();
+      await page.keyboard.press('Shift+Tab');
+      await expect(refreshBtn).toBeFocused();
+      const focusRingStyle = await refreshBtn.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { boxShadow: s.boxShadow, outlineStyle: s.outlineStyle };
+      });
+      expect(
+        focusRingStyle.boxShadow !== 'none' || focusRingStyle.outlineStyle !== 'none'
+      ).toBe(true);
 
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
@@ -542,6 +639,9 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       // Reload normal scale for connectivity & stale refresh retry test
       await page.reload();
       await expectShellReady(page);
+      const beforeRefreshIso = await page
+        .getByTestId('inbox-last-refresh')
+        .getAttribute('data-refreshed-at');
 
       // Simulate connectivity loss during refresh
       await page.route('**/api/reminders/inbox*', (route) => route.abort('failed'));
@@ -554,12 +654,29 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       // Existing items remain visible on screen instead of disappearing into blank page
       await expect(page.getByTestId(`inbox-item-${overdueDelivery.id}`)).toBeVisible();
 
-      // Restore connection & retry refresh cleanly
+      // Restore connection & retry refresh cleanly and confirm last-refresh timestamp updates
       await page.context().setOffline(false);
       await page.unroute('**/api/reminders/inbox*');
-      await page.getByTestId('inbox-error-retry-button').click();
+      expect(beforeRefreshIso).toBeTruthy();
+      await Promise.all([
+        page.waitForResponse(
+          (res) =>
+            new URL(res.url()).pathname === '/api/reminders/inbox' && res.status() === 200
+        ),
+        page.getByTestId('inbox-error-retry-button').click(),
+      ]);
       await expect(page.getByTestId('inbox-refresh-error')).toBeHidden();
       await expect(page.getByTestId(`inbox-item-${overdueDelivery.id}`)).toBeVisible();
+      await expect(page.getByTestId('inbox-last-refresh')).not.toHaveAttribute(
+        'data-refreshed-at',
+        beforeRefreshIso!
+      );
+
+      const afterRefreshIso = await page
+        .getByTestId('inbox-last-refresh')
+        .getAttribute('data-refreshed-at');
+      expect(afterRefreshIso).toBeTruthy();
+      expect(afterRefreshIso).not.toBe(beforeRefreshIso);
 
       // Privacy & cookie hardening assertions
       const cookies = await snapshotCookies(page);
@@ -573,11 +690,13 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       ];
       expectNoSensitiveValues(storage, needles);
     } finally {
+      await prisma.workerHeartbeat.deleteMany({ where: { id: 'reminder-worker' } });
       await cleanupScopedT10Data({
-        matterIds: [matter.id],
-        deadlineIds: [overdueDeadline.id],
-        deliveryIds: [overdueDelivery.id],
-        jobIds: [failedJob.id],
+        ownerIds: [owner.id],
+        matterIds: localMatterIds,
+        deadlineIds: localDeadlineIds,
+        deliveryIds: localDeliveryIds,
+        jobIds: localJobIds,
       });
     }
   });
