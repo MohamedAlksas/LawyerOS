@@ -6,8 +6,8 @@
 **Worktree & Branch:** `D:/Lawyer/work/t10-gemini` on `feature/t10-reminders`
 **Base Commit (`origin/main`):** `dedbf40f15922cfd07dad856659db83b881e1cf2`
 **Review Checkpoint SHA:** `03be778503147e9051ed516e10a551227f2f35c1`
-**Final Implementation SHA:** `08d5b69a0b26a540c88f912fa68354accc26f8ca`
-**Report-Only Attestation Note:** This submission document (`docs/reviews/T10-submission.md`) is committed on top of `08d5b69a0b26a540c88f912fa68354accc26f8ca` with zero code, schema, test, or configuration edits.
+**Final Implementation SHA:** `33cfc9fa4a08fd0680497c1ff9cda2022aec4c51`
+**Report-Only Attestation Note:** This submission document (`docs/reviews/T10-submission.md`) is committed on top of `33cfc9fa4a08fd0680497c1ff9cda2022aec4c51` with zero code, schema, test, or configuration edits.
 **Predecessor Status Note:** `docs/reviews/T09-review.md` does not exist on `origin/main`. T09 (`7f419b2`, PR #18) and its CI origin fix (`dedbf40`, PR #19) were merged into `origin/main` by the project owner, delivered T09 source/migrations (`src/modules/scheduling/deadline-service.ts`, `src/modules/productivity/productivity-service.ts`, `prisma/migrations/20261123000000_t09_deadlines_tasks_agenda/migration.sql`) were verified present on `dedbf40`, and work proceeded on the project owner's explicit start authorization.
 
 ---
@@ -75,7 +75,19 @@ All PostgreSQL and browser checks ran against isolated test DBs using synthetic 
 
 ## 5. Verification Commands Executed & Real Exits
 
-### On Final Implementation SHA `08d5b69a0b26a540c88f912fa68354accc26f8ca`
+### On Final Implementation SHA `33cfc9fa4a08fd0680497c1ff9cda2022aec4c51`
+
+| Command | Exit Code | Observed Result |
+|---|:---:|---|
+| `npm.cmd run lint` | `0` | Clean (`eslint .`, 0 errors, 0 warnings) |
+| `npm.cmd run typecheck` | `0` | Clean (`tsc --noEmit`) |
+| `npm.cmd run test` | `0` | **21/21 files, 319/319 unit tests passed** (`tests/unit/reminder-policy.test.ts` 7/7, covering DST, redaction of Basic/JSON/44-char base64 keys, and `computeWorkerHealth` states) |
+| `npm.cmd run build` | `0` | Next.js 16.4.6 Turbopack production build succeeded (48 routes compiled including `/inbox`, `/api/reminders/*`) |
+| `npx.cmd vitest run --no-file-parallelism tests/integration/t10-reminders-worker.test.ts tests/integration/t09-deadlines-tasks-agenda.test.ts tests/integration/hearing-transactions.test.ts tests/integration/hearing-archive-guards.test.ts` | `0` | **4/4 files, 27/27 real PG integration tests passed** (`t10` 8 including `cancelDeadline` clearing `FAILED` job, `t09` 8, `hearing-transactions` 5, `hearing-archive-guards` 6) |
+| `npx.cmd playwright test --config=playwright.t10.config.ts` | `0` | **5/5 passed** (`desktop-1440`, `tablet-768`, `mobile-390`) |
+| `git diff --check` | `0` | Clean (zero whitespace/conflict markers) |
+
+### Prior Verification Run on Agency-Reviewed SHA `08d5b69a0b26a540c88f912fa68354accc26f8ca`
 
 | Command | Exit Code | Observed Result |
 |---|:---:|---|
@@ -108,7 +120,7 @@ All PostgreSQL and browser checks ran against isolated test DBs using synthetic 
 - **Non-Blocking Residual Notes (`P3` from Support Reviews):**
   - `package.json` `"worker": "tsx src/worker/index.ts"` keeps `tsx` in `devDependencies` (consistent with `"auth:provision-owner"`); T18 production Docker packaging will bundle or compile the worker entrypoint.
   - Windows `child.kill('SIGTERM')` uses `TerminateProcess`, so graceful in-process POSIX `SIGINT`/`SIGTERM` shutdown exit code `0` in `src/worker/index.ts` remains outside native Windows signal semantics (`NOT RUN`).
-  - Minor non-blocking residual items: un-mocked live worker daemon E2E loop, unit tests specifically targeting `STALE`/`NOT_STARTED` `computeWorkerHealth` branches, `T10-TC-04` DST check with a custom modified rule, and JSON-quoted `redactErrorMessage` edge pattern (not triggered by T10 payloads).
+  - Minor non-blocking residual items: un-mocked live worker daemon E2E loop and `T10-TC-04` DST check with a custom modified rule (covered separately by `reminder-policy.test.ts` unit tests + `listEnabledRulesForEventType` DB loading).
 - **`NOT RUN` Limits:**
-  - Unrelated prior domain integration suites (`matter-*.test.ts`, `party-*.test.ts`, `auth-integration.test.ts`, `http-origin-matrix.test.ts`, `search-performance.test.ts`, `db-readiness.test.ts`), `migration-upgrade.test.ts`/`startup-process.test.ts` post-reconciliation, and `playwright.t03`/`t05`/`t06`/`t07`/`t08` were not re-run locally on `08d5b69a0b26a540c88f912fa68354accc26f8ca` (GitHub Actions CI runs the complete suite upon PR).
+  - After the final polish commit `33cfc9fa4a08fd0680497c1ff9cda2022aec4c51` (cancelling obsolete `FAILED` jobs in `cancelSourceReminderJobs`, strengthening `redactErrorMessage` for Basic/JSON/44-char keys, removing duplicate `ensureDefaultReminderRules` call in `reminder-worker.ts`, adding `InboxView` unmount abort & `401` session recheck, and extending `reminder-policy.test.ts`/`t10-reminders-worker.test.ts`), `prisma validate`, `audit-fixes-regressions.test.ts`, `migration-upgrade.test.ts`, `startup-process.test.ts`, unrelated prior domain integration suites (`matter-*`, `party-*`, `auth-*`), and `playwright.t03`..`t09` were not re-run locally (all verified previously on `08d5b69`/`03be778`; GitHub Actions CI runs the complete suite upon PR).
   - Live assistive-technology screen reader walkthroughs and live HTTPS mobile push/closed-app testing remain outside local Playwright runs.
