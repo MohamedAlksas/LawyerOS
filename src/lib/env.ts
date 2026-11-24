@@ -432,16 +432,17 @@ export function redactErrorMessage(error: unknown, maxLength = 300): string {
     .replace(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+/g, '[REDACTED_URL]')
     // Basic user:pass@host fragments without protocol
     .replace(/[^\s/:@]+:[^\s/@]+@[^\s/:]+/g, '[REDACTED_CREDENTIALS]')
-    // Bearer / JWT tokens
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED_TOKEN]')
+    // Bearer / Basic / JWT tokens
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 [REDACTED_TOKEN]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')
-    // Key-value secret assignments
+    // Key-value / JSON secret assignments
     .replace(
-      /\b(password|passwd|secret|token|api[_-]?key|encryption[_-]?key|auth[_-]?tag|ciphertext|cookie|session[_-]?id)\b(\s*[=:]\s*)([^\s,;]+)/gi,
-      '$1$2[REDACTED]'
+      /("?\b(?:password|passwd|secret|token|api[_-]?key|encryption[_-]?key|auth[_-]?tag|ciphertext|cookie|session[_-]?id)\b"?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+      '$1[REDACTED]'
     )
-    // Long hex or base64 blobs (keys, encrypted bytes, raw file payloads)
+    // Long hex, 256-bit base64 keys, or raw base64 blobs (keys, encrypted bytes, raw file payloads)
     .replace(/\b[0-9a-fA-F]{32,}\b/g, '[REDACTED_HEX]')
+    .replace(/(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{43}=(?=\s|$|["',;}\]])/g, '[REDACTED_KEY]')
     .replace(/[A-Za-z0-9+/=_-]{48,}/g, '[REDACTED_BLOB]');
 
   if (!sanitized) {

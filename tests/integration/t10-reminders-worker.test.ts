@@ -12,6 +12,7 @@ import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { AuthorizationError } from '@/modules/identity/types';
 import { addProceeding, openMatter } from '@/modules/matters/matter-service';
 import {
+  cancelDeadline,
   cancelHearing,
   changeDeadlineDate,
   completeDeadline,
@@ -808,6 +809,24 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
 
     expect((await getDeadline(owner, dl.id)).status).toBe('CONFIRMED');
     expect((await getTask(owner, linkedTask.id)).status).toBe('OPEN');
+
+    // Cancelling a Deadline also clears any terminal FAILED reminder job so obsolete failures vanish from /inbox
+    await prisma.jobRun.updateMany({
+      where: { sourceType: 'Deadline', sourceId: dl.id, status: 'PENDING' },
+      data: { status: 'FAILED', lastError: 'فشل قبل الإلغاء' },
+    });
+    const cancelledDl = await cancelDeadline(owner, {
+      deadlineId: dl.id,
+      expectedVersion: confDl.version,
+      reason: 'إلغاء الموعد بعد تعذر الإرسال',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(cancelledDl.status).toBe('CANCELLED');
+    expect(
+      await prisma.jobRun.count({
+        where: { sourceType: 'Deadline', sourceId: dl.id, status: 'FAILED' },
+      })
+    ).toBe(0);
   });
 
   it('T10-TC-06: Blocks all jobs in RESTORE_MODE/dispatch-disabled, rejects unauthorized HTTP/service callers, and redacts secrets/bytes', async () => {

@@ -5,6 +5,7 @@ import {
   CAIRO_TIMEZONE,
 } from '@/lib/cairo-date';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
+import { computeWorkerHealth } from '@/modules/reminders/reminder-service';
 import { computeRetryBackoffMs } from '@/worker/reminder-worker';
 
 function formatCairoWall(date: Date): string {
@@ -106,5 +107,42 @@ describe('T10 Unit Tests: Cairo Reminder Policy, Redaction, Restore Mode & Backo
     expect(computeRetryBackoffMs(2, 30_000, 900_000)).toBe(60_000);
     expect(computeRetryBackoffMs(3, 30_000, 900_000)).toBe(120_000);
     expect(computeRetryBackoffMs(10, 30_000, 900_000)).toBe(900_000);
+  });
+
+  it('redacts Basic credentials, JSON-quoted secrets, and 44-char base64 keys', () => {
+    const key256Base64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk123456=';
+    const raw = `Header Authorization: Basic dXNlcjpwYXNz Payload {"password":"My Json Pass","secret":"TopSecretVal"} Key=${key256Base64}`;
+    const redacted = redactErrorMessage(raw, 400);
+    expect(redacted).not.toContain('dXNlcjpwYXNz');
+    expect(redacted).not.toContain('My Json Pass');
+    expect(redacted).not.toContain('TopSecretVal');
+    expect(redacted).not.toContain(key256Base64);
+    expect(redacted).toContain('Basic [REDACTED_TOKEN]');
+    expect(redacted).toContain('[REDACTED_KEY]');
+  });
+
+  it('computes WorkerHealth states cleanly for NOT_STARTED, STALE, HEALTHY, FAILED, and RESTORE_MODE', () => {
+    const now = new Date('2027-06-01T10:00:00.000Z');
+    expect(computeWorkerHealth(null, 0, now).status).toBe('NOT_STARTED');
+
+    const healthyHeartbeat = {
+      workerId: 'worker-1',
+      lastPollAt: new Date(now.getTime() - 60_000),
+      lastSuccessAt: new Date(now.getTime() - 60_000),
+      lastErrorAt: null,
+      lastError: null,
+      restoreMode: false,
+    };
+    expect(computeWorkerHealth(healthyHeartbeat, 0, now).status).toBe('HEALTHY');
+
+    const staleHeartbeat = {
+      ...healthyHeartbeat,
+      lastPollAt: new Date(now.getTime() - 10 * 60_000),
+    };
+    expect(computeWorkerHealth(staleHeartbeat, 0, now).status).toBe('STALE');
+    expect(computeWorkerHealth(healthyHeartbeat, 1, now).status).toBe('FAILED');
+    expect(computeWorkerHealth({ ...healthyHeartbeat, restoreMode: true }, 1, now).status).toBe(
+      'RESTORE_MODE'
+    );
   });
 });

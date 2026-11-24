@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -119,6 +119,12 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
     });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      refreshAbortRef.current?.abort();
+    };
+  }, []);
+
   const refreshInbox = useCallback(async () => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
@@ -132,6 +138,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         cache: 'no-store',
         signal: controller.signal,
       });
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
       const body = (await res.json().catch(() => null)) as ActionResult<InboxOverviewDTO> | null;
       if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {

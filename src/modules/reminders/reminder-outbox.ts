@@ -155,7 +155,7 @@ export async function cancelSourceReminderJobs(
     where: {
       sourceType,
       sourceId,
-      status: { in: ['PENDING', 'RUNNING'] },
+      status: { in: ['PENDING', 'RUNNING', 'FAILED'] },
     },
     data: {
       status: 'CANCELLED',

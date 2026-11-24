@@ -9,7 +9,6 @@ import {
   formatUtcDateToIsoDate,
 } from '@/lib/cairo-date';
 import {
-  ensureDefaultReminderRules,
   listEnabledRulesForEventType,
   reminderEventTypeFromSourceType,
 } from '@/modules/reminders/reminder-outbox';
@@ -546,7 +545,6 @@ export async function processClaimedReminderJob(
 
     const eventType =
       reminderEventTypeFromSourceType(lockedJob.source_type) ?? live.eventType;
-    await ensureDefaultReminderRules(tx, [eventType]);
     const enabledRules = await listEnabledRulesForEventType(tx, eventType);
 
     const rulesWithInstants = enabledRules
