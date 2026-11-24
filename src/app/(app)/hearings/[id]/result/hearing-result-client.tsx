@@ -120,7 +120,10 @@ export function HearingResultClient({
   const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
   const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
     Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
-  useLeaveGuard(resultDirty || (isCorrecting && !correctionFrozen), isSubmitting || correctionSubmitting);
+  useLeaveGuard(
+    resultDirty || (isCorrecting && !correctionFrozen),
+    isSubmitting || correctionSubmitting || isFrozenRetry || correctionFrozen
+  );
 
   const handleAddTask = () => {
     const newTask: FollowUpTaskItem = {

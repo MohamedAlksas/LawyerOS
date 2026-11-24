@@ -427,7 +427,7 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     await expect(page.getByRole('button', { name: savedLabel })).toHaveCount(0);
   });
 
-  test('security dialog error and success reflow at 200% with keyboard focus and Escape', async ({ page }, testInfo) => {
+  test('security dialog error and success reflow at 200% with keyboard focus and Escape @responsive @a11y', async ({ page }, testInfo) => {
     await loginAndCompleteMfa(page);
     await page.goto('/settings/security');
     const securityMain = page.getByTestId('main-content');

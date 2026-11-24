@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { getPrismaClient } from '@/lib/auth';
-import { seedT04Owner, T04Owner, signInWithTotp } from '../helpers/t04-auth';
+import { seedT04Owner, deleteT04Owner, T04Owner, signInWithTotp } from '../helpers/t04-auth';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 
@@ -59,9 +59,38 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
   });
 
   test.afterAll(async () => {
+    if (createdMatterIds.length > 0) {
+      const hearings = await prisma.hearing.findMany({
+        where: { proceeding: { matterId: { in: createdMatterIds } } },
+        select: { id: true },
+      });
+      const hearingIds = hearings.map((h) => h.id);
+      if (hearingIds.length > 0) {
+        await prisma.jobRun.deleteMany({
+          where: { sourceType: 'Hearing', sourceId: { in: hearingIds } },
+        });
+      }
+      const tasks = await prisma.task.findMany({
+        where: { matterId: { in: createdMatterIds } },
+        select: { id: true },
+      });
+      const taskIds = tasks.map((t) => t.id);
+      if (taskIds.length > 0) {
+        await prisma.jobRun.deleteMany({
+          where: { sourceType: 'Task', sourceId: { in: taskIds } },
+        });
+      }
+    }
+
     await cleanupMatterFixtures(prisma, createdMatterIds);
     await cleanupPartyFixtures(prisma, createdPartyIds);
     await cleanupReferenceFixtures(prisma, { courtIds: createdCourtIds });
+
+    if (owner?.id) {
+      await prisma.auditEvent.deleteMany({ where: { userId: owner.id } });
+      await prisma.idempotencyRecord.deleteMany({ where: { actorId: owner.id } });
+      await deleteT04Owner(owner.id);
+    }
   });
 
   /**
@@ -409,13 +438,15 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
 
     // Session 1 opens form
     const ctx1 = await browser.newContext();
+    let ctx2: Awaited<ReturnType<typeof browser.newContext>> | null = null;
+    try {
     const page1 = await ctx1.newPage();
     await signInWithTotp(page1, owner);
     await page1.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
     await page1.getByTestId(`record-result-button-${hearing.id}`).click();
 
     // Session 2 opens form
-    const ctx2 = await browser.newContext();
+    ctx2 = await browser.newContext();
     const page2 = await ctx2.newPage();
     await signInWithTotp(page2, owner);
     await page2.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
@@ -459,8 +490,12 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page2.getByText('مراجعات النتيجة السابقة').click();
     await expect(page2.getByText('حكمت المحكمة بندب خبير حسابي')).toBeVisible();
 
-    await ctx1.close();
-    await ctx2.close();
+    } finally {
+      await ctx1.close();
+      if (ctx2) {
+        await ctx2.close();
+      }
+    }
   });
 
   /**

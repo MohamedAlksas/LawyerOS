@@ -416,9 +416,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
 
     // 2. Open an unauthenticated browser context
     const unauthContext = await browser.newContext();
-    const page = await unauthContext.newPage();
-
     try {
+    const page = await unauthContext.newPage();
       // 3. Navigate directly to matter deep link
       await page.goto(`/matters/${matter.id}`);
 
@@ -464,9 +463,8 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     test.setTimeout(90_000);
 
     const unauthContext = await browser.newContext();
-    const page = await unauthContext.newPage();
-
     try {
+    const page = await unauthContext.newPage();
       // 1. Visit /matters/new signed out
       await page.goto('/matters/new');
       await expect(page).toHaveURL((url) => {
@@ -544,8 +542,11 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
 
     // 8. Open login in new tab/page within same context to renew session via login & MFA
     const loginPage = await page.context().newPage();
-    await signInWithTotp(loginPage, owner);
-    await loginPage.close();
+    try {
+      await signInWithTotp(loginPage, owner);
+    } finally {
+      await loginPage.close();
+    }
 
     // 9. Return to original page with frozen form and click session recovery retry button
     const retryBtn = page.getByTestId('session-recovery-retry-button');
@@ -1070,60 +1071,90 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     await page.getByTestId('proceeding-court-select').selectOption(court.id);
     await page.getByTestId('proceeding-year-input').fill('2026');
 
-    // Intercept to add a delay to the FIRST (debounced) lookup request
+    const continueRouteSafely = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+      try {
+        await route.continue();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          !message.includes('Target page, context or browser has been closed') &&
+          !message.includes('Route is already handled')
+        ) {
+          throw err;
+        }
+      }
+    };
+
+    // Intercept to deterministically hold the FIRST (debounced) lookup request in flight
     let lookupCount = 0;
+    let resolveFirstLookupStarted!: () => void;
+    const firstLookupStarted = new Promise<void>((resolve) => {
+      resolveFirstLookupStarted = resolve;
+    });
+    let releaseFirstLookup!: () => void;
+    const firstLookupGate = new Promise<void>((resolve) => {
+      releaseFirstLookup = resolve;
+    });
+    let firstLookupRequest: ReturnType<Parameters<Parameters<typeof page.route>[1]>[0]['request']> | null = null;
 
     await page.route(`**/matters/${matter.id}/proceedings**`, async (route) => {
       if (route.request().method() === 'POST') {
         lookupCount++;
         if (lookupCount === 1) {
-          // Delay the debounced lookup so it settles after user interaction
-          await new Promise((r) => setTimeout(r, 800));
-          try {
-            await route.continue();
-          } catch {}
-        } else {
-          try {
-            await route.continue();
-          } catch {}
+          firstLookupRequest = route.request();
+          resolveFirstLookupStarted();
+          await firstLookupGate;
+          await continueRouteSafely(route);
+          return;
         }
-      } else {
-        try {
-          await route.continue();
-        } catch {}
       }
+      await continueRouteSafely(route);
     });
 
-    // Fill the number to trigger debounced lookup (request 1 - will be delayed)
-    await page.getByTestId('proceeding-number-input').fill('9900');
+    try {
+      // Fill the number to trigger debounced lookup (request 1 - held deterministically)
+      await page.getByTestId('proceeding-number-input').fill('9900');
 
-    // Wait 400ms so debounced lookup is in flight
-    await page.waitForTimeout(400);
+      // Wait until the debounced lookup request is actually intercepted in flight
+      await firstLookupStarted;
 
-    // Click submit while debounced lookup is in flight
-    await page.getByTestId('proceeding-submit-button').click();
+      // Capture response promises for both the delayed debounced lookup and submit's authoritative lookup
+      const delayedLookupResponsePromise = page.waitForResponse(
+        (res) => firstLookupRequest !== null && res.request() === firstLookupRequest
+      );
 
-    // Similarity warning banner must appear with the candidate
-    const similarityBanner = page.getByTestId('similarity-warning-banner');
-    await expect(similarityBanner).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId(`similarity-candidate-${existingProc.id}`)).toBeVisible();
+      // Click submit while debounced lookup is in flight (advances submitGen ahead of gen=1)
+      await page.getByTestId('proceeding-submit-button').click();
+      await expect(page.getByTestId('proceeding-submit-button')).toBeDisabled();
 
-    // Confirm distinct save for this candidate set
-    const confirmBtn = page.getByTestId('confirm-distinct-save-button');
-    await expect(confirmBtn).toBeVisible();
-    await confirmBtn.click();
+      // Release the held first lookup now that submit has entered in-flight state and invalidated gen=1
+      releaseFirstLookup();
+      await delayedLookupResponsePromise;
 
-    const confirmedMsg = page.getByTestId('distinct-save-confirmed-message');
-    await expect(confirmedMsg).toBeVisible();
+      // Similarity warning banner must appear from submit's newer lookup with the candidate
+      const similarityBanner = page.getByTestId('similarity-warning-banner');
+      await expect(similarityBanner).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId(`similarity-candidate-${existingProc.id}`)).toBeVisible();
 
-    // Wait for the delayed first lookup to finish
-    await page.waitForTimeout(1000);
+      // Confirm distinct save for this candidate set
+      const confirmBtn = page.getByTestId('confirm-distinct-save-button');
+      await expect(confirmBtn).toBeVisible();
+      await confirmBtn.click();
 
-    // Assert that the delayed older response DID NOT clear or replace the confirmation!
-    await expect(confirmedMsg).toBeVisible();
-    await expect(similarityBanner).toBeVisible();
+      const confirmedMsg = page.getByTestId('distinct-save-confirmed-message');
+      await expect(confirmedMsg).toBeVisible();
 
-    await page.unroute(`**/matters/${matter.id}/proceedings**`);
+      // Wait one paint frame and confirm no extra lookup unsettled or cleared confirmation
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+
+      // Assert that the delayed older response DID NOT clear or replace the confirmation!
+      await expect(confirmedMsg).toBeVisible();
+      await expect(similarityBanner).toBeVisible();
+      expect(lookupCount).toBeGreaterThanOrEqual(2);
+    } finally {
+      releaseFirstLookup();
+      await page.unroute(`**/matters/${matter.id}/proceedings**`).catch(() => {});
+    }
 
     // Submit now proceeds and creates the proceeding successfully
     await page.getByTestId('proceeding-submit-button').click();
@@ -1339,16 +1370,25 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
         resolveHeldRequest = resolve;
       });
 
+      const continueRouteSafely = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+        try {
+          await route.continue();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (
+            !message.includes('Target page, context or browser has been closed') &&
+            !message.includes('Route is already handled')
+          ) {
+            throw err;
+          }
+        }
+      };
       await page.route('**/settings/reference**', async (route) => {
         if (route.request().method() === 'POST') {
           await heldPromise;
-          try {
-            await route.continue();
-          } catch {}
+          await continueRouteSafely(route);
         } else {
-          try {
-            await route.continue();
-          } catch {}
+          await continueRouteSafely(route);
         }
       });
 

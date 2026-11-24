@@ -223,17 +223,22 @@ export function ScheduleHearingModal({
               id="schedule-hearing-date"
               name="hearingDate"
               type="date"
+              dir="ltr"
               required
               value={hearingDate}
               onChange={(e) => setHearingDate(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
+              aria-invalid={Boolean(fieldErrors.hearingDate)}
+              aria-describedby={fieldErrors.hearingDate ? 'schedule-hearing-date-error' : undefined}
               data-testid="schedule-hearing-date-input"
-              className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
+              className={`w-full p-2.5 bg-white border rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
                 fieldErrors.hearingDate ? 'border-red-500' : 'border-[#D5DFE3]'
               }`}
             />
             {fieldErrors.hearingDate && (
-              <p className="text-red-600 text-[11px] font-semibold">{fieldErrors.hearingDate}</p>
+              <p id="schedule-hearing-date-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                {fieldErrors.hearingDate}
+              </p>
             )}
           </div>
 
@@ -271,14 +276,19 @@ export function ScheduleHearingModal({
                   id="schedule-hearing-time"
                   name="hearingTime"
                   type="time"
+                  dir="ltr"
                   value={hearingTime}
                   onChange={(e) => setHearingTime(e.target.value)}
                   disabled={isSubmitting || isFrozenRetry}
+                  aria-invalid={Boolean(fieldErrors.hearingTime)}
+                  aria-describedby={fieldErrors.hearingTime ? 'schedule-hearing-time-error' : undefined}
                   data-testid="schedule-hearing-time-input"
-                  className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
                 {fieldErrors.hearingTime && (
-                  <p className="text-red-600 text-[11px] font-semibold">{fieldErrors.hearingTime}</p>
+                  <p id="schedule-hearing-time-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                    {fieldErrors.hearingTime}
+                  </p>
                 )}
               </div>
             ) : (
@@ -303,7 +313,7 @@ export function ScheduleHearingModal({
                 onChange={(e) => setLocationRoom(e.target.value)}
                 disabled={isSubmitting || isFrozenRetry}
                 data-testid="schedule-hearing-room-input"
-                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
 
@@ -320,7 +330,7 @@ export function ScheduleHearingModal({
                 onChange={(e) => setRollNumber(e.target.value)}
                 disabled={isSubmitting || isFrozenRetry}
                 data-testid="schedule-hearing-roll-input"
-                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
           </div>
@@ -339,7 +349,7 @@ export function ScheduleHearingModal({
               onChange={(e) => setPurpose(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
               data-testid="schedule-hearing-purpose-input"
-              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
             />
           </div>
 

@@ -17,19 +17,22 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 
 // Strictly validate test environment before starting test runner or web server (R07)
 const env = validateTestEnvironment();
+Object.assign(process.env, { NODE_ENV: 'test' });
 
 export default defineConfig({
   testDir: './tests/e2e',
   testIgnore: ['**/t04-*.spec.ts', '**/t05-*.spec.ts', '**/t06-*.spec.ts', '**/t07-*.spec.ts', '**/t08-*.spec.ts', '**/t09-*.spec.ts', '**/t10-*.spec.ts', '**/t11-*.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   workers: 1,
+  outputDir: 'test-results/t03',
   reporter: 'list',
   use: {
     baseURL: BASE_URL,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   projects: [
     {
@@ -44,12 +47,14 @@ export default defineConfig({
       use: {
         viewport: { width: 768, height: 1024 },
       },
+      grep: /@(?:responsive|a11y|tablet)\b/,
     },
     {
       name: 'mobile-390',
       use: {
         viewport: { width: 390, height: 844 },
       },
+      grep: /@(?:responsive|a11y|mobile)\b/,
     },
   ],
   webServer: {
@@ -64,6 +69,10 @@ export default defineConfig({
       TEST_DATABASE_URL: env.TEST_DATABASE_URL!,
       BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: BASE_URL,
+      PARTY_IDENTITY_ENCRYPTION_KEY:
+        process.env.PARTY_IDENTITY_ENCRYPTION_KEY ||
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      PARTY_IDENTITY_KEY_ID: process.env.PARTY_IDENTITY_KEY_ID || 'k2026_01',
     },
   },
 });

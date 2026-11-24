@@ -1,4 +1,8 @@
-import { readSchedulingFromRequest } from '@/modules/scheduling/deadline-http';
+import {
+  parseQueryBooleanParam,
+  parseQueryIntegerParam,
+  readSchedulingFromRequest,
+} from '@/modules/scheduling/deadline-http';
 import { listInbox } from '@/modules/reminders/reminder-service';
 import { reminderError } from '@/modules/reminders/reminder-errors';
 
@@ -7,12 +11,11 @@ export async function GET(request: Request) {
     request,
     (actor) => {
       const sp = new URL(request.url).searchParams;
-      const unreadOnly = sp.get('unreadOnly') === 'true';
-      const limitParam = sp.get('limit');
-      const parsedLimit = limitParam ? Number(limitParam) : undefined;
+      const unreadOnly = parseQueryBooleanParam(sp, 'unreadOnly');
+      const limit = parseQueryIntegerParam(sp, 'limit');
       return listInbox(actor, {
-        unreadOnly,
-        ...(parsedLimit !== undefined && Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+        ...(unreadOnly !== undefined ? { unreadOnly } : {}),
+        ...(limit !== undefined ? { limit } : {}),
       });
     },
     reminderError

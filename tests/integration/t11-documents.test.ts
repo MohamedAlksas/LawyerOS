@@ -9,9 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import nextConfig from '../../next.config';
 import { getAuth, getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
+import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { AuthorizationError } from '@/modules/identity/types';
 import { addProceeding, openMatter } from '@/modules/matters/matter-service';
 import { scheduleHearing } from '@/modules/scheduling';
+import { DocumentNotFoundError } from '@/modules/documents/document-types';
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
@@ -861,6 +863,7 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     });
     expect(rejectedAttempt.status).toBe('REJECTED');
     expect(rejectedAttempt.documentId).toBeNull();
+    expect(await storage.exists('quarantine', rejectedAttempt.quarantineKey)).toBe(false);
 
     const rejectAudit = await prisma.auditEvent.findFirst({
       where: {
@@ -892,6 +895,7 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     });
     expect(mismatchRow.status).toBe('REJECTED');
     expect(mismatchRow.documentId).toBeNull();
+    expect(await storage.exists('quarantine', mismatchRow.quarantineKey)).toBe(false);
 
     // ADR 0003 fail-closed when DOCUMENT_SCAN_POLICY_MODE=REQUIRED
     const validPdf = buildSyntheticPdf('REQUIRED-POLICY-FAIL-CLOSED');
@@ -1826,5 +1830,335 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     });
     expect(lazyPutRowAfter.status).toBe('EXPIRED');
     expect(await storage.exists('quarantine', lazyPutRowAfter.quarantineKey)).toBe(false);
+  });
+
+  it('T11-IDEMPOTENCY-XOR: Enforces beginUpload idempotency replay/drift (409) and matter/party XOR validation (400)', async () => {
+    const trustedOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const samplePdf = buildSyntheticPdf('IDEM-REPLAY-XOR');
+    const serviceKey = crypto.randomUUID();
+
+    const firstAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'مستند اختبار التكرار',
+      documentType: 'CONTRACT',
+      originalFilename: 'idem-service.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: samplePdf.byteLength,
+      idempotencyKey: serviceKey,
+    });
+    createdAttemptIds.push(firstAttempt.id);
+
+    const replayAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'مستند اختبار التكرار',
+      documentType: 'CONTRACT',
+      originalFilename: 'idem-service.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: samplePdf.byteLength,
+      idempotencyKey: serviceKey,
+    });
+    expect(replayAttempt.id).toBe(firstAttempt.id);
+
+    await expect(
+      beginUpload(owner, {
+        matterId: matterAId,
+        title: 'عنوان مختلف لنفس المفتاح',
+        documentType: 'CONTRACT',
+        originalFilename: 'idem-service.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: samplePdf.byteLength,
+        idempotencyKey: serviceKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    // HTTP replay + 409 payload drift
+    const httpKey = crypto.randomUUID();
+    const baseBody = {
+      matterId: matterAId,
+      title: 'مستند التكرار عبر HTTP',
+      documentType: 'CONTRACT',
+      originalFilename: 'idem-http.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: samplePdf.byteLength,
+      idempotencyKey: httpKey,
+    };
+
+    const firstHttpRes = await beginUploadRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(baseBody),
+      })
+    );
+    expect(firstHttpRes.status).toBe(201);
+    const firstHttpJson = (await firstHttpRes.json()) as { success: true; data: { id: string } };
+    createdAttemptIds.push(firstHttpJson.data.id);
+
+    const replayHttpRes = await beginUploadRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(baseBody),
+      })
+    );
+    expect(replayHttpRes.status).toBe(201);
+    const replayHttpJson = (await replayHttpRes.json()) as { success: true; data: { id: string } };
+    expect(replayHttpJson.data.id).toBe(firstHttpJson.data.id);
+
+    const driftHttpRes = await beginUploadRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ...baseBody, title: 'عنوان متغير' }),
+      })
+    );
+    expect(driftHttpRes.status).toBe(409);
+
+    // XOR validation: both matterId & partyId present OR both missing
+    await expect(
+      beginUpload(owner, {
+        matterId: matterAId,
+        partyId,
+        title: 'ارتباط مزدوج غير صالح',
+        documentType: 'CONTRACT',
+        originalFilename: 'xor-both.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: samplePdf.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(DocumentValidationError);
+
+    await expect(
+      beginUpload(owner, {
+        title: 'بدون ارتباط',
+        documentType: 'CONTRACT',
+        originalFilename: 'xor-none.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: samplePdf.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(DocumentValidationError);
+
+    const xorBothHttpRes = await beginUploadRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          matterId: matterAId,
+          partyId,
+          title: 'ارتباط مزدوج HTTP',
+          documentType: 'CONTRACT',
+          originalFilename: 'xor-both.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: samplePdf.byteLength,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    expect(xorBothHttpRes.status).toBe(400);
+
+    const xorNoneHttpRes = await beginUploadRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          cookie: ownerCookie,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: 'بدون ارتباط HTTP',
+          documentType: 'CONTRACT',
+          originalFilename: 'xor-none.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: samplePdf.byteLength,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    expect(xorNoneHttpRes.status).toBe(400);
+  });
+
+  it('T11-VERSIONS-404-STREAM: Covers ?versionId resolution, 404 routes, missing ready file handling, x-request-id sanitization, and quarantine key swap', async () => {
+    const storage = createLocalDocumentStorage(storageRoot);
+    const trustedOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+
+    const bytesA = buildSyntheticPdf('DOC-A-VERSION-CHECK');
+    const attemptA = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'مستند أ لاختبار النسخة',
+      documentType: 'CONTRACT',
+      originalFilename: 'doc-a.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: bytesA.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(attemptA.id);
+    await uploadAttemptBytes(owner, attemptA.id, bytesA);
+    const docA = await finalizeUpload(owner, { attemptId: attemptA.id });
+    createdDocumentIds.push(docA.id);
+
+    const bytesB = buildSyntheticPdf('DOC-B-MISSING-READY');
+    const attemptB = await beginUpload(owner, {
+      partyId,
+      title: 'مستند ب لاختبار الفقد',
+      documentType: 'ID_COPY',
+      originalFilename: 'doc-b.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: bytesB.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(attemptB.id);
+    await uploadAttemptBytes(owner, attemptB.id, bytesB);
+    const docB = await finalizeUpload(owner, { attemptId: attemptB.id });
+    createdDocumentIds.push(docB.id);
+
+    // 1. ?versionId matching docA -> 200 and exact bytes
+    const validVersionRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docA.id}/content?versionId=${docA.currentVersion!.id}`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: docA.id }) }
+    );
+    expect(validVersionRes.status).toBe(200);
+    expect(Buffer.compare(Buffer.from(await validVersionRes.arrayBuffer()), bytesA)).toBe(0);
+
+    // 2. Cross-document ?versionId (docB's version queried on docA) -> 404
+    const crossVersionRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docA.id}/content?versionId=${docB.currentVersion!.id}`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: docA.id }) }
+    );
+    expect(crossVersionRes.status).toBe(404);
+
+    // 3. Non-existent ?versionId -> 404
+    const unknownVersionRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docA.id}/content?versionId=${crypto.randomUUID()}`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: docA.id }) }
+    );
+    expect(unknownVersionRes.status).toBe(404);
+
+    // 4. 404 on unknown document, content, and upload attempt routes
+    const missingId = crypto.randomUUID();
+    const missingMetaRes = await getDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${missingId}`, { headers: { cookie: ownerCookie } }),
+      { params: Promise.resolve({ id: missingId }) }
+    );
+    expect(missingMetaRes.status).toBe(404);
+
+    const missingContentRouteRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${missingId}/content`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: missingId }) }
+    );
+    expect(missingContentRouteRes.status).toBe(404);
+
+    const missingAttemptRes = await getUploadAttemptRoute(
+      new Request(`${trustedOrigin}/api/documents/uploads/${missingId}`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ attemptId: missingId }) }
+    );
+    expect(missingAttemptRes.status).toBe(404);
+
+    // 5. x-request-id sanitization in download audit events
+    const badReqIdRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docA.id}/content`, {
+        headers: {
+          cookie: ownerCookie,
+          'x-request-id': 'bad req id/with spaces',
+        },
+      }),
+      { params: Promise.resolve({ id: docA.id }) }
+    );
+    expect(badReqIdRes.status).toBe(200);
+    await badReqIdRes.arrayBuffer();
+    const latestBadAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityType: 'Document', entityId: docA.id, action: 'DOWNLOAD_DOCUMENT' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(latestBadAudit.requestId).toBeNull();
+
+    const validReqIdRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docA.id}/content`, {
+        headers: {
+          cookie: ownerCookie,
+          'x-request-id': 't11-req-id_01',
+        },
+      }),
+      { params: Promise.resolve({ id: docA.id }) }
+    );
+    expect(validReqIdRes.status).toBe(200);
+    await validReqIdRes.arrayBuffer();
+    const latestValidAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: { entityType: 'Document', entityId: docA.id, action: 'DOWNLOAD_DOCUMENT' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(latestValidAudit.requestId).toBe('t11-req-id_01');
+
+    // 6. Missing ready file on disk rejects cleanly BEFORE HTTP 200 headers/stream
+    const docBVer = await prisma.documentVersion.findUniqueOrThrow({
+      where: { id: docB.currentVersion!.id },
+    });
+    expect(await storage.deleteReady(docBVer.objectKey)).toBe(true);
+    await expect(storage.readReadyStream(docBVer.objectKey)).rejects.toThrow(DocumentNotFoundError);
+    await expect(authorizeDownload(owner, docB.id)).rejects.toThrow(DocumentNotFoundError);
+    const missingReadyFileRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docB.id}/content`, {
+        headers: { cookie: ownerCookie },
+      }),
+      { params: Promise.resolve({ id: docB.id }) }
+    );
+    expect(missingReadyFileRes.status).toBe(404);
+
+    // 7. uploadAttemptBytes quarantine key swap cleans up previous quarantine object
+    const swapBytes1 = buildSyntheticPdf('SWAP-QUARANTINE-1');
+    const swapBytes2 = buildSyntheticPdf('SWAP-QUARANTINE-2');
+    expect(swapBytes1.byteLength).toBe(swapBytes2.byteLength);
+
+    const swapAttempt = await beginUpload(owner, {
+      matterId: matterAId,
+      title: 'اختبار استبدال الحجر',
+      documentType: 'CONTRACT',
+      originalFilename: 'swap.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: swapBytes1.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(swapAttempt.id);
+
+    await uploadAttemptBytes(owner, swapAttempt.id, swapBytes1);
+    const firstRow = await prisma.uploadAttempt.findUniqueOrThrow({ where: { id: swapAttempt.id } });
+    expect(await storage.exists('quarantine', firstRow.quarantineKey)).toBe(true);
+
+    await uploadAttemptBytes(owner, swapAttempt.id, swapBytes2);
+    const secondRow = await prisma.uploadAttempt.findUniqueOrThrow({ where: { id: swapAttempt.id } });
+    expect(secondRow.quarantineKey).not.toBe(firstRow.quarantineKey);
+    expect(await storage.exists('quarantine', secondRow.quarantineKey)).toBe(true);
+    expect(await storage.exists('quarantine', firstRow.quarantineKey)).toBe(false);
+
+    const swapDoc = await finalizeUpload(owner, { attemptId: swapAttempt.id });
+    createdDocumentIds.push(swapDoc.id);
+    const expectedSwapSha = crypto.createHash('sha256').update(swapBytes2).digest('hex');
+    expect(swapDoc.currentVersion?.sha256).toBe(expectedSwapSha);
   });
 });

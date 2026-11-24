@@ -202,5 +202,27 @@ describe('sanitizeReturnTo (C21 / R04-06)', () => {
       expect(sanitizeReturnTo('/offline/unknown')).toBe('/');
     });
   });
+
+  describe('Phase 1 productivity and document allowlisted routes', () => {
+    it('allows /today, /agenda, /inbox, /tasks, /deadlines, /documents, and /documents/<uuid>', () => {
+      expect(sanitizeReturnTo('/today')).toBe('/today');
+      expect(sanitizeReturnTo('/agenda?view=month')).toBe('/agenda?view=month');
+      expect(sanitizeReturnTo('/inbox?unread=true')).toBe('/inbox?unread=true');
+      expect(sanitizeReturnTo('/tasks?status=OPEN')).toBe('/tasks?status=OPEN');
+      expect(sanitizeReturnTo('/deadlines?window=upcoming')).toBe('/deadlines?window=upcoming');
+      expect(sanitizeReturnTo('/documents?q=test')).toBe('/documents?q=test');
+      expect(sanitizeReturnTo(`/documents/${VALID_UUID_1}?tab=meta`)).toBe(
+        `/documents/${VALID_UUID_1}?tab=meta`
+      );
+    });
+
+    it('rejects malformed or unauthorized document/productivity subroutes fail-closed', () => {
+      expect(sanitizeReturnTo('/documents/not-a-uuid')).toBe('/');
+      expect(sanitizeReturnTo(`/documents/${VALID_UUID_1}/edit`)).toBe('/');
+      expect(sanitizeReturnTo('/today/extra')).toBe('/');
+      expect(sanitizeReturnTo('/agenda/extra')).toBe('/');
+      expect(sanitizeReturnTo('/tasks/123')).toBe('/');
+    });
+  });
 });
 

@@ -57,6 +57,12 @@ export interface ServiceExecutionOptions {
   simulateAuditFailure?: boolean;
 }
 
+const PARTY_IDENTITY_INCLUDE = {
+  identities: {
+    orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
+  },
+} satisfies Prisma.PartyInclude;
+
 function mapPartySummary(
   party: Prisma.PartyGetPayload<{ include: { identities: true } }>
 ): PartySummaryDTO {
@@ -151,7 +157,7 @@ async function buildReplaySavePartyResult(
   }
   const party = await txOrPrisma.party.findFirst({
     where: { id: partyId, archivedAt: null },
-    include: { identities: true },
+    include: PARTY_IDENTITY_INCLUDE,
   });
   if (!party) {
     throw new NotFoundError('الطرف المطلوب غير موجود.');
@@ -308,7 +314,7 @@ export async function saveParty(
       // UPDATE PATH
       const existing = await tx.party.findUnique({
         where: { id: input.id, archivedAt: null },
-        include: { identities: true },
+        include: PARTY_IDENTITY_INCLUDE,
       });
 
       if (!existing) {
@@ -393,7 +399,7 @@ export async function saveParty(
 
       resultingParty = (await tx.party.findUniqueOrThrow({
         where: { id: targetPartyId },
-        include: { identities: true },
+        include: PARTY_IDENTITY_INCLUDE,
       })) as Prisma.PartyGetPayload<{ include: { identities: true } }>;
 
       await recordAuditEvent(
@@ -465,7 +471,7 @@ export async function saveParty(
 
       resultingParty = (await tx.party.findUniqueOrThrow({
         where: { id: targetPartyId },
-        include: { identities: true },
+        include: PARTY_IDENTITY_INCLUDE,
       })) as Prisma.PartyGetPayload<{ include: { identities: true } }>;
 
       await recordAuditEvent(
@@ -637,12 +643,14 @@ export async function getClientProfile(
   const party = await prisma.party.findUnique({
     where: { id: partyId },
     include: {
-      identities: true,
+      ...PARTY_IDENTITY_INCLUDE,
       communicationNotes: {
         orderBy: { communicationAt: 'desc' },
+        take: 200,
       },
       powersOfAttorney: {
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        take: 200,
       },
     },
   });
@@ -1048,7 +1056,7 @@ export async function revealPartyIdentity(
 
   const party = await prisma.party.findUnique({
     where: { id: partyId, archivedAt: null },
-    include: { identities: true },
+    include: PARTY_IDENTITY_INCLUDE,
   });
 
   if (!party || party.identities.length === 0) {

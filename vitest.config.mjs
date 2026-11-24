@@ -40,6 +40,9 @@ export function loadLocalTestEnv(baseDir = __dirname) {
 }
 
 const localEnv = loadLocalTestEnv();
+const envOverrides = Object.fromEntries(
+  Object.entries(localEnv).filter(([key]) => process.env[key] === undefined)
+);
 
 export default defineConfig({
   test: {
@@ -51,13 +54,9 @@ export default defineConfig({
     hookTimeout: 10000,
     fileParallelism: false,
     env: {
-      ...localEnv,
+      ...envOverrides,
       // Force test mode unconditionally after local files are loaded (R08)
       NODE_ENV: 'test',
-      // Preserve explicit environment variables from shell or CI
-      ...(process.env.DATABASE_URL ? { DATABASE_URL: process.env.DATABASE_URL } : {}),
-      ...(process.env.TEST_DATABASE_URL ? { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL } : {}),
-      ...(process.env.CI !== undefined ? { CI: process.env.CI } : {}),
     },
   },
   resolve: {

@@ -14,6 +14,7 @@ import {
   type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
+import { cancelSourceReminderJobsBatch } from '@/modules/reminders/reminder-outbox';
 import {
   MatterDTO,
   MatterPartySummaryDTO,
@@ -2663,8 +2664,10 @@ export async function getMatter(matterId: string, actor?: Actor, includeNoteHist
   const dto = mapMatterToDTO(matter);
   if (includeNoteHistory) {
     const revisions = await prisma.matterNoteRevision.findMany({
-      where: { matterId }, orderBy: { version: 'desc' },
+      where: { matterId },
+      orderBy: { version: 'desc' },
       select: { version: true, notes: true, changedById: true, createdAt: true },
+      take: 200,
     });
     dto.noteRevisions = revisions.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
   }
@@ -3143,6 +3146,23 @@ export async function archiveMatter(
         select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
       });
 
+      const openTasks = await tx.task.findMany({
+        where: {
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          OR: [
+            { matterId: input.matterId },
+            { proceeding: { matterId: input.matterId } },
+          ],
+        },
+        select: { id: true },
+      });
+      await cancelSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks.map((t) => t.id),
+        now
+      );
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'ARCHIVE_MATTER',
@@ -3504,6 +3524,20 @@ export async function archiveProceeding(
         SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${input.matterId};
       `;
+
+      const openTasks = await tx.task.findMany({
+        where: {
+          proceedingId: input.proceedingId,
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+        },
+        select: { id: true },
+      });
+      await cancelSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks.map((t) => t.id),
+        now
+      );
 
       await recordAuditEvent(tx, {
         userId: actor.id,

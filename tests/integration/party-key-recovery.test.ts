@@ -226,6 +226,8 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       const subEnvSuccess: NodeJS.ProcessEnv = {
         ...process.env,
         DATABASE_URL: getEnv().DATABASE_URL,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: getEnv().BETTER_AUTH_SECRET,
         PARTY_IDENTITY_ENCRYPTION_KEY: SYNTHETIC_ENCRYPTION_KEY,
         PARTY_IDENTITY_KEY_ID: SYNTHETIC_KEY_ID,
         NODE_ENV: 'production',
@@ -251,6 +253,8 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       const envWithoutKey: NodeJS.ProcessEnv = {
         ...process.env,
         DATABASE_URL: getEnv().DATABASE_URL,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: getEnv().BETTER_AUTH_SECRET,
         NODE_ENV: 'production',
       };
       delete envWithoutKey.TEST_DATABASE_URL;

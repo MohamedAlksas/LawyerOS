@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useFormDraft } from '@/components/navigation-guard';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { renderModalPortal, useAccessibleModal } from '@/components/productivity/productivity-ui-types';
 import {
   MatterDTO,
   MatterPartyRole,
@@ -180,7 +180,6 @@ export function MatterDetailClient({
   }
 
   // Standards 5: Modal Focus Management
-  const lastLifecycleTriggerRef = useRef<HTMLElement | null>(null);
   const archiveMatterModalRef = useRef<HTMLDivElement>(null);
   const archiveMatterReasonInputRef = useRef<HTMLTextAreaElement>(null);
   const reopenMatterModalRef = useRef<HTMLDivElement>(null);
@@ -285,12 +284,28 @@ export function MatterDetailClient({
     setShowAddPartyModal(false);
   };
 
-  const openArchiveMatterModal = (triggerEl?: HTMLElement | null) => {
+  const hasUnsavedModalInput = Boolean(
+    ((showArchiveMatterModal || showReopenMatterModal) && matterLifecycleReason.trim()) ||
+      (selectedProceedingForLifecycle && proceedingLifecycleReason.trim()) ||
+      (showAddPartyModal && (selectedPartyId || partyNotes.trim())) ||
+      (showAddPoaModal && selectedPoaId)
+  );
+  const hasPendingOperations = Boolean(
+    pendingLifecycleOp ||
+      pendingAssocOp ||
+      isLifecycleSubmitting ||
+      isProceedingLifecycleSubmitting ||
+      isAssocSubmitting ||
+      isSubmittingParty ||
+      isSubmittingPoa
+  );
+  useLeaveGuard(hasUnsavedModalInput, hasPendingOperations);
+
+  const openArchiveMatterModal = () => {
     if (pendingLifecycleOpRef.current && pendingLifecycleOpRef.current.kind !== 'archiveMatter') {
       setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
-    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
     setLifecycleError(null);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'archiveMatter'
@@ -303,18 +318,13 @@ export function MatterDetailClient({
   const closeArchiveMatterModal = useCallback(() => {
     if (isLifecycleSubmitting) return;
     setShowArchiveMatterModal(false);
-    const trigger = lastLifecycleTriggerRef.current;
-    if (trigger && typeof trigger.focus === 'function') {
-      requestAnimationFrame(() => trigger.focus());
-    }
   }, [isLifecycleSubmitting]);
 
-  const openReopenMatterModal = (triggerEl?: HTMLElement | null) => {
+  const openReopenMatterModal = () => {
     if (pendingLifecycleOpRef.current && pendingLifecycleOpRef.current.kind !== 'reopenMatter') {
       setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
-    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
     setLifecycleError(null);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'reopenMatter'
@@ -327,16 +337,11 @@ export function MatterDetailClient({
   const closeReopenMatterModal = useCallback(() => {
     if (isLifecycleSubmitting) return;
     setShowReopenMatterModal(false);
-    const trigger = lastLifecycleTriggerRef.current;
-    if (trigger && typeof trigger.focus === 'function') {
-      requestAnimationFrame(() => trigger.focus());
-    }
   }, [isLifecycleSubmitting]);
 
   const openProceedingLifecycleModal = (
     proc: ProceedingSummaryDTO,
-    action: 'archive' | 'reopen',
-    triggerEl?: HTMLElement | null
+    action: 'archive' | 'reopen'
   ) => {
     if (
       pendingLifecycleOpRef.current &&
@@ -349,7 +354,6 @@ export function MatterDetailClient({
       setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
-    lastLifecycleTriggerRef.current = triggerEl || (document.activeElement as HTMLElement | null);
     setSelectedProceedingForLifecycle(proc);
     setProceedingLifecycleAction(action);
     setProceedingLifecycleError(null);
@@ -369,134 +373,38 @@ export function MatterDetailClient({
     if (isProceedingLifecycleSubmitting) return;
     setSelectedProceedingForLifecycle(null);
     setProceedingLifecycleAction(null);
-    const trigger = lastLifecycleTriggerRef.current;
-    if (trigger && typeof trigger.focus === 'function') {
-      requestAnimationFrame(() => trigger.focus());
-    }
   }, [isProceedingLifecycleSubmitting]);
 
-  // Focus trap and initial focus for Archive Matter Modal
-  useEffect(() => {
-    if (showArchiveMatterModal) {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          if (!isLifecycleSubmitting) {
-            e.preventDefault();
-            closeArchiveMatterModal();
-          }
-          return;
-        }
-        if (e.key === 'Tab' && archiveMatterModalRef.current) {
-          const focusables = archiveMatterModalRef.current.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-          );
-          if (focusables.length === 0) return;
-          const first = focusables[0];
-          const last = focusables[focusables.length - 1];
-          if (e.shiftKey) {
-            if (document.activeElement === first) {
-              e.preventDefault();
-              last.focus();
-            }
-          } else {
-            if (document.activeElement === last) {
-              e.preventDefault();
-              first.focus();
-            }
-          }
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      requestAnimationFrame(() => {
-        archiveMatterReasonInputRef.current?.focus();
-      });
-      return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-      };
-    }
-  }, [showArchiveMatterModal, isLifecycleSubmitting, closeArchiveMatterModal]);
+  useAccessibleModal({
+    isOpen: showArchiveMatterModal,
+    isSubmitting: isLifecycleSubmitting,
+    hasPending: pendingLifecycleOp?.kind === 'archiveMatter',
+    onClose: closeArchiveMatterModal,
+    dialogRef: archiveMatterModalRef,
+    initialFocusRef: archiveMatterReasonInputRef,
+  });
 
-  // Focus trap and initial focus for Reopen Matter Modal
-  useEffect(() => {
-    if (showReopenMatterModal) {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          if (!isLifecycleSubmitting) {
-            e.preventDefault();
-            closeReopenMatterModal();
-          }
-          return;
-        }
-        if (e.key === 'Tab' && reopenMatterModalRef.current) {
-          const focusables = reopenMatterModalRef.current.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-          );
-          if (focusables.length === 0) return;
-          const first = focusables[0];
-          const last = focusables[focusables.length - 1];
-          if (e.shiftKey) {
-            if (document.activeElement === first) {
-              e.preventDefault();
-              last.focus();
-            }
-          } else {
-            if (document.activeElement === last) {
-              e.preventDefault();
-              first.focus();
-            }
-          }
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      requestAnimationFrame(() => {
-        reopenMatterReasonInputRef.current?.focus();
-      });
-      return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-      };
-    }
-  }, [showReopenMatterModal, isLifecycleSubmitting, closeReopenMatterModal]);
+  useAccessibleModal({
+    isOpen: showReopenMatterModal,
+    isSubmitting: isLifecycleSubmitting,
+    hasPending: pendingLifecycleOp?.kind === 'reopenMatter',
+    onClose: closeReopenMatterModal,
+    dialogRef: reopenMatterModalRef,
+    initialFocusRef: reopenMatterReasonInputRef,
+  });
 
-  // Focus trap and initial focus for Proceeding Lifecycle Modal
-  useEffect(() => {
-    if (selectedProceedingForLifecycle && proceedingLifecycleAction) {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') {
-          if (!isProceedingLifecycleSubmitting) {
-            e.preventDefault();
-            closeProceedingLifecycleModal();
-          }
-          return;
-        }
-        if (e.key === 'Tab' && procLifecycleModalRef.current) {
-          const focusables = procLifecycleModalRef.current.querySelectorAll<HTMLElement>(
-            'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-          );
-          if (focusables.length === 0) return;
-          const first = focusables[0];
-          const last = focusables[focusables.length - 1];
-          if (e.shiftKey) {
-            if (document.activeElement === first) {
-              e.preventDefault();
-              last.focus();
-            }
-          } else {
-            if (document.activeElement === last) {
-              e.preventDefault();
-              first.focus();
-            }
-          }
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      requestAnimationFrame(() => {
-        procLifecycleReasonInputRef.current?.focus();
-      });
-      return () => {
-        window.removeEventListener('keydown', handleKeyDown);
-      };
-    }
-  }, [selectedProceedingForLifecycle, proceedingLifecycleAction, isProceedingLifecycleSubmitting, closeProceedingLifecycleModal]);
+  useAccessibleModal({
+    isOpen: Boolean(selectedProceedingForLifecycle && proceedingLifecycleAction),
+    isSubmitting: isProceedingLifecycleSubmitting,
+    hasPending: Boolean(
+      selectedProceedingForLifecycle &&
+        (pendingLifecycleOp?.kind === 'archiveProceeding' || pendingLifecycleOp?.kind === 'reopenProceeding') &&
+        pendingLifecycleOp.proceedingId === selectedProceedingForLifecycle.id
+    ),
+    onClose: closeProceedingLifecycleModal,
+    dialogRef: procLifecycleModalRef,
+    initialFocusRef: procLifecycleReasonInputRef,
+  });
 
   // Search Parties for Linking (C11/U4: separate query from selection, clear
   // stale rows on query change, and invalidate generations on selection/close)
@@ -1486,9 +1394,7 @@ export function MatterDetailClient({
                 type="button"
                 data-testid="archive-matter-button"
                 disabled={Boolean(pendingLifecycleOp && pendingLifecycleOp.kind !== 'archiveMatter')}
-                onClick={(e) => {
-                  openArchiveMatterModal(e.currentTarget);
-                }}
+                onClick={openArchiveMatterModal}
                 className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold rounded-[6px] border border-amber-300 transition-colors min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <span>أرشفة الملف</span>
@@ -1513,9 +1419,7 @@ export function MatterDetailClient({
               type="button"
               data-testid="reopen-matter-button"
               disabled={Boolean(pendingLifecycleOp && pendingLifecycleOp.kind !== 'reopenMatter')}
-              onClick={(e) => {
-                openReopenMatterModal(e.currentTarget);
-              }}
+              onClick={openReopenMatterModal}
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors shadow-xs min-h-[44px] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <span>إعادة فتح الملف</span>
@@ -2295,8 +2199,8 @@ export function MatterDetailClient({
                                     pendingLifecycleOp.proceedingId === proc.id
                                   )
                               )}
-                              onClick={(e) => {
-                                openProceedingLifecycleModal(proc, 'archive', e.currentTarget);
+                              onClick={() => {
+                                openProceedingLifecycleModal(proc, 'archive');
                               }}
                               className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-medium rounded-[6px] border border-amber-300 transition-colors min-h-[36px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
                             >
@@ -2313,8 +2217,8 @@ export function MatterDetailClient({
                                     pendingLifecycleOp.proceedingId === proc.id
                                   )
                               )}
-                              onClick={(e) => {
-                                openProceedingLifecycleModal(proc, 'reopen', e.currentTarget);
+                              onClick={() => {
+                                openProceedingLifecycleModal(proc, 'reopen');
                               }}
                               className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium rounded-[6px] border border-emerald-300 transition-colors min-h-[36px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
                             >
@@ -2659,20 +2563,23 @@ export function MatterDetailClient({
       </div>
 
       {/* Archive Matter Modal */}
-      {showArchiveMatterModal && (
-        <div
-          ref={archiveMatterModalRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="archive-matter-title"
-          data-testid="archive-matter-modal"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isLifecycleSubmitting) {
-              closeArchiveMatterModal();
-            }
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-        >
+      {showArchiveMatterModal &&
+        renderModalPortal(
+          <div
+            ref={archiveMatterModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-matter-title"
+            data-testid="archive-matter-modal"
+            dir="rtl"
+            lang="ar-EG"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isLifecycleSubmitting) {
+                closeArchiveMatterModal();
+              }
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+          >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2773,23 +2680,26 @@ export function MatterDetailClient({
             </form>
           </div>
         </div>
-      )}
+        )}
 
       {/* Reopen Matter Modal */}
-      {showReopenMatterModal && (
-        <div
-          ref={reopenMatterModalRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="reopen-matter-title"
-          data-testid="reopen-matter-modal"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isLifecycleSubmitting) {
-              closeReopenMatterModal();
-            }
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-        >
+      {showReopenMatterModal &&
+        renderModalPortal(
+          <div
+            ref={reopenMatterModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reopen-matter-title"
+            data-testid="reopen-matter-modal"
+            dir="rtl"
+            lang="ar-EG"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isLifecycleSubmitting) {
+                closeReopenMatterModal();
+              }
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+          >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2890,23 +2800,27 @@ export function MatterDetailClient({
             </form>
           </div>
         </div>
-      )}
+        )}
 
       {/* Proceeding Lifecycle Modal (Archive or Reopen) */}
-      {selectedProceedingForLifecycle && proceedingLifecycleAction && (
-        <div
-          ref={procLifecycleModalRef}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="proceeding-lifecycle-title"
-          data-testid="proceeding-lifecycle-modal"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !isProceedingLifecycleSubmitting) {
-              closeProceedingLifecycleModal();
-            }
-          }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
-        >
+      {selectedProceedingForLifecycle &&
+        proceedingLifecycleAction &&
+        renderModalPortal(
+          <div
+            ref={procLifecycleModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="proceeding-lifecycle-title"
+            data-testid="proceeding-lifecycle-modal"
+            dir="rtl"
+            lang="ar-EG"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isProceedingLifecycleSubmitting) {
+                closeProceedingLifecycleModal();
+              }
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+          >
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
@@ -3060,7 +2974,7 @@ export function MatterDetailClient({
             </form>
           </div>
         </div>
-      )}
+        )}
     </div>
   );
 }

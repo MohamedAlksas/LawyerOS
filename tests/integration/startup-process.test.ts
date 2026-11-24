@@ -133,7 +133,13 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
       cwd: process.cwd(),
       detached: process.platform !== 'win32',
       windowsHide: true,
-      env: { ...process.env, NODE_ENV: 'production', DATABASE_URL: validatedTestUrl },
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        DATABASE_URL: validatedTestUrl,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'synthetic-startup-secret-key-at-least-32-chars',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     activeChildren.push(build);
@@ -183,6 +189,8 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
         NODE_ENV: 'production',
         PORT: String(port),
         DATABASE_URL: invalidUrl,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'synthetic-startup-secret-key-at-least-32-chars',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -245,6 +253,8 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
         NODE_ENV: 'production',
         PORT: String(port),
         DATABASE_URL: invalidUrl,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'synthetic-startup-secret-key-at-least-32-chars',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -298,6 +308,8 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
         NODE_ENV: 'production',
         PORT: String(port),
         DATABASE_URL: validatedTestUrl,
+        BETTER_AUTH_URL: 'https://lawoffice.example.com',
+        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || 'synthetic-startup-secret-key-at-least-32-chars',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });

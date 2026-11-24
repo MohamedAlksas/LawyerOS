@@ -300,6 +300,7 @@ export async function listReferenceItems(
     const courts = await prisma.court.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const c of courts) {
       results.push({
@@ -321,6 +322,7 @@ export async function listReferenceItems(
     const areas = await prisma.practiceArea.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const a of areas) {
       results.push({
@@ -341,6 +343,7 @@ export async function listReferenceItems(
     const locations = await prisma.storageLocation.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const l of locations) {
       results.push({

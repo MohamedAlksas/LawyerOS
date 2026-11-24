@@ -235,17 +235,22 @@ export function RescheduleHearingModal({
               id="reschedule-new-date"
               name="newHearingDate"
               type="date"
+              dir="ltr"
               required
               value={newHearingDate}
               onChange={(e) => setNewHearingDate(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
+              aria-invalid={Boolean(fieldErrors.newHearingDate)}
+              aria-describedby={fieldErrors.newHearingDate ? 'reschedule-new-date-error' : undefined}
               data-testid="reschedule-new-date-input"
-              className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
+              className={`w-full p-2.5 bg-white border rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
                 fieldErrors.newHearingDate ? 'border-red-500' : 'border-[#D5DFE3]'
               }`}
             />
             {fieldErrors.newHearingDate && (
-              <p className="text-red-600 text-[11px] font-semibold">{fieldErrors.newHearingDate}</p>
+              <p id="reschedule-new-date-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                {fieldErrors.newHearingDate}
+              </p>
             )}
           </div>
 
@@ -277,16 +282,26 @@ export function RescheduleHearingModal({
               </label>
             </div>
             {hasSpecificTime ? (
-              <input
-                id="reschedule-new-time"
-                name="newHearingTime"
-                type="time"
-                value={newHearingTime}
-                onChange={(e) => setNewHearingTime(e.target.value)}
-                disabled={isSubmitting || isFrozenRetry}
-                data-testid="reschedule-new-time-input"
-                className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
-              />
+              <div className="space-y-1">
+                <input
+                  id="reschedule-new-time"
+                  name="newHearingTime"
+                  type="time"
+                  dir="ltr"
+                  value={newHearingTime}
+                  onChange={(e) => setNewHearingTime(e.target.value)}
+                  disabled={isSubmitting || isFrozenRetry}
+                  aria-invalid={Boolean(fieldErrors.newHearingTime)}
+                  aria-describedby={fieldErrors.newHearingTime ? 'reschedule-new-time-error' : undefined}
+                  data-testid="reschedule-new-time-input"
+                  className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                />
+                {fieldErrors.newHearingTime && (
+                  <p id="reschedule-new-time-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                    {fieldErrors.newHearingTime}
+                  </p>
+                )}
+              </div>
             ) : (
               <p className="text-xs text-[#4D606A] italic">
                 الساعة غير محددة (سيتم عرضها &laquo;الساعة غير محددة&raquo; دون افتراض وقت عشوائي).
@@ -308,7 +323,7 @@ export function RescheduleHearingModal({
               onChange={(e) => setLocationRoom(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
               data-testid="reschedule-location-room-input"
-              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
             />
           </div>
 
@@ -326,13 +341,17 @@ export function RescheduleHearingModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
+              aria-invalid={Boolean(fieldErrors.reason)}
+              aria-describedby={fieldErrors.reason ? 'reschedule-reason-error' : undefined}
               data-testid="reschedule-reason-input"
-              className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`w-full p-2.5 bg-white border rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 fieldErrors.reason ? 'border-red-500' : 'border-[#D5DFE3]'
               }`}
             />
             {fieldErrors.reason && (
-              <p className="text-red-600 text-[11px] font-semibold">{fieldErrors.reason}</p>
+              <p id="reschedule-reason-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                {fieldErrors.reason}
+              </p>
             )}
           </div>
 
@@ -355,13 +374,14 @@ export function RescheduleHearingModal({
                     {selected && (
                       <input
                         type="date"
+                        dir="ltr"
                         aria-label={`الموعد الجديد لمهمة ${task.title}`}
                         value={selected.dueDate ?? ''}
                         onChange={(event) => {
                           setTaskChanges(taskChanges.map((change) => change.taskId === task.id
                             ? { ...change, dueDate: event.target.value || null } : change));
                         }}
-                        className="mt-1.5 w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                        className="mt-1.5 w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                       />
                     )}
                   </div>

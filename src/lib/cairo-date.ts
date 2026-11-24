@@ -206,11 +206,32 @@ export function formatTimeOrUnspecified(time: string | null | undefined): string
   const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return trimmed;
   const hours = parseInt(match[1], 10);
+  const minutesNum = parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutesNum < 0 || minutesNum > 59) return trimmed;
   const minutes = match[2];
-  if (hours < 0 || hours > 23) return trimmed;
   const isPM = hours >= 12;
   const displayHours = hours % 12 === 0 ? 12 : hours % 12;
   return `${displayHours}:${minutes} ${isPM ? 'م' : 'ص'}`;
+}
+
+export function formatCairoInstantArabic(value?: string | Date | null): string {
+  if (!value) return '—';
+  const fallback = typeof value === 'string' ? value : '—';
+  try {
+    const d = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(d.getTime())) return fallback;
+    return new Intl.DateTimeFormat('ar-EG', {
+      timeZone: CAIRO_TIMEZONE,
+      calendar: 'gregory',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch {
+    return fallback;
+  }
 }
 
 const cairoWallClockFormatter = new Intl.DateTimeFormat('en-US', {

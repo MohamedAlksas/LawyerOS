@@ -393,15 +393,18 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       };
       page.on('console', onConsole);
 
+      const pdfViewerEnabled = await page.evaluate(() => navigator.pdfViewerEnabled);
       const inlineNavResponsePromise = page.waitForResponse(
         (res) =>
           res.url().includes('/api/documents/') &&
           res.url().includes('/content?disposition=inline')
       );
-      const inlineDownloadPromise = page.waitForEvent('download', {
-        predicate: (dl) => dl.url().includes('/content?disposition=inline'),
-        timeout: 15_000,
-      }).catch(() => null);
+      const inlineDownloadPromise = !pdfViewerEnabled
+        ? page.waitForEvent('download', {
+            predicate: (dl) => dl.url().includes('/content?disposition=inline'),
+            timeout: 15_000,
+          })
+        : null;
       await page.getByTestId('queue-ready-link-0').click();
       await expect(page).toHaveURL(/\/documents\/[0-9a-f-]+$/);
       const pdfDocId = page.url().split('/').pop()!;
@@ -439,17 +442,16 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       const contentFrame = await iframeHandle?.contentFrame();
       expect(contentFrame).not.toBeNull();
 
-      const pdfViewerEnabled = await page.evaluate(() => navigator.pdfViewerEnabled);
       if (pdfViewerEnabled) {
         await expect
           .poll(() => contentFrame!.url())
           .toContain(`/api/documents/${pdfDocId}/content?disposition=inline`);
         expect(contentFrame!.url()).not.toContain('chrome-error://');
       } else {
-        const inlineDownload = await inlineDownloadPromise;
+        const inlineDownload = await inlineDownloadPromise!;
         expect(inlineDownload, 'Headless shell without PDFium should receive the unblocked 200 inline PDF').not.toBeNull();
-        expect(inlineDownload!.url()).toContain(`/api/documents/${pdfDocId}/content?disposition=inline`);
-        await inlineDownload!.cancel().catch(() => {});
+        expect(inlineDownload.url()).toContain(`/api/documents/${pdfDocId}/content?disposition=inline`);
+        await inlineDownload.cancel().catch(() => {});
       }
 
       page.off('console', onConsole);

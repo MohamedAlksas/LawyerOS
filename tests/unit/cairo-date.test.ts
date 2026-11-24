@@ -3,6 +3,7 @@ import {
   addCairoDays,
   CalendarValidationError,
   formatCairoDateArabic,
+  formatCairoInstantArabic,
   formatTimeOrUnspecified,
   formatUtcDateToIsoDate,
   getCairoMonthRange,
@@ -94,6 +95,20 @@ describe('T09 Unit Tests: Africa/Cairo Date, DST, and Time Validation', () => {
     expect(formatTimeOrUnspecified('')).toBe(UNSPECIFIED_TIME_LABEL);
     expect(formatTimeOrUnspecified(null)).not.toContain('00:00');
     expect(formatTimeOrUnspecified('14:30')).toBe('2:30 م');
+    expect(formatTimeOrUnspecified('14:60')).toBe('14:60');
+    expect(formatTimeOrUnspecified('09:99')).toBe('09:99');
+    expect(formatTimeOrUnspecified('24:00')).toBe('24:00');
     expect(formatCairoDateArabic('2027-04-30')).toContain('أبريل');
+  });
+
+  it('formats Cairo instants safely with fallback for missing or invalid inputs', () => {
+    expect(formatCairoInstantArabic(null)).toBe('—');
+    expect(formatCairoInstantArabic(undefined)).toBe('—');
+    expect(formatCairoInstantArabic(new Date('invalid'))).toBe('—');
+    expect(formatCairoInstantArabic('not-a-timestamp')).toBe('not-a-timestamp');
+
+    const formatted = formatCairoInstantArabic('2027-04-30T10:15:00.000Z');
+    expect(formatted).toContain('أبريل');
+    expect(formatted).toMatch(/2027|٢٠٢٧/);
   });
 });

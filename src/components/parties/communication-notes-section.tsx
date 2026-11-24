@@ -214,13 +214,14 @@ export function CommunicationNotesSection({
                 id="communicationAt"
                 data-testid="note-date-input"
                 type="datetime-local"
+                dir="ltr"
                 required
                 value={communicationAt}
                 onChange={(e) => {
                   setCommunicationAt(e.target.value);
                   setCommunicationAtEdited(true);
                 }}
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
 
@@ -233,7 +234,7 @@ export function CommunicationNotesSection({
                 data-testid="note-channel-select"
                 value={channel}
                 onChange={(e) => setChannel(e.target.value as CommunicationChannel)}
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="PHONE">{COMMUNICATION_CHANNEL_LABELS.PHONE}</option>
                 <option value="IN_PERSON">{COMMUNICATION_CHANNEL_LABELS.IN_PERSON}</option>
@@ -257,7 +258,7 @@ export function CommunicationNotesSection({
               value={summary}
               onChange={(e) => setSummary(e.target.value)}
               placeholder="اكتب تفاصيل الاتصال، ما تم الاتفاق عليه، أو التوجيهات القانونية..."
-              className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
             />
           </div>
 
@@ -284,9 +285,10 @@ export function CommunicationNotesSection({
                   id="followUpDate"
                   data-testid="note-follow-up-date-input"
                   type="date"
+                  dir="ltr"
                   value={followUpDate}
                   onChange={(e) => setFollowUpDate(e.target.value)}
-                  className="px-3 py-1.5 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  className="px-3 py-1.5 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
               </div>
             )}

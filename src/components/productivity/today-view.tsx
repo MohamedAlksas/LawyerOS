@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { completeTaskAction } from '@/modules/productivity/productivity-actions';
@@ -53,6 +53,12 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshSeqRef = useRef(0);
 
+  useEffect(() => {
+    return () => {
+      refreshAbortRef.current?.abort();
+    };
+  }, []);
+
   const refreshToday = useCallback(async () => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
@@ -63,6 +69,9 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
     setLoadError(null);
     try {
       const res = await fetch('/api/today', { cache: 'no-store', signal: controller.signal });
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
       const body = (await res.json().catch(() => null)) as ActionResult<TodayOverviewDTO> | null;
       if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
@@ -758,7 +767,13 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
                           <div>
                             <p className="text-sm font-bold text-[#172A35] [overflow-wrap:anywhere]">{t.title}</p>
                             <p className="text-xs text-[#4D606A]">
-                              {t.matterTitle ? `${t.matterFileCode} — ${t.matterTitle}` : 'مهمة عامة بدون تاريخ'}
+                              {t.matterTitle ? (
+                                <>
+                                  <bdi dir="ltr">{t.matterFileCode}</bdi> — {t.matterTitle}
+                                </>
+                              ) : (
+                                'مهمة عامة بدون تاريخ'
+                              )}
                             </p>
                           </div>
                           <button

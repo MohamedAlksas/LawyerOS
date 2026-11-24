@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createTaskAction,
@@ -18,7 +17,7 @@ import type {
   UpdateTaskInput,
 } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
-import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { LoadingIndicator, ErrorContainer, EmptyStateContainer } from '@/components/presentation-state';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
@@ -145,6 +144,12 @@ export function TasksView({
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshSeqRef = useRef(0);
 
+  useEffect(() => {
+    return () => {
+      refreshAbortRef.current?.abort();
+    };
+  }, []);
+
   const refreshTasks = useCallback(async () => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
@@ -157,6 +162,9 @@ export function TasksView({
       const sp = new URLSearchParams({ includeCompleted: 'true' });
       if (lockedMatterId) sp.set('matterId', lockedMatterId);
       const res = await fetch(`/api/tasks?${sp.toString()}`, { cache: 'no-store', signal: controller.signal });
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
       const body = (await res.json().catch(() => null)) as ActionResult<TaskItemDTO[]> | null;
       if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
@@ -504,9 +512,15 @@ export function TasksView({
               سجل المتابعة الإدارية والإجرائية
             </span>
           </div>
-          <h1 className={lockedMatterId ? 'text-lg font-bold text-[#172A35]' : 'text-2xl font-bold text-[#172A35]'}>
-            المهام الإجرائية ومهام المتابعة
-          </h1>
+          {lockedMatterId ? (
+            <h2 className="text-lg font-bold text-[#172A35]">
+              المهام الإجرائية ومهام المتابعة
+            </h2>
+          ) : (
+            <h1 className="text-2xl font-bold text-[#172A35]">
+              المهام الإجرائية ومهام المتابعة
+            </h1>
+          )}
           <p className="text-sm text-[#4D606A]">
             إتمام مهمة متابعة أو قراءة إشعار لا يُغلق أو يعتمد أي موعد قانوني — المواعيد القانونية تُدار بشكل مستقل.
           </p>

@@ -106,7 +106,7 @@ export interface AuthorizedDownloadResult {
   document: DocumentDTO;
   version: DocumentVersionDTO;
   headers: Record<string, string>;
-  openStream: () => Readable;
+  openStream: () => Promise<Readable>;
   readBytes: () => Promise<Buffer>;
 }
 
@@ -463,7 +463,11 @@ async function closeOpenAttempt(
   data: Prisma.UploadAttemptUpdateManyMutationInput
 ): Promise<boolean> {
   const res = await db.uploadAttempt.updateMany({
-    where: { id: attempt.id, status: { in: OPEN_UPLOAD_STATUSES } },
+    where: {
+      id: attempt.id,
+      status: { in: OPEN_UPLOAD_STATUSES },
+      quarantineKey: attempt.quarantineKey,
+    },
     data,
   });
   if (res.count > 0) {
@@ -703,15 +707,19 @@ export async function uploadAttemptBytes(
     throw new DocumentValidationError('حالة محاولة الرفع لا تسمح باستقبال البيانات حالياً.');
   }
 
+  const { extension } = sanitizeDisplayFilename(attempt.originalFilename);
+  const newQuarantineKey = storage.generateQuarantineKey(attempt.id, extension, now);
+
   let alreadyRecordedFailure = false;
   try {
     const written = await storage.writeQuarantineStream(
-      attempt.quarantineKey,
+      newQuarantineKey,
       source,
       MAX_DOCUMENT_BYTES
     );
 
     if (written.bytesWritten !== attempt.expectedSizeBytes) {
+      await storage.deleteQuarantine(newQuarantineKey).catch(() => false);
       const mismatchMsg =
         written.bytesWritten < attempt.expectedSizeBytes
           ? 'انقطع الرفع أو لم يكتمل حجم الملف المتوقع في الحجر.'
@@ -730,10 +738,12 @@ export async function uploadAttemptBytes(
       where: {
         id: attempt.id,
         status: { in: OPEN_UPLOAD_STATUSES },
+        quarantineKey: attempt.quarantineKey,
         expiresAt: { gt: now },
       },
       data: {
         status: 'UPLOADED',
+        quarantineKey: newQuarantineKey,
         bytesWritten: written.bytesWritten,
         sha256: written.sha256,
         failureReason: null,
@@ -741,7 +751,12 @@ export async function uploadAttemptBytes(
     });
 
     if (updatedRes.count === 0) {
+      await storage.deleteQuarantine(newQuarantineKey).catch(() => false);
       throw new ConcurrencyConflictError('تغيرت حالة محاولة الرفع أثناء استلام الملف. يرجى التحديث.');
+    }
+
+    if (attempt.quarantineKey !== newQuarantineKey) {
+      await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
     }
 
     const updated = await db.uploadAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
@@ -750,6 +765,8 @@ export async function uploadAttemptBytes(
     if (alreadyRecordedFailure || err instanceof ConcurrencyConflictError) {
       throw err;
     }
+
+    await storage.deleteQuarantine(newQuarantineKey).catch(() => false);
 
     const isOversized =
       err instanceof DocumentValidationError && err.reasonCode === 'PAYLOAD_TOO_LARGE';
@@ -922,6 +939,7 @@ export async function finalizeUpload(
           reason: safeReason,
         });
       });
+      await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
       statusFinalizedOrReverted = true;
       throw err;
     }
@@ -1321,7 +1339,7 @@ export async function listDocuments(
     ...(normalizedQuery
       ? {
           OR: [
-            { titleNormalized: { contains: normalizedQuery, mode: 'insensitive' } },
+            { titleNormalized: { contains: normalizedQuery } },
             {
               currentVersion: {
                 is: {
@@ -1467,22 +1485,28 @@ export async function cleanupExpiredUploadAttempts(
     take: 200,
   });
 
+  const candidateKeys = Array.from(new Set(candidates.map((a) => a.quarantineKey)));
+  const protectedVersions =
+    candidateKeys.length > 0
+      ? await db.documentVersion.findMany({
+          where: {
+            objectKey: { in: candidateKeys },
+            OR: [
+              { uploadStatus: 'READY' },
+              { backupPins: { some: { releasedAt: null } } },
+            ],
+          },
+          select: { objectKey: true },
+        })
+      : [];
+  const protectedKeySet = new Set(protectedVersions.map((v) => v.objectKey));
+
   let expiredAttemptCount = 0;
   let deletedQuarantineCount = 0;
 
   for (const attempt of candidates) {
     // Defense-in-depth: ensure no READY or active-pinned DocumentVersion matches quarantineKey
-    const matchingProtectedVersion = await db.documentVersion.findFirst({
-      where: {
-        objectKey: attempt.quarantineKey,
-        OR: [
-          { uploadStatus: 'READY' },
-          { backupPins: { some: { releasedAt: null } } },
-        ],
-      },
-      select: { id: true },
-    });
-    if (matchingProtectedVersion) {
+    if (protectedKeySet.has(attempt.quarantineKey)) {
       skippedProtectedCount++;
       continue;
     }

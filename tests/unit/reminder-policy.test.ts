@@ -6,6 +6,8 @@ import {
 } from '@/lib/cairo-date';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
 import { computeWorkerHealth } from '@/modules/reminders/reminder-service';
+import { reminderError } from '@/modules/reminders/reminder-errors';
+import { SchedulingValidationError } from '@/modules/scheduling/hearing-types';
 import { computeRetryBackoffMs } from '@/worker/reminder-worker';
 
 function formatCairoWall(date: Date): string {
@@ -144,5 +146,17 @@ describe('T10 Unit Tests: Cairo Reminder Policy, Redaction, Restore Mode & Backo
     expect(computeWorkerHealth({ ...healthyHeartbeat, restoreMode: true }, 1, now).status).toBe(
       'RESTORE_MODE'
     );
+  });
+
+  it('maps SchedulingValidationError cleanly via reminderError without collapsing to internal error', () => {
+    const result = reminderError(
+      new SchedulingValidationError('معرف غير صالح.', { limit: 'يجب أن يكون رقماً صحيحاً.' })
+    );
+    expect(result).toEqual({
+      success: false,
+      error: 'معرف غير صالح.',
+      code: 'VALIDATION_ERROR',
+      fieldErrors: { limit: 'يجب أن يكون رقماً صحيحاً.' },
+    });
   });
 });

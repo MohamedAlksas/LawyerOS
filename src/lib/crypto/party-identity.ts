@@ -59,14 +59,15 @@ export function parseKeyBuffer(raw: string | Buffer): Buffer {
     return Buffer.from(trimmed, 'hex');
   }
 
-  // Base64 (44 characters with padding or 43 unpadded)
-  try {
+  // Base64 (44 characters with '=' padding or 43 unpadded) with strict canonical round-trip check
+  if (/^[A-Za-z0-9+/]{43}=?$/.test(trimmed) || /^[A-Za-z0-9+/]{44}$/.test(trimmed)) {
     const buf = Buffer.from(trimmed, 'base64');
     if (buf.length === 32) {
-      return buf;
+      const canonical = buf.toString('base64');
+      if (trimmed === canonical || trimmed === canonical.replace(/=+$/, '')) {
+        return buf;
+      }
     }
-  } catch {
-    // fall through
   }
 
   throw new CryptoConfigurationError('Invalid encryption key format. Expected 32 bytes as 64-char hex or 44-char base64 string.');

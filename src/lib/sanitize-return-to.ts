@@ -3,6 +3,12 @@ const UUID_SEGMENT = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 
 const ALLOWED_EXACT_ROUTES = new Set([
   '/',
+  '/today',
+  '/agenda',
+  '/inbox',
+  '/tasks',
+  '/deadlines',
+  '/documents',
   '/search',
   '/matters',
   '/matters/new',
@@ -17,6 +23,7 @@ const ALLOWED_EXACT_ROUTES = new Set([
 const ALLOWED_PREFIX_ROUTES: string[] = [];
 
 const ALLOWED_PATTERN_ROUTES = [
+  new RegExp(`^/documents/${UUID_SEGMENT}$`),
   new RegExp(`^/matters/${UUID_SEGMENT}$`),
   new RegExp(`^/matters/${UUID_SEGMENT}/edit$`),
   new RegExp(`^/matters/${UUID_SEGMENT}/proceedings$`),

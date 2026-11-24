@@ -48,13 +48,31 @@ async function main() {
     }, intervalMs);
   };
 
+  const SHUTDOWN_TIMEOUT_MS = 15_000;
+
   const shutdown = async (signal: string) => {
     if (stopping) return;
     stopping = true;
     if (timer) clearTimeout(timer);
     process.stdout.write(`[ReminderWorker] shutting down (${signal})...\n`);
     if (activeTick) {
-      await activeTick.catch(() => {});
+      let guardTimer: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          activeTick.catch(() => {}),
+          new Promise<void>((resolve) => {
+            guardTimer = setTimeout(() => {
+              process.stderr.write(
+                `[ReminderWorker] shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms waiting for active tick; forcing disconnect.\n`
+              );
+              resolve();
+            }, SHUTDOWN_TIMEOUT_MS);
+            guardTimer.unref();
+          }),
+        ]);
+      } finally {
+        if (guardTimer) clearTimeout(guardTimer);
+      }
     }
     await getPrismaClient().$disconnect().catch(() => {});
     await closeDbPool().catch(() => {});

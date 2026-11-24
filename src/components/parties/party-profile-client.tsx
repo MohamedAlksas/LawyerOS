@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from '@/components/navigation-guard';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
 import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
 import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
@@ -153,7 +153,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
             <Link href="/parties" className="hover:text-[#14566B] hover:underline">
               دليل الأطراف
             </Link>
-            <span aria-hidden="true">&gt;</span>
+            <span aria-hidden="true">/</span>
             <span className="text-[#172A35] font-medium">{party.name}</span>
           </nav>
           <div className="flex items-center gap-3">

@@ -4,7 +4,9 @@ import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { TaskPriority, TaskStatus } from '@/modules/productivity/productivity-types';
 import type { DeadlineStatus } from '@/modules/scheduling/deadline-types';
-import { CAIRO_TIMEZONE, addCairoDays, getCairoMonthRange } from '@/lib/cairo-date';
+import { addCairoDays, formatCairoInstantArabic, getCairoMonthRange } from '@/lib/cairo-date';
+
+export { formatCairoInstantArabic };
 
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
   LOW: 'منخفضة',
@@ -50,25 +52,6 @@ export const DEADLINE_STATUS_CLASSES: Record<DeadlineStatus, string> = {
 
 export function isUncertainMutationOutcome(code?: string): boolean {
   return !code || ['INTERNAL_ERROR', 'DATABASE_UNAVAILABLE', 'IDEMPOTENCY_CONCURRENT_CONFLICT'].includes(code);
-}
-
-export function formatCairoInstantArabic(isoString?: string | null): string {
-  if (!isoString) return '—';
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return isoString;
-    return new Intl.DateTimeFormat('ar-EG', {
-      timeZone: CAIRO_TIMEZONE,
-      calendar: 'gregory',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(d);
-  } catch {
-    return isoString;
-  }
 }
 
 export function shiftCairoMonth(anchorDate: string, deltaMonths: number): string {
@@ -130,17 +113,6 @@ export function useAccessibleModal(options: {
     if (!isOpen) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
-    const frameId = requestAnimationFrame(() => {
-      if (hasPending) {
-        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]');
-        if (submitBtn) {
-          submitBtn.focus();
-          return;
-        }
-      }
-      initialFocusRef.current?.focus();
-    });
-
     const shell = document.getElementById('app-shell-content') as (HTMLElement & { inert: boolean }) | null;
     const prevInert = shell?.inert ?? false;
     const prevHidden = shell?.getAttribute('aria-hidden') ?? null;
@@ -150,7 +122,6 @@ export function useAccessibleModal(options: {
     }
 
     return () => {
-      cancelAnimationFrame(frameId);
       if (shell) {
         shell.inert = prevInert;
         if (prevHidden === null) shell.removeAttribute('aria-hidden');
@@ -162,6 +133,21 @@ export function useAccessibleModal(options: {
         });
       }
     };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frameId = requestAnimationFrame(() => {
+      if (hasPending) {
+        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]:not([disabled])');
+        if (submitBtn) {
+          submitBtn.focus();
+          return;
+        }
+      }
+      initialFocusRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
   }, [isOpen, hasPending, dialogRef, initialFocusRef]);
 
   useEffect(() => {

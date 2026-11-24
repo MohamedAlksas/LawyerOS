@@ -6,9 +6,8 @@ import { trackNetwork } from '../helpers/t04-storage';
 /**
  * T04-02 — Arabic root document, local-only typography and BiDi isolation.
  *
- * The shell contract guarantees RTL/Arabic at the document level and a locally
- * bundled "Noto Sans Arabic". It does not guarantee a timestamp element, so the
- * Cairo-timezone test skips explicitly when no `<time>` exists and says so.
+ * The shell contract guarantees RTL/Arabic at the document level, a locally
+ * bundled "Noto Sans Arabic", and a Cairo-formatted <time> element on the home shell.
  */
 
 function baseURL(): string {
@@ -132,7 +131,7 @@ test('numeric and email text is isolated from the RTL paragraph direction @once'
   ).toEqual([]);
 });
 
-test('timestamp formatting follows Africa/Cairo when the shell exposes one @once', async ({
+test('timestamp formatting follows Africa/Cairo on the home shell @once', async ({
   t04Page: page,
 }) => {
   await page.goto(T04_ROUTES.home);
@@ -141,22 +140,27 @@ test('timestamp formatting follows Africa/Cairo when the shell exposes one @once
   const timestamps = page.locator('time');
   const count = await timestamps.count();
 
-  test.skip(
-    count === 0,
-    'NOT VERIFIABLE: the contract requires Africa/Cairo formatting, but neither the T04 interface contract nor the delivered shell defines a timestamp element or selector. Add a dated element to the contract to enable this assertion.'
-  );
+  expect(count, 'Authenticated home shell must render a Cairo <time> element').toBeGreaterThan(0);
 
   const first = timestamps.first();
   const datetime = await first.getAttribute('datetime');
   expect(datetime, 'A <time> element must expose a machine-readable datetime').not.toBeNull();
-  expect(Number.isNaN(new Date(datetime!).getTime()), `Invalid datetime "${datetime}"`).toBe(false);
+  const parsedDate = new Date(datetime!);
+  expect(Number.isNaN(parsedDate.getTime()), `Invalid datetime "${datetime}"`).toBe(false);
 
   const rendered = (await first.innerText()).trim();
   expect(rendered.length, 'A timestamp must not render empty').toBeGreaterThan(0);
 
-  test.info().annotations.push({
-    type: 'limitation',
-    description:
-      'The shell contract defines no timestamp element or formatting options; this test verifies a valid datetime and non-empty rendering only. Exact Cairo-timezone text requires a contract-defined fixture/clock.',
+  const fmt = new Intl.DateTimeFormat('ar-EG', {
+    timeZone: 'Africa/Cairo',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
   });
+  const allowedCairoDates = [
+    fmt.format(parsedDate),
+    fmt.format(new Date(parsedDate.getTime() - 5000)),
+  ];
+  expect(allowedCairoDates).toContain(rendered);
 });

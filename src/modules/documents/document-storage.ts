@@ -62,7 +62,7 @@ function resolveRealPathWithSuffix(targetPath: string): string {
     : realBase;
 }
 
-/** True when el (from path.relative) stays inside its base; a segment merely starting with .. (e.g. ..uploads) is inside. */
+/** True when `rel` (from path.relative) stays inside its base; a segment merely starting with .. (e.g. ..uploads) is inside. */
 function isRelInside(rel: string, allowSame: boolean): boolean {
   if (rel === '') return allowSame;
   return rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
@@ -189,7 +189,7 @@ export interface DocumentStorageAdapter {
   readQuarantineBytes(quarantineKey: string, maxBytes?: number): Promise<Buffer>;
   writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void>;
   promoteToReady(quarantineKey: string, readyKey: string): Promise<void>;
-  readReadyStream(readyKey: string): Readable;
+  readReadyStream(readyKey: string): Promise<Readable>;
   readReadyBytes(readyKey: string): Promise<Buffer>;
   exists(zone: 'quarantine' | 'ready', key: string): Promise<boolean>;
   stat(zone: 'quarantine' | 'ready', key: string): Promise<{ sizeBytes: number } | null>;
@@ -282,7 +282,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       let handle: fs.promises.FileHandle | null = null;
 
       try {
-        handle = await fs.promises.open(tempPartPath, 'w');
+        handle = await fs.promises.open(tempPartPath, 'wx');
 
         if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
           const buf = Buffer.isBuffer(source)
@@ -380,7 +380,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
-        handle = await fs.promises.open(tempPartPath, 'w');
+        handle = await fs.promises.open(tempPartPath, 'wx');
         await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
@@ -403,21 +403,47 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       await fs.promises.mkdir(destDir, { recursive: true });
 
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
+      let handle: fs.promises.FileHandle | null = null;
       try {
-        await fs.promises.copyFile(srcPath, tempPartPath);
+        await fs.promises.copyFile(srcPath, tempPartPath, fs.constants.COPYFILE_EXCL);
+        handle = await fs.promises.open(tempPartPath, 'r+');
+        await handle.sync();
+        await handle.close();
+        handle = null;
         await fs.promises.rename(tempPartPath, destPath);
       } catch (err) {
+        if (handle) {
+          await handle.close().catch(() => {});
+          handle = null;
+        }
         await unlinkIfExists(tempPartPath).catch(() => {});
         throw err;
       }
     },
 
-    readReadyStream(readyKey: string): Readable {
+    async readReadyStream(readyKey: string): Promise<Readable> {
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
-      if (!fs.existsSync(targetPath)) {
-        throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
+      let handle: fs.promises.FileHandle;
+      try {
+        handle = await fs.promises.open(targetPath, 'r');
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+          throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
+        }
+        throw err;
       }
-      return fs.createReadStream(targetPath);
+
+      try {
+        const st = await handle.stat();
+        if (!st.isFile() || st.size <= 0) {
+          throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
+        }
+        return handle.createReadStream({ autoClose: true });
+      } catch (err) {
+        await handle.close().catch(() => {});
+        throw err;
+      }
     },
 
     async readReadyBytes(readyKey: string): Promise<Buffer> {

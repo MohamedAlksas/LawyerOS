@@ -51,6 +51,12 @@ export function canonicalizeJson(value: unknown): string {
   if (Array.isArray(value)) {
     return '[' + value.map((item) => canonicalizeJson(item)).join(',') + ']';
   }
+  if (value instanceof Date) {
+    return JSON.stringify(value.toISOString());
+  }
+  if (typeof value === 'bigint') {
+    return JSON.stringify({ $bigint: value.toString() });
+  }
   if (typeof value === 'object') {
     const sortedKeys = Object.keys(value as Record<string, unknown>).sort();
     const pairs = sortedKeys.map(

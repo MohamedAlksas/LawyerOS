@@ -11,7 +11,7 @@ import {
   UNSCANNED_POLICY_DETAIL_AR,
   UNSCANNED_POLICY_NOTICE_AR,
 } from '@/modules/documents/document-types';
-import { CAIRO_TIMEZONE } from '@/lib/cairo-date';
+import { formatCairoInstantArabic } from '@/lib/cairo-date';
 
 export {
   DOCUMENT_TYPE_LABELS_AR,
@@ -19,6 +19,7 @@ export {
   MAX_DOCUMENT_BYTES,
   UNSCANNED_POLICY_DETAIL_AR,
   UNSCANNED_POLICY_NOTICE_AR,
+  formatCairoInstantArabic,
 };
 
 export interface SelectablePartyOption {
@@ -182,23 +183,4 @@ export function isPreviewableImageFile(file: File): boolean {
 
 export function isPdfFile(file: File): boolean {
   return resolveDeclaredMime(file) === 'application/pdf';
-}
-
-export function formatCairoInstantArabic(isoString?: string | null): string {
-  if (!isoString) return '—';
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return isoString;
-    return new Intl.DateTimeFormat('ar-EG', {
-      timeZone: CAIRO_TIMEZONE,
-      calendar: 'gregory',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(d);
-  } catch {
-    return isoString;
-  }
 }

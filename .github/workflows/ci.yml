@@ -83,3 +83,12 @@ jobs:
 
       - name: Run Playwright E2E tests
         run: npm run test:e2e
+
+      - name: Upload test artifacts on failure
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14
+          if-no-files-found: ignore

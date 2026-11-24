@@ -428,11 +428,14 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
     await expect(page.getByTestId('protected-view-lock')).toContainText('انتهت الجلسة');
     const reauth = await context.newPage();
-    await signInWithTotp(reauth, owner);
-    const replacement = await sessionId();
-    expect(replacement).not.toBe(oldId);
-    await prisma.session.update({ where: { id: replacement }, data: { userAgent: 'T07 replacement browser' } });
-    await reauth.close();
+    try {
+      await signInWithTotp(reauth, owner);
+      const replacement = await sessionId();
+      expect(replacement).not.toBe(oldId);
+      await prisma.session.update({ where: { id: replacement }, data: { userAgent: 'T07 replacement browser' } });
+    } finally {
+      await reauth.close();
+    }
     await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
     const current = page.locator('div.divide-y > div').filter({ hasText: 'T07 replacement browser' });
     await expect(current.getByText('الجلسة الحالية')).toBeVisible();
@@ -568,6 +571,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     test.setTimeout(90_000);
     await signInWithTotp(page, owner);
 
+    await page.clock.install();
     await page.goto('/search?type=MATTER&includeArchived=true&limit=15');
     const searchInput = page.getByTestId('unified-search-input');
     await searchInput.fill(`تصفح صفحات النظام ${pageRunId}`);
@@ -583,8 +587,21 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await expect(page).toHaveURL(/page=2/);
     await expect(paginationControls).toContainText('صفحة 2 من 2');
 
-    // CRITICAL: Wait 500ms (exceeding 300ms debounce timer) to verify debounce effect does NOT reset to page 1
-    await page.waitForTimeout(500);
+    // Track POST requests and deterministically advance past the 300ms debounce timer
+    let postRequestsAfterPage2 = 0;
+    const onSearchRequest = (req: { method(): string; url(): string }) => {
+      if (req.method() === 'POST' && req.url().includes('/search')) {
+        postRequestsAfterPage2++;
+      }
+    };
+    page.on('request', onSearchRequest);
+    try {
+      await page.clock.runFor(500);
+      await page.clock.resume();
+    } finally {
+      page.off('request', onSearchRequest);
+    }
+    expect(postRequestsAfterPage2).toBe(0);
     await expect(page).toHaveURL(/page=2/);
     await expect(paginationControls).toContainText('صفحة 2 من 2');
 
@@ -1022,8 +1039,11 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
     await expect(page.getByTestId('protected-view-lock')).toContainText('انتهت الجلسة');
     const reauth = await page.context().newPage();
-    await signInWithTotp(reauth, owner);
-    await reauth.close();
+    try {
+      await signInWithTotp(reauth, owner);
+    } finally {
+      await reauth.close();
+    }
     await page.evaluate(() => window.dispatchEvent(new Event('lawoffice:recheck-session')));
     await expect(unresolvedBanner).toBeVisible();
     await expect(page.getByTestId('reopen-matter-button')).toBeDisabled();

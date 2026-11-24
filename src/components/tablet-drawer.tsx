@@ -39,6 +39,11 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     setIsLoggingOut(false);
     onClose();
   }, [onClose]);
+  const handleCloseRef = useRef(handleClose);
+
+  useEffect(() => {
+    handleCloseRef.current = handleClose;
+  }, [handleClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -73,7 +78,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        handleClose();
+        handleCloseRef.current();
         restoreFocus();
         return;
       }
@@ -108,7 +113,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
       document.removeEventListener('keydown', handleKeyDown);
       restoreFocus();
     };
-  }, [isOpen, handleClose, triggerRef]);
+  }, [isOpen, triggerRef]);
 
   if (!isOpen) return null;
 

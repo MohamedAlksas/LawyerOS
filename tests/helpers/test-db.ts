@@ -224,8 +224,7 @@ export async function cleanupTrackedFixtures(
 
   const client = await pool.connect();
   try {
-    // Only search by email if no explicit userIds were provided
-    if (emails.length > 0 && userIds.size === 0) {
+    if (emails.length > 0) {
       const found = await client.query('SELECT id FROM "user" WHERE email = ANY($1::text[])', [emails]);
       for (const row of found.rows) {
         userIds.add(row.id);

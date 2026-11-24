@@ -8,6 +8,14 @@ import {
 import { authorizeDownload } from '@/modules/documents/document-service';
 import { DocumentValidationError } from '@/modules/documents/document-types';
 
+const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function sanitizeRequestId(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return REQUEST_ID_RE.test(trimmed) ? trimmed : null;
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -32,10 +40,10 @@ export async function GET(
     const versionId = sp.get('versionId') || undefined;
     const authorized = await authorizeDownload(actor, id, versionId, {
       disposition,
-      requestId: request.headers.get('x-request-id'),
+      requestId: sanitizeRequestId(request.headers.get('x-request-id')),
     });
 
-    const nodeStream = authorized.openStream();
+    const nodeStream = await authorized.openStream();
     const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
 
     return new NextResponse(webStream, {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import {
   markReminderReadAction,
@@ -108,6 +108,19 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
   const ruleKeysRef = useRef<Map<string, string>>(new Map());
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshSeqRef = useRef(0);
+
+  const hasUnsavedRuleDrafts = Boolean(
+    overview?.rules.some((rule) => {
+      const draft = ruleDrafts[rule.id];
+      if (!draft) return false;
+      return (
+        draft.dayOffset !== rule.dayOffset ||
+        draft.reminderTime !== rule.reminderTime ||
+        draft.enabled !== rule.enabled
+      );
+    })
+  );
+  useLeaveGuard(hasUnsavedRuleDrafts, Boolean(markingId || retryingJobId || savingRuleId));
 
   const syncRuleDrafts = useCallback((rules: ReminderRuleDTO[]) => {
     setRuleDrafts(() => {
@@ -572,6 +585,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-all"
+              aria-pressed={filter === 'all'}
               onClick={() => setFilter('all')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'all'
@@ -584,6 +598,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-unread"
+              aria-pressed={filter === 'unread'}
               onClick={() => setFilter('unread')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'unread'
@@ -596,6 +611,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-overdue"
+              aria-pressed={filter === 'overdue'}
               onClick={() => setFilter('overdue')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'overdue'
@@ -688,7 +704,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                       </span>
                     )}
                     <span>
-                      وقت التسليم (SENT):{' '}
+                      {item.deliveredAt ? 'وقت التسليم بالصندوق:' : 'الموعد المجدول للتنبيه:'}{' '}
                       <strong className="text-[#172A35]">
                         {formatCairoInstantArabic(item.deliveredAt ?? item.scheduledAt)}
                       </strong>
@@ -771,7 +787,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     {RULE_EVENT_LABELS[rule.eventType]}
                   </div>
                   <div className="text-xs text-[#4D606A]">
-                    القناة: إشعار داخل التطبيق (IN_APP) • الإصدار {rule.version}
+                    القناة: إشعار داخل التطبيق • الإصدار {rule.version}
                   </div>
                 </div>
 
@@ -780,6 +796,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <span>قبل الموعد بـ</span>
                     <input
                       type="number"
+                      dir="ltr"
                       min={0}
                       max={365}
                       value={draft.dayOffset}
@@ -787,12 +804,12 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
+                            ...(prev[rule.id] ?? draft),
                             dayOffset: Number(e.target.value),
                           },
                         }))
                       }
-                      className="w-20 min-h-[40px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
+                      className="w-20 min-h-[44px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
                       aria-label={`عدد الأيام قبل الموعد (${RULE_EVENT_LABELS[rule.eventType]})`}
                     />
                     <span>يوم</span>
@@ -802,22 +819,23 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <span>الساعة</span>
                     <input
                       type="time"
+                      dir="ltr"
                       value={draft.reminderTime}
                       onChange={(e) =>
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
+                            ...(prev[rule.id] ?? draft),
                             reminderTime: e.target.value,
                           },
                         }))
                       }
-                      className="min-h-[40px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
+                      className="min-h-[44px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
                       aria-label={`ساعة التذكير (${RULE_EVENT_LABELS[rule.eventType]})`}
                     />
                   </label>
 
-                  <label className="inline-flex items-center gap-2 min-h-[40px] text-xs font-semibold text-[#172A35] cursor-pointer">
+                  <label className="inline-flex items-center gap-2 min-h-[44px] px-1 text-xs font-semibold text-[#172A35] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={draft.enabled}
@@ -825,7 +843,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
+                            ...(prev[rule.id] ?? draft),
                             enabled: e.target.checked,
                           },
                         }))

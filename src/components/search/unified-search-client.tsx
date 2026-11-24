@@ -123,6 +123,8 @@ export function UnifiedSearchClient({
     }
   }, [syncHistory]);
 
+  const hasInitialResult = Boolean(initialResult);
+
   useEffect(() => {
     bindSearchSession(sessionId);
     const restore = (view: ReturnType<typeof unifiedSearchFilters>, text: string) => {
@@ -142,7 +144,16 @@ export function UnifiedSearchClient({
     };
     // Back navigation can reuse an earlier render's server props.
     const saved = readSearchHistory(sessionId);
-    const firstRestore = saved ? setTimeout(onHistory, 0) : undefined;
+    const currentParams = new URLSearchParams(window.location.search);
+    const currentFilters = unifiedSearchFilters((name) => readParam(currentParams, name));
+    const matchesInitial =
+      hasInitialResult &&
+      saved?.query === '' &&
+      currentFilters.type === initial.type &&
+      currentFilters.includeArchived === initial.includeArchived &&
+      currentFilters.page === initial.page &&
+      currentFilters.limit === initial.limit;
+    const firstRestore = saved && !matchesInitial ? setTimeout(onHistory, 0) : undefined;
     if (!saved) syncHistory('', initial);
     window.addEventListener('popstate', onHistory);
     return () => {
@@ -150,7 +161,7 @@ export function UnifiedSearchClient({
       cancelSearch();
       window.removeEventListener('popstate', onHistory);
     };
-  }, [cancelSearch, executeSearch, initialIncludeArchived, initialLimit, initialPage, initialType, sessionId, syncHistory]);
+  }, [cancelSearch, executeSearch, hasInitialResult, initialIncludeArchived, initialLimit, initialPage, initialType, sessionId, syncHistory]);
 
   const handleQueryChange = (text: string) => {
     setQuery(text);
@@ -210,7 +221,7 @@ export function UnifiedSearchClient({
               placeholder="ابحث بالاسم، كود الملف، رقم الدعوى بالمحكمة، أو رقم الهاتف..."
               aria-label="البحث الموحد"
               data-testid="unified-search-input"
-              className="w-full pl-3 pr-10 py-2.5 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
+              className="w-full px-3 py-2.5 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
             />
             </div>
 
@@ -237,19 +248,18 @@ export function UnifiedSearchClient({
 
         {/* Tabs Bar & Archive Toggle */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#E8EEF1]">
-          {/* Tabs */}
+          {/* Type Filter Pills */}
           <div
-            role="tablist"
+            role="group"
             aria-label="أقسام البحث"
             className="flex flex-wrap items-center gap-1.5"
           >
             <button
               type="button"
-              role="tab"
-              aria-selected={searchType === 'ALL'}
+              aria-pressed={searchType === 'ALL'}
               data-testid="tab-all"
               onClick={() => handleTypeChange('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
                 searchType === 'ALL'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -267,11 +277,10 @@ export function UnifiedSearchClient({
 
             <button
               type="button"
-              role="tab"
-              aria-selected={searchType === 'MATTER'}
+              aria-pressed={searchType === 'MATTER'}
               data-testid="tab-matter"
               onClick={() => handleTypeChange('MATTER')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
                 searchType === 'MATTER'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -289,11 +298,10 @@ export function UnifiedSearchClient({
 
             <button
               type="button"
-              role="tab"
-              aria-selected={searchType === 'PROCEEDING'}
+              aria-pressed={searchType === 'PROCEEDING'}
               data-testid="tab-proceeding"
               onClick={() => handleTypeChange('PROCEEDING')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
                 searchType === 'PROCEEDING'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -311,11 +319,10 @@ export function UnifiedSearchClient({
 
             <button
               type="button"
-              role="tab"
-              aria-selected={searchType === 'PARTY'}
+              aria-pressed={searchType === 'PARTY'}
               data-testid="tab-party"
               onClick={() => handleTypeChange('PARTY')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[38px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
                 searchType === 'PARTY'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -334,7 +341,7 @@ export function UnifiedSearchClient({
 
           {/* Include Archived Toggle */}
           <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7] min-h-[44px]">
               <input
                 type="checkbox"
                 data-testid="include-archived-checkbox"
@@ -400,6 +407,7 @@ export function UnifiedSearchClient({
             data-testid="search-results-list"
             className="space-y-3"
             role="feed"
+            aria-busy={isLoading}
             aria-label="قائمة نتائج البحث"
           >
             {items.map((item) => {
@@ -475,7 +483,7 @@ export function UnifiedSearchClient({
                     <div className="shrink-0 pt-1 sm:pt-0">
                       <Link
                         href={item.href}
-                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[40px]"
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
                       >
                         <span>عرض التفاصيل</span>
                         <span aria-hidden="true">&larr;</span>

@@ -56,6 +56,28 @@ describe('T05-07: Party Identity Authenticated Envelope Crypto (Unit)', () => {
       delete process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
       expect(() => resolveEncryptionKey()).toThrowError(CryptoConfigurationError);
     });
+
+    it('enforces strict canonical Base64 round-trip in parseKeyBuffer', () => {
+      const canonicalPadded = Buffer.from('fbef'.repeat(16), 'hex').toString('base64');
+      const canonicalUnpadded = canonicalPadded.replace(/=+$/, '');
+      expect(parseKeyBuffer(canonicalPadded)).toHaveLength(32);
+      expect(parseKeyBuffer(canonicalUnpadded)).toHaveLength(32);
+
+      // Non-canonical trailing padding bits in final Base64 character must fail closed
+      const nonCanonicalBits = 'A'.repeat(42) + 'B=';
+      expect(() => parseKeyBuffer(nonCanonicalBits)).toThrowError(CryptoConfigurationError);
+
+      // URL-safe Base64 characters, internal whitespace, or invalid padding must fail closed
+      const urlSafe = canonicalPadded.replace(/\+/g, '-').replace(/\//g, '_');
+      expect(urlSafe).not.toBe(canonicalPadded);
+      expect(() => parseKeyBuffer(urlSafe)).toThrowError(CryptoConfigurationError);
+      expect(() => parseKeyBuffer(canonicalPadded.slice(0, 42) + '==')).toThrowError(
+        CryptoConfigurationError
+      );
+      expect(() => parseKeyBuffer('ABCD '.repeat(8) + 'AAAA')).toThrowError(
+        CryptoConfigurationError
+      );
+    });
   });
 
   describe('Encryption & Nonce Randomness', () => {

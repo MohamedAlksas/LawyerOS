@@ -94,7 +94,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await expect(page.locator('h1')).toContainText('تسجيل الدخول');
   });
 
-  test('responsive reflow verification across mobile, tablet, and desktop viewports', async ({ page }) => {
+  test('responsive reflow verification across mobile, tablet, and desktop viewports @responsive', async ({ page }) => {
     const viewports = [
       { width: 390, height: 844 },
       { width: 768, height: 1024 },
@@ -145,7 +145,9 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
   test('revocation of session from a second browser context evicts access', async ({ browser }) => {
     // Context A (Current session)
     const contextA = await browser.newContext();
-    const pageA = await contextA.newPage();
+    let contextB: Awaited<ReturnType<typeof browser.newContext>> | null = null;
+    try {
+      const pageA = await contextA.newPage();
 
     // Login Context A
     await pageA.goto('/login');
@@ -159,7 +161,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await pageA.waitForURL((url) => !url.pathname.includes('/verify'));
 
     // Context B (Secondary device)
-    const contextB = await browser.newContext();
+    contextB = await browser.newContext();
     const pageB = await contextB.newPage();
 
     // Login Context B
@@ -195,9 +197,12 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await pageB.reload();
     await pageB.waitForURL('**/login*');
     await expect(pageB.locator('h1')).toContainText('تسجيل الدخول');
-
-    await contextA.close();
-    await contextB.close();
+    } finally {
+      await contextA.close();
+      if (contextB) {
+        await contextB.close();
+      }
+    }
   });
 
   test('completes two-factor verification via RFC 6238 TOTP code and enters security settings (R01)', async ({ page }) => {
@@ -226,7 +231,9 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
 
   test('password change in Context A evicts Context B sessions unconditionally (R04)', async ({ browser }) => {
     const contextA = await browser.newContext();
-    const pageA = await contextA.newPage();
+    let contextB: Awaited<ReturnType<typeof browser.newContext>> | null = null;
+    try {
+      const pageA = await contextA.newPage();
 
     // Login Context A
     await pageA.goto('/login');
@@ -240,7 +247,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await pageA.waitForURL((url) => !url.pathname.includes('/verify'));
 
     // Login Context B
-    const contextB = await browser.newContext();
+    contextB = await browser.newContext();
     const pageB = await contextB.newPage();
 
     await pageB.goto('/login');
@@ -289,8 +296,12 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
       },
     });
 
-    await contextA.close();
-    await contextB.close();
+    } finally {
+      await contextA.close();
+      if (contextB) {
+        await contextB.close();
+      }
+    }
   });
 
   test('direct navigation to /settings/security by MAINTAINER user renders access denied', async ({ page }) => {
@@ -334,7 +345,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     }
   });
 
-  test('keyboard accessibility: form submission via Enter key and logical focus flow', async ({ page }) => {
+  test('keyboard accessibility: form submission via Enter key and logical focus flow @a11y', async ({ page }) => {
     await page.goto('/login');
 
     await page.focus('#email');
@@ -350,7 +361,7 @@ test.describe('LawOffice OS — Authentication & Security Journeys (T03)', () =>
     await expect(page.locator('h1')).toContainText('التحقق الثنائي');
   });
 
-  test('accessibility reflow and text scaling: 200% font zoom renders without horizontal scroll overflow (R10)', async ({ page }) => {
+  test('accessibility reflow and text scaling: 200% font zoom renders without horizontal scroll overflow (R10) @responsive @a11y', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 450 });
     await page.goto('/login');
 

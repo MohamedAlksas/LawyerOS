@@ -336,7 +336,7 @@ export function DocumentUploadForm({
 
   const resolveEffectiveTitle = (item: QueueItem, pending: QueueItem[]): string => {
     if (item.sentTitle) return item.sentTitle;
-    if (item.itemTitleEdited && item.itemTitle.trim()) {
+    if (item.itemTitleEdited) {
       return clampTitle(item.itemTitle);
     }
     const base = title.trim();
@@ -415,6 +415,7 @@ export function DocumentUploadForm({
       const body = (await response.json().catch(() => null)) as
         | DocumentActionResult<DocumentDTO>
         | null;
+      if (!isMountedRef.current) return 'INCOMPLETE';
 
       if (response.status === 409 && body && !body.success && body.code === 'DUPLICATE_CHECKSUM_WARNING') {
         updateQueueItem(queueId, {
@@ -517,6 +518,7 @@ export function DocumentUploadForm({
         const beginBody = (await beginRes.json().catch(() => null)) as
           | DocumentActionResult<UploadAttemptDTO>
           | null;
+        if (!isMountedRef.current) return 'INCOMPLETE';
 
         if (!beginRes.ok || !beginBody || !beginBody.success) {
           const failureBody = beginBody && !beginBody.success ? beginBody : null;
@@ -562,6 +564,7 @@ export function DocumentUploadForm({
         const putBody = (await putRes.json().catch(() => null)) as
           | DocumentActionResult<UploadAttemptDTO>
           | null;
+        if (!isMountedRef.current) return 'INCOMPLETE';
 
         if (!putRes.ok || !putBody || !putBody.success) {
           const failure = classifyFailure(

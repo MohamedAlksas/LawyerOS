@@ -18,6 +18,7 @@ import {
   getOfficeSettingsAction,
 } from '@/modules/settings/reference-actions';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
+import { renderModalPortal, useAccessibleModal } from '@/components/productivity/productivity-ui-types';
 
 interface ReferenceSettingsClientProps {
   ownerId: string;
@@ -165,8 +166,6 @@ export function ReferenceSettingsClient({
   const editPendingRef = useRef<ReferenceDraft['edit']>(restored?.edit ?? null);
   const editDialogRef = useRef<HTMLDivElement>(null);
   const editNameInputRef = useRef<HTMLInputElement>(null);
-  const lastFocusedOpenerRef = useRef<HTMLElement | null>(null);
-  const prevEditingItemIdRef = useRef<string | null>(null);
 
   // Modal State Ref for stable callbacks without effect re-runs (U9)
   const editModalStateRef = useRef({
@@ -248,53 +247,14 @@ export function ReferenceSettingsClient({
     setEditItemSessionExpired(false);
   }, []);
 
-  const editingItemId = editingItem?.id ?? null;
-
-  // U9: Focus first interactive input on open; restore focus to opener ONLY on close
-  useEffect(() => {
-    if (editingItemId && !prevEditingItemIdRef.current) {
-      editNameInputRef.current?.focus();
-    } else if (!editingItemId && prevEditingItemIdRef.current) {
-      lastFocusedOpenerRef.current?.focus();
-    }
-    prevEditingItemIdRef.current = editingItemId;
-  }, [editingItemId]);
-
-  // Modal Focus Trap and Escape key listener (U9: stable callback and isolated from field typing)
-  useEffect(() => {
-    if (!editingItemId) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const dialog = editDialogRef.current;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleCloseEditModal();
-        return;
-      }
-
-      if (e.key === 'Tab' && dialog) {
-        const focusable = dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [editingItemId, handleCloseEditModal]);
+  useAccessibleModal({
+    isOpen: Boolean(editingItem),
+    isSubmitting: isSavingEditItem,
+    hasPending: editItemPending,
+    onClose: handleCloseEditModal,
+    dialogRef: editDialogRef,
+    initialFocusRef: editNameInputRef,
+  });
 
   // Handle Office Settings Save (C09/U1: frozen key & payload across retries)
   const [officeIdempotencyKey, setOfficeIdempotencyKey] = useState(() => generateClientRequestId('off'));
@@ -568,8 +528,7 @@ export function ReferenceSettingsClient({
   };
 
   // Open Edit Modal (C19/U9)
-  const handleOpenEditModal = (item: ReferenceItemDTO, openerElement?: HTMLElement) => {
-    lastFocusedOpenerRef.current = openerElement || (document.activeElement as HTMLElement);
+  const handleOpenEditModal = (item: ReferenceItemDTO) => {
     setEditingItem(item);
     setEditItemName(item.name);
     setEditItemCode(item.code || '');
@@ -1516,7 +1475,7 @@ export function ReferenceSettingsClient({
                         <button
                           type="button"
                           data-testid={`edit-reference-item-${item.id}`}
-                          onClick={(e) => handleOpenEditModal(item, e.currentTarget)}
+                          onClick={() => handleOpenEditModal(item)}
                           disabled={isTogglingActive || togglePending}
                           className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors ${
                             isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed' : ''
@@ -1550,20 +1509,22 @@ export function ReferenceSettingsClient({
       )}
 
       {/* Edit Reference Item Modal (C19/U1/U9) */}
-      {editingItem && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="edit-reference-title"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-        >
+      {editingItem &&
+        renderModalPortal(
           <div
-            ref={editDialogRef}
-            data-testid="reference-item-modal"
-            className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs"
-            dir="rtl"
-            lang="ar-EG"
+            role="presentation"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
           >
+            <div
+              ref={editDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-reference-title"
+              data-testid="reference-item-modal"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs"
+              dir="rtl"
+              lang="ar-EG"
+            >
             <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
               <h2 id="edit-reference-title" className="text-base font-bold text-[#172A35]">
                 تعديل بيانات العنصر المرجعي
@@ -1647,7 +1608,6 @@ export function ReferenceSettingsClient({
                   </label>
                   <input
                     ref={editNameInputRef}
-                    autoFocus
                     id="edit-reference-name-input"
                     type="text"
                     required
@@ -1729,7 +1689,7 @@ export function ReferenceSettingsClient({
             </form>
           </div>
         </div>
-      )}
+        )}
     </div>
   );
 }

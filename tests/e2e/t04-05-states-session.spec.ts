@@ -105,8 +105,11 @@ test('public offline fallback is reachable and leaks no owner data @once', async
 test('login with malicious returnTo sanitizes safely to root without open redirect @once', async ({
   browser,
   t04Owner,
-}) => {
-  const context = await browser.newContext({ baseURL: 'http://127.0.0.1:3204' });
+}, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  expect(baseURL, 'Playwright project must configure baseURL').toBeTruthy();
+  const origin = new URL(baseURL!).origin;
+  const context = await browser.newContext({ baseURL });
   const page = await context.newPage();
   try {
     // Navigate to login with protocol-relative external returnTo vector
@@ -126,7 +129,7 @@ test('login with malicious returnTo sanitizes safely to root without open redire
 
     // Settle at local root '/' — must not redirect to evil.com
     await page.waitForURL((url) => url.pathname === '/' && !url.hostname.includes('evil.com'));
-    expect(new URL(page.url()).origin).toBe('http://127.0.0.1:3204');
+    expect(new URL(page.url()).origin).toBe(origin);
     expect(new URL(page.url()).pathname).toBe('/');
   } finally {
     await context.close();
@@ -136,7 +139,10 @@ test('login with malicious returnTo sanitizes safely to root without open redire
 test('navigating to verify with dot-segment open-redirect returnTo settles safely on root (T04-R2-01) @once', async ({
   page,
   t04Owner,
-}) => {
+}, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  expect(baseURL, 'Playwright project must configure baseURL').toBeTruthy();
+  const origin = new URL(baseURL!).origin;
   await page.route('**://redirect.invalid/**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Controlled redirect observer</title>' })
   );
@@ -152,15 +158,18 @@ test('navigating to verify with dot-segment open-redirect returnTo settles safel
   await page.locator('button[type="submit"]').click();
 
   // Assert browser settles safely on local root '/' and NOT external redirect.invalid
-  await page.waitForURL((url) => url.origin === 'http://127.0.0.1:3204' && url.pathname === '/');
-  expect(page.url()).toBe('http://127.0.0.1:3204/');
+  await page.waitForURL((url) => url.origin === origin && url.pathname === '/');
+  expect(page.url()).toBe(`${origin}/`);
   expect(page.url()).not.toContain('redirect.invalid');
 });
 
 test('expired session return journey redirects through login and verify back to security @once', async ({
   t04OwnerPage: page,
   t04Owner,
-}) => {
+}, testInfo) => {
+  const baseURL = testInfo.project.use.baseURL;
+  expect(baseURL, 'Playwright project must configure baseURL').toBeTruthy();
+  const origin = new URL(baseURL!).origin;
   await page.goto(T04_ROUTES.home);
   await expectShellReady(page);
   expect(await countSessionsForUser(t04Owner.id)).toBeGreaterThan(0);
@@ -199,8 +208,8 @@ test('expired session return journey redirects through login and verify back to 
   await page.locator('#totpCode').fill(code);
   await page.locator('button[type="submit"]').click();
 
-  await page.waitForURL((url) => url.origin === 'http://127.0.0.1:3204' && url.pathname === '/settings/security');
-  expect(page.url()).toBe('http://127.0.0.1:3204/settings/security');
+  await page.waitForURL((url) => url.origin === origin && url.pathname === '/settings/security');
+  expect(page.url()).toBe(`${origin}/settings/security`);
 
   // 4. Assert displaying "الأمان وإدارة الجلسات"
   const heading = page.getByRole('heading', { level: 1 });

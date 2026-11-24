@@ -461,8 +461,10 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
           process.platform === 'win32' ? 'junction' : 'dir'
         );
         linkCreated = true;
-      } catch {
-        // Ignore if environment forbids symlink/junction creation
+      } catch (error) {
+        if (process.env.CI && process.env.CI !== 'false') {
+          throw error;
+        }
       }
       if (linkCreated) {
         expect(() => resolveSafeStorageRoot(linkToPublic)).toThrow(DocumentStoragePathError);

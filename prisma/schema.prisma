@@ -797,6 +797,7 @@ model JobRun {
   @@index([sourceType, sourceId, status])
   @@index([status, scheduledAt])
   @@index([status, availableAt, leaseUntil])
+  @@index([jobType, status, updatedAt])
   @@map("job_run")
 }
 
@@ -844,6 +845,7 @@ model ReminderDelivery {
 
   @@unique([sourceType, sourceId, sourceVersion, ruleKey, channel, recipientUserId], map: "reminder_delivery_source_rule_channel_recipient_key")
   @@index([recipientUserId, status, scheduledAt])
+  @@index([recipientUserId, status, deliveredAt])
   @@index([status, scheduledAt])
   @@index([matterId])
   @@map("reminder_delivery")

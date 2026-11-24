@@ -35,12 +35,39 @@ export function schedulingHttpErrorResponse(error: unknown, mapper: (err: unknow
   });
 }
 
+export function parseQueryIntegerParam(sp: URLSearchParams, name: string): number | undefined {
+  const raw = sp.get(name);
+  if (raw === null || raw === '') return undefined;
+  if (!/^\d{1,9}$/.test(raw)) {
+    throw new SchedulingValidationError('معاملات البحث أو العرض غير صالحة.', {
+      [name]: 'يجب أن تكون القيمة رقماً صحيحاً.',
+    });
+  }
+  return Number(raw);
+}
+
+export function parseQueryBooleanParam(sp: URLSearchParams, name: string): boolean | undefined {
+  const raw = sp.get(name);
+  if (raw === null) return undefined;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new SchedulingValidationError('معاملات البحث أو العرض غير صالحة.', {
+    [name]: 'القيمة يجب أن تكون true أو false.',
+  });
+}
+
 export async function readSchedulingFromRequest<R>(
   request: Request,
   query: (actor: Actor) => Promise<R>,
   mapper: (err: unknown) => ActionResult<never> = hearingError
 ) {
   try {
+    if (request.headers.get('sec-fetch-site') === 'cross-site') {
+      return NextResponse.json(
+        { success: false, code: 'FORBIDDEN', error: 'غير مصرح بالوصول من مصدر خارجي.' },
+        { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
+      );
+    }
     const actor = await requireActor({
       headers: request.headers,
       requiredPermission: 'READ_CLIENT_DATA',

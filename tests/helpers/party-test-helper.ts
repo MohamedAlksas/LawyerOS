@@ -43,22 +43,67 @@ export async function cleanupPartyFixtures(
   const validIds = partyIds.filter(Boolean);
   if (validIds.length === 0) return;
 
-  // Deleting party cascades to identities, notes, and poas via onDelete: Cascade
+  const [identities, notes, poas, documents, uploadAttempts] = await Promise.all([
+    prisma.partyIdentity.findMany({ where: { partyId: { in: validIds } }, select: { id: true } }),
+    prisma.communicationNote.findMany({ where: { partyId: { in: validIds } }, select: { id: true } }),
+    prisma.powerOfAttorney.findMany({ where: { partyId: { in: validIds } }, select: { id: true } }),
+    prisma.document.findMany({ where: { partyId: { in: validIds } }, select: { id: true } }),
+    prisma.uploadAttempt.findMany({ where: { partyId: { in: validIds } }, select: { id: true } }),
+  ]);
+
+  const poaIds = poas.map((r) => r.id);
+  const authorizations =
+    poaIds.length > 0
+      ? await prisma.matterAuthorization.findMany({
+          where: { powerOfAttorneyId: { in: poaIds } },
+          select: { id: true },
+        })
+      : [];
+
+  const uploadAttemptIds = uploadAttempts.map((r) => r.id);
+  if (uploadAttemptIds.length > 0) {
+    await prisma.uploadAttempt.deleteMany({ where: { id: { in: uploadAttemptIds } } });
+  }
+
+  // Deleting party cascades to identities, notes, poas, and documents via onDelete: Cascade
   await prisma.party.deleteMany({
     where: { id: { in: validIds } },
   });
 
+  const allEntityIds = Array.from(
+    new Set([
+      ...validIds,
+      ...identities.map((r) => r.id),
+      ...notes.map((r) => r.id),
+      ...poaIds,
+      ...authorizations.map((r) => r.id),
+      ...documents.map((r) => r.id),
+      ...uploadAttemptIds,
+    ])
+  );
+
   // Clean up associated audit and idempotency records for test cleanliness
   await prisma.auditEvent.deleteMany({
     where: {
-      entityType: 'Party',
-      entityId: { in: validIds },
+      entityType: {
+        in: [
+          'Party',
+          'PARTY',
+          'PartyIdentity',
+          'CommunicationNote',
+          'PowerOfAttorney',
+          'MatterAuthorization',
+          'Document',
+          'UploadAttempt',
+        ],
+      },
+      entityId: { in: allEntityIds },
     },
   });
 
   await prisma.idempotencyRecord.deleteMany({
     where: {
-      resultId: { in: validIds },
+      resultId: { in: allEntityIds },
     },
   });
 }

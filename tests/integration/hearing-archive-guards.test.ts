@@ -102,6 +102,18 @@ describe('T08 Integration Tests: Hearing Rescheduling, Cancellation & Archive Gu
   });
 
   afterAll(async () => {
+    if (createdMatterIds.length > 0) {
+      const hearings = await prisma.hearing.findMany({
+        where: { proceeding: { matterId: { in: createdMatterIds } } },
+        select: { id: true },
+      });
+      const hearingIds = hearings.map((h) => h.id);
+      if (hearingIds.length > 0) {
+        await prisma.jobRun.deleteMany({
+          where: { sourceType: 'Hearing', sourceId: { in: hearingIds } },
+        });
+      }
+    }
     await cleanupMatterFixtures(prisma, createdMatterIds);
     await cleanupPartyFixtures(prisma, createdPartyIds);
     await cleanupReferenceFixtures(prisma, { courtIds: createdCourtIds });

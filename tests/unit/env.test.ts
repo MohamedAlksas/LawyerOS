@@ -600,4 +600,54 @@ describe('Environment validation (src/lib/env.ts)', () => {
       }
     });
   });
+
+  describe('Production BETTER_AUTH_URL hardening', () => {
+    const baseProdEnv = {
+      NODE_ENV: 'production',
+      PORT: '3000',
+      HOST: '127.0.0.1',
+      DATABASE_URL: 'postgresql://lawoffice_user:synthetic_prod_secret@127.0.0.1:5432/lawoffice_prod?schema=public',
+      BETTER_AUTH_SECRET: '0123456789abcdef0123456789abcdef',
+    };
+
+    it('rejects omitted BETTER_AUTH_URL in production runtime instead of falling back to localhost', () => {
+      expect(() => validateEnv(baseProdEnv)).toThrow(EnvironmentValidationError);
+      try {
+        validateEnv(baseProdEnv);
+      } catch (err) {
+        expect((err as EnvironmentValidationError).missingKeys).toContain('BETTER_AUTH_URL');
+      }
+    });
+
+    it('rejects non-loopback http:// BETTER_AUTH_URL in production', () => {
+      expect(() =>
+        validateEnv({
+          ...baseProdEnv,
+          BETTER_AUTH_URL: 'http://office.example.com',
+        })
+      ).toThrow(EnvironmentValidationError);
+    });
+
+    it('accepts https:// and loopback http:// BETTER_AUTH_URL in production', () => {
+      const httpsEnv = validateEnv({
+        ...baseProdEnv,
+        BETTER_AUTH_URL: 'https://office.example.com',
+      });
+      expect(httpsEnv.BETTER_AUTH_URL).toBe('https://office.example.com');
+
+      const loopbackEnv = validateEnv({
+        ...baseProdEnv,
+        BETTER_AUTH_URL: 'http://127.0.0.1:3000',
+      });
+      expect(loopbackEnv.BETTER_AUTH_URL).toBe('http://127.0.0.1:3000');
+    });
+
+    it('permits omitted BETTER_AUTH_URL only during NEXT_PHASE=phase-production-build', () => {
+      const buildEnv = validateEnv({
+        ...baseProdEnv,
+        NEXT_PHASE: 'phase-production-build',
+      });
+      expect(buildEnv.BETTER_AUTH_URL).toBe('http://127.0.0.1:3000');
+    });
+  });
 });

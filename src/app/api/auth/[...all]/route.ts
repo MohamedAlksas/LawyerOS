@@ -158,21 +158,35 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
 
 async function privateAuthResponse(response: Response): Promise<Response> {
   const headers = new Headers(response.headers);
-  headers.set('Cache-Control', 'no-store');
-  if (response.status === 204 || !response.body || !headers.get('content-type')?.includes('application/json')) {
+  headers.set('Cache-Control', 'private, no-store');
+  if (
+    response.status === 204 ||
+    !response.body ||
+    !headers.get('content-type')?.toLowerCase().includes('application/json')
+  ) {
     return new Response(response.body, { status: response.status, headers });
   }
   const text = await response.text();
   if (!text) {
     return new Response(null, { status: response.status, headers });
   }
-  const data: unknown = JSON.parse(text);
   headers.delete('content-length');
   headers.delete('content-encoding');
-  return new Response(JSON.stringify(data, (key, value) => key === 'token' ? undefined : value), {
-    status: response.status,
-    headers,
-  });
+  try {
+    const data: unknown = JSON.parse(text);
+    return new Response(
+      JSON.stringify(data, (key, value) => (key === 'token' ? undefined : value)),
+      {
+        status: response.status,
+        headers,
+      }
+    );
+  } catch {
+    return new Response(text, {
+      status: response.status,
+      headers,
+    });
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -309,9 +323,9 @@ export async function POST(request: NextRequest) {
     } else {
       email = (await request.clone().json().catch(() => null))?.email;
     }
-    if (typeof email === 'string' && email) {
+    if (typeof email === 'string' && email.trim()) {
       try {
-        signInUserCredentialVersion = await getUserCredentialVersionByEmail(email);
+        signInUserCredentialVersion = await getUserCredentialVersionByEmail(email.trim());
       } catch {
         return noStoreJson(
           { error: 'فشل في قراءة حالة أمان الحساب. يرجى إعادة المحاولة.' },
@@ -535,29 +549,52 @@ export async function POST(request: NextRequest) {
     // Also if a direct session was issued without 2FA:
     const sessionCookie = setCookies.find(
       (c) =>
-        c.startsWith('better-auth.session_token=') ||
-        c.startsWith('__Secure-better-auth.session_token=')
+        (c.startsWith('better-auth.session_token=') ||
+          c.startsWith('__Secure-better-auth.session_token=')) &&
+        !c.includes('Max-Age=0')
     );
-    if (sessionCookie && signInUserCredentialVersion !== null) {
+    if (sessionCookie) {
+      let directSessionId: string | null = null;
+      const prisma = getPrismaClient();
+      const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
       try {
-        const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
-        if (rawToken) {
-          const prisma = getPrismaClient();
-          const session = await prisma.session.findFirst({
-            where: {
-              OR: candidateIdentifiers.map((token) => ({ token })),
-            },
-          });
-          if (session) {
-            await setSessionCredentialVersion(
-              prisma,
-              session.id,
-              signInUserCredentialVersion
-            );
-          }
+        if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
+          throw new Error('Credential version not captured before authentication');
         }
+        if (!rawToken) {
+          throw new Error('Failed to extract direct session token');
+        }
+        const session = await prisma.session.findFirst({
+          where: {
+            OR: candidateIdentifiers.map((token) => ({ token })),
+          },
+        });
+        if (!session) {
+          throw new Error('Issued session not found in database');
+        }
+        directSessionId = session.id;
+        await setSessionCredentialVersion(
+          prisma,
+          session.id,
+          signInUserCredentialVersion
+        );
       } catch {
-        // Best-effort sign-in metadata stamping
+        if (directSessionId) {
+          await prisma.session.delete({ where: { id: directSessionId } }).catch(() => {});
+        } else if (candidateIdentifiers.length > 0) {
+          await prisma.session
+            .deleteMany({
+              where: { OR: candidateIdentifiers.map((token) => ({ token })) },
+            })
+            .catch(() => {});
+        }
+        const errRes = noStoreJson(
+          { error: 'فشل في تهيئة أمان الجلسة.' },
+          { status: 500 }
+        );
+        errRes.cookies.delete('better-auth.session_token');
+        errRes.cookies.delete('__Secure-better-auth.session_token');
+        return errRes;
       }
     }
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import {
   authorize,
   assertAuthorized,
@@ -8,6 +8,9 @@ import {
   AuthenticationError,
 } from '@/modules/identity';
 import { validateEnv, EnvironmentValidationError } from '@/lib/env';
+import { getAuth } from '@/lib/auth';
+import { closeDbPool } from '@/lib/db';
+import { GET as viewSessionGet } from '@/app/api/auth/view-session/route';
 
 describe('Identity & Authorization Unit Tests', () => {
   const ownerActor: Actor = {
@@ -141,5 +144,57 @@ describe('Identity & Authorization Unit Tests', () => {
       const inactiveErr = new AuthenticationError('SESSION_INACTIVE', 'تم قفل الجلسة لعدم النشاط.');
       expect(inactiveErr.code).toBe('SESSION_INACTIVE');
     });
+
+    it('disables unsafe Better Auth session and two-factor endpoints in getAuth()', async () => {
+      const prevDbUrl = process.env.DATABASE_URL;
+      const prevTestUrl = process.env.TEST_DATABASE_URL;
+      const prevSecret = process.env.BETTER_AUTH_SECRET;
+      const prevUrl = process.env.BETTER_AUTH_URL;
+      delete (globalThis as Record<string, unknown>).__lawoffice_auth;
+      delete (globalThis as Record<string, unknown>).__lawoffice_prisma;
+
+      process.env.DATABASE_URL =
+        'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_unit_dev?schema=public';
+      process.env.TEST_DATABASE_URL =
+        'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_unit_test?schema=public';
+      process.env.BETTER_AUTH_SECRET = '0123456789abcdef0123456789abcdef';
+      process.env.BETTER_AUTH_URL = 'http://127.0.0.1:3000';
+
+      try {
+        const disabled = getAuth().options.disabledPaths ?? [];
+        expect(disabled).toContain('/two-factor/get-totp-uri');
+        expect(disabled).toContain('/two-factor/disable');
+        expect(disabled).toContain('/list-sessions');
+        expect(disabled).toContain('/revoke-session');
+      } finally {
+        delete (globalThis as Record<string, unknown>).__lawoffice_auth;
+        delete (globalThis as Record<string, unknown>).__lawoffice_prisma;
+        await closeDbPool();
+        if (prevDbUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = prevDbUrl;
+        if (prevTestUrl === undefined) delete process.env.TEST_DATABASE_URL;
+        else process.env.TEST_DATABASE_URL = prevTestUrl;
+        if (prevSecret === undefined) delete process.env.BETTER_AUTH_SECRET;
+        else process.env.BETTER_AUTH_SECRET = prevSecret;
+        if (prevUrl === undefined) delete process.env.BETTER_AUTH_URL;
+        else process.env.BETTER_AUTH_URL = prevUrl;
+      }
+    });
+
+    it('rejects cross-site GET /api/auth/view-session requests fail-closed with private no-store headers', async () => {
+      const response = await viewSessionGet(
+        new Request('http://127.0.0.1:3000/api/auth/view-session', {
+          headers: { 'sec-fetch-site': 'cross-site' },
+        })
+      );
+      expect(response.status).toBe(403);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    });
+  });
+
+  afterAll(async () => {
+    delete (globalThis as Record<string, unknown>).__lawoffice_auth;
+    delete (globalThis as Record<string, unknown>).__lawoffice_prisma;
+    await closeDbPool();
   });
 });

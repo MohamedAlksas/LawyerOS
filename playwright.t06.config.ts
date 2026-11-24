@@ -59,14 +59,14 @@ export default defineConfig({
       use: {
         viewport: { width: 768, height: 1024 },
       },
-      grep: /@(?:matters|a11y|tablet)\b/,
+      grep: /@(?:responsive|a11y|tablet)\b/,
     },
     {
       name: 'mobile-390',
       use: {
         viewport: { width: 390, height: 844 },
       },
-      grep: /@(?:matters|a11y|mobile)\b/,
+      grep: /@(?:responsive|a11y|mobile)\b/,
     },
   ],
   webServer: {

@@ -1094,7 +1094,7 @@ export async function listHearingsForProceeding(
         orderBy: { revision: 'desc' },
         take: 1,
       },
-      tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } },
+      tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' }, take: 200 },
       linksTo: {
         where: { relation: { in: ['ADJOURNED_TO', 'RESCHEDULED_TO'] } },
         select: { fromHearingId: true, relation: true },
@@ -1104,6 +1104,7 @@ export async function listHearingsForProceeding(
       { hearingDate: 'asc' },
       { id: 'asc' },
     ],
+    take: 500,
   });
 
   const byId = new Map(hearings.map((hearing) => [hearing.id, hearing]));

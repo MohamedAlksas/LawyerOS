@@ -127,6 +127,32 @@ export function validateMimeAndExtension(
   return mime;
 }
 
+const PDF_OBJ_TOKEN = Buffer.from('obj', 'ascii');
+const PDF_ENDOBJ_TOKEN = Buffer.from('endobj', 'ascii');
+
+function isAsciiWordByte(b: number): boolean {
+  return (
+    (b >= 0x30 && b <= 0x39) || // 0-9
+    (b >= 0x41 && b <= 0x5a) || // A-Z
+    b === 0x5f || // _
+    (b >= 0x61 && b <= 0x7a) // a-z
+  );
+}
+
+function hasWordToken(buffer: Buffer, token: Buffer): boolean {
+  let pos = 0;
+  while (pos <= buffer.byteLength - token.byteLength) {
+    const idx = buffer.indexOf(token, pos);
+    if (idx === -1) return false;
+    const beforeOk = idx === 0 || !isAsciiWordByte(buffer[idx - 1]);
+    const afterPos = idx + token.byteLength;
+    const afterOk = afterPos === buffer.byteLength || !isAsciiWordByte(buffer[afterPos]);
+    if (beforeOk && afterOk) return true;
+    pos = idx + 1;
+  }
+  return false;
+}
+
 /**
  * PDF structural gate (not a full parser): `%PDF-1.x|2.x` + EOL at byte 0, at least one
  * `obj`/`endobj` pair, `startxref` and a final `%%EOF` in the tail followed only by whitespace.
@@ -150,8 +176,7 @@ function isValidPdfBytes(buffer: Buffer): boolean {
   if (!tailSlice.slice(0, lastEofIdx).includes('startxref')) {
     return false;
   }
-  const body = buffer.toString('latin1');
-  return /\bobj\b/.test(body) && /\bendobj\b/.test(body);
+  return hasWordToken(buffer, PDF_OBJ_TOKEN) && hasWordToken(buffer, PDF_ENDOBJ_TOKEN);
 }
 
 function isJpegSof(marker: number): boolean {

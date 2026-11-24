@@ -19,6 +19,8 @@ describe('Database Connection Pool Lifecycle & Timeout Bounds (R03, R04)', () =>
   it('reuses the exact same singleton pool instance across multiple calls in production mode (R03)', async () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
     process.env.DATABASE_URL = 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_prod?schema=public';
+    process.env.BETTER_AUTH_URL = 'https://lawoffice.example.com';
+    process.env.BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || 'synthetic-db-pool-secret-key-at-least-32-chars';
 
     const pool1 = getDbPool();
     const pool2 = getDbPool();
@@ -31,6 +33,8 @@ describe('Database Connection Pool Lifecycle & Timeout Bounds (R03, R04)', () =>
   it('closeDbPool cleanly ends the owned pool and allows fresh instantiation (R03)', async () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
     process.env.DATABASE_URL = 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_prod?schema=public';
+    process.env.BETTER_AUTH_URL = 'https://lawoffice.example.com';
+    process.env.BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || 'synthetic-db-pool-secret-key-at-least-32-chars';
 
     const pool1 = getDbPool();
     await closeDbPool();
@@ -151,6 +155,8 @@ describe('Database Connection Pool Lifecycle & Timeout Bounds (R03, R04)', () =>
   it('configures bounded resource budget (max: 10 connections, 5000ms acquire timeout) on singleton pool (R19, R21)', () => {
     (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
     process.env.DATABASE_URL = 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_prod?schema=public';
+    process.env.BETTER_AUTH_URL = 'https://lawoffice.example.com';
+    process.env.BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || 'synthetic-db-pool-secret-key-at-least-32-chars';
 
     const pool = getDbPool();
     expect(pool.options.max).toBe(10);
