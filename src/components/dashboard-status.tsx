@@ -6,6 +6,7 @@ import { LoadingIndicator, ErrorContainer } from './presentation-state';
 import {
   IconCalendar,
   IconDeadline,
+  IconDocument,
   IconFolder,
   IconShield,
   IconToday,
@@ -149,6 +150,14 @@ export function DashboardStatus({ actorEmail }: DashboardStatusProps) {
         >
           <IconDeadline className="w-4 h-4 text-[#14566B]" />
           <span>المواعيد القانونية</span>
+        </Link>
+        <Link
+          href="/documents"
+          data-testid="dashboard-documents-link"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] font-medium text-sm rounded-[6px] shadow-xs transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
+        >
+          <IconDocument className="w-4 h-4 text-[#14566B]" />
+          <span>أرشيف المستندات</span>
         </Link>
         <Link
           href="/settings/security"

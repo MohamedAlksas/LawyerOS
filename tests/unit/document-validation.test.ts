@@ -1,0 +1,338 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { afterEach, describe, expect, it } from 'vitest';
+import { validateEnv } from '@/lib/env';
+import {
+  ADR_0003_POLICY_CODE,
+  ADR_0003_POLICY_VERSION,
+  DocumentScanPolicyUnavailableError,
+  DocumentStoragePathError,
+  DocumentValidationError,
+  MAX_DOCUMENT_BYTES,
+  UNSCANNED_POLICY_NOTICE_AR,
+  createLocalDocumentStorage,
+  documentError,
+  documentStatusFromErrorCode,
+  evaluateDocumentScanPolicy,
+  inspectFileContent,
+  resolveSafeKeyPath,
+  resolveSafeStorageRoot,
+  sanitizeDisplayFilename,
+} from '@/modules/documents';
+
+function buildSyntheticPdf(extraBytes = 0): Buffer {
+  const header = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n', 'ascii');
+  const footer = Buffer.from('\ntrailer\n<<>>\n%%EOF', 'ascii');
+  if (extraBytes <= 0) {
+    return Buffer.concat([header, footer]);
+  }
+  const pad = Buffer.alloc(extraBytes, 0x20);
+  return Buffer.concat([header, pad, footer]);
+}
+
+function buildSyntheticJpeg(): Buffer {
+  return Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46,
+    0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x00, 0x00, 0xff, 0xd9,
+  ]);
+}
+
+function buildSyntheticPng(): Buffer {
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from([0x00, 0x00, 0x00, 0x0d]),
+    Buffer.from('IHDR', 'ascii'),
+    Buffer.from([0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00]),
+    Buffer.from([0x90, 0x77, 0x53, 0xde]),
+    Buffer.from([0x00, 0x00, 0x00, 0x00]),
+    Buffer.from('IEND', 'ascii'),
+    Buffer.from([0xae, 0x42, 0x60, 0x82]),
+  ]);
+}
+
+describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003 Policy', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop()!;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeTempStorageRoot(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t11-unit-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  describe('Valid magic bytes & MIME cross-checks', () => {
+    it('accepts valid synthetic PDF, JPEG (.jpg/.jpeg), and PNG with accurate SHA-256', () => {
+      const pdf = buildSyntheticPdf();
+      const pdfRes = inspectFileContent(pdf, {
+        originalFilename: 'عريضة_دعوى_2026.pdf',
+        declaredMime: 'application/pdf',
+      });
+      expect(pdfRes.detectedMime).toBe('application/pdf');
+      expect(pdfRes.extension).toBe('.pdf');
+      expect(pdfRes.sizeBytes).toBe(pdf.byteLength);
+      expect(pdfRes.sha256).toBe(crypto.createHash('sha256').update(pdf).digest('hex'));
+
+      const jpeg = buildSyntheticJpeg();
+      const jpgRes = inspectFileContent(jpeg, {
+        originalFilename: 'صورة_توكيل.jpeg',
+        declaredMime: 'image/jpeg',
+      });
+      expect(jpgRes.detectedMime).toBe('image/jpeg');
+      expect(jpgRes.extension).toBe('.jpg');
+      expect(jpgRes.sha256).toBe(crypto.createHash('sha256').update(jpeg).digest('hex'));
+
+      const png = buildSyntheticPng();
+      const pngRes = inspectFileContent(png, {
+        originalFilename: 'إيصال_سداد.png',
+        declaredMime: 'image/png',
+      });
+      expect(pngRes.detectedMime).toBe('image/png');
+      expect(pngRes.extension).toBe('.png');
+      expect(pngRes.sha256).toBe(crypto.createHash('sha256').update(png).digest('hex'));
+    });
+  });
+
+  describe('Disguised, polyglot, malformed & oversized files', () => {
+    it('rejects HTML, SVG, EXE, ZIP, and polyglot HTML+PDF files disguised as PDF/JPEG/PNG', () => {
+      const htmlBytes = Buffer.from('<html><body><script>alert(1)</script></body></html>', 'utf8');
+      expect(() =>
+        inspectFileContent(htmlBytes, {
+          originalFilename: 'contract.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>', 'utf8');
+      expect(() =>
+        inspectFileContent(svgBytes, {
+          originalFilename: 'scan.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const exeBytes = Buffer.concat([Buffer.from('MZ', 'ascii'), Buffer.alloc(64, 0x90)]);
+      expect(() =>
+        inspectFileContent(exeBytes, {
+          originalFilename: 'photo.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const zipBytes = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(40, 0)]);
+      expect(() =>
+        inspectFileContent(zipBytes, {
+          originalFilename: 'archive.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const polyglotBytes = Buffer.from('<html>%PDF-1.4\n%%EOF</html>', 'ascii');
+      expect(() =>
+        inspectFileContent(polyglotBytes, {
+          originalFilename: 'polyglot.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+    });
+
+    it('rejects mismatched MIME/extension/signature and truncated files', () => {
+      const png = buildSyntheticPng();
+      expect(() =>
+        inspectFileContent(png, {
+          originalFilename: 'wrong.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
+      const jpeg = buildSyntheticJpeg();
+      expect(() =>
+        inspectFileContent(jpeg, {
+          originalFilename: 'wrong.png',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
+      expect(() =>
+        inspectFileContent(Buffer.from('%PDF-1.4\n1 0 obj', 'ascii'), {
+          originalFilename: 'truncated.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      expect(() =>
+        inspectFileContent(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 0, 0, 0, 0, 0]), {
+          originalFilename: 'no-iend.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      expect(() =>
+        inspectFileContent(Buffer.alloc(0), {
+          originalFilename: 'empty.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+    });
+
+    it('accepts exact 25 MiB (26,214,400 bytes) and rejects 25 MiB + 1 byte (26,214,401 bytes)', () => {
+      const overhead = buildSyntheticPdf(0).byteLength;
+      const exact25MiB = buildSyntheticPdf(MAX_DOCUMENT_BYTES - overhead);
+      expect(exact25MiB.byteLength).toBe(MAX_DOCUMENT_BYTES);
+
+      const exactResult = inspectFileContent(exact25MiB, {
+        originalFilename: 'boundary-25mib.pdf',
+        declaredMime: 'application/pdf',
+      });
+      expect(exactResult.sizeBytes).toBe(MAX_DOCUMENT_BYTES);
+
+      const overLimit = buildSyntheticPdf(MAX_DOCUMENT_BYTES - overhead + 1);
+      expect(overLimit.byteLength).toBe(MAX_DOCUMENT_BYTES + 1);
+      expect(() =>
+        inspectFileContent(overLimit, {
+          originalFilename: 'over-25mib.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+    });
+  });
+
+  describe('Path traversal & private storage isolation', () => {
+    it('rejects filenames containing path separators, traversal, colons, null bytes, or disallowed extensions', () => {
+      const unsafeNames = [
+        '../secret.pdf',
+        '..\\secret.pdf',
+        'nested/doc.pdf',
+        'nested\\doc.pdf',
+        'C:\\Windows\\System32\\cmd.exe',
+        'C:drive-relative.pdf',
+        'file\0name.pdf',
+        '.hidden.pdf',
+        'trailingdot.pdf.',
+        'macro.docx',
+        'page.html',
+        'vector.svg',
+      ];
+      for (const name of unsafeNames) {
+        expect(() => sanitizeDisplayFilename(name)).toThrow(DocumentValidationError);
+      }
+
+      const safe = sanitizeDisplayFilename('  حكم_محكمة_النقض_123.PDF  ');
+      expect(safe.displayFilename).toBe('حكم_محكمة_النقض_123.PDF');
+      expect(safe.extension).toBe('.pdf');
+    });
+
+    it('rejects unsafe storage keys and forbids storage roots inside public/, .next/, or src/', () => {
+      const root = makeTempStorageRoot();
+      const quarantineDir = path.join(root, 'quarantine');
+
+      expect(resolveSafeKeyPath(quarantineDir, 'q/2026/11/safe-file.pdf')).toBe(
+        path.resolve(quarantineDir, 'q', '2026', '11', 'safe-file.pdf')
+      );
+
+      const badKeys = [
+        '',
+        '../escape.pdf',
+        'q/../../escape.pdf',
+        'q\\windows\\style.pdf',
+        '/leading/slash.pdf',
+        'C:/drive.pdf',
+        'q/null\0byte.pdf',
+        'q//double.pdf',
+        'q/./dot.pdf',
+      ];
+      for (const key of badKeys) {
+        expect(() => resolveSafeKeyPath(quarantineDir, key)).toThrow(DocumentStoragePathError);
+      }
+
+      expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), 'public'))).toThrow(
+        DocumentStoragePathError
+      );
+      expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), 'public', 'uploads'))).toThrow(
+        DocumentStoragePathError
+      );
+      expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), '.next', 'cache'))).toThrow(
+        DocumentStoragePathError
+      );
+      expect(() => resolveSafeStorageRoot(path.resolve(process.cwd(), 'src'))).toThrow(
+        DocumentStoragePathError
+      );
+    });
+
+    it('aborts stream upload exceeding maxBytes without leaving partial files on disk', async () => {
+      const root = makeTempStorageRoot();
+      const storage = createLocalDocumentStorage(root);
+      const qKey = storage.generateQuarantineKey('attempt-1', '.pdf');
+
+      const oversizedStream = Readable.from([
+        Buffer.alloc(16 * 1024 * 1024, 0x41),
+        Buffer.alloc(10 * 1024 * 1024 + 1, 0x42),
+      ]);
+
+      await expect(
+        storage.writeQuarantineStream(qKey, oversizedStream, MAX_DOCUMENT_BYTES)
+      ).rejects.toThrow(DocumentValidationError);
+
+      expect(await storage.exists('quarantine', qKey)).toBe(false);
+      const yearDir = path.join(storage.quarantineDir, String(new Date().getUTCFullYear()));
+      if (fs.existsSync(yearDir)) {
+        const files = fs.readdirSync(yearDir, { recursive: true });
+        expect(files.filter((f) => String(f).includes('.part-'))).toHaveLength(0);
+      }
+    });
+  });
+
+  describe('ADR 0003 scan policy & env compatibility', () => {
+    it('records NOT_SCANNED_POLICY under INITIAL_DEFERRED and fails closed under REQUIRED', () => {
+      const fixedNow = new Date('2026-11-24T12:00:00.000Z');
+      const deferred = evaluateDocumentScanPolicy('INITIAL_DEFERRED', fixedNow);
+      expect(deferred.scanStatus).toBe('NOT_SCANNED_POLICY');
+      expect(deferred.policyCode).toBe(ADR_0003_POLICY_CODE);
+      expect(deferred.policyVersion).toBe(ADR_0003_POLICY_VERSION);
+      expect(deferred.detailArabic).toContain(UNSCANNED_POLICY_NOTICE_AR);
+
+      expect(() => evaluateDocumentScanPolicy('REQUIRED', fixedNow)).toThrow(
+        DocumentScanPolicyUnavailableError
+      );
+      expect(() => evaluateDocumentScanPolicy('UNEXPECTED_MODE', fixedNow)).toThrow(
+        DocumentScanPolicyUnavailableError
+      );
+    });
+
+    it('preserves optional DOCUMENTS_STORAGE_ROOT and defaults DOCUMENT_SCAN_POLICY_MODE in validateEnv', () => {
+      const env = validateEnv({
+        NODE_ENV: 'development',
+        DATABASE_URL: 'postgresql://lawoffice_user:secret@127.0.0.1:5432/lawoffice_dev',
+        BETTER_AUTH_SECRET: 'synthetic_development_secret_32_bytes_minimum_length_required',
+      });
+      expect(env.DOCUMENTS_STORAGE_ROOT).toBeUndefined();
+      expect(env.DOCUMENT_SCAN_POLICY_MODE).toBe('INITIAL_DEFERRED');
+    });
+
+    it('maps domain errors cleanly with Arabic messages and HTTP codes', () => {
+      const scanErr = documentError(new DocumentScanPolicyUnavailableError());
+      expect(scanErr.success).toBe(false);
+      if (!scanErr.success) {
+        expect(scanErr.code).toBe('SCAN_POLICY_UNAVAILABLE');
+        expect(documentStatusFromErrorCode(scanErr.code)).toBe(503);
+      }
+
+      const internal = documentError(new Error('secret db string leaked?'));
+      expect(internal.success).toBe(false);
+      if (!internal.success) {
+        expect(internal.code).toBe('INTERNAL_ERROR');
+        expect(internal.error).not.toContain('secret db string');
+        expect(documentStatusFromErrorCode(internal.code)).toBe(500);
+      }
+    });
+  });
+});

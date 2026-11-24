@@ -8,6 +8,7 @@ import {
   IconCalendar,
   IconDashboard,
   IconDeadline,
+  IconDocument,
   IconFolder,
   IconLogout,
   IconSearch,
@@ -54,6 +55,7 @@ export function DesktopSidebar() {
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
+  const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
@@ -139,6 +141,16 @@ export function DesktopSidebar() {
           >
             <IconUsers className={`w-5 h-5 shrink-0 ${isPartiesActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
             <span>دليل الأطراف</span>
+          </Link>
+
+          <Link
+            href="/documents"
+            data-testid="nav-link-documents"
+            aria-current={isDocumentsActive ? 'page' : undefined}
+            className={navItemClass(isDocumentsActive)}
+          >
+            <IconDocument className={`w-5 h-5 shrink-0 ${isDocumentsActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
+            <span>المستندات</span>
           </Link>
 
           <Link

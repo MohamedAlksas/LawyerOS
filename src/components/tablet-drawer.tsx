@@ -8,6 +8,7 @@ import {
   IconCalendar,
   IconDashboard,
   IconDeadline,
+  IconDocument,
   IconFolder,
   IconLogout,
   IconSearch,
@@ -140,6 +141,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
+  const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
@@ -272,6 +274,17 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             >
               <IconUsers className="w-5 h-5 shrink-0" />
               <span>دليل الأطراف</span>
+            </Link>
+
+            <Link
+              href="/documents"
+              data-testid="nav-link-documents"
+              aria-current={isDocumentsActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={navItemClass(isDocumentsActive)}
+            >
+              <IconDocument className="w-5 h-5 shrink-0" />
+              <span>المستندات</span>
             </Link>
 
             <Link

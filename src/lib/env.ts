@@ -230,6 +230,10 @@ const baseEnvSchema = z.object({
   RESTORE_MODE: z.string().optional(),
   REMINDER_DISPATCH_DISABLED: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().optional(),
+  DOCUMENTS_STORAGE_ROOT: z.string().trim().min(1).optional(),
+  DOCUMENT_SCAN_POLICY_MODE: z
+    .enum(['INITIAL_DEFERRED', 'REQUIRED'])
+    .default('INITIAL_DEFERRED'),
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;

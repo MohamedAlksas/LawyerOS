@@ -21,6 +21,8 @@ const NO_STORE_PATHS = [
   '/matters/:path*',
   '/parties',
   '/parties/:path*',
+  '/documents',
+  '/documents/:path*',
   '/hearings/:path*',
   '/search',
   '/settings/:path*',
