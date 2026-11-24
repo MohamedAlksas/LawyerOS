@@ -3,6 +3,8 @@ import { getPrismaClient } from '@/lib/auth';
 import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
+import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
+import { computeWorkerHealth } from '@/modules/reminders/reminder-service';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -527,6 +529,25 @@ export async function createTask(
         include: taskIncludeConfig,
       });
 
+      if (dueDateStr) {
+        await enqueueSourceReminderJob(tx, {
+          sourceType: 'Task',
+          sourceId: created.id,
+          sourceVersion: created.version,
+          eventDateYmd: dueDateStr,
+          deduplicationKey: `task_reminder_${created.id}_v${created.version}`,
+          payload: {
+            taskId: created.id,
+            matterId: effectiveMatterId,
+            proceedingId: effectiveProceedingId,
+            dueDate: dueDateStr,
+            dueTime: normTime,
+            sourceVersion: created.version,
+            recipientUserId: actor.id,
+          },
+        });
+      }
+
       await recordAuditEvent(
         tx,
         {
@@ -601,8 +622,9 @@ export async function updateTask(
             : locked.due_time;
       const normTime = validateOptionalCalendarTime(nextDueDateStr, nextDueTimeRaw, 'dueTime');
 
+      const nextVersion = locked.version + 1;
       const updateData: Prisma.TaskUncheckedUpdateManyInput = {
-        version: locked.version + 1,
+        version: nextVersion,
         updatedById: actor.id,
       };
       if (input.title !== undefined) updateData.title = input.title;
@@ -620,6 +642,29 @@ export async function updateTask(
       });
       if (updated.count !== 1) {
         throw new ConcurrencyConflictError();
+      }
+
+      const previousDueDateStr = formatUtcDateToIsoDate(locked.due_date);
+      if (nextDueDateStr !== previousDueDateStr) {
+        await cancelSourceReminderJobs(tx, 'Task', locked.id);
+        if (nextDueDateStr) {
+          await enqueueSourceReminderJob(tx, {
+            sourceType: 'Task',
+            sourceId: locked.id,
+            sourceVersion: nextVersion,
+            eventDateYmd: nextDueDateStr,
+            deduplicationKey: `task_reminder_${locked.id}_v${nextVersion}`,
+            payload: {
+              taskId: locked.id,
+              matterId: locked.matter_id,
+              proceedingId: locked.proceeding_id,
+              dueDate: nextDueDateStr,
+              dueTime: normTime,
+              sourceVersion: nextVersion,
+              recipientUserId: actor.id,
+            },
+          });
+        }
       }
 
       await recordAuditEvent(
@@ -696,6 +741,8 @@ export async function completeTask(
         throw new ConcurrencyConflictError();
       }
 
+      await cancelSourceReminderJobs(tx, 'Task', locked.id, now);
+
       // Note: Completing a task MUST NOT alter any linked Deadline or Hearing state.
       await recordAuditEvent(
         tx,
@@ -769,6 +816,8 @@ export async function cancelTask(
       if (updated.count !== 1) {
         throw new ConcurrencyConflictError();
       }
+
+      await cancelSourceReminderJobs(tx, 'Task', locked.id);
 
       await recordAuditEvent(
         tx,
@@ -1281,7 +1330,15 @@ export async function getTodayOverview(
   const weekStartUtc = parseCalendarDateToUtcDate(weekRange.startDate)!;
   const weekEndUtc = parseCalendarDateToUtcDate(weekRange.endDate)!;
 
-  const [agenda, hearingsCount, confirmedDeadlinesCount, tasksCount] = await Promise.all([
+  const [
+    agenda,
+    hearingsCount,
+    confirmedDeadlinesCount,
+    tasksCount,
+    unreadRemindersCount,
+    failedRemindersCount,
+    workerHeartbeat,
+  ] = await Promise.all([
     listAgenda(actor, { view: 'today', anchorDate: cairoToday }, { now }),
     prisma.hearing.count({
       where: {
@@ -1316,12 +1373,29 @@ export async function getTodayOverview(
         ],
       },
     }),
+    prisma.reminderDelivery.count({
+      where: {
+        recipientUserId: actor.id,
+        status: 'SENT',
+        readAt: null,
+      },
+    }),
+    prisma.jobRun.count({
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        status: 'FAILED',
+      },
+    }),
+    prisma.workerHeartbeat.findUnique({
+      where: { id: 'reminder-worker' },
+    }),
   ]);
 
   const draftDeadlinesCount = agenda.draftDeadlines.length;
   const overdueDeadlinesCount = agenda.overdueDeadlines.length;
   const overdueTasksCount = agenda.overdueTasks.length;
   const sameDayCourtConflictsCount = agenda.sameDayCourtConflicts.length;
+  const workerHealth = computeWorkerHealth(workerHeartbeat, failedRemindersCount, now);
 
   const notes: string[] = [];
   if (draftDeadlinesCount > 0) {
@@ -1336,6 +1410,28 @@ export async function getTodayOverview(
   if (sameDayCourtConflictsCount > 0) {
     notes.push(`تنبيه: يوجد تعارض جلسات في نفس اليوم أمام محاكم متعددة.`);
   }
+  if (failedRemindersCount > 0) {
+    notes.push(`تنبيه تشغيل: يوجد ${failedRemindersCount} مهمة تذكير متعثرة في صندوق التنبيهات.`);
+  } else if (unreadRemindersCount > 0) {
+    notes.push(`يوجد ${unreadRemindersCount} تنبيه غير مقروء في صندوق التنبيهات.`);
+  }
+
+  let workerStatusNote: string;
+  if (workerHealth.status === 'RESTORE_MODE') {
+    workerStatusNote =
+      'وضع الاستعادة مفعّل: إرسال التذكيرات التلقائي متوقف لحين المراجعة اليدوية. التنبيهات داخل التطبيق فقط، وفحص النسخ الاحتياطي (T19) غير مفعّل بعد.';
+  } else if (workerHealth.status === 'FAILED') {
+    workerStatusNote = `تنبيه: تعثّر تسليم ${failedRemindersCount > 0 ? `${failedRemindersCount} مهمة تذكير` : 'عامل التذكيرات'}. راجع صندوق التنبيهات لإعادة التشغيل الآمن. (فحص النسخ الاحتياطي T19 غير مفعّل بعد).`;
+  } else if (workerHealth.status === 'HEALTHY') {
+    workerStatusNote =
+      'عامل التذكيرات الداخلي يعمل بصورة طبيعية داخل التطبيق (لا يضمن النظام وصول التنبيهات عند إغلاق التطبيق أو انقطاع الاتصال؛ فحص النسخ الاحتياطي T19 غير مفعّل بعد).';
+  } else if (workerHealth.status === 'STALE') {
+    workerStatusNote =
+      'عامل التذكيرات الداخلي لم يسجل تحديثاً حديثاً؛ يرجى مراجعة صندوق التنبيهات وحالة التشغيل. (فحص النسخ الاحتياطي T19 غير مفعّل بعد).';
+  } else {
+    workerStatusNote =
+      'عامل التذكيرات الداخلي مهيّأ ولم يبدأ تشغيله بعد؛ التذكيرات داخل التطبيق فقط عند التشغيل والاتصال. (فحص النسخ الاحتياطي T19 غير مفعّل بعد).';
+  }
 
   return {
     cairoToday,
@@ -1346,9 +1442,11 @@ export async function getTodayOverview(
       overdueDeadlinesCount,
       overdueTasksCount,
       sameDayCourtConflictsCount,
+      unreadRemindersCount,
+      failedRemindersCount,
+      workerStatus: workerHealth.status,
       notes,
-      workerStatusNote:
-        'تنبيه: خدمة إرسال التذكيرات التلقائية في الخلفية (T10) وفحص حالة النسخ الاحتياطي (T19) غير مفعّلين في هذا الإصدار بعد؛ اعتمد على مراجعة هذه القائمة وطباعة الأجندة.',
+      workerStatusNote,
     },
     weeklySummary: {
       startDate: weekRange.startDate,

@@ -15,6 +15,7 @@ import { formatCairoDateArabic } from '@/lib/cairo-date';
 import { LoadingIndicator, EmptyStateContainer } from '@/components/presentation-state';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
 import {
+  IconBell,
   IconCalendar,
   IconCheck,
   IconClock,
@@ -366,6 +367,27 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
             <IconPlus className="w-4 h-4 text-[#14566B]" />
             <span>فتح ملف قضية</span>
           </Link>
+          <Link
+            href="/inbox"
+            data-testid="today-inbox-link"
+            className="min-h-[44px] px-3.5 bg-white border border-[#D5DFE3] hover:border-[#14566B] hover:text-[#14566B] text-[#172A35] rounded-[6px] text-sm font-medium inline-flex items-center gap-2 transition-colors"
+          >
+            <IconBell className="w-4 h-4 text-[#14566B]" />
+            <span>صندوق التنبيهات</span>
+            {(operatingAlerts.unreadRemindersCount > 0 || operatingAlerts.failedRemindersCount > 0) && (
+              <span
+                className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                  operatingAlerts.failedRemindersCount > 0
+                    ? 'bg-red-50 text-[#A4262C] border-red-300'
+                    : 'bg-[#E9F2F5] text-[#14566B] border-[#C2D9E2]'
+                }`}
+              >
+                {operatingAlerts.failedRemindersCount > 0
+                  ? `${operatingAlerts.failedRemindersCount} فشل`
+                  : operatingAlerts.unreadRemindersCount}
+              </span>
+            )}
+          </Link>
         </div>
       </div>
 
@@ -512,9 +534,15 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
                 </div>
               </div>
 
-              <p className="text-xs text-[#4D606A] leading-relaxed bg-[#F8FAFB] p-3 rounded-[4px] border border-[#E5ECEE]">
-                {operatingAlerts.workerStatusNote}
-              </p>
+              <div className="text-xs text-[#4D606A] leading-relaxed bg-[#F8FAFB] p-3 rounded-[4px] border border-[#E5ECEE] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <p>{operatingAlerts.workerStatusNote}</p>
+                <Link
+                  href="/inbox"
+                  className="shrink-0 font-bold text-[#14566B] hover:underline min-h-[36px] inline-flex items-center"
+                >
+                  عرض صندوق التنبيهات وحالة العامل
+                </Link>
+              </div>
             </section>
           </div>
 

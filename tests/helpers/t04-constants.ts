@@ -27,6 +27,7 @@ export const T04_TEST_IDS = {
   sessionExpiredAlert: 'session-expired-alert',
   navHome: 'nav-link-home',
   navToday: 'nav-link-today',
+  navInbox: 'nav-link-inbox',
   navAgenda: 'nav-link-agenda',
   navTasks: 'nav-link-tasks',
   navDeadlines: 'nav-link-deadlines',
@@ -43,6 +44,7 @@ export type T04TestId = (typeof T04_TEST_IDS)[keyof typeof T04_TEST_IDS];
 export const T04_ROUTES = {
   home: '/',
   today: '/today',
+  inbox: '/inbox',
   agenda: '/agenda',
   tasks: '/tasks',
   deadlines: '/deadlines',
@@ -62,6 +64,7 @@ export const T04_ROUTES = {
 export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.home,
   T04_ROUTES.today,
+  T04_ROUTES.inbox,
   T04_ROUTES.agenda,
   T04_ROUTES.tasks,
   T04_ROUTES.deadlines,
@@ -80,6 +83,7 @@ export const T04_AVAILABLE_ROUTES: readonly string[] = [
 export const T04_ALLOWED_NAV_HREFS: readonly string[] = [
   T04_ROUTES.home,
   T04_ROUTES.today,
+  T04_ROUTES.inbox,
   T04_ROUTES.agenda,
   T04_ROUTES.tasks,
   T04_ROUTES.deadlines,

@@ -348,6 +348,7 @@ model Matter {
   tasks           Task[]
   deadlines       Deadline[]
   noteRevisions   MatterNoteRevision[]
+  reminderDeliveries ReminderDelivery[]
 
   @@index([status])
   @@index([status, updatedAt])
@@ -596,6 +597,27 @@ enum JobType {
 
 enum JobRunStatus {
   PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ReminderEventType {
+  HEARING
+  DEADLINE
+  TASK
+}
+
+enum ReminderChannel {
+  IN_APP
+}
+
+enum ReminderDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
   CANCELLED
 }
 
@@ -745,18 +767,93 @@ model Deadline {
 }
 
 model JobRun {
-  id               String       @id @default(uuid())
-  jobType          JobType      @default(REMINDER_DELIVERY) @map("job_type")
-  sourceType       String       @default("Hearing") @map("source_type")
-  sourceId         String       @map("source_id")
-  scheduledAt      DateTime     @db.Timestamptz(3) @map("scheduled_at")
-  status           JobRunStatus @default(PENDING) @map("status")
-  deduplicationKey String       @unique @map("deduplication_key")
-  payload          Json         @map("payload")
-  createdAt        DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
-  updatedAt        DateTime     @updatedAt @db.Timestamptz(3) @map("updated_at")
+  id               String             @id @default(uuid())
+  jobType          JobType            @default(REMINDER_DELIVERY) @map("job_type")
+  sourceType       String             @default("Hearing") @map("source_type")
+  sourceId         String             @map("source_id")
+  sourceVersion    Int                @default(1) @map("source_version")
+  payloadVersion   Int                @default(1) @map("payload_version")
+  scheduledAt      DateTime           @db.Timestamptz(3) @map("scheduled_at")
+  availableAt      DateTime           @default(now()) @db.Timestamptz(3) @map("available_at")
+  nextAttemptAt    DateTime?          @db.Timestamptz(3) @map("next_attempt_at")
+  leaseUntil       DateTime?          @db.Timestamptz(3) @map("lease_until")
+  lockedBy         String?            @map("locked_by")
+  attemptCount     Int                @default(0) @map("attempt_count")
+  maxAttempts      Int                @default(5) @map("max_attempts")
+  completedAt      DateTime?          @db.Timestamptz(3) @map("completed_at")
+  lastError        String?            @map("last_error")
+  status           JobRunStatus       @default(PENDING) @map("status")
+  deduplicationKey String             @unique @map("deduplication_key")
+  payload          Json               @map("payload")
+  createdAt        DateTime           @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  deliveries       ReminderDelivery[]
 
   @@index([sourceType, sourceId, status])
   @@index([status, scheduledAt])
+  @@index([status, availableAt, leaseUntil])
   @@map("job_run")
+}
+
+model ReminderRule {
+  id           String             @id @default(uuid())
+  eventType    ReminderEventType  @map("event_type")
+  dayOffset    Int                @map("day_offset")
+  reminderTime String             @default("09:00") @map("reminder_time")
+  channel      ReminderChannel    @default(IN_APP) @map("channel")
+  enabled      Boolean            @default(true) @map("enabled")
+  version      Int                @default(1) @map("version")
+  createdAt    DateTime           @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt    DateTime           @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  deliveries   ReminderDelivery[]
+
+  @@unique([eventType, dayOffset, channel])
+  @@index([eventType, enabled])
+  @@map("reminder_rule")
+}
+
+model ReminderDelivery {
+  id              String                 @id @default(uuid())
+  sourceType      String                 @map("source_type")
+  sourceId        String                 @map("source_id")
+  sourceVersion   Int                    @default(1) @map("source_version")
+  ruleId          String?                @map("rule_id")
+  ruleKey         String                 @map("rule_key")
+  scheduledAt     DateTime               @db.Timestamptz(3) @map("scheduled_at")
+  channel         ReminderChannel        @default(IN_APP) @map("channel")
+  recipientUserId String                 @map("recipient_user_id")
+  status          ReminderDeliveryStatus @default(PENDING) @map("status")
+  title           String                 @map("title")
+  body            String                 @map("body")
+  matterId        String?                @map("matter_id")
+  deliveredAt     DateTime?              @db.Timestamptz(3) @map("delivered_at")
+  readAt          DateTime?              @db.Timestamptz(3) @map("read_at")
+  jobRunId        String?                @map("job_run_id")
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  rule            ReminderRule?          @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  jobRun          JobRun?                @relation(fields: [jobRunId], references: [id], onDelete: SetNull)
+  matter          Matter?                @relation(fields: [matterId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceType, sourceId, sourceVersion, ruleKey, channel, recipientUserId], map: "reminder_delivery_source_rule_channel_recipient_key")
+  @@index([recipientUserId, status, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([matterId])
+  @@map("reminder_delivery")
+}
+
+model WorkerHeartbeat {
+  id            String    @id @default("reminder-worker")
+  workerId      String    @map("worker_id")
+  lastPollAt    DateTime  @db.Timestamptz(3) @map("last_poll_at")
+  lastSuccessAt DateTime? @db.Timestamptz(3) @map("last_success_at")
+  lastErrorAt   DateTime? @db.Timestamptz(3) @map("last_error_at")
+  lastError     String?   @map("last_error")
+  restoreMode   Boolean   @default(false) @map("restore_mode")
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  @@map("worker_heartbeat")
 }

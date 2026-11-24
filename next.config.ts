@@ -12,6 +12,8 @@ const NO_STORE_PATHS = [
   '/',
   '/today',
   '/agenda',
+  '/inbox',
+  '/inbox/:path*',
   '/tasks',
   '/deadlines',
   '/deadlines/:path*',

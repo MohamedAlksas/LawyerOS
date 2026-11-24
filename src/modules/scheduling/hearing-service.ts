@@ -4,6 +4,7 @@ import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import { claimIdempotencyKey, completeIdempotencyKey, resolveConcurrentIdempotency, runWithIdempotencyRetry } from '@/lib/idempotency';
+import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import {
   HearingDTO,
   HearingResultDTO,
@@ -347,20 +348,19 @@ export async function scheduleHearing(
     });
 
     // Create durable reminder work in outbox (JobRun)
-    await tx.jobRun.create({
-      data: {
-        jobType: 'REMINDER_DELIVERY',
-        sourceType: 'Hearing',
-        sourceId: hearing.id,
-        scheduledAt: hearingDateUtc,
-        status: 'PENDING',
-        deduplicationKey: `hearing_reminder_${hearing.id}`,
-        payload: {
-          hearingId: hearing.id,
-          proceedingId: input.proceedingId,
-          hearingDate: input.hearingDate,
-          hearingTime: normTime,
-        },
+    await enqueueSourceReminderJob(tx, {
+      sourceType: 'Hearing',
+      sourceId: hearing.id,
+      sourceVersion: hearing.version,
+      eventDateYmd: input.hearingDate,
+      deduplicationKey: `hearing_reminder_${hearing.id}`,
+      payload: {
+        hearingId: hearing.id,
+        proceedingId: input.proceedingId,
+        hearingDate: input.hearingDate,
+        hearingTime: normTime,
+        sourceVersion: hearing.version,
+        recipientUserId: actor.id,
       },
     });
 
@@ -498,16 +498,7 @@ export async function recordHearingResult(
     });
 
     // 4. Invalidate obsolete reminder work for the completed hearing
-    await tx.jobRun.updateMany({
-      where: {
-        sourceType: 'Hearing',
-        sourceId: hearing.id,
-        status: 'PENDING',
-      },
-      data: {
-        status: 'CANCELLED',
-      },
-    });
+    await cancelSourceReminderJobs(tx, 'Hearing', hearing.id, recordedAt);
 
     // 5. If adjournment next date is KNOWN, create linked next hearing & reminder outbox
     let nextHearingDTO: HearingDTO | null = null;
@@ -547,20 +538,19 @@ export async function recordHearingResult(
       });
 
       // Create durable reminder JobRun for next hearing
-      await tx.jobRun.create({
-        data: {
-          jobType: 'REMINDER_DELIVERY',
-          sourceType: 'Hearing',
-          sourceId: nextHearing.id,
-          scheduledAt: nextDateUtc,
-          status: 'PENDING',
-          deduplicationKey: `hearing_reminder_${nextHearing.id}`,
-          payload: {
-            hearingId: nextHearing.id,
-            proceedingId: hearing.proceedingId,
-            hearingDate: nextDateStr,
-            hearingTime: normNextTime,
-          },
+      await enqueueSourceReminderJob(tx, {
+        sourceType: 'Hearing',
+        sourceId: nextHearing.id,
+        sourceVersion: nextHearing.version,
+        eventDateYmd: nextDateStr,
+        deduplicationKey: `hearing_reminder_${nextHearing.id}`,
+        payload: {
+          hearingId: nextHearing.id,
+          proceedingId: hearing.proceedingId,
+          hearingDate: nextDateStr,
+          hearingTime: normNextTime,
+          sourceVersion: nextHearing.version,
+          recipientUserId: actor.id,
         },
       });
 
@@ -588,6 +578,25 @@ export async function recordHearingResult(
           },
         });
         taskIds.push(task.id);
+        if (dueDate) {
+          await enqueueSourceReminderJob(tx, {
+            sourceType: 'Task',
+            sourceId: task.id,
+            sourceVersion: task.version,
+            eventDateYmd: dueDate,
+            deduplicationKey: `task_reminder_${task.id}_v${task.version}`,
+            payload: {
+              taskId: task.id,
+              matterId: hearing.proceeding.matterId,
+              proceedingId: hearing.proceedingId,
+              hearingId: hearing.id,
+              dueDate,
+              dueTime: null,
+              sourceVersion: task.version,
+              recipientUserId: actor.id,
+            },
+          });
+        }
         createdTasksDTO.push(mapTaskToDTO(task));
       }
     }
@@ -890,34 +899,44 @@ export async function rescheduleHearing(
         data: { hearingId: replacementHearing.id, dueDate: parseCalendarDateToUtc(task.dueDate), version: { increment: 1 }, updatedById: actor.id },
       });
       if (updated.count !== 1) throw new ConcurrencyConflictError('تم تغيير إحدى مهام الجلسة. أعد فتح النموذج.');
+      await cancelSourceReminderJobs(tx, 'Task', task.taskId);
+      if (task.dueDate) {
+        const nextTaskVersion = task.expectedVersion + 1;
+        await enqueueSourceReminderJob(tx, {
+          sourceType: 'Task',
+          sourceId: task.taskId,
+          sourceVersion: nextTaskVersion,
+          eventDateYmd: task.dueDate,
+          deduplicationKey: `task_reminder_${task.taskId}_v${nextTaskVersion}`,
+          payload: {
+            taskId: task.taskId,
+            proceedingId: hearing.proceedingId,
+            hearingId: replacementHearing.id,
+            dueDate: task.dueDate,
+            dueTime: null,
+            sourceVersion: nextTaskVersion,
+            recipientUserId: actor.id,
+          },
+        });
+      }
     }
 
     // 5. Invalidate old reminders & create new for replacement
-    await tx.jobRun.updateMany({
-      where: {
-        sourceType: 'Hearing',
-        sourceId: hearing.id,
-        status: 'PENDING',
-      },
-      data: {
-        status: 'CANCELLED',
-      },
-    });
+    await cancelSourceReminderJobs(tx, 'Hearing', hearing.id);
 
-    await tx.jobRun.create({
-      data: {
-        jobType: 'REMINDER_DELIVERY',
-        sourceType: 'Hearing',
-        sourceId: replacementHearing.id,
-        scheduledAt: newDateUtc,
-        status: 'PENDING',
-        deduplicationKey: `hearing_reminder_${replacementHearing.id}`,
-        payload: {
-          hearingId: replacementHearing.id,
-          proceedingId: hearing.proceedingId,
-          hearingDate: input.newHearingDate,
-          hearingTime: normTime,
-        },
+    await enqueueSourceReminderJob(tx, {
+      sourceType: 'Hearing',
+      sourceId: replacementHearing.id,
+      sourceVersion: replacementHearing.version,
+      eventDateYmd: input.newHearingDate,
+      deduplicationKey: `hearing_reminder_${replacementHearing.id}`,
+      payload: {
+        hearingId: replacementHearing.id,
+        proceedingId: hearing.proceedingId,
+        hearingDate: input.newHearingDate,
+        hearingTime: normTime,
+        sourceVersion: replacementHearing.version,
+        recipientUserId: actor.id,
       },
     });
 
@@ -1014,16 +1033,7 @@ export async function cancelHearing(
     });
 
     // Invalidate reminders
-    await tx.jobRun.updateMany({
-      where: {
-        sourceType: 'Hearing',
-        sourceId: hearing.id,
-        status: 'PENDING',
-      },
-      data: {
-        status: 'CANCELLED',
-      },
-    });
+    await cancelSourceReminderJobs(tx, 'Hearing', hearing.id);
 
     // Audit
     await recordAuditEvent(tx, {

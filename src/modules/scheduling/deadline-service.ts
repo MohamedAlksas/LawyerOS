@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/auth';
 import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
+import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -666,31 +667,27 @@ export async function confirmDeadline(
         throw new ConcurrencyConflictError();
       }
 
-      await tx.jobRun.updateMany({
-        where: { sourceType: 'Deadline', sourceId: locked.id, status: 'PENDING' },
-        data: { status: 'CANCELLED' },
-      });
+      await cancelSourceReminderJobs(tx, 'Deadline', locked.id, now);
 
       if (shouldInjectFault(opts, 'outbox')) {
         throw new Error('SIMULATED_OUTBOX_TRANSACTION_FAILURE');
       }
 
-      await tx.jobRun.create({
-        data: {
-          jobType: 'REMINDER_DELIVERY',
-          sourceType: 'Deadline',
-          sourceId: locked.id,
-          scheduledAt: dueDateUtc,
-          status: 'PENDING',
-          deduplicationKey: `deadline_reminder_${locked.id}_v${nextVersion}`,
-          payload: {
-            deadlineId: locked.id,
-            matterId: locked.matter_id,
-            proceedingId: locked.proceeding_id,
-            dueDate: input.dueDate,
-            dueTime: normTime,
-            version: nextVersion,
-          },
+      await enqueueSourceReminderJob(tx, {
+        sourceType: 'Deadline',
+        sourceId: locked.id,
+        sourceVersion: nextVersion,
+        eventDateYmd: input.dueDate,
+        deduplicationKey: `deadline_reminder_${locked.id}_v${nextVersion}`,
+        payload: {
+          deadlineId: locked.id,
+          matterId: locked.matter_id,
+          proceedingId: locked.proceeding_id,
+          dueDate: input.dueDate,
+          dueTime: normTime,
+          version: nextVersion,
+          sourceVersion: nextVersion,
+          recipientUserId: actor.id,
         },
       });
 
@@ -788,10 +785,7 @@ export async function changeDeadlineDate(
         throw new Error('SIMULATED_OUTBOX_TRANSACTION_FAILURE');
       }
 
-      await tx.jobRun.updateMany({
-        where: { sourceType: 'Deadline', sourceId: locked.id, status: 'PENDING' },
-        data: { status: 'CANCELLED' },
-      });
+      await cancelSourceReminderJobs(tx, 'Deadline', locked.id);
 
       await recordAuditEvent(
         tx,
@@ -883,10 +877,7 @@ export async function completeDeadline(
         throw new Error('SIMULATED_OUTBOX_TRANSACTION_FAILURE');
       }
 
-      await tx.jobRun.updateMany({
-        where: { sourceType: 'Deadline', sourceId: locked.id, status: 'PENDING' },
-        data: { status: 'CANCELLED' },
-      });
+      await cancelSourceReminderJobs(tx, 'Deadline', locked.id);
 
       await recordAuditEvent(
         tx,
@@ -964,10 +955,7 @@ export async function cancelDeadline(
         throw new Error('SIMULATED_OUTBOX_TRANSACTION_FAILURE');
       }
 
-      await tx.jobRun.updateMany({
-        where: { sourceType: 'Deadline', sourceId: locked.id, status: 'PENDING' },
-        data: { status: 'CANCELLED' },
-      });
+      await cancelSourceReminderJobs(tx, 'Deadline', locked.id);
 
       await recordAuditEvent(
         tx,
