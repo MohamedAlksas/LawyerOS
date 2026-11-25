@@ -49,7 +49,6 @@ interface QueueItem {
   itemTitleEdited: boolean;
   /** Title sent with the begin request; frozen so an idempotent replay never changes payload. */
   sentTitle?: string;
-  beginAttempted: boolean;
   status: QueueUploadStatus;
   errorMessage: string | null;
   attemptId?: string;
@@ -91,7 +90,6 @@ const SIZE_EXCEEDED_MESSAGE = 'حجم الملف يتجاوز الحد الأق�
 const CONFLICT_CODES = new Set<string>([
   'CONCURRENCY_CONFLICT',
   'IDEMPOTENCY_CONCURRENT_CONFLICT',
-  'IDEMPOTENCY_PAYLOAD_MISMATCH',
 ]);
 
 const isPending = (item: QueueItem) => item.status !== 'READY' && item.status !== 'CANCELLED';
@@ -119,7 +117,6 @@ type AttemptState = Pick<
   QueueItem,
   | 'attemptId'
   | 'sentTitle'
-  | 'beginAttempted'
   | 'contentUploaded'
   | 'pendingConfirmDuplicate'
   | 'duplicateMatches'
@@ -131,7 +128,6 @@ type AttemptState = Pick<
 const freshAttemptPatch = (): AttemptState => ({
   attemptId: undefined,
   sentTitle: undefined,
-  beginAttempted: false,
   contentUploaded: false,
   pendingConfirmDuplicate: false,
   duplicateMatches: [],
@@ -443,7 +439,9 @@ export function DocumentUploadForm({
         updateQueueItem(queueId, {
           status: failure.status,
           errorMessage: failure.message,
-          ...(failure.status === 'REJECTED' ? { pendingConfirmDuplicate: false } : {}),
+          ...(failure.status === 'REJECTED'
+            ? { pendingConfirmDuplicate: false, sentTitle: undefined }
+            : {}),
         });
         return failure.status;
       }
@@ -494,7 +492,6 @@ export function DocumentUploadForm({
       updateQueueItem(queueId, {
         status: 'UPLOADING',
         errorMessage: null,
-        beginAttempted: true,
         sentTitle: frozenTitle,
       });
 
@@ -544,7 +541,7 @@ export function DocumentUploadForm({
                 ? Object.values(serverFieldErrors)[0]
                 : undefined) ?? failure.message,
             ...(failure.status === 'REJECTED'
-              ? { beginAttempted: false, sentTitle: undefined }
+              ? { sentTitle: undefined }
               : {}),
           });
           return failure.status;
@@ -585,7 +582,11 @@ export function DocumentUploadForm({
             putBody && !putBody.success ? putBody : null,
             'تعذر رفع محتوى الملف إلى الحجر الخاص.'
           );
-          updateQueueItem(queueId, { status: failure.status, errorMessage: failure.message });
+          updateQueueItem(queueId, {
+            status: failure.status,
+            errorMessage: failure.message,
+            ...(failure.status === 'REJECTED' ? { sentTitle: undefined } : {}),
+          });
           return failure.status;
         }
 
@@ -973,7 +974,11 @@ export function DocumentUploadForm({
                               ? item.itemTitle
                               : resolveEffectiveTitle(item, pendingQueue)
                           }
-                          disabled={isUploading || item.status === 'INCOMPLETE' || Boolean(item.attemptId)}
+                          disabled={
+                            isUploading ||
+                            item.status === 'INCOMPLETE' ||
+                            (Boolean(item.attemptId) && item.status !== 'REJECTED')
+                          }
                           onChange={(e) =>
                             updateQueueItem(item.queueId, {
                               itemTitle: e.target.value,

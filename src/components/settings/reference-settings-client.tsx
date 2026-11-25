@@ -313,7 +313,6 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setOfficePending(true);
@@ -464,7 +463,6 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setItemPending(true);
@@ -586,7 +584,6 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setEditItemPending(true);
@@ -678,7 +675,6 @@ export function ReferenceSettingsClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setTogglePending(true);
@@ -769,7 +765,7 @@ export function ReferenceSettingsClient({
           <button
             type="button"
             onClick={() => router.refresh()}
-            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+            className="inline-flex items-center justify-center px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs min-h-[44px]"
           >
             إعادة تحميل الصفحة
           </button>

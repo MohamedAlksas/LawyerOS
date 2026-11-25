@@ -324,6 +324,25 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
       }
 
       ruleKeysRef.current.delete(opKey);
+      const savedRule = res.data;
+      const nextOverview = overviewRef.current
+        ? {
+            ...overviewRef.current,
+            rules: overviewRef.current.rules.map((r) => (r.id === savedRule.id ? savedRule : r)),
+          }
+        : null;
+      if (nextOverview) {
+        overviewRef.current = nextOverview;
+        setOverview(nextOverview);
+      }
+      setRuleDrafts((prev) => ({
+        ...prev,
+        [savedRule.id]: {
+          dayOffset: String(savedRule.dayOffset),
+          reminderTime: savedRule.reminderTime,
+          enabled: savedRule.enabled,
+        },
+      }));
       setActionNotice('تم تحديث سياسة التذكير بنجاح.');
       await refreshInbox(rule.id);
       if (typeof window !== 'undefined') {
@@ -590,7 +609,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                   <button
                     type="button"
                     data-testid={`retry-failed-job-${job.id}`}
-                    disabled={retryingJobId === job.id}
+                    disabled={Boolean(retryingJobId)}
                     onClick={() => handleRetryFailedJob(job)}
                     className="min-h-[44px] px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded-[6px] inline-flex items-center gap-1.5 transition-colors"
                   >
@@ -777,7 +796,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <button
                       type="button"
                       data-testid={`mark-reminder-read-${item.id}`}
-                      disabled={markingId === item.id}
+                      disabled={Boolean(markingId)}
                       onClick={() => handleMarkRead(item)}
                       className="min-h-[44px] px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded-[6px] inline-flex items-center gap-1.5 transition-colors"
                     >
@@ -908,7 +927,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                   <button
                     type="button"
                     data-testid={`save-rule-${rule.id}`}
-                    disabled={savingRuleId === rule.id}
+                    disabled={Boolean(savingRuleId)}
                     onClick={() => handleSaveRule(rule)}
                     className="min-h-[44px] px-3.5 py-2 bg-white hover:bg-[#E9F2F5] text-[#14566B] border border-[#14566B] rounded-[6px] text-xs font-bold transition-colors disabled:opacity-50"
                   >

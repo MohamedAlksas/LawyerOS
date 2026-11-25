@@ -144,6 +144,7 @@ export interface TaskDTO {
   hearingId?: string | null;
   title: string;
   dueDate?: string | null;
+  dueTime?: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   version: number;
@@ -331,7 +332,21 @@ export const rescheduleHearingSchema = z.object({
   circuit: z.string().nullable().optional(),
   purpose: z.string().trim().max(200).nullable().optional(),
   rollNumber: z.string().trim().max(50).nullable().optional(),
-  taskChanges: z.array(z.object({ taskId: z.uuid(), expectedVersion: z.number().int().min(1), dueDate: strictDateSchema.nullable() }).strict()).max(50).optional(),
+  taskChanges: z
+    .array(
+      z
+        .object({
+          taskId: z.uuid(),
+          expectedVersion: z.number().int().min(1),
+          dueDate: strictDateSchema.nullable(),
+        })
+        .strict()
+    )
+    .max(50)
+    .refine((items) => new Set(items.map((item) => item.taskId)).size === items.length, {
+      message: 'لا يمكن تكرار نفس المهمة في طلب تعديل موعد الجلسة.',
+    })
+    .optional(),
   idempotencyKey: z.string().trim().min(1).max(100),
 }).strict();
 

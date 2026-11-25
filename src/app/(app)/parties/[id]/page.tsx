@@ -63,7 +63,7 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <PartyProfileClient key={`${actor.sessionId}:${party.id}`} party={party} ownerId={actor.id} />
+      <PartyProfileClient key={`${actor.id}:${party.id}`} party={party} ownerId={actor.id} />
     </div>
   );
 }

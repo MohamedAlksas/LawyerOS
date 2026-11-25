@@ -809,6 +809,62 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     }
   });
 
+  it('rejects conflicting better-auth.two_factor and __Secure-better-auth.two_factor cookies with 401 and clears both', async () => {
+    const prisma = getPrismaClient();
+    const origin = new URL(getEnv().BETTER_AUTH_URL).origin;
+    const signInRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({
+          email: provisionedOwner.email,
+          password: 'StrongOwnerSecret2026!',
+        }),
+      })
+    );
+    expect(signInRes.status).toBe(200);
+    const signInCookies = signInRes.headers.getSetCookie?.() || [signInRes.headers.get('set-cookie') || ''];
+    const tfCookie = signInCookies.find((c) => c.startsWith('better-auth.two_factor='));
+    expect(tfCookie).toBeDefined();
+    const standardTfHeader = tfCookie!.split(';')[0];
+
+    try {
+      const code = await generateTotpCode(provisionedOwner.totpSecret);
+      const conflictRes = await authRoutePOST(
+        new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin,
+            cookie: `${standardTfHeader}; __Secure-better-auth.two_factor=conflicting-secure-challenge`,
+          },
+          body: JSON.stringify({ code }),
+        })
+      );
+
+      expect(conflictRes.status).toBe(401);
+      expect(conflictRes.headers.get('cache-control')).toBe('private, no-store');
+      const setCookies = conflictRes.headers.getSetCookie?.() || [
+        conflictRes.headers.get('set-cookie') || '',
+      ];
+      const clearedStandard = setCookies.find((c) => c.startsWith('better-auth.two_factor='));
+      const clearedSecure = setCookies.find((c) => c.startsWith('__Secure-better-auth.two_factor='));
+      expect(clearedStandard).toBeDefined();
+      expect(clearedStandard).toMatch(/Max-Age=0/i);
+      expect(clearedSecure).toBeDefined();
+      expect(clearedSecure).toMatch(/Max-Age=0/i);
+      expect(
+        setCookies.some(
+          (c) => c.includes('better-auth.session_token=') && !/Max-Age=0/i.test(c)
+        )
+      ).toBe(false);
+    } finally {
+      await prisma.verification
+        .deleteMany({ where: { value: provisionedOwner.userId } })
+        .catch(() => {});
+    }
+  });
+
   it('fails closed and returns sanitized non-success if pre-handler guard encounters database error (R03)', async () => {
     const prisma = getPrismaClient();
     const spyFirst = vi.spyOn(prisma.session, 'findFirst').mockRejectedValueOnce(

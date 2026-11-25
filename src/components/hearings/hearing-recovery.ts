@@ -23,10 +23,15 @@ export function useHearingModalEffects(options: {
 }) {
   const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
   const onCloseRef = useRef(onClose);
+  const hasPendingRef = useRef(hasPending);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    hasPendingRef.current = hasPending;
+  }, [hasPending]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -49,19 +54,23 @@ export function useHearingModalEffects(options: {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || isSubmitting) return;
+    if (!isOpen || hasPendingRef.current) return;
     const frameId = requestAnimationFrame(() => {
-      if (hasPending) {
-        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]:not([disabled])');
-        if (submitBtn) {
-          submitBtn.focus();
-          return;
-        }
-      }
       initialFocusRef.current?.focus();
     });
     return () => cancelAnimationFrame(frameId);
-  }, [isOpen, isSubmitting, hasPending, dialogRef, initialFocusRef]);
+  }, [isOpen, initialFocusRef]);
+
+  useEffect(() => {
+    if (!isOpen || !hasPending || isSubmitting) return;
+    const frameId = requestAnimationFrame(() => {
+      const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>(
+        'button[type="submit"]:not([disabled]), button[data-modal-retry="true"]:not([disabled])'
+      );
+      submitBtn?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isOpen, hasPending, isSubmitting, dialogRef]);
 
   useEffect(() => {
     if (!isOpen) return;

@@ -476,7 +476,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
@@ -585,7 +584,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
@@ -686,7 +684,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
@@ -816,7 +813,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
@@ -917,7 +913,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
@@ -967,7 +962,7 @@ export function MatterDetailClient({
       (pendingAssocOpRef.current.kind !== 'unlinkPoa' ||
         pendingAssocOpRef.current.targetId !== auth.id)
     ) {
-      setPartyActionError(
+      setActionError(
         'توجد عملية سابقة قيد الانتظار أو لم يتأكد اكتمالها بعد. يرجى إعادة محاولة أو حسم العملية العالقة أولاً قبل بدء عملية جديدة.'
       );
       return;
@@ -1027,7 +1022,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           updatePendingLifecycleOp(op);
@@ -1111,7 +1105,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           updatePendingLifecycleOp(op);
@@ -1195,7 +1188,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           updatePendingLifecycleOp(op);
@@ -1288,7 +1280,6 @@ export function MatterDetailClient({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           updatePendingLifecycleOp(op);
@@ -1512,7 +1503,8 @@ export function MatterDetailClient({
           <button
             type="button"
             onClick={() => setActionMessage(null)}
-            className="text-emerald-700 hover:text-emerald-900 font-bold px-2 py-0.5"
+            aria-label="إغلاق رسالة التأكيد"
+            className="text-emerald-700 hover:text-emerald-900 font-bold px-2 py-0.5 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded"
           >
             ✕
           </button>
@@ -1530,7 +1522,7 @@ export function MatterDetailClient({
             type="button"
             onClick={() => setActionError(null)}
             aria-label="إغلاق رسالة الخطأ"
-            className="text-red-700 hover:text-red-900 font-bold px-2 py-0.5"
+            className="text-red-700 hover:text-red-900 font-bold px-2 py-0.5 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded"
           >
             ✕
           </button>
@@ -1547,7 +1539,8 @@ export function MatterDetailClient({
           <button
             type="button"
             onClick={() => setPartyActionError(null)}
-            className="text-red-700 hover:text-red-900 font-bold px-2 py-0.5"
+            aria-label="إغلاق رسالة خطأ الأطراف"
+            className="text-red-700 hover:text-red-900 font-bold px-2 py-0.5 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded"
           >
             ✕
           </button>

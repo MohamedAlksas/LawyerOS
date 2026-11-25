@@ -56,7 +56,7 @@ export function RescheduleHearingModal({
     taskChanges.length > 0 ||
     newHearingDate !== initialDate
   );
-  useLeaveGuard(dirty, isSubmitting || isFrozenRetry);
+  useLeaveGuard(dirty || isFrozenRetry, isSubmitting);
 
   useHearingModalEffects({
     isOpen,

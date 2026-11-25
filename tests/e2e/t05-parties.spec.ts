@@ -388,9 +388,18 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     const query1Gate = new Promise<void>((resolve) => {
       releaseQuery1 = resolve;
     });
+    let resolveQuery2Started!: () => void;
+    const query2Started = new Promise<void>((resolve) => {
+      resolveQuery2Started = resolve;
+    });
+    let releaseQuery2!: () => void;
+    const query2Gate = new Promise<void>((resolve) => {
+      releaseQuery2 = resolve;
+    });
 
     let postCount = 0;
     let query1Fulfilled = false;
+    let query2Fulfilled = false;
     await page.route('**/parties**', async (route) => {
       if (route.request().method() === 'POST') {
         postCount++;
@@ -401,6 +410,22 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
             const response = await route.fetch();
             await route.fulfill({ response });
             query1Fulfilled = true;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (
+              !msg.includes('Target page, context or browser has been closed') &&
+              !msg.includes('Route is already handled')
+            ) {
+              throw err;
+            }
+          }
+        } else if (postCount === 2) {
+          resolveQuery2Started();
+          await query2Gate;
+          try {
+            const response = await route.fetch();
+            await route.fulfill({ response });
+            query2Fulfilled = true;
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             if (
@@ -435,26 +460,39 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
       await page.getByTestId('party-search-submit').click();
       await query1Started;
 
-      // 2. Dispatch Query 2 ("سريع") while Query 1 is still in flight (advances requestGenRef past gen=1)
+      // 2. Dispatch Query 2 ("سريع") while Query 1 is held (advances requestGenRef past gen=1 while Next.js queues Request 2)
       await searchInput.fill('سريع');
       await page.getByTestId('party-search-submit').click();
 
-      // 3. Release Query 1 deterministically; its stale gen=1 response must be discarded
+      // 3. Release Query 1 while Query 2 is held by query2Gate; Query 1's stale response must settle and be discarded
       releaseQuery1();
       await expect.poll(() => query1Fulfilled, { timeout: 10_000 }).toBe(true);
+      await query2Started;
 
-      // Query 2 arrives and updates the UI with Party 2 (Fast)
+      // Let React settle any pending microtasks/frames from Query 1 while Query 2 is still held
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      );
+
       const fastPartyEntry = page
         .locator(`[data-testid="party-row-${fastParty.id}"], [data-testid="party-card-${fastParty.id}"]`)
         .filter({ visible: true });
-      await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
       const slowPartyEntry = page
         .locator(`[data-testid="party-row-${slowParty.id}"], [data-testid="party-card-${slowParty.id}"]`)
         .filter({ visible: true });
+      await expect(page.getByTestId('loading-indicator')).toBeVisible();
+      await expect(slowPartyEntry).toBeHidden();
+      await expect(fastPartyEntry).toBeHidden();
+
+      // 4. Release Query 2 and verify Fast party renders while Slow party stays hidden
+      releaseQuery2();
+      await expect.poll(() => query2Fulfilled, { timeout: 10_000 }).toBe(true);
+      await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
       await expect(slowPartyEntry).toBeHidden();
       expect(postCount).toBeGreaterThanOrEqual(2);
     } finally {
       releaseQuery1();
+      releaseQuery2();
       await page.unroute('**/parties**');
     }
   });

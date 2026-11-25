@@ -42,7 +42,7 @@ export function CancelHearingModal({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
   const [sessionExpired, setSessionExpired] = useState(false);
-  useLeaveGuard(isOpen && Boolean(reason.trim()), isSubmitting || isFrozenRetry);
+  useLeaveGuard((isOpen && Boolean(reason.trim())) || isFrozenRetry, isSubmitting);
 
   useHearingModalEffects({
     isOpen,

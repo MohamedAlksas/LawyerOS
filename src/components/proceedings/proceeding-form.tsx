@@ -525,7 +525,6 @@ export function ProceedingForm({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           setOperationPending(true);
@@ -622,7 +621,7 @@ export function ProceedingForm({
           <button
             type="button"
             onClick={() => router.refresh()}
-            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+            className="inline-flex items-center justify-center px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs min-h-[44px]"
           >
             إعادة تحميل الصفحة
           </button>
@@ -649,7 +648,7 @@ export function ProceedingForm({
                 router.refresh();
               }}
               data-testid="conflict-reload-button"
-              className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] transition-colors"
+              className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] transition-colors min-h-[44px]"
             >
               تحديث الصفحة واسترجاع أحدث نسخة
             </button>
@@ -660,7 +659,7 @@ export function ProceedingForm({
                 setConcurrencyConflict(false);
               }}
               data-testid="conflict-dismiss-button"
-              className="px-3 py-1.5 bg-white border border-amber-400 text-amber-900 font-semibold rounded-[6px] hover:bg-amber-100 transition-colors"
+              className="px-3 py-1.5 bg-white border border-amber-400 text-amber-900 font-semibold rounded-[6px] hover:bg-amber-100 transition-colors min-h-[44px]"
             >
               متابعة المحاولة بالبيانات الحالية
             </button>

@@ -756,6 +756,36 @@ async function loadActiveSourceEventDates(
 }
 
 /**
+ * Atomically updates a PENDING reminder job's schedule (and optional deduplicationKey),
+ * clearing nextAttemptAt only while live attemptCount === 0 so concurrent retry backoffs
+ * set by a worker after an unlocked read are never wiped out.
+ */
+async function updatePendingReminderJobSchedule(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+  scheduledAt: Date,
+  deduplicationKey?: string
+): Promise<number> {
+  const baseData = {
+    ...(deduplicationKey !== undefined ? { deduplicationKey } : {}),
+    scheduledAt,
+    availableAt: scheduledAt,
+  };
+  const zeroAttemptResult = await tx.jobRun.updateMany({
+    where: { id: jobId, status: 'PENDING', attemptCount: 0 },
+    data: { ...baseData, nextAttemptAt: null },
+  });
+  if (zeroAttemptResult.count > 0) {
+    return zeroAttemptResult.count;
+  }
+  const retriedResult = await tx.jobRun.updateMany({
+    where: { id: jobId, status: 'PENDING', attemptCount: { not: 0 } },
+    data: baseData,
+  });
+  return retriedResult.count;
+}
+
+/**
  * Recomputes scheduledAt/availableAt (and chained deduplication keys safely) for active PENDING
  * reminder jobs after a ReminderRule update so schedule shifts take effect without recreating jobs.
  */
@@ -867,40 +897,29 @@ async function reschedulePendingReminderJobs(
       if (isChained && nextChainedKey !== job.deduplicationKey) {
         const collision = await tx.jobRun.findUnique({
           where: { deduplicationKey: nextChainedKey },
-          select: { id: true, status: true, attemptCount: true },
+          select: { id: true, status: true },
         });
         let handled = false;
         if (!collision) {
           await tx.$executeRaw`SAVEPOINT sp_resched_dedup`;
           try {
-            await tx.jobRun.updateMany({
-              where: { id: job.id, status: 'PENDING' },
-              data: {
-                deduplicationKey: nextChainedKey,
-                scheduledAt: nextInstant,
-                availableAt: nextInstant,
-                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-              },
-            });
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant, nextChainedKey);
             await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
             handled = true;
           } catch (err) {
-            await tx.$executeRaw`ROLLBACK TO SAVEPOINT sp_resched_dedup`;
-            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
             if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
               throw err;
             }
+            await tx.$executeRaw`ROLLBACK TO SAVEPOINT sp_resched_dedup`;
+            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
           }
         } else if (collision.status === 'PENDING') {
-          const updatedCollision = await tx.jobRun.updateMany({
-            where: { id: collision.id, status: 'PENDING' },
-            data: {
-              scheduledAt: nextInstant,
-              availableAt: nextInstant,
-              ...(collision.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-            },
-          });
-          if (updatedCollision.count === 1) {
+          const updatedCollisionCount = await updatePendingReminderJobSchedule(
+            tx,
+            collision.id,
+            nextInstant
+          );
+          if (updatedCollisionCount === 1) {
             await tx.jobRun.updateMany({
               where: { id: job.id, status: 'PENDING' },
               data: {
@@ -918,27 +937,12 @@ async function reschedulePendingReminderJobs(
           // otherwise ReminderWorker will later see this job as SUCCEEDED on that key and skip the future rule.
           const fallbackKey = `${nextChainedKey}_resched_${job.id}`;
           if (fallbackKey !== job.deduplicationKey) {
-            await tx.jobRun.updateMany({
-              where: { id: job.id, status: 'PENDING' },
-              data: {
-                deduplicationKey: fallbackKey,
-                scheduledAt: nextInstant,
-                availableAt: nextInstant,
-                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-              },
-            });
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant, fallbackKey);
           } else if (
             job.scheduledAt.getTime() !== nextInstant.getTime() ||
             job.availableAt.getTime() !== nextInstant.getTime()
           ) {
-            await tx.jobRun.updateMany({
-              where: { id: job.id, status: 'PENDING' },
-              data: {
-                scheduledAt: nextInstant,
-                availableAt: nextInstant,
-                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-              },
-            });
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant);
           }
         }
         continue;
@@ -948,14 +952,7 @@ async function reschedulePendingReminderJobs(
         job.scheduledAt.getTime() !== nextInstant.getTime() ||
         job.availableAt.getTime() !== nextInstant.getTime()
       ) {
-        await tx.jobRun.updateMany({
-          where: { id: job.id, status: 'PENDING' },
-          data: {
-            scheduledAt: nextInstant,
-            availableAt: nextInstant,
-            ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-          },
-        });
+        await updatePendingReminderJobSchedule(tx, job.id, nextInstant);
       }
     }
   }

@@ -11,6 +11,7 @@ import {
   rescheduleHearing,
   listHearingsForProceeding,
   getHearing,
+  SchedulingValidationError,
 } from '@/modules/scheduling';
 import {
   createSyntheticActor,
@@ -465,5 +466,59 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     expect(carriedTask.status).toBe('IN_PROGRESS');
     expect(carriedTask.dueDate).toBeNull();
     expect(carriedTask.dueTime).toBeNull();
+  });
+
+  it('recordHearingResult returns dueTime on TaskDTO and rescheduleHearing rejects duplicate taskId entries with SchedulingValidationError', async () => {
+    const hearing = await scheduleHearing(actor, {
+      proceedingId: testProceedingId,
+      hearingDate: '2027-09-01',
+      idempotencyKey: `sched_dup_${crypto.randomUUID()}`,
+    });
+
+    const recordPayload = {
+      hearingId: hearing.id,
+      expectedVersion: hearing.version,
+      decisionText: 'تأجيل مع مهمة بوقت استحقاق محدد',
+      nextDateDisposition: 'KNOWN' as const,
+      nextHearingDate: '2027-10-01',
+      tasks: [
+        {
+          title: 'إيداع مذكرة الرد قبل الجلسة',
+          dueDate: '2027-09-25',
+          dueTime: '11:45',
+        },
+      ],
+      idempotencyKey: `rec_dup_${crypto.randomUUID()}`,
+    };
+
+    const recorded = await recordHearingResult(actor, recordPayload);
+    expect(recorded.tasks).toHaveLength(1);
+    expect(recorded.tasks![0].dueTime).toBe('11:45');
+
+    const retried = await recordHearingResult(actor, recordPayload);
+    expect(retried.tasks).toHaveLength(1);
+    expect(retried.tasks![0].dueTime).toBe('11:45');
+
+    const taskId = recorded.tasks![0].id;
+    const nextHearing = recorded.nextHearing!;
+    await expect(
+      rescheduleHearing(actor, {
+        hearingId: nextHearing.id,
+        expectedVersion: nextHearing.version,
+        newHearingDate: '2027-10-15',
+        reason: 'محاولة تكرار نفس المهمة في إعادة الجدولة',
+        taskChanges: [
+          { taskId, expectedVersion: 1, dueDate: '2027-10-10' },
+          { taskId, expectedVersion: 1, dueDate: '2027-10-12' },
+        ],
+        idempotencyKey: `resched_dup_${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrowError(SchedulingValidationError);
+
+    const untouchedHearing = await prisma.hearing.findUniqueOrThrow({ where: { id: nextHearing.id } });
+    expect(untouchedHearing.status).toBe('SCHEDULED');
+    const untouchedTask = await prisma.task.findUniqueOrThrow({ where: { id: taskId } });
+    expect(untouchedTask.hearingId).toBe(hearing.id);
+    expect(untouchedTask.dueTime).toBe('11:45');
   });
 });

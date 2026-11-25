@@ -2256,4 +2256,60 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(expiredValidating.status).toBe('EXPIRED');
     expect(await storage.exists('quarantine', expiredValidating.quarantineKey)).toBe(false);
   });
+
+  it('T11-REJECTED-CLEANUP: cleanupExpiredUploadAttempts unlinks leftover quarantine bytes on expired REJECTED attempts without expiring status or count', async () => {
+    const storage = createLocalDocumentStorage(storageRoot);
+    const now = new Date('2026-11-24T17:00:00.000Z');
+
+    // Drain any prior expired candidates before measuring counts for the expired REJECTED row
+    await cleanupExpiredUploadAttempts(storage, { now });
+
+    const leftoverBytes = buildSyntheticPdf('EXPIRED-REJECTED-LEFTOVER');
+    const rejectedAttempt = await beginUpload(
+      owner,
+      {
+        matterId: matterAId,
+        title: 'محاولة مرفوضة منتهية بملف حجر متبقٍ',
+        documentType: 'OTHER',
+        originalFilename: 'rejected-leftover.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: leftoverBytes.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { now }
+    );
+    createdAttemptIds.push(rejectedAttempt.id);
+    await uploadAttemptBytes(owner, rejectedAttempt.id, leftoverBytes, { now });
+
+    const past = new Date(now.getTime() - 60_000);
+    await prisma.$executeRaw`
+      UPDATE "upload_attempt"
+      SET "status" = 'REJECTED'::"UploadAttemptStatus",
+          "failure_reason" = 'رفض الفحص مع بقاء ملف مؤقت',
+          "expires_at" = ${past},
+          "updated_at" = ${past}
+      WHERE "id" = ${rejectedAttempt.id}
+    `;
+
+    const beforeRow = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: rejectedAttempt.id },
+    });
+    expect(await storage.exists('quarantine', beforeRow.quarantineKey)).toBe(true);
+
+    const cleanupRes = await cleanupExpiredUploadAttempts(storage, { now });
+    expect(cleanupRes.skipped).toBe(false);
+    expect(cleanupRes.expiredAttemptCount).toBe(0);
+    expect(cleanupRes.deletedQuarantineCount).toBe(1);
+
+    const afterRow = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: rejectedAttempt.id },
+    });
+    expect(afterRow.status).toBe('REJECTED');
+    expect(afterRow.failureReason).toBe('رفض الفحص مع بقاء ملف مؤقت');
+    expect(await storage.exists('quarantine', afterRow.quarantineKey)).toBe(false);
+
+    const secondCleanup = await cleanupExpiredUploadAttempts(storage, { now });
+    expect(secondCleanup.expiredAttemptCount).toBe(0);
+    expect(secondCleanup.deletedQuarantineCount).toBe(0);
+  });
 });

@@ -79,7 +79,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
 
   return (
     <HearingResultClient
-      key={`${actor.sessionId}:${hearing.id}`}
+      key={`${actor.id}:${hearing.id}`}
       actorId={actor.id}
       hearingId={hearing.id}
       initialVersion={hearing.version}

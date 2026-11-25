@@ -197,11 +197,16 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
         setMarkError(res.error || 'تعذر تأشير التنبيه كمقروء.');
         return;
       }
+      abortRef.current?.abort();
+      abortRef.current = null;
+      ++seqRef.current;
+      setLoading(false);
       setOverview((prev) => {
         if (!prev) return prev;
+        const alreadyRead = prev.items.some((it) => it.id === item.id && it.isRead);
         return {
           ...prev,
-          unreadCount: Math.max(0, prev.unreadCount - 1),
+          unreadCount: alreadyRead ? prev.unreadCount : Math.max(0, prev.unreadCount - 1),
           items: prev.items.map((it) =>
             it.id === item.id
               ? { ...it, isRead: true, readAt: res.data.readAt ?? new Date().toISOString() }

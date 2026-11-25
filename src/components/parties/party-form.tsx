@@ -62,6 +62,10 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
 
   const savingRef = useRef(false);
   const savedRef = useRef(false);
+  const identityNumberError = fieldErrors.identityNumber ?? fieldErrors['identity.number'];
+  const additionalPhonesError =
+    fieldErrors.additionalPhones ??
+    Object.entries(fieldErrors).find(([key]) => key.startsWith('additionalPhones.'))?.[1];
   const dirty = name !== (party?.name ?? '') || kind !== (party?.kind ?? 'PERSON') ||
     primaryPhone !== (party?.primaryPhone ?? '') || additionalPhones !== (party?.additionalPhones?.join(', ') ?? '') ||
     email !== (party?.email ?? '') || address !== (party?.address ?? '') || notes !== (party?.notes ?? '') || hasIdentity;
@@ -511,11 +515,35 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
               data-testid="party-phones-input"
               type="text"
               value={additionalPhones}
-              onChange={(e) => setAdditionalPhones(e.target.value)}
+              onChange={(e) => {
+                setAdditionalPhones(e.target.value);
+                setFieldErrors((prev) => {
+                  const hasAdditionalPhoneError = Object.keys(prev).some(
+                    (key) => key === 'additionalPhones' || key.startsWith('additionalPhones.')
+                  );
+                  if (!hasAdditionalPhoneError) return prev;
+                  const n = { ...prev };
+                  for (const key of Object.keys(n)) {
+                    if (key === 'additionalPhones' || key.startsWith('additionalPhones.')) {
+                      delete n[key];
+                    }
+                  }
+                  return n;
+                });
+              }}
               dir="ltr"
               placeholder="0123456789, 0233445566"
-              className="w-full px-3.5 py-2.5 rounded-[6px] border border-[#A7B9C1] text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right"
+              aria-invalid={Boolean(additionalPhonesError)}
+              aria-describedby={additionalPhonesError ? 'additionalPhones-error' : undefined}
+              className={`w-full px-3.5 py-2.5 rounded-[6px] border text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right ${
+                additionalPhonesError ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+              }`}
             />
+            {additionalPhonesError && (
+              <p id="additionalPhones-error" className="text-xs text-[#A4262C] mt-1 font-medium">
+                {additionalPhonesError}
+              </p>
+            )}
           </div>
         </div>
 
@@ -605,7 +633,28 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
               <button
                 type="button"
                 data-testid="toggle-identity-fields"
-                onClick={() => setHasIdentity((prev) => !prev)}
+                onClick={() => {
+                  const next = !hasIdentity;
+                  setHasIdentity(next);
+                  if (!next) {
+                    setFieldErrors((prev) => {
+                      if (
+                        !prev.identityNumber &&
+                        !prev['identity.number'] &&
+                        !prev.identity &&
+                        !prev['identity.identificationType']
+                      ) {
+                        return prev;
+                      }
+                      const n = { ...prev };
+                      delete n.identityNumber;
+                      delete n['identity.number'];
+                      delete n.identity;
+                      delete n['identity.identificationType'];
+                      return n;
+                    });
+                  }
+                }}
                 className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] px-2 flex items-center"
               >
                 {hasIdentity ? 'إلغاء تسجيل الهوية' : '＋ إضافة وثيقة هوية'}
@@ -652,25 +701,26 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
                     value={identityNumber}
                     onChange={(e) => {
                       setIdentityNumber(e.target.value);
-                      if (fieldErrors.identityNumber) {
+                      if (fieldErrors.identityNumber || fieldErrors['identity.number']) {
                         setFieldErrors((prev) => {
                           const n = { ...prev };
                           delete n.identityNumber;
+                          delete n['identity.number'];
                           return n;
                         });
                       }
                     }}
                     dir="ltr"
                     placeholder="29001011234567"
-                    aria-invalid={Boolean(fieldErrors.identityNumber)}
-                    aria-describedby={fieldErrors.identityNumber ? 'identityNumber-error' : undefined}
+                    aria-invalid={Boolean(identityNumberError)}
+                    aria-describedby={identityNumberError ? 'identityNumber-error' : undefined}
                     className={`w-full px-3 py-2 rounded-[6px] border text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono ${
-                      fieldErrors.identityNumber ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+                      identityNumberError ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
                     }`}
                   />
-                  {fieldErrors.identityNumber && (
+                  {identityNumberError && (
                     <p id="identityNumber-error" className="text-xs text-[#A4262C] mt-1 font-medium">
-                      {fieldErrors.identityNumber}
+                      {identityNumberError}
                     </p>
                   )}
                 </div>

@@ -54,7 +54,7 @@ export function ScheduleHearingModal({
   const dirty = isOpen && Boolean(
     hasSpecificTime || hearingTime || locationRoom || rollNumber || purpose || hearingDate !== initialDate
   );
-  useLeaveGuard(dirty, isSubmitting || isFrozenRetry);
+  useLeaveGuard(dirty || isFrozenRetry, isSubmitting);
 
   useHearingModalEffects({
     isOpen,

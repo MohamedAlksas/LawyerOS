@@ -87,7 +87,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
   return (
     <div className="py-2">
       <MatterDetailClient
-        key={`${actor.sessionId}:${matter.id}`}
+        key={`${actor.id}:${matter.id}`}
         ownerId={actor.id}
         initialMatter={matter}
         initialTasks={initialTasks}

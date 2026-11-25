@@ -1,4 +1,5 @@
 import { auth, getPrismaClient, getTrustedOrigins } from '@/lib/auth';
+import { getEnv } from '@/lib/env';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireActor } from '@/modules/identity/require-actor';
 import { regenerateRecoveryCodes } from '@/modules/identity/recovery-codes';
@@ -29,6 +30,17 @@ function clearAuthCookie(res: NextResponse, name: string): void {
     sameSite: 'lax',
     secure: name.startsWith('__Secure-'),
   });
+}
+
+function getActiveTwoFactorCookieName(): '__Secure-better-auth.two_factor' | 'better-auth.two_factor' {
+  return new URL(getEnv().BETTER_AUTH_URL).protocol === 'https:'
+    ? '__Secure-better-auth.two_factor'
+    : 'better-auth.two_factor';
+}
+
+function findNonEmptyCookieEntries(cookies: string[], name: string): string[] {
+  const prefix = `${name}=`;
+  return cookies.filter((c) => c.startsWith(prefix) && c.slice(prefix.length).trim().length > 0);
 }
 
 async function auditIdentityOutcome(userId: string, action: string) {
@@ -368,11 +380,22 @@ export async function POST(request: NextRequest) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
       const cookies = cookieHeader.split(';').map((c) => c.trim());
-      const tfCookie = cookies.find(
-        (c) =>
-          c.startsWith('better-auth.two_factor=') ||
-          c.startsWith('__Secure-better-auth.two_factor=')
-      );
+      const standardTfCookies = findNonEmptyCookieEntries(cookies, 'better-auth.two_factor');
+      const secureTfCookies = findNonEmptyCookieEntries(cookies, '__Secure-better-auth.two_factor');
+      if (standardTfCookies.length > 0 && secureTfCookies.length > 0) {
+        const errRes = noStoreJson(
+          { error: 'جلسة التحقق الثنائي غير صالحة أو متعارضة. يرجى تسجيل الدخول مجدداً.' },
+          { status: 401 }
+        );
+        clearAuthCookie(errRes, 'better-auth.two_factor');
+        clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+        return errRes;
+      }
+      const activeTfName = getActiveTwoFactorCookieName();
+      const tfCookie =
+        activeTfName === '__Secure-better-auth.two_factor'
+          ? secureTfCookies[0]
+          : standardTfCookies[0];
       if (tfCookie) {
         const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
         if (rawToken) {
@@ -497,73 +520,79 @@ export async function POST(request: NextRequest) {
     const setCookies = response.headers.getSetCookie?.() || [
       response.headers.get('set-cookie') || '',
     ];
+    const activeTfPrefix = `${getActiveTwoFactorCookieName()}=`;
     const tfCookie = setCookies.find(
-      (c) =>
-        c.startsWith('better-auth.two_factor=') ||
-        c.startsWith('__Secure-better-auth.two_factor=')
+      (c) => c.startsWith(activeTfPrefix) && !/\bmax-age=0\b/i.test(c)
     );
     if (tfCookie) {
       const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
       const companionCandidates = candidateIdentifiers.map((id) => `2fa-cred-ver-${id}`);
-      if (rawToken) {
-        const prisma = getPrismaClient();
-        let verifRecordId: string | null = null;
-        let verifUserId: string | null = null;
-        try {
-          const verifRecord = await prisma.verification.findFirst({
-            where: { identifier: { in: candidateIdentifiers } },
-          });
-          if (!verifRecord) {
-            throw new Error(`Verification challenge record not found for token ${rawToken}`);
-          }
-          verifRecordId = verifRecord.id;
-          verifUserId = verifRecord.value;
+      const prisma = getPrismaClient();
+      let verifRecordId: string | null = null;
+      let verifUserId: string | null = null;
+      try {
+        if (!rawToken) {
+          throw new Error('Failed to extract two-factor challenge token');
+        }
+        const verifRecord = await prisma.verification.findFirst({
+          where: { identifier: { in: candidateIdentifiers } },
+        });
+        if (!verifRecord) {
+          throw new Error(`Verification challenge record not found for token ${rawToken}`);
+        }
+        verifRecordId = verifRecord.id;
+        verifUserId = verifRecord.value;
 
-          const expiresAt =
-            verifRecord.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
+        const expiresAt =
+          verifRecord.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
 
-          // R13-01: Fail closed if credential version was not captured before authentication.
-          // NEVER reconstruct or read credential version after provider authentication!
-          if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
-            throw new Error('Credential version not captured before authentication');
-          }
-          const credVer = signInUserCredentialVersion;
+        // R13-01: Fail closed if credential version was not captured before authentication.
+        // NEVER reconstruct or read credential version after provider authentication!
+        if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
+          throw new Error('Credential version not captured before authentication');
+        }
+        const credVer = signInUserCredentialVersion;
 
-          await prisma.verification.deleteMany({
-            where: { identifier: { in: companionCandidates } },
-          });
+        await prisma.verification.deleteMany({
+          where: { identifier: { in: companionCandidates } },
+        });
 
-          await prisma.verification.create({
-            data: {
-              id: randomUUID(),
-              identifier: `2fa-cred-ver-${rawToken}`,
-              value: String(credVer),
-              expiresAt,
-            },
-          });
-        } catch {
-          // R12-01: Prevent companion insert failure suppression!
-          // If inserting 2fa-cred-ver-${rawToken} fails, clean up created verification record,
-          // clear 2FA cookies, and return HTTP 500 fail-closed
+        await prisma.verification.create({
+          data: {
+            id: randomUUID(),
+            identifier: `2fa-cred-ver-${rawToken}`,
+            value: String(credVer),
+            expiresAt,
+          },
+        });
+      } catch {
+        // R12-01: Prevent companion insert failure suppression!
+        // If inserting 2fa-cred-ver-${rawToken} fails, clean up created verification record,
+        // clear 2FA cookies, and return HTTP 500 fail-closed
+        if (verifRecordId || verifUserId || candidateIdentifiers.length > 0) {
           await prisma.verification.deleteMany({
             where: {
               OR: [
                 ...(verifRecordId ? [{ id: verifRecordId }] : []),
                 ...(verifUserId ? [{ value: verifUserId }] : []),
-                { identifier: { in: candidateIdentifiers } },
-                { identifier: { in: companionCandidates } },
+                ...(candidateIdentifiers.length > 0
+                  ? [
+                      { identifier: { in: candidateIdentifiers } },
+                      { identifier: { in: companionCandidates } },
+                    ]
+                  : []),
               ],
             },
           }).catch(() => {});
-
-          const errRes = noStoreJson(
-            { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
-            { status: 500 }
-          );
-          clearAuthCookie(errRes, 'better-auth.two_factor');
-          clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
-          return errRes;
         }
+
+        const errRes = noStoreJson(
+          { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
+          { status: 500 }
+        );
+        clearAuthCookie(errRes, 'better-auth.two_factor');
+        clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+        return errRes;
       }
     }
 
@@ -655,9 +684,14 @@ export async function POST(request: NextRequest) {
         newSessionId = newSession.id;
 
         const uid = targetUserId || newSession.userId;
-        const postCredVer = await getUserCredentialVersion(uid);
+        const postCredVer =
+          targetUserId !== null && newSession.userId === targetUserId
+            ? await getUserCredentialVersion(targetUserId)
+            : null;
 
         if (
+          targetUserId === null ||
+          newSession.userId !== targetUserId ||
           expectedCredVer === null ||
           postCredVer !== expectedCredVer ||
           newSession.credentialVersion !== expectedCredVer

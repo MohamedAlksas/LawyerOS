@@ -384,10 +384,21 @@ async function assertValidParentLinks(
   }
 
   if (partyId) {
-    const party = await client.party.findUnique({
-      where: { id: partyId },
-      select: { id: true, archivedAt: true },
-    });
+    const party = lockParents
+      ? (
+          await client.$queryRaw<
+            Array<{ id: string; archivedAt: Date | null }>
+          >`
+            SELECT "id", "archivedAt"
+            FROM "party"
+            WHERE "id" = ${partyId}
+            FOR UPDATE
+          `
+        )[0] ?? null
+      : await client.party.findUnique({
+          where: { id: partyId },
+          select: { id: true, archivedAt: true },
+        });
     if (!party) {
       throw new DocumentNotFoundError('الطرف المحدد غير موجود.');
     }
@@ -582,6 +593,8 @@ export async function beginUpload(
   }
 
   const tags = Array.from(new Set(parsed.tags.map((t) => t.trim()).filter(Boolean)));
+  const description = parsed.description || null;
+  const originalLocation = parsed.originalLocation || null;
   const db = getDb(options);
   const storage = getStorage(options);
   const now = options?.now ?? new Date();
@@ -594,9 +607,9 @@ export async function beginUpload(
     title: parsed.title,
     documentType: parsed.documentType,
     documentDate: parsed.documentDate ?? null,
-    description: parsed.description ?? null,
+    description,
     tags,
-    originalLocation: parsed.originalLocation ?? null,
+    originalLocation,
     originalPresent: parsed.originalPresent,
     sensitivity: parsed.sensitivity,
     originalFilename: displayFilename,
@@ -652,9 +665,9 @@ export async function beginUpload(
             title: parsed.title,
             documentType: parsed.documentType,
             documentDate,
-            description: parsed.description ?? null,
+            description,
             tags,
-            originalLocation: parsed.originalLocation ?? null,
+            originalLocation,
             originalPresent: parsed.originalPresent,
             sensitivity: parsed.sensitivity,
             originalFilename: displayFilename,
@@ -1490,10 +1503,14 @@ export async function getUploadAttempt(
 }
 
 /** Open + REJECTED, plus EXPIRED (leftover quarantine files); VALIDATING uses a separate stale window on updatedAt. */
-const NON_VALIDATING_CLEANUP_STATUSES: UploadAttemptStatus[] = [
+const EXPIRABLE_NON_VALIDATING_STATUSES: UploadAttemptStatus[] = [
   ...OPEN_UPLOAD_STATUSES,
-  'REJECTED',
   'EXPIRED',
+];
+
+const NON_VALIDATING_CLEANUP_STATUSES: UploadAttemptStatus[] = [
+  ...EXPIRABLE_NON_VALIDATING_STATUSES,
+  'REJECTED',
 ];
 
 const STALE_VALIDATING_MIN_WINDOW_MS = 5 * 60_000;
@@ -1528,6 +1545,13 @@ export async function cleanupExpiredUploadAttempts(
   const staleValidatingCutoff = new Date(
     now.getTime() - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS)
   );
+  const expirableCleanupWhere: Prisma.UploadAttemptWhereInput = {
+    expiresAt: { lte: cutoff },
+    OR: [
+      { status: { in: EXPIRABLE_NON_VALIDATING_STATUSES } },
+      { status: 'VALIDATING', updatedAt: { lte: staleValidatingCutoff } },
+    ],
+  };
   const cleanupEligibilityWhere: Prisma.UploadAttemptWhereInput = {
     expiresAt: { lte: cutoff },
     OR: [
@@ -1558,7 +1582,7 @@ export async function cleanupExpiredUploadAttempts(
     where: {
       AND: [cleanupEligibilityWhere, { NOT: protectedFilter }],
     },
-    // updatedAt: the claim below touches EXPIRED rows too, so already-clean ones rotate to the back.
+    // updatedAt: the claim below touches EXPIRED/REJECTED rows too, so already-clean ones rotate to the back.
     orderBy: { updatedAt: 'asc' },
     take: 200,
   });
@@ -1589,11 +1613,34 @@ export async function cleanupExpiredUploadAttempts(
       continue;
     }
 
-    // Atomically transition to EXPIRED before deleting quarantine bytes so finalized/active VALIDATING attempts cannot race
+    if (attempt.status === 'REJECTED') {
+      // Unlink any leftover quarantine bytes while preserving REJECTED status/failureReason and rotating updatedAt
+      const claimedRejected = await db.uploadAttempt.updateMany({
+        where: {
+          id: attempt.id,
+          status: 'REJECTED',
+          quarantineKey: attempt.quarantineKey,
+          expiresAt: { lte: cutoff },
+        },
+        data: { status: 'REJECTED' },
+      });
+      if (claimedRejected.count === 0) {
+        continue;
+      }
+
+      const deleted = await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      if (deleted) {
+        deletedQuarantineCount++;
+      }
+      continue;
+    }
+
+    // Atomically transition to EXPIRED before deleting quarantine bytes so finalized/active VALIDATING/REJECTED attempts cannot race
     const claimed = await db.uploadAttempt.updateMany({
       where: {
         id: attempt.id,
-        ...cleanupEligibilityWhere,
+        quarantineKey: attempt.quarantineKey,
+        ...expirableCleanupWhere,
       },
       data: {
         status: 'EXPIRED',

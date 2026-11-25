@@ -114,6 +114,7 @@ interface TaskRecord {
   hearingId?: string | null;
   title: string;
   dueDate?: Date | null;
+  dueTime?: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   version: number;
@@ -193,6 +194,7 @@ function mapTaskToDTO(raw: TaskRecord): TaskDTO {
     hearingId: raw.hearingId ?? null,
     title: raw.title,
     dueDate: raw.dueDate ? toDateString(raw.dueDate) : null,
+    dueTime: raw.dueTime ?? null,
     priority: raw.priority,
     status: raw.status,
     version: raw.version,
@@ -245,7 +247,15 @@ function resultAcknowledgment(value: RecordHearingResultResult) {
     resultId: value.resultId,
     hearing: hearingAcknowledgment(value.hearing),
     next: value.nextHearing ? hearingAcknowledgment(value.nextHearing) : null,
-    tasks: value.tasks?.map(({ id, hearingId, dueDate, status, version, updatedAt }) => ({ id, hearingId, dueDate, status, version, updatedAt })) ?? [],
+    tasks: value.tasks?.map(({ id, hearingId, dueDate, dueTime, status, version, updatedAt }) => ({
+      id,
+      hearingId,
+      dueDate,
+      dueTime: dueTime ?? null,
+      status,
+      version,
+      updatedAt,
+    })) ?? [],
   };
 }
 
@@ -916,20 +926,24 @@ export async function rescheduleHearing(
       if (updated.count !== 1) throw new ConcurrencyConflictError('تم تغيير إحدى مهام الجلسة. أعد فتح النموذج.');
       await cancelSourceReminderJobs(tx, 'Task', task.taskId);
       if (task.dueDate) {
-        const nextTaskVersion = task.expectedVersion + 1;
+        const updatedTask = await tx.task.findUniqueOrThrow({
+          where: { id: task.taskId },
+          select: { matterId: true, dueTime: true, version: true },
+        });
         await enqueueSourceReminderJob(tx, {
           sourceType: 'Task',
           sourceId: task.taskId,
-          sourceVersion: nextTaskVersion,
+          sourceVersion: updatedTask.version,
           eventDateYmd: task.dueDate,
-          deduplicationKey: `task_reminder_${task.taskId}_v${nextTaskVersion}`,
+          deduplicationKey: `task_reminder_${task.taskId}_v${updatedTask.version}`,
           payload: {
             taskId: task.taskId,
+            matterId: updatedTask.matterId,
             proceedingId: hearing.proceedingId,
             hearingId: replacementHearing.id,
             dueDate: task.dueDate,
-            dueTime: null,
-            sourceVersion: nextTaskVersion,
+            dueTime: updatedTask.dueTime ?? null,
+            sourceVersion: updatedTask.version,
             recipientUserId: actor.id,
           },
         });
