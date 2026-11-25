@@ -86,7 +86,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
     // 2. Normalization test matter (contains Alef with hamza and 2026 digits)
     const normMatter = await prisma.matter.create({
       data: {
-        fileCode: `2026/7788`,
+        fileCode: `2026/7788-${runId.slice(0, 4)}`,
         title: `الأهرام ${runId} نزاع استثماري 2026`,
         titleNormalized: normalizeArabicText(`الأهرام ${runId} نزاع استثماري 2026`),
         kind: 'LITIGATION',

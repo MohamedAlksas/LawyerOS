@@ -2,7 +2,6 @@
 
 import { verifyActionSecurity } from '@/modules/identity/action-security';
 import {
-  listActiveSessions,
   revokeSession,
   revokeOtherSessions,
   regenerateRecoveryCodes,
@@ -33,29 +32,6 @@ export type RegenerateBackupCodesResult =
       message: string;
       remainingAttempts?: number;
     };
-
-export async function getSecurityOverview() {
-  const actor = await verifyActionSecurity('MANAGE_SECURITY');
-  const sessions = await listActiveSessions(actor.id, actor.sessionId);
-
-  return {
-    actor: {
-      id: actor.id,
-      name: actor.name,
-      email: actor.email,
-      role: actor.role,
-      twoFactorVerified: actor.twoFactorVerified,
-    },
-    sessions: sessions.map((s) => ({
-      id: s.id,
-      ipAddress: s.ipAddress || 'غير معروف',
-      userAgent: s.userAgent || 'متصفح غير معروف',
-      createdAt: s.createdAt.toISOString(),
-      updatedAt: s.updatedAt.toISOString(),
-      isCurrent: s.isCurrent,
-    })),
-  };
-}
 
 export async function revokeSessionAction(
   sessionId: string

@@ -235,7 +235,7 @@ export function parseTargetUrl(targetUrl: string): ParsedTargetUrl {
   }
 
   return {
-    host: parsed.hostname,
+    host: parsed.hostname.replace(/^\[(.+)\]$/, '$1'),
     port,
     database,
     user,

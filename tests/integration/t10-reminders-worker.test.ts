@@ -978,50 +978,56 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     const rules = await listReminderRules(owner);
     expect(rules.length).toBeGreaterThanOrEqual(7);
     const taskRule = rules.find((r) => r.eventType === 'TASK')!;
-    const updatedRule = await updateReminderRule(owner, {
-      ruleId: taskRule.id,
-      expectedVersion: taskRule.version,
-      reminderTime: '10:00',
-      idempotencyKey: crypto.randomUUID(),
-    });
-    expect(updatedRule.reminderTime).toBe('10:00');
-    expect(updatedRule.version).toBe(taskRule.version + 1);
-
-    await expect(
-      updateReminderRule(owner, {
+    let updatedRule: typeof taskRule;
+    try {
+      updatedRule = await updateReminderRule(owner, {
         ruleId: taskRule.id,
-        expectedVersion: taskRule.version, // stale version
-        reminderTime: '11:00',
+        expectedVersion: taskRule.version,
+        reminderTime: '10:00',
         idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ConcurrencyConflictError);
+      });
+      expect(updatedRule.reminderTime).toBe('10:00');
+      expect(updatedRule.version).toBe(taskRule.version + 1);
 
-    await expect(
-      updateReminderRule(owner, {
-        ruleId: updatedRule.id,
-        expectedVersion: updatedRule.version,
-        reminderTime: '25:00',
-        idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ReminderValidationError);
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: taskRule.id,
+          expectedVersion: taskRule.version, // stale version
+          reminderTime: '11:00',
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ConcurrencyConflictError);
 
-    const hearingRule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7)!;
-    await expect(
-      updateReminderRule(owner, {
-        ruleId: hearingRule7.id,
-        expectedVersion: hearingRule7.version,
-        dayOffset: 3, // duplicates existing HEARING dayOffset=3 rule
-        idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ReminderValidationError);
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: updatedRule.id,
+          expectedVersion: updatedRule.version,
+          reminderTime: '25:00',
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ReminderValidationError);
 
-    // Restore original rule time
-    await updateReminderRule(owner, {
-      ruleId: updatedRule.id,
-      expectedVersion: updatedRule.version,
-      reminderTime: '09:00',
-      idempotencyKey: crypto.randomUUID(),
-    });
+      const hearingRule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7)!;
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: hearingRule7.id,
+          expectedVersion: hearingRule7.version,
+          dayOffset: 3, // duplicates existing HEARING dayOffset=3 rule
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ReminderValidationError);
+    } finally {
+      // Restore original rule time
+      const currentRule = await prisma.reminderRule.findUniqueOrThrow({ where: { id: taskRule.id } });
+      if (currentRule.reminderTime !== '09:00') {
+        await updateReminderRule(owner, {
+          ruleId: currentRule.id,
+          expectedVersion: currentRule.version,
+          reminderTime: '09:00',
+          idempotencyKey: crypto.randomUUID(),
+        });
+      }
+    }
 
     // REMINDER_DISPATCH_DISABLED blocks all dispatch without advancing deliveries
     const blockedTask = await createTask(owner, {
@@ -1422,6 +1428,63 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     }
   });
 
+  it('Continues reminder chaining via _chain_ fallback when existingNextJob.status === SUCCEEDED', async () => {
+    const hSucc = await scheduleHearing(owner, {
+      proceedingId,
+      hearingDate: '2028-03-20',
+      hearingTime: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hSucc.id);
+
+    try {
+      const primaryJob = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `hearing_reminder_${hSucc.id}` },
+      });
+      expect(primaryJob.status).toBe('PENDING');
+
+      // Seed a prior SUCCEEDED row holding the canonical _r3 deduplication key
+      const succeededR3 = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Hearing',
+          sourceId: hSucc.id,
+          sourceVersion: 1,
+          scheduledAt: new Date('2028-03-17T07:00:00.000Z'),
+          availableAt: new Date('2028-03-17T07:00:00.000Z'),
+          status: 'SUCCEEDED',
+          completedAt: new Date('2028-03-13T06:00:00.000Z'),
+          deduplicationKey: `reminder_Hearing_${hSucc.id}_v1_r3`,
+          payload: primaryJob.payload as object,
+        },
+      });
+
+      await runReminderWorkerTick({
+        now: new Date('2028-03-13T07:05:00.000Z'),
+        workerId: 'worker-succ-chain',
+      });
+
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: primaryJob.id } })).status).toBe('SUCCEEDED');
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: succeededR3.id } })).status).toBe('SUCCEEDED');
+
+      const chainedR3 = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `reminder_Hearing_${hSucc.id}_v1_r3_chain_${primaryJob.id}` },
+      });
+      expect(chainedR3.status).toBe('PENDING');
+      expect(chainedR3.scheduledAt.toISOString()).toBe('2028-03-17T07:00:00.000Z');
+    } finally {
+      await prisma.reminderDelivery.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: hSucc.id },
+      });
+      await prisma.jobRun.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: hSucc.id },
+      });
+      await prisma.hearing.deleteMany({
+        where: { id: hSucc.id },
+      });
+    }
+  });
+
   it('Migration verification: fresh deploy, SQL CHECK constraints, and populated T09-to-T10 upgrade with available_at backfill', async () => {
     const fresh = await createDedicatedTestDatabase();
     try {
@@ -1458,8 +1521,8 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     }
 
     // Populated T09 -> T10 upgrade preserves existing rows and backfills job_run.available_at from scheduled_at
-    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t09-baseline-'));
     const upgraded = await createDedicatedTestDatabase();
+    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t09-baseline-'));
     try {
       const schema = path.join(stageDir, 'schema.prisma');
       const migrations = path.join(stageDir, 'migrations');

@@ -7,7 +7,9 @@ import {
   computePayloadHash,
   runWithIdempotencyRetry,
   IdempotencyConcurrentConflictError,
+  isIdempotencyUniqueConflict,
 } from '@/lib/idempotency';
+import { parseTargetUrl } from '@/cli/baseline-identity';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import {
   searchMattersParamsSchema,
@@ -244,6 +246,44 @@ describe('Audit fixes unit regressions', () => {
     it('returns null from getUserCredentialVersionByEmail without querying when email is blank', async () => {
       expect(await getUserCredentialVersionByEmail('')).toBeNull();
       expect(await getUserCredentialVersionByEmail('   ')).toBeNull();
+    });
+
+    it('returns false from isIdempotencyUniqueConflict on non-IdempotencyRecord P2002', () => {
+      const nonModelP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { modelName: 'DocumentVersion', target: ['objectKey'] },
+      });
+      expect(isIdempotencyUniqueConflict(nonModelP2002)).toBe(false);
+
+      const missingCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['objectKey'] },
+      });
+      expect(isIdempotencyUniqueConflict(missingCompositeP2002)).toBe(false);
+
+      const partialCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['actorId', 'key'] },
+      });
+      expect(isIdempotencyUniqueConflict(partialCompositeP2002)).toBe(false);
+
+      const validCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['actorId', 'commandType', 'key'] },
+      });
+      expect(isIdempotencyUniqueConflict(validCompositeP2002)).toBe(true);
+    });
+
+    it('strips IPv6 brackets in host while preserving them in canonicalUrl in parseTargetUrl', () => {
+      const parsed = parseTargetUrl(
+        'postgresql://lawoffice_user:secret@[::1]:5432/lawoffice_test?sslmode=disable'
+      );
+      expect(parsed.host).toBe('::1');
+      expect(parsed.canonicalUrl).toContain('@[::1]:5432/');
     });
   });
 });

@@ -86,7 +86,7 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
   return (
     <div className="py-2">
       <MatterForm
-        key={actor.id}
+        key={`${actor.sessionId}:${matter.id}`}
         ownerId={actor.id}
         initialMatter={matter}
         practiceAreas={practiceAreas.map((pa) => ({ id: pa.id, name: pa.name, isActive: pa.isActive }))}

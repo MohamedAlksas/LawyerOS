@@ -148,16 +148,16 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
     <div className="space-y-6 max-w-4xl">
       {/* 1. Header / Breadcrumb */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[#D5DFE3]">
-        <div className="space-y-1">
-          <nav aria-label="مسار التصفح" className="text-xs text-[#4D606A] flex items-center gap-1.5">
+        <div className="space-y-1 min-w-0">
+          <nav aria-label="مسار التصفح" className="text-xs text-[#4D606A] flex flex-wrap items-center gap-1.5 min-w-0">
             <Link href="/parties" className="hover:text-[#14566B] hover:underline">
               دليل الأطراف
             </Link>
             <span aria-hidden="true">/</span>
-            <span className="text-[#172A35] font-medium">{party.name}</span>
+            <span className="text-[#172A35] font-medium min-w-0 [overflow-wrap:anywhere]">{party.name}</span>
           </nav>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold text-[#172A35] tracking-tight">
               {party.name}
             </h1>
             <span className="inline-block px-2.5 py-0.5 rounded text-xs font-semibold bg-[#E8EEF1] text-[#14566B]">
@@ -434,14 +434,14 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                 data-testid={`linked-matter-${m.matterId}`}
                 className="py-3 flex items-center justify-between gap-3 text-xs"
               >
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="space-y-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
                     <bdi dir="ltr" className="font-mono font-bold text-[#14566B] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
                       {m.fileCode}
                     </bdi>
                     <Link
                       href={`/matters/${m.matterId}`}
-                      className="font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
+                      className="min-w-0 [overflow-wrap:anywhere] font-bold text-sm text-[#172A35] hover:text-[#14566B] hover:underline"
                     >
                       {m.title}
                     </Link>

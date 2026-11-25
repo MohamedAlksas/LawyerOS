@@ -200,9 +200,8 @@ export function ReferenceSettingsClient({
       editItemIsActive !== editingItem.isActive);
 
   useLeaveGuard(
-    officeDirty || itemDraftDirty || isModalDirty,
-    officePending || itemPending || editItemPending || togglePending ||
-      isSavingOffice || isCreatingItem || isSavingEditItem || isTogglingActive
+    officeDirty || itemDraftDirty || isModalDirty || officePending || itemPending || editItemPending || togglePending,
+    isSavingOffice || isCreatingItem || isSavingEditItem || isTogglingActive
   );
 
   const keepPendingOperations = () => {
@@ -767,12 +766,13 @@ export function ReferenceSettingsClient({
           <p className="leading-relaxed">
             حدث خطأ أثناء استرجاع البيانات المرجعية من الخادم. يمكنك إعادة تحميل الصفحة.
           </p>
-          <Link
-            href="/settings/reference"
+          <button
+            type="button"
+            onClick={() => router.refresh()}
             className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
           >
             إعادة تحميل الصفحة
-          </Link>
+          </button>
         </div>
       )}
 
@@ -1559,7 +1559,8 @@ export function ReferenceSettingsClient({
                   <button
                     type="submit"
                     form="edit-reference-item-form"
-                    className="px-2.5 py-1 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded"
+                    disabled={isSavingEditItem}
+                    className="px-2.5 py-1 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded disabled:opacity-50"
                   >
                     إعادة محاولة الحفظ
                   </button>
@@ -1579,7 +1580,8 @@ export function ReferenceSettingsClient({
                   <button
                     type="submit"
                     form="edit-reference-item-form"
-                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded"
+                    disabled={isSavingEditItem}
+                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded disabled:opacity-50"
                   >
                     إعادة المحاولة
                   </button>

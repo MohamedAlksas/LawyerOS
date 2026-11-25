@@ -190,7 +190,8 @@ describe('Environment validation (src/lib/env.ts)', () => {
         expect(err.message).toContain('must not target the operational/development database');
       }
     } finally {
-      process.env.CI = originalAmbientCi;
+      if (originalAmbientCi === undefined) delete process.env.CI;
+      else process.env.CI = originalAmbientCi;
     }
   });
 

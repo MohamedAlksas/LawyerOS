@@ -64,7 +64,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
     else draft.clear();
   });
-  useLeaveGuard(!readOnly && isFormOpen && isDirty, !readOnly && (isSubmitting || Boolean(pending)));
+  useLeaveGuard(!readOnly && isFormOpen && (isDirty || Boolean(pending)), !readOnly && isSubmitting);
 
   const getIdempotencyKey = (): string => {
     if (!idempotencyKeyRef.current) {

@@ -51,6 +51,8 @@ interface MatterDetailClientProps {
   initialMatter: MatterDTO;
   initialTasks?: TaskItemDTO[];
   initialDeadlines?: DeadlineDTO[];
+  tasksError?: string;
+  deadlinesError?: string;
 }
 
 export function MatterDetailClient({
@@ -58,6 +60,8 @@ export function MatterDetailClient({
   initialMatter,
   initialTasks = [],
   initialDeadlines = [],
+  tasksError,
+  deadlinesError,
 }: MatterDetailClientProps) {
   const router = useRouter();
   const [matter, setMatter] = useState<MatterDTO>(initialMatter);
@@ -102,6 +106,7 @@ export function MatterDetailClient({
 
   // General Notification / Error
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Matter Archive/Reopen State
   const [showArchiveMatterModal, setShowArchiveMatterModal] = useState(false);
@@ -268,6 +273,7 @@ export function MatterDetailClient({
 
   const handleOpenPartyModal = () => {
     setActionMessage(null);
+    setActionError(null);
     setPartyActionError(null);
     setPartySearchError(null);
     partySearchGenRef.current++;
@@ -285,7 +291,8 @@ export function MatterDetailClient({
   };
 
   const hasUnsavedModalInput = Boolean(
-    ((showArchiveMatterModal || showReopenMatterModal) && matterLifecycleReason.trim()) ||
+    pendingAssocOp ||
+      ((showArchiveMatterModal || showReopenMatterModal) && matterLifecycleReason.trim()) ||
       (selectedProceedingForLifecycle && proceedingLifecycleReason.trim()) ||
       (showAddPartyModal && (selectedPartyId || partyNotes.trim())) ||
       (showAddPoaModal && selectedPoaId)
@@ -301,9 +308,11 @@ export function MatterDetailClient({
 
   const openArchiveMatterModal = () => {
     if (pendingLifecycleOpRef.current && pendingLifecycleOpRef.current.kind !== 'archiveMatter') {
-      setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
+      setActionMessage(null);
+      setActionError(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
+    setActionError(null);
     setLifecycleError(null);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'archiveMatter'
@@ -320,9 +329,11 @@ export function MatterDetailClient({
 
   const openReopenMatterModal = () => {
     if (pendingLifecycleOpRef.current && pendingLifecycleOpRef.current.kind !== 'reopenMatter') {
-      setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
+      setActionMessage(null);
+      setActionError(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
+    setActionError(null);
     setLifecycleError(null);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'reopenMatter'
@@ -349,9 +360,11 @@ export function MatterDetailClient({
         pendingLifecycleOpRef.current.proceedingId === proc.id
       )
     ) {
-      setActionMessage(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
+      setActionMessage(null);
+      setActionError(`توجد عملية مجمّدة أخرى لم تُحسم بعد (${pendingLifecycleOpRef.current.description}). يرجى حسمها أولاً.`);
       return;
     }
+    setActionError(null);
     setSelectedProceedingForLifecycle(proc);
     setProceedingLifecycleAction(action);
     setProceedingLifecycleError(null);
@@ -539,7 +552,7 @@ export function MatterDetailClient({
           matterId: matter.id,
           partyId: selectedPartyId,
           role: selectedPartyRole,
-          isPrimaryContact,
+          isPrimaryContact: selectedPartyRole === 'CLIENT' && isPrimaryContact,
           billingEnabled: false,
           notes: partyNotes.trim() || null,
         },
@@ -755,6 +768,7 @@ export function MatterDetailClient({
   const handleOpenPoaModal = async () => {
     const gen = ++poaLoadGenRef.current;
     setActionMessage(null);
+    setActionError(null);
     setAvailablePoas([]);
     setSelectedPoaId('');
     setShowAddPoaModal(true);
@@ -857,7 +871,7 @@ export function MatterDetailClient({
       (pendingAssocOpRef.current.kind !== 'linkPoa' ||
         pendingAssocOpRef.current.targetId !== selectedPoaId)
     ) {
-      setPartyActionError(
+      setPoaActionError(
         'توجد عملية سابقة قيد الانتظار أو لم يتأكد اكتمالها بعد. يرجى إعادة محاولة أو حسم العملية العالقة أولاً قبل بدء عملية جديدة.'
       );
       return;
@@ -884,6 +898,8 @@ export function MatterDetailClient({
   const executeUnlinkPoa = async (op: Extract<AssociationOp, { kind: 'unlinkPoa' }>) => {
     if (isAssocSubmitting) return;
     setIsAssocSubmitting(true);
+    setActionError(null);
+    setActionMessage(null);
     try {
       const res = await unlinkMatterAuthorizationAction({
         ...op.payload,
@@ -896,7 +912,7 @@ export function MatterDetailClient({
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
             setPendingAssocOp(op);
           }
-          setActionMessage('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
+          setActionError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة.');
         } else if (
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
@@ -907,7 +923,7 @@ export function MatterDetailClient({
           if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
             setPendingAssocOp(op);
           }
-          setActionMessage(
+          setActionError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
               ? 'العملية قيد المعالجة حالياً على الخادم. أُبقيت العملية مجمّدة؛ أعد المحاولة بنفس المفتاح.'
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة.'
@@ -917,7 +933,7 @@ export function MatterDetailClient({
             pendingAssocOpRef.current = null;
             setPendingAssocOp(null);
           }
-          setActionMessage(`تعذر إلغاء الربط: ${res.error}`);
+          setActionError(`تعذر إلغاء الربط: ${res.error}`);
         }
         return;
       }
@@ -937,7 +953,7 @@ export function MatterDetailClient({
       if (!pendingAssocOpRef.current || pendingAssocOpRef.current.key === op.key) {
         setPendingAssocOp(op);
       }
-      setActionMessage('حدث خطأ أثناء إلغاء الربط.');
+      setActionError('حدث خطأ أثناء إلغاء الربط.');
     } finally {
       setIsAssocSubmitting(false);
     }
@@ -1503,6 +1519,24 @@ export function MatterDetailClient({
         </div>
       )}
 
+      {actionError && (
+        <div
+          role="alert"
+          data-testid="detail-action-error"
+          className="p-3 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs flex items-center justify-between"
+        >
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="إغلاق رسالة الخطأ"
+            className="text-red-700 hover:text-red-900 font-bold px-2 py-0.5"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {partyActionError && (
         <div
           role="alert"
@@ -1704,7 +1738,7 @@ export function MatterDetailClient({
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
             }`}
           >
-            المهام والمواعيد ({initialTasks.length + initialDeadlines.length})
+            المهام والمواعيد ({tasksError || deadlinesError ? '—' : initialTasks.length + initialDeadlines.length})
           </button>
 
           <button
@@ -1786,7 +1820,7 @@ export function MatterDetailClient({
                   {partySearchError && (
                     <p className="text-xs text-red-600 font-medium pt-1">{partySearchError}</p>
                   )}
-                  {!isSearchingParty && !partySearchError && partySearchQuery.trim() && searchedParties.length === 0 && (
+                  {!isSearchingParty && !partySearchError && partySearchQuery.trim() && searchedParties.length === 0 && !selectedPartyId && (
                     <p className="text-xs text-[#4D606A] italic pt-1">لم يتم العثور على أطراف مطابقة.</p>
                   )}
 
@@ -1824,7 +1858,13 @@ export function MatterDetailClient({
                     <select
                       id="link-party-role-select"
                       value={selectedPartyRole}
-                      onChange={(e) => setSelectedPartyRole(e.target.value as MatterPartyRole)}
+                      onChange={(e) => {
+                        const nextRole = e.target.value as MatterPartyRole;
+                        setSelectedPartyRole(nextRole);
+                        if (nextRole !== 'CLIENT') {
+                          setIsPrimaryContact(false);
+                        }
+                      }}
                       data-testid="party-role-select"
                       className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
                     >
@@ -2473,6 +2513,7 @@ export function MatterDetailClient({
           <DeadlinesView
             actorId={ownerId}
             initialDeadlines={initialDeadlines}
+            initialError={deadlinesError}
             selectableMatters={[]}
             lockedMatterId={matter.id}
             lockedMatterProceedings={(matter.proceedings || [])
@@ -2490,6 +2531,7 @@ export function MatterDetailClient({
           <TasksView
             actorId={ownerId}
             initialTasks={initialTasks}
+            initialError={tasksError}
             selectableMatters={[]}
             lockedMatterId={matter.id}
             lockedMatterProceedings={(matter.proceedings || [])

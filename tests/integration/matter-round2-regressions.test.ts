@@ -429,4 +429,89 @@ describe('T06 Round 2 Regression & Defect Verification', () => {
     });
     expect(idem).toBeNull();
   });
+
+  it('T06-R2-10: updateMatter validates openingDate <= closingDate against existing DB date and addProceeding rejects duplicate matterPartyId', async () => {
+    const court = await createReferenceItem(actor, {
+      type: 'COURT',
+      name: `Validation Court ${crypto.randomUUID().slice(0, 6)}`,
+      idempotencyKey: `court-val-${crypto.randomUUID()}`,
+    });
+    createdCourtIds.push(court.id);
+
+    const opened = await openMatter(actor, {
+      title: 'Date Range & Duplicate Party Matter',
+      kind: 'LITIGATION',
+      openingDate: '2026-06-01',
+      idempotencyKey: `open-dates-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(opened.matter.id);
+
+    // Updating only closingDate earlier than existing DB openingDate must throw MatterValidationError
+    await expect(
+      updateMatter(actor, {
+        id: opened.matter.id,
+        title: opened.matter.title,
+        kind: opened.matter.kind,
+        status: opened.matter.status,
+        closingDate: '2026-05-01',
+        expectedVersion: opened.matter.version,
+        idempotencyKey: `upd-bad-closing-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(MatterValidationError);
+
+    // Valid closingDate succeeds, then moving openingDate past existing closingDate must fail
+    const withClosing = await updateMatter(actor, {
+      id: opened.matter.id,
+      title: opened.matter.title,
+      kind: opened.matter.kind,
+      status: opened.matter.status,
+      closingDate: '2026-07-01',
+      expectedVersion: opened.matter.version,
+      idempotencyKey: `upd-ok-closing-${crypto.randomUUID()}`,
+    });
+
+    await expect(
+      updateMatter(actor, {
+        id: opened.matter.id,
+        title: opened.matter.title,
+        kind: opened.matter.kind,
+        status: opened.matter.status,
+        openingDate: '2026-08-01',
+        expectedVersion: withClosing.matter.version,
+        idempotencyKey: `upd-bad-opening-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(MatterValidationError);
+
+    // Duplicate matterPartyId in addProceeding throws MatterValidationError
+    const party = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: 'Duplicate Proceeding Party',
+        nameNormalized: 'duplicate proceeding party',
+        createdById: actor.id,
+        updatedById: actor.id,
+      },
+    });
+    createdPartyIds.push(party.id);
+
+    const mp = await linkMatterParty(actor, {
+      matterId: opened.matter.id,
+      partyId: party.id,
+      role: 'CLIENT',
+      idempotencyKey: `mp-dup-${crypto.randomUUID()}`,
+    });
+
+    await expect(
+      addProceeding(actor, {
+        matterId: opened.matter.id,
+        courtId: court.id,
+        instance: 'FIRST_INSTANCE',
+        parties: [
+          { matterPartyId: mp.id, legalCapacity: 'PLAINTIFF' },
+          { matterPartyId: mp.id, legalCapacity: 'DEFENDANT' },
+        ],
+        idempotencyKey: `proc-dup-party-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(MatterValidationError);
+  });
 });

@@ -338,12 +338,14 @@ async function assertValidParentLinks(
     partyId?: string | null;
     proceedingId?: string | null;
     hearingId?: string | null;
-  }
+  },
+  options?: { lockParents?: boolean }
 ): Promise<void> {
   const matterId = links.matterId ?? null;
   const partyId = links.partyId ?? null;
   const proceedingId = links.proceedingId ?? null;
   const hearingId = links.hearingId ?? null;
+  const lockParents = options?.lockParents ?? false;
 
   if (Boolean(matterId) === Boolean(partyId)) {
     throw new DocumentValidationError(
@@ -358,14 +360,25 @@ async function assertValidParentLinks(
   }
 
   if (matterId) {
-    const matter = await client.matter.findUnique({
-      where: { id: matterId },
-      select: { id: true, archivedAt: true },
-    });
+    const matter = lockParents
+      ? (
+          await client.$queryRaw<
+            Array<{ id: string; status: string; archivedAt: Date | null }>
+          >`
+            SELECT "id", "status", "archivedAt"
+            FROM "matter"
+            WHERE "id" = ${matterId}
+            FOR UPDATE
+          `
+        )[0] ?? null
+      : await client.matter.findUnique({
+          where: { id: matterId },
+          select: { id: true, status: true, archivedAt: true },
+        });
     if (!matter) {
       throw new DocumentNotFoundError('ملف القضية المحدد غير موجود.');
     }
-    if (matter.archivedAt !== null) {
+    if (matter.archivedAt !== null || matter.status === 'ARCHIVED') {
       throw new DocumentValidationError('لا يمكن رفع مستند على ملف قضية مؤرشف.');
     }
   }
@@ -384,10 +397,21 @@ async function assertValidParentLinks(
   }
 
   if (proceedingId) {
-    const proceeding = await client.proceeding.findUnique({
-      where: { id: proceedingId },
-      select: { id: true, matterId: true, archivedAt: true },
-    });
+    const proceeding = lockParents
+      ? (
+          await client.$queryRaw<
+            Array<{ id: string; matterId: string; archivedAt: Date | null }>
+          >`
+            SELECT "id", "matterId", "archivedAt"
+            FROM "proceeding"
+            WHERE "id" = ${proceedingId}
+            FOR UPDATE
+          `
+        )[0] ?? null
+      : await client.proceeding.findUnique({
+          where: { id: proceedingId },
+          select: { id: true, matterId: true, archivedAt: true },
+        });
     if (!proceeding) {
       throw new DocumentNotFoundError('القيد القضائي المحدد غير موجود.');
     }
@@ -413,18 +437,40 @@ async function assertValidParentLinks(
     if (!hearing) {
       throw new DocumentNotFoundError('الجلسة المحددة غير موجودة.');
     }
-    if (hearing.proceeding.matterId !== matterId) {
-      throw new CrossMatterLinkForbiddenError(
-        'لا يمكن ربط المستند بجلسة تتبع ملف قضية آخر.'
-      );
-    }
-    if (proceedingId && hearing.proceedingId !== proceedingId) {
-      throw new CrossMatterLinkForbiddenError(
-        'الجلسة المحددة لا تتبع القيد القضائي المختار.'
-      );
-    }
-    if (hearing.proceeding.archivedAt !== null) {
-      throw new DocumentValidationError('لا يمكن رفع مستند على جلسة في قيد قضائي مؤرشف.');
+    if (lockParents && !proceedingId) {
+      const [lockedProceeding] = await client.$queryRaw<
+        Array<{ id: string; matterId: string; archivedAt: Date | null }>
+      >`
+        SELECT "id", "matterId", "archivedAt"
+        FROM "proceeding"
+        WHERE "id" = ${hearing.proceedingId}
+        FOR UPDATE
+      `;
+      if (!lockedProceeding) {
+        throw new DocumentNotFoundError('القيد القضائي المحدد غير موجود.');
+      }
+      if (lockedProceeding.matterId !== matterId) {
+        throw new CrossMatterLinkForbiddenError(
+          'لا يمكن ربط المستند بجلسة تتبع ملف قضية آخر.'
+        );
+      }
+      if (lockedProceeding.archivedAt !== null) {
+        throw new DocumentValidationError('لا يمكن رفع مستند على جلسة في قيد قضائي مؤرشف.');
+      }
+    } else {
+      if (hearing.proceeding.matterId !== matterId) {
+        throw new CrossMatterLinkForbiddenError(
+          'لا يمكن ربط المستند بجلسة تتبع ملف قضية آخر.'
+        );
+      }
+      if (proceedingId && hearing.proceedingId !== proceedingId) {
+        throw new CrossMatterLinkForbiddenError(
+          'الجلسة المحددة لا تتبع القيد القضائي المختار.'
+        );
+      }
+      if (hearing.proceeding.archivedAt !== null) {
+        throw new DocumentValidationError('لا يمكن رفع مستند على جلسة في قيد قضائي مؤرشف.');
+      }
     }
   }
 }
@@ -866,6 +912,7 @@ export async function finalizeUpload(
     where: {
       id: attempt.id,
       status: { in: ['UPLOADED', 'FAILED'] },
+      quarantineKey: attempt.quarantineKey,
       expiresAt: { gt: now },
     },
     data: { status: 'VALIDATING' },
@@ -917,14 +964,17 @@ export async function finalizeUpload(
       });
     } catch (err) {
       const safeReason = toSafeFailureReason(err);
-      await db.$transaction(async (tx) => {
-        await tx.uploadAttempt.update({
-          where: { id: attempt.id },
+      const rejected = await db.$transaction(async (tx) => {
+        const res = await tx.uploadAttempt.updateMany({
+          where: { id: attempt.id, status: 'VALIDATING' },
           data: {
             status: 'REJECTED',
             failureReason: safeReason,
           },
         });
+        if (res.count === 0) {
+          return false;
+        }
         await recordAuditEvent(tx, {
           userId: actor.id,
           action: 'REJECT_DOCUMENT_UPLOAD',
@@ -938,8 +988,11 @@ export async function finalizeUpload(
           },
           reason: safeReason,
         });
+        return true;
       });
-      await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      if (rejected) {
+        await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      }
       statusFinalizedOrReverted = true;
       throw err;
     }
@@ -1022,7 +1075,11 @@ export async function finalizeUpload(
           });
 
           if (claim.isReplay && claim.resultId) {
-            return { isReplay: true, documentId: claim.resultId };
+            return {
+              isReplay: true,
+              documentId: claim.resultId,
+              quarantineKey: attempt.quarantineKey,
+            };
           }
 
           const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
@@ -1044,17 +1101,24 @@ export async function finalizeUpload(
           if (lockedAttempt.status !== 'VALIDATING') {
             throw new ConcurrencyConflictError('تغيرت حالة محاولة الرفع أثناء الاعتماد.');
           }
+          if (lockedAttempt.quarantineKey !== attempt.quarantineKey) {
+            throw new ConcurrencyConflictError('تغيرت بيانات محاولة الرفع أثناء المعالجة.');
+          }
           if (lockedAttempt.sha256 && lockedAttempt.sha256 !== inspected.sha256) {
             throw new DocumentValidationError('بصمة الملف تغيرت أثناء المعالجة.');
           }
 
-          // Re-validate parent links inside the DB transaction under lock
-          await assertValidParentLinks(tx, {
-            matterId: lockedAttempt.matterId,
-            partyId: lockedAttempt.partyId,
-            proceedingId: lockedAttempt.proceedingId,
-            hearingId: lockedAttempt.hearingId,
-          });
+          // Re-validate and lock parent links inside the DB transaction (matter -> proceeding)
+          await assertValidParentLinks(
+            tx,
+            {
+              matterId: lockedAttempt.matterId,
+              partyId: lockedAttempt.partyId,
+              proceedingId: lockedAttempt.proceedingId,
+              hearingId: lockedAttempt.hearingId,
+            },
+            { lockParents: true }
+          );
 
           await tx.document.create({
             data: {
@@ -1165,7 +1229,7 @@ export async function finalizeUpload(
             await options.beforeCommit(tx);
           }
 
-          return { isReplay: false, documentId };
+          return { isReplay: false, documentId, quarantineKey: lockedAttempt.quarantineKey };
         }),
       async () => {
         const resolved = await resolveConcurrentIdempotency(db, {
@@ -1175,7 +1239,14 @@ export async function finalizeUpload(
           payload: payloadForIdempotency,
         });
         if (!resolved || !resolved.resultId) return { resolved: false };
-        return { resolved: true, value: { isReplay: true, documentId: resolved.resultId } };
+        return {
+          resolved: true,
+          value: {
+            isReplay: true,
+            documentId: resolved.resultId,
+            quarantineKey: attempt.quarantineKey,
+          },
+        };
       }
     );
 
@@ -1187,7 +1258,7 @@ export async function finalizeUpload(
     if (txResult.isReplay && txResult.documentId !== documentId) {
       await storage.deleteReady(promotedReadyKey).catch(() => false);
     } else {
-      await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      await storage.deleteQuarantine(txResult.quarantineKey).catch(() => false);
     }
 
     const committedDoc = await db.document.findUniqueOrThrow({
@@ -1418,13 +1489,14 @@ export async function getUploadAttempt(
   return mapUploadAttemptToDTO(attempt);
 }
 
-/** Open + REJECTED, plus EXPIRED (leftover quarantine files) and VALIDATING (crashed finalize) past expiry. */
-const CLEANUP_ATTEMPT_STATUSES: UploadAttemptStatus[] = [
+/** Open + REJECTED, plus EXPIRED (leftover quarantine files); VALIDATING uses a separate stale window on updatedAt. */
+const NON_VALIDATING_CLEANUP_STATUSES: UploadAttemptStatus[] = [
   ...OPEN_UPLOAD_STATUSES,
   'REJECTED',
   'EXPIRED',
-  'VALIDATING',
 ];
+
+const STALE_VALIDATING_MIN_WINDOW_MS = 5 * 60_000;
 
 export async function cleanupExpiredUploadAttempts(
   storage: DocumentStorageAdapter = createLocalDocumentStorage(),
@@ -1453,6 +1525,16 @@ export async function cleanupExpiredUploadAttempts(
       : getDb({ prismaOverride: nowOrOptions?.prismaOverride });
 
   const cutoff = new Date(now.getTime() - Math.max(0, gracePeriodMs));
+  const staleValidatingCutoff = new Date(
+    now.getTime() - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS)
+  );
+  const cleanupEligibilityWhere: Prisma.UploadAttemptWhereInput = {
+    expiresAt: { lte: cutoff },
+    OR: [
+      { status: { in: NON_VALIDATING_CLEANUP_STATUSES } },
+      { status: 'VALIDATING', updatedAt: { lte: staleValidatingCutoff } },
+    ],
+  };
 
   const protectedFilter: Prisma.UploadAttemptWhereInput = {
     targetDocumentVersion: {
@@ -1468,17 +1550,13 @@ export async function cleanupExpiredUploadAttempts(
 
   let skippedProtectedCount = await db.uploadAttempt.count({
     where: {
-      status: { in: CLEANUP_ATTEMPT_STATUSES },
-      expiresAt: { lte: cutoff },
-      ...protectedFilter,
+      AND: [cleanupEligibilityWhere, protectedFilter],
     },
   });
 
   const candidates = await db.uploadAttempt.findMany({
     where: {
-      status: { in: CLEANUP_ATTEMPT_STATUSES },
-      expiresAt: { lte: cutoff },
-      NOT: protectedFilter,
+      AND: [cleanupEligibilityWhere, { NOT: protectedFilter }],
     },
     // updatedAt: the claim below touches EXPIRED rows too, so already-clean ones rotate to the back.
     orderBy: { updatedAt: 'asc' },
@@ -1511,12 +1589,11 @@ export async function cleanupExpiredUploadAttempts(
       continue;
     }
 
-    // Atomically transition to EXPIRED before deleting quarantine bytes so finalized attempts cannot race
+    // Atomically transition to EXPIRED before deleting quarantine bytes so finalized/active VALIDATING attempts cannot race
     const claimed = await db.uploadAttempt.updateMany({
       where: {
         id: attempt.id,
-        status: { in: CLEANUP_ATTEMPT_STATUSES },
-        expiresAt: { lte: cutoff },
+        ...cleanupEligibilityWhere,
       },
       data: {
         status: 'EXPIRED',

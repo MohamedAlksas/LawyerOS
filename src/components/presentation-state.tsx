@@ -88,6 +88,7 @@ export interface EmptyStateContainerProps {
 }
 
 export function EmptyStateContainer({
+  icon,
   title,
   description,
   action,
@@ -95,6 +96,10 @@ export function EmptyStateContainer({
   className = '',
   testId = 'empty-state-container',
 }: EmptyStateContainerProps) {
+  const renderedIcon =
+    typeof icon === 'string'
+      ? icon.trim() || <IconFolder className="w-7 h-7" />
+      : icon || <IconFolder className="w-7 h-7" />;
   return (
     <div
       data-testid={testId}
@@ -104,7 +109,7 @@ export function EmptyStateContainer({
         className="w-14 h-14 mx-auto rounded-[6px] bg-[#E9F2F5] border border-[#C2D9E2] flex items-center justify-center text-[#14566B] select-none"
         aria-hidden="true"
       >
-        <IconFolder className="w-7 h-7" />
+        {renderedIcon}
       </div>
       <div className="max-w-md mx-auto space-y-2">
         <h2 className="text-lg font-bold text-[#172A35]">{title}</h2>

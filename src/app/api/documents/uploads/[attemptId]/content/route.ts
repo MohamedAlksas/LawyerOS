@@ -32,8 +32,12 @@ export async function PUT(
 
     const contentLengthHeader = request.headers.get('content-length');
     if (contentLengthHeader !== null) {
-      const parsedLength = Number(contentLengthHeader.trim());
-      if (!Number.isInteger(parsedLength) || parsedLength < 0) {
+      const trimmedLength = contentLengthHeader.trim();
+      if (!/^\d+$/.test(trimmedLength)) {
+        throw new DocumentValidationError('ترويسة طول المحتوى (Content-Length) غير صالحة.');
+      }
+      const parsedLength = Number(trimmedLength);
+      if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) {
         throw new DocumentValidationError('ترويسة طول المحتوى (Content-Length) غير صالحة.');
       }
       if (parsedLength === 0) {

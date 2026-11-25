@@ -1106,8 +1106,8 @@ describe('T09 Integration Tests: Deadlines, Tasks, Agenda & Archive Guards (PG)'
     }
 
     // 2. Populated T08 -> T09 upgrade preserves existing Matter/Proceeding/Hearing/Task/JobRun rows
-    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t08-baseline-'));
     const upgraded = await createDedicatedTestDatabase();
+    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t08-baseline-'));
     try {
       const schema = path.join(stageDir, 'schema.prisma');
       const migrations = path.join(stageDir, 'migrations');

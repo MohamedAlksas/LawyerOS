@@ -7,10 +7,11 @@ import { IconDashboard, IconFolder, IconSearch, IconShield, IconUsers } from './
 
 interface MobileBottomNavProps {
   navRef: React.Ref<HTMLElement>;
+  isDrawerOpen: boolean;
   onOpenDrawer: (opener: HTMLButtonElement) => void;
 }
 
-export function MobileBottomNav({ navRef, onOpenDrawer }: MobileBottomNavProps) {
+export function MobileBottomNav({ navRef, isDrawerOpen, onOpenDrawer }: MobileBottomNavProps) {
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
@@ -95,6 +96,8 @@ export function MobileBottomNav({ navRef, onOpenDrawer }: MobileBottomNavProps) 
       <button
         type="button"
         aria-label="المزيد: فتح القائمة الكاملة"
+        aria-expanded={isDrawerOpen}
+        aria-controls="tablet-drawer"
         data-testid="mobile-nav-menu"
         onClick={(event) => onOpenDrawer(event.currentTarget)}
         className="flex flex-col items-center justify-center flex-[1_0_auto] py-1 px-[4px] min-h-[44px] min-w-[44px] rounded-[6px] text-[#4D606A] hover:text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"

@@ -359,7 +359,9 @@ describe('T06-13: Real Server Action HTTP Transport Authorization & Wire Verific
         client.release();
       }
     } finally {
-      process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      if (originalTestDatabaseUrl === undefined) delete process.env.TEST_DATABASE_URL;
+      else process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      getEnv(true);
       await clearGlobalSingletons();
     }
 

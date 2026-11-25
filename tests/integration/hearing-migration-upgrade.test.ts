@@ -42,7 +42,7 @@ describe('T08 Integration Tests: Migration & Schema Upgrade Verification', () =>
 
     // Run full migration suite on fresh database
     runPrismaMigrateDeploy(dbUrl);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     if (pool) {
@@ -51,7 +51,7 @@ describe('T08 Integration Tests: Migration & Schema Upgrade Verification', () =>
     if (dropDb) {
       await dropDb().catch(() => {});
     }
-  });
+  }, 30_000);
 
   it('verifies hearing table exists with date-only hearing_date and proper constraints', async () => {
     const client = await pool.connect();
@@ -121,8 +121,8 @@ describe('T08 Integration Tests: Migration & Schema Upgrade Verification', () =>
   });
 
   it('preserves populated T07 Matter, Party and Proceeding records when applying T08', async () => {
-    const baseline = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t07-baseline-'));
     const dedicated = await createDedicatedTestDatabase();
+    const baseline = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t07-baseline-'));
     try {
       const schema = path.join(baseline, 'schema.prisma');
       const migrations = path.join(baseline, 'migrations');

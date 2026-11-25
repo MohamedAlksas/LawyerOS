@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
 import { recordAuditEvent } from '@/lib/audit';
@@ -367,7 +367,12 @@ export async function listInbox(
       include: {
         matter: { select: { fileCode: true, title: true } },
       },
-      orderBy: [{ deliveredAt: 'desc' }, { scheduledAt: 'desc' }, { id: 'asc' }],
+      orderBy: [
+        { readAt: { sort: 'asc', nulls: 'first' } },
+        { deliveredAt: 'desc' },
+        { scheduledAt: 'desc' },
+        { id: 'asc' },
+      ],
       take: params.limit,
     }),
     prisma.jobRun.findMany({
@@ -862,24 +867,37 @@ async function reschedulePendingReminderJobs(
       if (isChained && nextChainedKey !== job.deduplicationKey) {
         const collision = await tx.jobRun.findUnique({
           where: { deduplicationKey: nextChainedKey },
-          select: { id: true, status: true },
+          select: { id: true, status: true, attemptCount: true },
         });
+        let handled = false;
         if (!collision) {
-          await tx.jobRun.updateMany({
-            where: { id: job.id, status: 'PENDING' },
-            data: {
-              deduplicationKey: nextChainedKey,
-              scheduledAt: nextInstant,
-              availableAt: nextInstant,
-              ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-            },
-          });
+          await tx.$executeRaw`SAVEPOINT sp_resched_dedup`;
+          try {
+            await tx.jobRun.updateMany({
+              where: { id: job.id, status: 'PENDING' },
+              data: {
+                deduplicationKey: nextChainedKey,
+                scheduledAt: nextInstant,
+                availableAt: nextInstant,
+                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
+              },
+            });
+            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
+            handled = true;
+          } catch (err) {
+            await tx.$executeRaw`ROLLBACK TO SAVEPOINT sp_resched_dedup`;
+            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
+            if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
+              throw err;
+            }
+          }
         } else if (collision.status === 'PENDING') {
           const updatedCollision = await tx.jobRun.updateMany({
             where: { id: collision.id, status: 'PENDING' },
             data: {
               scheduledAt: nextInstant,
               availableAt: nextInstant,
+              ...(collision.attemptCount === 0 ? { nextAttemptAt: null } : {}),
             },
           });
           if (updatedCollision.count === 1) {
@@ -892,8 +910,10 @@ async function reschedulePendingReminderJobs(
                 lockedBy: null,
               },
             });
+            handled = true;
           }
-        } else {
+        }
+        if (!handled) {
           // Never leave a pulled-forward job holding a future rule's canonical deduplicationKey,
           // otherwise ReminderWorker will later see this job as SUCCEEDED on that key and skip the future rule.
           const fallbackKey = `${nextChainedKey}_resched_${job.id}`;
@@ -975,7 +995,16 @@ export async function updateReminderRule(
         return claim.resultPayload as ReminderRuleDTO;
       }
 
-      const [locked] = await tx.$queryRaw<
+      const target = await tx.reminderRule.findUnique({
+        where: { id: input.ruleId },
+        select: { id: true, eventType: true },
+      });
+
+      if (!target) {
+        throw new NotFoundError('سياسة التذكير المطلوبة غير موجودة.');
+      }
+
+      const lockedRules = await tx.$queryRaw<
         Array<{
           id: string;
           event_type: ReminderRuleDTO['eventType'];
@@ -988,9 +1017,12 @@ export async function updateReminderRule(
       >`
         SELECT "id", "event_type", "day_offset", "reminder_time", "channel", "enabled", "version"
         FROM "reminder_rule"
-        WHERE "id" = ${input.ruleId}
+        WHERE "event_type" = ${target.eventType}::"ReminderEventType"
+        ORDER BY "id" ASC
         FOR UPDATE
       `;
+
+      const locked = lockedRules.find((r) => r.id === input.ruleId);
 
       if (!locked) {
         throw new NotFoundError('سياسة التذكير المطلوبة غير موجودة.');

@@ -7,7 +7,7 @@ import {
   AuthorizationError,
   AuthenticationError,
 } from '@/modules/identity';
-import { validateEnv, EnvironmentValidationError } from '@/lib/env';
+import { validateEnv, EnvironmentValidationError, getEnv } from '@/lib/env';
 import { getAuth } from '@/lib/auth';
 import { closeDbPool } from '@/lib/db';
 import { GET as viewSessionGet } from '@/app/api/auth/view-session/route';
@@ -178,6 +178,44 @@ describe('Identity & Authorization Unit Tests', () => {
         else process.env.BETTER_AUTH_SECRET = prevSecret;
         if (prevUrl === undefined) delete process.env.BETTER_AUTH_URL;
         else process.env.BETTER_AUTH_URL = prevUrl;
+        getEnv(true);
+      }
+    });
+
+    it('detects uppercase HTTPS:// protocol for defaultCookieAttributes.secure in getAuth()', async () => {
+      const prevDbUrl = process.env.DATABASE_URL;
+      const prevTestUrl = process.env.TEST_DATABASE_URL;
+      const prevSecret = process.env.BETTER_AUTH_SECRET;
+      const prevUrl = process.env.BETTER_AUTH_URL;
+      delete (globalThis as Record<string, unknown>).__lawoffice_auth;
+      delete (globalThis as Record<string, unknown>).__lawoffice_prisma;
+
+      process.env.DATABASE_URL =
+        'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_unit_dev?schema=public';
+      process.env.TEST_DATABASE_URL =
+        'postgresql://lawoffice_user:synthetic@127.0.0.1:5432/lawoffice_unit_test?schema=public';
+      process.env.BETTER_AUTH_SECRET = '0123456789abcdef0123456789abcdef';
+      process.env.BETTER_AUTH_URL = 'HTTPS://lawoffice.example.com';
+      getEnv(true);
+
+      try {
+        const cookieAttrs = getAuth().options.advanced?.defaultCookieAttributes as
+          | { secure?: boolean }
+          | undefined;
+        expect(cookieAttrs?.secure).toBe(true);
+      } finally {
+        delete (globalThis as Record<string, unknown>).__lawoffice_auth;
+        delete (globalThis as Record<string, unknown>).__lawoffice_prisma;
+        await closeDbPool();
+        if (prevDbUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = prevDbUrl;
+        if (prevTestUrl === undefined) delete process.env.TEST_DATABASE_URL;
+        else process.env.TEST_DATABASE_URL = prevTestUrl;
+        if (prevSecret === undefined) delete process.env.BETTER_AUTH_SECRET;
+        else process.env.BETTER_AUTH_SECRET = prevSecret;
+        if (prevUrl === undefined) delete process.env.BETTER_AUTH_URL;
+        else process.env.BETTER_AUTH_URL = prevUrl;
+        getEnv(true);
       }
     });
 

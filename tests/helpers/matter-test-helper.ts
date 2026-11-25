@@ -142,6 +142,26 @@ export async function cleanupReferenceFixtures(
     storageLocationIds?: string[];
   }
 ): Promise<void> {
+  const allRefIds = [
+    ...(opts.courtIds || []),
+    ...(opts.practiceAreaIds || []),
+    ...(opts.storageLocationIds || []),
+  ];
+
+  if (allRefIds.length > 0) {
+    await prisma.auditEvent.deleteMany({
+      where: {
+        entityId: { in: allRefIds },
+      },
+    });
+
+    await prisma.idempotencyRecord.deleteMany({
+      where: {
+        resultId: { in: allRefIds },
+      },
+    });
+  }
+
   if (opts.courtIds && opts.courtIds.length > 0) {
     await prisma.court.deleteMany({
       where: { id: { in: opts.courtIds } },

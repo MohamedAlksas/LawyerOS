@@ -269,15 +269,15 @@ export function DeadlinesView({
     isSubmittingDraftModal ||
     isSubmittingDateChange ||
     isSubmittingComplete ||
-    isSubmittingCancel ||
-    isFrozenDraftRetry ||
-    isFrozenDateRetry ||
-    isFrozenCompleteRetry;
+    isSubmittingCancel;
 
   const anyDirty =
-    (isDraftModalOpen && !isFrozenDraftRetry && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
-    (Boolean(changeDateTarget) && !isFrozenDateRetry && Boolean(dateChangeReason)) ||
-    (Boolean(completeTarget) && !isFrozenCompleteRetry && Boolean(completionNotes));
+    isFrozenDraftRetry ||
+    isFrozenDateRetry ||
+    isFrozenCompleteRetry ||
+    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
+    (Boolean(changeDateTarget) && Boolean(dateChangeReason)) ||
+    (Boolean(completeTarget) && Boolean(completionNotes));
 
   useLeaveGuard(anyDirty, anyBusy);
 
@@ -1607,6 +1607,7 @@ export function DeadlinesView({
                   <button
                     type="button"
                     data-testid="confirm-deadline-button"
+                    data-modal-retry={isFrozenDraftRetry ? 'true' : undefined}
                     disabled={isSubmittingDraftModal}
                     onClick={handleConfirmDeadline}
                     className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"

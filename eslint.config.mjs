@@ -12,6 +12,10 @@ const eslintConfig = [
       'next-env.d.ts',
       'node_modules/**',
       'work/**',
+      'test-results/**',
+      'playwright-report/**',
+      'coverage/**',
+      'graphify-out/**',
     ],
   },
 ];

@@ -100,8 +100,10 @@ export function TasksView({
   const cancelDialogRef = useRef<HTMLDivElement>(null);
   const cancelReasonInputRef = useRef<HTMLTextAreaElement>(null);
 
-  const createDirty = isCreateOpen && !isFrozenCreateRetry && Boolean(title || details || dueDate || dueTime);
-  useLeaveGuard(createDirty, isSubmittingCreate || isFrozenCreateRetry || Boolean(mutatingTaskId));
+  const createDirty =
+    isFrozenCreateRetry ||
+    (isCreateOpen && Boolean(title || details || dueDate || dueTime));
+  useLeaveGuard(createDirty, isSubmittingCreate || isSubmittingCancel || Boolean(mutatingTaskId));
 
   const closeCreateModal = () => {
     if (isSubmittingCreate) return;

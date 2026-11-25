@@ -441,7 +441,9 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     await dialog.getByRole('button', { name: generateLabel, exact: true }).click();
     await expect(dialog.getByRole('alert')).toContainText('كلمة المرور الحالية غير صحيحة');
     await assertDialogReflow(page, dialog);
-    await page.screenshot({ path: 'work/t03-r14-fix/dialog-error-' + testInfo.project.name + '.png' });
+    const errorShotPath = testInfo.outputPath('dialog-error-' + testInfo.project.name + '.png');
+    await page.screenshot({ path: errorShotPath });
+    await testInfo.attach('dialog-error-' + testInfo.project.name, { path: errorShotPath });
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(page.getByRole('button', { name: regenerateLabel, exact: true })).toBeFocused();
@@ -451,7 +453,9 @@ test.describe('LawOffice OS — Round 11 Browser Journeys & Regression Evidence 
     await expect(dialog.getByRole('button', { name: savedLabel })).toBeVisible();
     await expect(dialog.locator('[dir="ltr"] > div')).toHaveCount(10);
     await assertDialogReflow(page, dialog);
-    await page.screenshot({ path: 'work/t03-r14-fix/dialog-success-' + testInfo.project.name + '.png' });
+    const successShotPath = testInfo.outputPath('dialog-success-' + testInfo.project.name + '.png');
+    await page.screenshot({ path: successShotPath });
+    await testInfo.attach('dialog-success-' + testInfo.project.name, { path: successShotPath });
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(page.getByRole('button', { name: regenerateLabel, exact: true })).toBeFocused();

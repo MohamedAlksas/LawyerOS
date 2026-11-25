@@ -21,6 +21,16 @@ function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
   return res;
 }
 
+function clearAuthCookie(res: NextResponse, name: string): void {
+  res.cookies.set(name, '', {
+    path: '/',
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: name.startsWith('__Secure-'),
+  });
+}
+
 async function auditIdentityOutcome(userId: string, action: string) {
   try {
     await recordAuditEvent(getPrismaClient(), {
@@ -139,8 +149,8 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
             },
             { status: 401 }
           );
-          response.cookies.delete('better-auth.session_token');
-          response.cookies.delete('__Secure-better-auth.session_token');
+          clearAuthCookie(response, 'better-auth.session_token');
+          clearAuthCookie(response, '__Secure-better-auth.session_token');
           return response;
         }
       }
@@ -207,7 +217,8 @@ export async function POST(request: NextRequest) {
   if (pathname.includes('/two-factor/generate-backup-codes')) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
-      if (request.headers.get('sec-fetch-site') === 'cross-site') {
+      const secFetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
+      if (secFetchSite === 'cross-site') {
         return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
       }
 
@@ -248,7 +259,7 @@ export async function POST(request: NextRequest) {
         // and reject untrusted Host header even if request.url was constructed with trusted base
         if (
           !allowedOrigins.has(reqOrigin) ||
-          request.headers.get('sec-fetch-site') !== 'same-origin'
+          secFetchSite !== 'same-origin'
         ) {
           return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
@@ -272,7 +283,16 @@ export async function POST(request: NextRequest) {
 
     try {
       const actor = await requireActor({ headers: request.headers });
-      const body = await request.clone().json().catch(() => ({}));
+      let parsedBody: unknown;
+      try {
+        parsedBody = await request.clone().json();
+      } catch {
+        return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
+      }
+      if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+        return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
+      }
+      const body = parsedBody as Record<string, unknown>;
       const password = body.currentPassword || body.password;
       if (!password || typeof password !== 'string' || password.trim().length === 0) {
         return noStoreJson(
@@ -393,8 +413,8 @@ export async function POST(request: NextRequest) {
                 },
                 { status: 401 }
               );
-              errRes.cookies.delete('better-auth.two_factor');
-              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              clearAuthCookie(errRes, 'better-auth.two_factor');
+              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
               await auditSignInMfa(targetUserId, false);
               return errRes;
             }
@@ -428,8 +448,8 @@ export async function POST(request: NextRequest) {
                 },
                 { status: 401 }
               );
-              errRes.cookies.delete('better-auth.two_factor');
-              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              clearAuthCookie(errRes, 'better-auth.two_factor');
+              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
               await auditSignInMfa(targetUserId, false);
               return errRes;
             }
@@ -465,6 +485,7 @@ export async function POST(request: NextRequest) {
   }
 
   const response = await auth.handler(reqToExecute);
+  // Successful rotations are audited atomically by DB trigger trg_audit_password_rotation ('CHANGE_PASSWORD').
   if (passwordChangeActorId && !response.ok) {
     await auditIdentityOutcome(passwordChangeActorId, 'REJECT_PASSWORD_CHANGE');
   }
@@ -539,8 +560,8 @@ export async function POST(request: NextRequest) {
             { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
             { status: 500 }
           );
-          errRes.cookies.delete('better-auth.two_factor');
-          errRes.cookies.delete('__Secure-better-auth.two_factor');
+          clearAuthCookie(errRes, 'better-auth.two_factor');
+          clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
           return errRes;
         }
       }
@@ -592,8 +613,8 @@ export async function POST(request: NextRequest) {
           { error: 'فشل في تهيئة أمان الجلسة.' },
           { status: 500 }
         );
-        errRes.cookies.delete('better-auth.session_token');
-        errRes.cookies.delete('__Secure-better-auth.session_token');
+        clearAuthCookie(errRes, 'better-auth.session_token');
+        clearAuthCookie(errRes, '__Secure-better-auth.session_token');
         return errRes;
       }
     }
@@ -620,53 +641,54 @@ export async function POST(request: NextRequest) {
       );
       if (sessionCookie) {
         const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
-        if (rawToken) {
-          const newSession = await prisma.session.findFirst({
-            where: {
-              OR: candidateIdentifiers.map((t) => ({ token: t })),
+        if (!rawToken) {
+          throw new Error('Failed to extract issued session token');
+        }
+        const newSession = await prisma.session.findFirst({
+          where: {
+            OR: candidateIdentifiers.map((t) => ({ token: t })),
+          },
+        });
+        if (!newSession) {
+          throw new Error('Issued session not found in database');
+        }
+        newSessionId = newSession.id;
+
+        const uid = targetUserId || newSession.userId;
+        const postCredVer = await getUserCredentialVersion(uid);
+
+        if (
+          expectedCredVer === null ||
+          postCredVer !== expectedCredVer ||
+          newSession.credentialVersion !== expectedCredVer
+        ) {
+          // Credential was rotated while completing MFA or session version mismatch! Evict session and fail closed!
+          await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
+          const errRes = noStoreJson(
+            {
+              error:
+                'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
             },
-          });
-          if (!newSession) {
-            throw new Error('Issued session not found in database');
-          }
-          newSessionId = newSession.id;
+            { status: 401 }
+          );
+          clearAuthCookie(errRes, 'better-auth.session_token');
+          clearAuthCookie(errRes, '__Secure-better-auth.session_token');
+          clearAuthCookie(errRes, 'better-auth.two_factor');
+          clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+          await auditSignInMfa(uid, false);
+          return errRes;
+        }
 
-          const uid = targetUserId || newSession.userId;
-          const postCredVer = await getUserCredentialVersion(uid);
-
-          if (
-            expectedCredVer === null ||
-            postCredVer !== expectedCredVer ||
-            newSession.credentialVersion !== expectedCredVer
-          ) {
-            // Credential was rotated while completing MFA or session version mismatch! Evict session and fail closed!
-            await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
-            const errRes = noStoreJson(
-              {
-                error:
-                  'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
-              },
-              { status: 401 }
-            );
-            errRes.cookies.delete('better-auth.session_token');
-            errRes.cookies.delete('__Secure-better-auth.session_token');
-            errRes.cookies.delete('better-auth.two_factor');
-            errRes.cookies.delete('__Secure-better-auth.two_factor');
-            await auditSignInMfa(uid, false);
-            return errRes;
-          }
-
-          // Clean up companion verification record
-          if (mfaRawToken) {
-            await prisma.verification.deleteMany({
-              where: {
-                OR: [
-                  { identifier: `2fa-cred-ver-${mfaRawToken}` },
-                  { identifier: `2fa-cred-ver-2fa-${mfaRawToken}` },
-                ],
-              },
-            }).catch(() => {});
-          }
+        // Clean up companion verification record
+        if (mfaRawToken) {
+          await prisma.verification.deleteMany({
+            where: {
+              OR: [
+                { identifier: `2fa-cred-ver-${mfaRawToken}` },
+                { identifier: `2fa-cred-ver-2fa-${mfaRawToken}` },
+              ],
+            },
+          }).catch(() => {});
         }
       }
     } catch {
@@ -678,10 +700,10 @@ export async function POST(request: NextRequest) {
         { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
         { status: 500 }
       );
-      errRes.cookies.delete('better-auth.session_token');
-      errRes.cookies.delete('__Secure-better-auth.session_token');
-      errRes.cookies.delete('better-auth.two_factor');
-      errRes.cookies.delete('__Secure-better-auth.two_factor');
+      clearAuthCookie(errRes, 'better-auth.session_token');
+      clearAuthCookie(errRes, '__Secure-better-auth.session_token');
+      clearAuthCookie(errRes, 'better-auth.two_factor');
+      clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
       return errRes;
     }
   }

@@ -337,7 +337,7 @@ export function MatterForm({
     setIsDirty(true);
   };
 
-  useLeaveGuard(isDirty, isSaving || operationPending);
+  useLeaveGuard(isDirty || operationPending, isSaving);
 
   useEffect(() => {
     if (Object.keys(fieldErrors).length === 0) return;
@@ -360,12 +360,13 @@ export function MatterForm({
           <p className="leading-relaxed">
             حدث خطأ أثناء استرجاع دوائر التخصص أو أماكن الحفظ من الخادم. يمكنك إعادة تحميل الصفحة.
           </p>
-          <Link
-            href={isEdit && initialMatter ? `/matters/${initialMatter.id}/edit` : '/matters/new'}
+          <button
+            type="button"
+            onClick={() => router.refresh()}
             className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
           >
             إعادة تحميل الصفحة
-          </Link>
+          </button>
         </div>
       )}
 

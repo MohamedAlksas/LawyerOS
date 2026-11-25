@@ -21,12 +21,28 @@ export class IdempotencyConcurrentConflictError extends Error {
 export function isIdempotencyUniqueConflict(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
     const meta = error.meta as { target?: string[] | string; modelName?: string } | undefined;
+    if (meta?.modelName && meta.modelName !== 'IdempotencyRecord') {
+      return false;
+    }
     if (meta?.modelName === 'IdempotencyRecord') {
       return true;
     }
-    const targetStr = Array.isArray(meta?.target) ? meta.target.join(',') : String(meta?.target || '');
-    if (targetStr.includes('key') || targetStr.includes('actorId') || targetStr.includes('commandType')) {
-      return true;
+    if (Array.isArray(meta?.target)) {
+      if (
+        meta.target.includes('actorId') &&
+        meta.target.includes('commandType') &&
+        meta.target.includes('key')
+      ) {
+        return true;
+      }
+    } else if (typeof meta?.target === 'string') {
+      if (
+        meta.target.includes('actorId') &&
+        meta.target.includes('commandType') &&
+        meta.target.includes('key')
+      ) {
+        return true;
+      }
     }
     if (error.message.includes('idempotency_record') || error.message.includes('actorId_commandType_key')) {
       return true;

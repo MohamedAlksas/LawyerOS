@@ -520,6 +520,29 @@ export async function createTask(
 
       await lockTaskParents(tx, effectiveMatterId, effectiveProceedingId);
 
+      if (input.deadlineId) {
+        const verifiedDeadline = await tx.deadline.findUnique({
+          where: { id: input.deadlineId },
+          select: { id: true, matterId: true, proceedingId: true },
+        });
+        if (!verifiedDeadline) {
+          throw new NotFoundError('الموعد القانوني المطلوب غير موجود.');
+        }
+        if (effectiveMatterId && verifiedDeadline.matterId !== effectiveMatterId) {
+          throw new CrossMatterLinkForbiddenError('لا يمكن ربط المهمة بعناصر تابعة لأكثر من ملف قضية.');
+        }
+        if (
+          verifiedDeadline.proceedingId &&
+          effectiveProceedingId &&
+          verifiedDeadline.proceedingId !== effectiveProceedingId
+        ) {
+          throw new CrossMatterLinkForbiddenError('العناصر المرتبطة بالمهمة تتبع قيوداً قضائية مختلفة.');
+        }
+        if (verifiedDeadline.proceedingId !== (deadlineRef?.proceedingId ?? null)) {
+          throw new ConcurrencyConflictError('تم تعديل الموعد القانوني المرتبط بالمهمة. يرجى المحاولة مجدداً.');
+        }
+      }
+
       const created = await tx.task.create({
         data: {
           matterId: effectiveMatterId,

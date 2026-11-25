@@ -94,7 +94,7 @@ function createAuthInstance() {
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: env.BETTER_AUTH_URL.startsWith('https://'),
+        secure: new URL(env.BETTER_AUTH_URL).protocol === 'https:',
       },
     },
     rateLimit: {

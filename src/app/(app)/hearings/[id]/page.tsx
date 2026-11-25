@@ -82,14 +82,20 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
         </Link>
         <span>/</span>
         <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline font-mono">
-          {matter.fileCode}
+          <bdi dir="ltr">{matter.fileCode}</bdi>
         </Link>
         <span>/</span>
         <Link
           href={`/matters/${matter.id}/proceedings/${proceeding.id}`}
           className="hover:text-[#14566B] hover:underline"
         >
-          {isProceedingComplete ? `قيد قضائي ${docketText}` : 'قيد قضائي (مسودة)'}
+          {isProceedingComplete ? (
+            <>
+              قيد قضائي <bdi dir="ltr">{docketText}</bdi>
+            </>
+          ) : (
+            'قيد قضائي (مسودة)'
+          )}
         </Link>
         <span>/</span>
         <span className="text-[#172A35] font-semibold">تفاصيل الجلسة</span>
@@ -108,7 +114,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               </span>
             </div>
             <p className="text-xs text-[#4D606A]">
-              تاريخ الجلسة: <span className="font-semibold text-[#172A35]">{dateIso}</span> ({formattedDate})
+              تاريخ الجلسة: <bdi dir="ltr" className="font-semibold text-[#172A35]">{dateIso}</bdi> ({formattedDate})
             </p>
           </div>
 
@@ -154,7 +160,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             <span className="text-[#4D606A] block font-medium">ساعة الانعقاد:</span>
             <div className="font-bold text-[#172A35]">
               {hearing.hearingTime ? (
-                <span className="font-mono text-sm">{hearing.hearingTime}</span>
+                <bdi dir="ltr" className="font-mono text-sm">{hearing.hearingTime}</bdi>
               ) : (
                 <span data-testid={`hearing-time-${hearing.id}`} className="text-[#64748B] italic">
                   الساعة غير محددة
@@ -174,7 +180,9 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             <span className="text-[#4D606A] block font-medium">القيد والقضية:</span>
             <div className="font-bold text-[#172A35]">
               {isProceedingComplete ? (
-                <span>رقم {docketText}</span>
+                <span>
+                  رقم <bdi dir="ltr">{docketText}</bdi>
+                </span>
               ) : (
                 <span className="text-amber-700">مسودة بدون رقم رسمي</span>
               )}
@@ -191,7 +199,9 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
           {hearing.rollNumber && (
             <div className="space-y-1 p-3 bg-[#F8FAFB] rounded-[6px] border border-[#E8EEF1]">
               <span className="text-[#4D606A] block font-medium">رقم الرول:</span>
-              <div className="font-bold text-[#172A35] font-mono">{hearing.rollNumber}</div>
+              <div className="font-bold text-[#172A35] font-mono">
+                <bdi dir="ltr">{hearing.rollNumber}</bdi>
+              </div>
             </div>
           )}
 

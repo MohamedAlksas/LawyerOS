@@ -673,7 +673,10 @@ export async function processClaimedReminderJob(
       let targetDedupKey: string | null = null;
       if (!existingNextJob) {
         targetDedupKey = nextDedupKey;
-      } else if (existingNextJob.status === 'CANCELLED') {
+      } else if (
+        existingNextJob.status === 'CANCELLED' ||
+        existingNextJob.status === 'SUCCEEDED'
+      ) {
         const activeSibling = await tx.jobRun.findFirst({
           where: {
             jobType: 'REMINDER_DELIVERY',

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GuardedLink } from '@/components/navigation-guard';
 import { IconBell, IconCheck, IconClock, IconRefresh, IconWarning } from '@/components/stitch-icons';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
@@ -69,7 +69,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
   const abortRef = useRef<AbortController | null>(null);
   const seqRef = useRef(0);
 
-  const runFetch = (controller: AbortController, seq: number) => {
+  const runFetch = useCallback((controller: AbortController, seq: number) => {
     fetchInboxPreview(controller.signal)
       .then((data) => {
         if (controller.signal.aborted || seq !== seqRef.current) return;
@@ -88,9 +88,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
           setLoading(false);
         }
       });
-  };
+  }, []);
 
-  const triggerRefresh = () => {
+  const triggerRefresh = useCallback(() => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -98,7 +98,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
     setLoading(true);
     setLoadError(null);
     runFetch(controller, seq);
-  };
+  }, [runFetch]);
 
   useEffect(() => {
     if (!enabled) {
@@ -129,10 +129,19 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
         }
       });
 
-    return () => {
-      controller.abort();
+    const handleInboxUpdated = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source === 'header') return;
+      triggerRefresh();
     };
-  }, [enabled]);
+    window.addEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+
+    return () => {
+      window.removeEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+      controller.abort();
+      abortRef.current?.abort();
+    };
+  }, [enabled, triggerRefresh]);
 
   const isOpen = enabled && open;
 
@@ -200,6 +209,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
           ),
         };
       });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lawoffice:inbox-updated', { detail: { source: 'header' } }));
+      }
     } catch {
       setMarkError('تعذر الاتصال بالخادم لتأشير التنبيه كمقروء.');
     } finally {
@@ -434,7 +446,10 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
             </GuardedLink>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                buttonRef.current?.focus();
+              }}
               className="text-xs font-medium text-[#4D606A] hover:text-[#172A35] px-2.5 py-1 min-h-[44px] inline-flex items-center rounded"
             >
               إغلاق

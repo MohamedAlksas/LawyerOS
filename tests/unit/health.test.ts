@@ -1,10 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { GET as livenessHandler } from '@/app/api/health/live/route';
 import { GET as readinessHandler } from '@/app/api/health/ready/route';
 import * as dbModule from '@/lib/db';
 import { EnvironmentValidationError } from '@/lib/env';
 
 describe('Health Routes (Liveness and Readiness)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it('liveness route returns HTTP 200 with non-sensitive status and uptime', async () => {
     const response = await livenessHandler();
     expect(response.status).toBe(200);

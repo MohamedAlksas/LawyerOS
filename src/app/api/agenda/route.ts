@@ -11,7 +11,11 @@ export async function GET(request: Request) {
     request,
     (actor) => {
       const sp = new URL(request.url).searchParams;
-      const rawTypes = sp.getAll('types').flatMap((v) => v.split(',')).filter(Boolean);
+      const rawTypes = sp
+        .getAll('types')
+        .flatMap((v) => v.split(','))
+        .map((s) => s.trim())
+        .filter(Boolean);
       const includeCompleted = parseQueryBooleanParam(sp, 'includeCompleted');
       return listAgenda(actor, {
         ...(sp.get('view') ? { view: sp.get('view') as AgendaView } : {}),

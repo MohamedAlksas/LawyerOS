@@ -139,7 +139,14 @@ export function AppShell({ children }: AppShellProps) {
         if (!response.ok) throw new Error('Session check unavailable');
         const session: ViewSession = await response.json();
         if (request.signal.aborted) return;
-        setViewUser({ name: session.name, email: session.email, role: session.role });
+        setViewUser((prev) =>
+          prev &&
+          prev.name === session.name &&
+          prev.email === session.email &&
+          prev.role === session.role
+            ? prev
+            : { name: session.name, email: session.email, role: session.role }
+        );
         const previous = sessionRef.current;
         sessionRef.current = session;
         if (previous && (previous.actorId !== session.actorId || previous.role !== session.role || previous.sessionId !== session.sessionId)) {
@@ -201,7 +208,7 @@ export function AppShell({ children }: AppShellProps) {
         <Suspense fallback={null}>
           <SessionExpiredAlert />
         </Suspense>
-        <ConnectivityBanner />
+        {!pathname.startsWith('/offline') && <ConnectivityBanner />}
         {children}
       </>
     );
@@ -285,6 +292,7 @@ export function AppShell({ children }: AppShellProps) {
         {/* 6. Mobile Bottom Nav Bar */}
         <MobileBottomNav
           navRef={mobileNavRef}
+          isDrawerOpen={isDrawerOpen}
           onOpenDrawer={(opener) => {
             drawerOpenerRef.current = opener;
             setIsDrawerOpen(true);

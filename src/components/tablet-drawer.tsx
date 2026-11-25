@@ -79,7 +79,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
       if (e.key === 'Escape') {
         e.preventDefault();
         handleCloseRef.current();
-        restoreFocus();
         return;
       }
 
@@ -331,7 +330,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               </span>
               <div className="space-y-1">
                 <div
-                  aria-disabled="true"
                   className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
                 >
                   <div className="flex items-center gap-2">

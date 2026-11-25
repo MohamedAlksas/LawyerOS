@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import crypto from 'crypto';
+import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { PrismaClient } from '@prisma/client';
@@ -117,6 +118,9 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
       const adapterB = new PrismaPg(dedicatedDbB.pool);
       const prismaB = new PrismaClient({ adapter: adapterB });
 
+      const originalKey = process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
+      const originalKeyId = process.env.PARTY_IDENTITY_KEY_ID;
+
       try {
         // Supply matching key
         process.env.PARTY_IDENTITY_ENCRYPTION_KEY = SYNTHETIC_ENCRYPTION_KEY;
@@ -132,11 +136,13 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
         // 6. Test missing key custody: delete key and verify fail-closed
         delete process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
 
-        await expect(
-          revealPartyIdentity(actor, partyA.party.id, 'محاولة بدون مفتاح', {
-            prismaOverride: prismaB,
-          })
-        ).rejects.toThrow();
+        const missingKeyErr = await revealPartyIdentity(actor, partyA.party.id, 'محاولة بدون مفتاح', {
+          prismaOverride: prismaB,
+        }).catch((err: unknown) => err);
+        expect(missingKeyErr).toBeInstanceOf(CryptoDecryptionError);
+        expect((missingKeyErr as Error).message).toBe(
+          'Cannot decrypt identity: Missing required encryption key: PARTY_IDENTITY_ENCRYPTION_KEY is not configured.'
+        );
 
         // 7. Test wrong key custody: provide incorrect key and verify fail-closed
         process.env.PARTY_IDENTITY_ENCRYPTION_KEY = 'f'.repeat(64);
@@ -164,6 +170,10 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
         });
         expect(revealedAfter.number).toBe(rawNationalId);
       } finally {
+        if (originalKey === undefined) delete process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
+        else process.env.PARTY_IDENTITY_ENCRYPTION_KEY = originalKey;
+        if (originalKeyId === undefined) delete process.env.PARTY_IDENTITY_KEY_ID;
+        else process.env.PARTY_IDENTITY_KEY_ID = originalKeyId;
         await prismaB.$disconnect();
       }
     } finally {
@@ -188,7 +198,7 @@ describe('T05-08: Disaster Recovery & Key Custody Simulation (Integration - SPEC
 
     const fs = await import('fs');
     const tsxCli = path.resolve(process.cwd(), 'node_modules/tsx/dist/cli.mjs');
-    const tempScriptPath = path.resolve(process.cwd(), `tests/scratch-cold-startup-${crypto.randomUUID()}.ts`);
+    const tempScriptPath = path.resolve(os.tmpdir(), `scratch-cold-startup-${crypto.randomUUID()}.ts`);
 
     try {
       fs.writeFileSync(

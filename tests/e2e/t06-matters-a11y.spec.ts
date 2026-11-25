@@ -7,6 +7,8 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
   let owner: T04Owner;
   const prisma = getPrismaClient();
   const createdMatterIds: string[] = [];
+  const runId = Math.floor(1000 + Math.random() * 9000);
+  const seededFileCode = `2026/${runId}`;
 
   test.beforeAll(async () => {
     owner = await seedT04Owner({ label: 'matters-a11y-e2e', name: 'أحمد المحامي' });
@@ -14,7 +16,7 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
     // Seed one matter with fileCode
     const matter = await prisma.matter.create({
       data: {
-        fileCode: '2026/7777',
+        fileCode: seededFileCode,
         title: 'دعوى اختبار المعايير وإمكانية الوصول الرقمي',
         kind: 'LITIGATION',
         status: 'ACTIVE',
@@ -50,7 +52,7 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
     expect(htmlLang).toBe('ar-EG');
 
     // BDI isolation for fileCode (select the visible instance across responsive breakpoints)
-    const bdiLocator = page.locator('bdi[dir="ltr"]:visible').filter({ hasText: '2026/7777' });
+    const bdiLocator = page.locator('bdi[dir="ltr"]:visible').filter({ hasText: seededFileCode });
     await expect(bdiLocator).toBeVisible();
   });
 
@@ -148,8 +150,9 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
     await page.goto('/matters/new');
     await expect(page).toHaveURL(/\/matters\/new/);
 
-    // Focus the title input
+    // Focus the title input (wait for AppShell session lock to clear so input is visible)
     const titleInput = page.getByTestId('matter-title-input');
+    await expect(titleInput).toBeVisible();
     await titleInput.focus();
     await expect(titleInput).toBeFocused();
 

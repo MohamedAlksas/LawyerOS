@@ -96,13 +96,13 @@ export function renderModalPortal(node: ReactNode) {
  */
 export function useAccessibleModal(options: {
   isOpen: boolean;
-  isSubmitting: boolean;
+  isSubmitting?: boolean;
   hasPending: boolean;
   onClose: () => void;
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef: RefObject<HTMLElement | null>;
 }) {
-  const { isOpen, isSubmitting, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -136,10 +136,12 @@ export function useAccessibleModal(options: {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isSubmitting) return;
     const frameId = requestAnimationFrame(() => {
       if (hasPending) {
-        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]:not([disabled])');
+        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>(
+          'button[type="submit"]:not([disabled]), button[data-modal-retry="true"]:not([disabled])'
+        );
         if (submitBtn) {
           submitBtn.focus();
           return;
@@ -148,7 +150,7 @@ export function useAccessibleModal(options: {
       initialFocusRef.current?.focus();
     });
     return () => cancelAnimationFrame(frameId);
-  }, [isOpen, hasPending, dialogRef, initialFocusRef]);
+  }, [isOpen, isSubmitting, hasPending, dialogRef, initialFocusRef]);
 
   useEffect(() => {
     if (!isOpen) return;

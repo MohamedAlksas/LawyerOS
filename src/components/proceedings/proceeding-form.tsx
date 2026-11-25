@@ -574,7 +574,7 @@ export function ProceedingForm({
     setIsDirty(true);
   };
 
-  useLeaveGuard(isDirty, isSaving || operationPending);
+  useLeaveGuard(isDirty || operationPending, isSaving);
 
   useEffect(() => {
     if (Object.keys(fieldErrors).length > 0) {
@@ -592,7 +592,7 @@ export function ProceedingForm({
           </Link>
           <span aria-hidden="true" className="mx-1.5">/</span>
           <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline">
-            {matter.title} ({matter.fileCode})
+            {matter.title} (<bdi dir="ltr" className="font-mono">{matter.fileCode}</bdi>)
           </Link>
           <span aria-hidden="true" className="mx-1.5">/</span>
           <span>{isEdit ? 'تعديل القيد القضائي' : 'إضافة قيد قضائي جديد'}</span>
@@ -619,12 +619,13 @@ export function ProceedingForm({
           <p className="leading-relaxed">
             حدث خطأ أثناء استرجاع بيانات المحاكم من الخادم. يمكنك إعادة تحميل الصفحة.
           </p>
-          <Link
-            href={isEdit && initialProceeding ? `/matters/${matter.id}/proceedings/${initialProceeding.id}/edit` : `/matters/${matter.id}/proceedings/new`}
+          <button
+            type="button"
+            onClick={() => router.refresh()}
             className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
           >
             إعادة تحميل الصفحة
-          </Link>
+          </button>
         </div>
       )}
 
@@ -816,7 +817,7 @@ export function ProceedingForm({
                   <span className="font-mono">
                     <bdi dir="ltr">{candidate.numberText || '—'}</bdi> لسنة <bdi dir="ltr">{candidate.yearLabel || '—'}</bdi>
                   </span>
-                  {' '}— {candidate.matterFileCode} ({candidate.matterTitle}) ↗
+                  {' '}— <bdi dir="ltr" className="font-mono">{candidate.matterFileCode}</bdi> ({candidate.matterTitle}) ↗
                 </Link>
                 <span className="block text-[11px] text-amber-800">
                   {candidate.courtName} — {candidate.similarityReason}
@@ -1198,38 +1199,37 @@ export function ProceedingForm({
                             </span>
                           </div>
 
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 max-w-lg">
-                            <div className="flex items-center gap-1.5 sm:w-1/2">
-                              <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
-                                الصفة القانونية:
-                              </label>
-                              <select
-                                id={`capacity-${mp.id}`}
-                                value={currentCap.legalCapacity}
-                                onChange={(e) =>
-                                  setPartyCapacities((prev) => ({
-                                    ...prev,
-                                    [mp.id]: {
-                                      ...prev[mp.id],
-                                      legalCapacity: e.target.value as ProceedingLegalCapacity,
-                                    },
-                                  }))
-                                }
-                                data-testid={`capacity-select-${mp.id}`}
-                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
-                              >
-                                <option value="">-- اختر الصفة القانونية صراحةً --</option>
-                                {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
-                                  <option key={cap} value={cap}>
-                                    {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
-                                  </option>
-                                ))}
-                              </select>
-                              {fieldErrors[`capacity_${mp.id}`] && (
-                                <p className="text-[11px] text-red-600 font-semibold mt-1">
-                                  {fieldErrors[`capacity_${mp.id}`]}
-                                </p>
-                              )}
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-2.5 flex-1 max-w-lg">
+                            <div className="space-y-1 sm:w-1/2">
+                              <div className="flex items-center gap-1.5">
+                                <label htmlFor={`capacity-${mp.id}`} className="font-semibold text-[#172A35] shrink-0">
+                                  الصفة القانونية:
+                                </label>
+                                <select
+                                  id={`capacity-${mp.id}`}
+                                  value={currentCap.legalCapacity}
+                                  onChange={(e) =>
+                                    setPartyCapacities((prev) => ({
+                                      ...prev,
+                                      [mp.id]: {
+                                        ...prev[mp.id],
+                                        legalCapacity: e.target.value as ProceedingLegalCapacity,
+                                      },
+                                    }))
+                                  }
+                                  data-testid={`capacity-select-${mp.id}`}
+                                  {...fieldErrorProps(`capacity_${mp.id}`)}
+                                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[38px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                                >
+                                  <option value="">-- اختر الصفة القانونية صراحةً --</option>
+                                  {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
+                                    <option key={cap} value={cap}>
+                                      {PROCEEDING_LEGAL_CAPACITY_LABELS[cap]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              {renderFieldError(`capacity_${mp.id}`)}
                             </div>
 
                             <div className="flex items-center gap-1.5 sm:w-1/2">

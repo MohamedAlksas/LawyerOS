@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { getPrismaClient } from '@/lib/auth';
 import { openMatter, addProceeding } from '@/modules/matters/matter-service';
 import { ConcurrencyConflictError } from '@/modules/matters/matter-types';
+import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import {
   scheduleHearing,
   recordHearingResult,
@@ -278,7 +279,9 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
       tasks: [{ title: 'عنوان مختلف تماماً لاختبار رفض التلاعب' }],
     };
 
-    await expect(recordHearingResult(actor, driftedPayload)).rejects.toThrow();
+    await expect(recordHearingResult(actor, driftedPayload)).rejects.toThrowError(
+      IdempotencyPayloadMismatchError
+    );
   });
 
   it.each(['task', 'audit_event'] as const)('T08-TC-04: Rolls back an injected %s write failure and retries unchanged', async (table) => {
@@ -403,5 +406,64 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     const linked = await prisma.hearingLink.findFirstOrThrow({ where: { fromHearingId: hearing.id, relation: 'ADJOURNED_TO' }, include: { toHearing: true } });
     expect(linked.toHearingId).toBe(session1Res.nextHearing?.id);
     expect(linked.toHearing.hearingDate.toISOString().slice(0, 10)).toBe('2027-06-15');
+  });
+
+  it('T08-R3: recordHearingResult persists dueTime and rescheduleHearing carries IN_PROGRESS task while clearing dueTime when dueDate is null', async () => {
+    const hOrig = await scheduleHearing(actor, {
+      proceedingId: testProceedingId,
+      hearingDate: '2027-07-01',
+      idempotencyKey: `sched_r3_${crypto.randomUUID()}`,
+    });
+
+    const recorded = await recordHearingResult(actor, {
+      hearingId: hOrig.id,
+      expectedVersion: hOrig.version,
+      decisionText: 'تأجيل مع تحديد موعد ومهمة بوقت محدد',
+      nextDateDisposition: 'KNOWN',
+      nextHearingDate: '2027-08-01',
+      tasks: [
+        {
+          title: 'مراجعة حافظة المستندات قبل الجلسة',
+          dueDate: '2027-07-20',
+          dueTime: '14:30',
+        },
+      ],
+      idempotencyKey: `res_r3_${crypto.randomUUID()}`,
+    });
+
+    expect(recorded.taskIds).toHaveLength(1);
+    const createdTask = await prisma.task.findUniqueOrThrow({
+      where: { id: recorded.taskIds[0] },
+    });
+    expect(createdTask.dueDate?.toISOString().slice(0, 10)).toBe('2027-07-20');
+    expect(createdTask.dueTime).toBe('14:30');
+
+    const inProgressTask = await prisma.task.update({
+      where: { id: createdTask.id },
+      data: { status: 'IN_PROGRESS' },
+    });
+
+    const moved = await rescheduleHearing(actor, {
+      hearingId: recorded.nextHearing!.id,
+      expectedVersion: recorded.nextHearing!.version,
+      newHearingDate: '2027-08-15',
+      reason: 'نقل الجلسة مع مسح تاريخ استحقاق المهمة الجارية',
+      taskChanges: [
+        {
+          taskId: inProgressTask.id,
+          expectedVersion: inProgressTask.version,
+          dueDate: null,
+        },
+      ],
+      idempotencyKey: `resched_r3_${crypto.randomUUID()}`,
+    });
+
+    const carriedTask = await prisma.task.findUniqueOrThrow({
+      where: { id: inProgressTask.id },
+    });
+    expect(carriedTask.hearingId).toBe(moved.replacementHearing.id);
+    expect(carriedTask.status).toBe('IN_PROGRESS');
+    expect(carriedTask.dueDate).toBeNull();
+    expect(carriedTask.dueTime).toBeNull();
   });
 });

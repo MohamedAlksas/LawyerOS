@@ -6,8 +6,12 @@ import { Readable } from 'node:stream';
 import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
-import { validateEnv } from '@/lib/env';
+import { getEnv, validateEnv } from '@/lib/env';
 import type { Actor } from '@/modules/identity/types';
+import {
+  verifyDocumentReadOrigin,
+  verifyDocumentMutationOrigin,
+} from '@/modules/documents/document-http';
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
@@ -629,6 +633,48 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         expect(internal.error).not.toContain('secret db string');
         expect(documentStatusFromErrorCode(internal.code)).toBe(500);
       }
+    });
+
+    it('verifies sec-fetch-site whitespace and case normalization in document HTTP helpers', () => {
+      // Read origin checks
+      const crossSitePadded = new Request('http://127.0.0.1:3000/api/documents/1', {
+        headers: { 'sec-fetch-site': ' Cross-Site ' },
+      });
+      const res1 = verifyDocumentReadOrigin(crossSitePadded);
+      expect(res1?.status).toBe(403);
+
+      const crossSiteUpper = new Request('http://127.0.0.1:3000/api/documents/1', {
+        headers: { 'sec-fetch-site': 'CROSS-SITE' },
+      });
+      const res2 = verifyDocumentReadOrigin(crossSiteUpper);
+      expect(res2?.status).toBe(403);
+
+      const sameOriginPadded = new Request('http://127.0.0.1:3000/api/documents/1', {
+        headers: { 'sec-fetch-site': ' same-origin ' },
+      });
+      expect(verifyDocumentReadOrigin(sameOriginPadded)).toBeNull();
+
+      // Mutation origin checks
+      const trustedOrigin = new URL(getEnv().BETTER_AUTH_URL).origin;
+      const mutCrossSitePadded = new Request(`${trustedOrigin}/api/documents`, {
+        method: 'POST',
+        headers: { origin: trustedOrigin, 'sec-fetch-site': ' Cross-Site ' },
+      });
+      const res3 = verifyDocumentMutationOrigin(mutCrossSitePadded);
+      expect(res3?.status).toBe(403);
+
+      const mutCrossSiteUpper = new Request(`${trustedOrigin}/api/documents`, {
+        method: 'POST',
+        headers: { origin: trustedOrigin, 'sec-fetch-site': 'CROSS-SITE' },
+      });
+      const res4 = verifyDocumentMutationOrigin(mutCrossSiteUpper);
+      expect(res4?.status).toBe(403);
+
+      const mutSameOriginPadded = new Request(`${trustedOrigin}/api/documents`, {
+        method: 'POST',
+        headers: { origin: trustedOrigin, 'sec-fetch-site': ' same-origin ' },
+      });
+      expect(verifyDocumentMutationOrigin(mutSameOriginPadded)).toBeNull();
     });
   });
 });

@@ -28,6 +28,7 @@ export function PartyListClient({
   initialKind,
 }: PartyListClientProps) {
   const [query, setQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
   const [selectedKind, setSelectedKind] = useState<PartyKind | undefined>(initialKind);
   const [page, setPage] = useState(1);
 
@@ -86,6 +87,7 @@ export function PartyListClient({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setAppliedQuery(query);
     setPage(1);
     fetchParties(query, selectedKind, 1);
   };
@@ -93,11 +95,12 @@ export function PartyListClient({
   const handleKindFilterChange = (kind?: PartyKind) => {
     setSelectedKind(kind);
     setPage(1);
-    fetchParties(query, kind, 1);
+    fetchParties(appliedQuery, kind, 1);
   };
 
   const handleClearFilters = () => {
     setQuery('');
+    setAppliedQuery('');
     setSelectedKind(undefined);
     setPage(1);
     fetchParties('', undefined, 1);
@@ -105,20 +108,20 @@ export function PartyListClient({
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
-    fetchParties(query, selectedKind, newPage);
+    fetchParties(appliedQuery, selectedKind, newPage);
   };
 
   const parties = partiesResult?.parties || [];
   const totalCount = partiesResult?.totalCount ?? 0;
   const totalPages = partiesResult?.totalPages ?? 1;
-  const hasActiveFilters = Boolean(query.trim() || selectedKind);
+  const hasActiveFilters = Boolean(appliedQuery.trim() || selectedKind);
 
   return (
     <div className="space-y-6">
       {/* 1. Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[#D5DFE3]">
-        <div>
-          <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
+        <div className="min-w-0">
+          <h1 className="min-w-0 [overflow-wrap:anywhere] text-2xl font-bold text-[#172A35] tracking-tight">
             دليل الأطراف والموكلين
           </h1>
           <p className="text-sm text-[#4D606A] mt-1">
@@ -226,7 +229,7 @@ export function PartyListClient({
         <ErrorContainer
           title="تعذر تحميل دليل الأطراف"
           message={error}
-          onRetry={() => fetchParties(query, selectedKind, page)}
+          onRetry={() => fetchParties(appliedQuery, selectedKind, page)}
         />
       ) : parties.length === 0 ? (
         hasActiveFilters ? (
@@ -287,7 +290,7 @@ export function PartyListClient({
                       data-testid={`party-row-${party.id}`}
                       className="hover:bg-[#F9FBFC] transition-colors"
                     >
-                      <td className="px-4 py-3 font-semibold text-[#172A35]">
+                      <td className="px-4 py-3 font-semibold text-[#172A35] min-w-0 [overflow-wrap:anywhere]">
                         <Link
                           href={`/parties/${party.id}`}
                           className="hover:text-[#14566B] hover:underline focus:outline-none focus:ring-1 focus:ring-[#14566B] rounded"
@@ -351,11 +354,11 @@ export function PartyListClient({
                 className="bg-white p-4 rounded-[6px] border border-[#D5DFE3] space-y-3 shadow-xs"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
+                  <div className="min-w-0">
                     <span className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-[#E8EEF1] text-[#172A35] mb-1">
                       {PARTY_KIND_SHORT_LABELS[party.kind]}
                     </span>
-                    <h2 className="text-base font-bold text-[#172A35]">
+                    <h2 className="min-w-0 [overflow-wrap:anywhere] text-base font-bold text-[#172A35]">
                       <Link href={`/parties/${party.id}`} className="hover:underline">
                         {party.name}
                       </Link>

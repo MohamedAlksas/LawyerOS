@@ -49,6 +49,7 @@ interface QueueItem {
   itemTitleEdited: boolean;
   /** Title sent with the begin request; frozen so an idempotent replay never changes payload. */
   sentTitle?: string;
+  beginAttempted: boolean;
   status: QueueUploadStatus;
   errorMessage: string | null;
   attemptId?: string;
@@ -87,7 +88,11 @@ const SESSION_EXPIRED_MESSAGE =
   'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.';
 const NETWORK_ERROR_MESSAGE = 'الاتصال انقطع، البيانات لسه ما اتحفظتش';
 const SIZE_EXCEEDED_MESSAGE = 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).';
-const CONFLICT_CODES = new Set<string>(['CONCURRENCY_CONFLICT', 'IDEMPOTENCY_CONCURRENT_CONFLICT']);
+const CONFLICT_CODES = new Set<string>([
+  'CONCURRENCY_CONFLICT',
+  'IDEMPOTENCY_CONCURRENT_CONFLICT',
+  'IDEMPOTENCY_PAYLOAD_MISMATCH',
+]);
 
 const isPending = (item: QueueItem) => item.status !== 'READY' && item.status !== 'CANCELLED';
 const pendingOf = (items: QueueItem[]) => items.filter(isPending);
@@ -114,6 +119,7 @@ type AttemptState = Pick<
   QueueItem,
   | 'attemptId'
   | 'sentTitle'
+  | 'beginAttempted'
   | 'contentUploaded'
   | 'pendingConfirmDuplicate'
   | 'duplicateMatches'
@@ -125,6 +131,7 @@ type AttemptState = Pick<
 const freshAttemptPatch = (): AttemptState => ({
   attemptId: undefined,
   sentTitle: undefined,
+  beginAttempted: false,
   contentUploaded: false,
   pendingConfirmDuplicate: false,
   duplicateMatches: [],
@@ -180,11 +187,11 @@ export function DocumentUploadForm({
   const hasReadyOrCancelled = queue.some(
     (item) => item.status === 'READY' || item.status === 'CANCELLED'
   );
-  // Shared metadata is already bound to a live attempt awaiting retry or duplicate confirmation.
+  // Shared metadata is already bound to an incomplete/live attempt awaiting retry or duplicate confirmation.
   const metadataLocked = queue.some(
     (item) =>
-      Boolean(item.attemptId) &&
-      (item.status === 'INCOMPLETE' || item.status === 'DUPLICATE_WARNING')
+      item.status === 'INCOMPLETE' ||
+      (Boolean(item.attemptId) && item.status === 'DUPLICATE_WARNING')
   );
   const metadataDisabled = isUploading || metadataLocked;
   const onlyDuplicateWarnings =
@@ -483,9 +490,12 @@ export function DocumentUploadForm({
         return 'REJECTED';
       }
 
+      const frozenTitle = current.sentTitle ?? effectiveTitle;
       updateQueueItem(queueId, {
         status: 'UPLOADING',
         errorMessage: null,
+        beginAttempted: true,
+        sentTitle: frozenTitle,
       });
 
       try {
@@ -497,7 +507,7 @@ export function DocumentUploadForm({
             matterId: linkMode === 'MATTER' ? matterId : null,
             partyId: linkMode === 'PARTY' ? partyId : null,
             proceedingId: linkMode === 'MATTER' && proceedingId ? proceedingId : null,
-            title: effectiveTitle,
+            title: frozenTitle,
             documentType,
             documentDate: documentDate || null,
             description: description.trim() || null,
@@ -533,12 +543,15 @@ export function DocumentUploadForm({
               (failure.status === 'REJECTED' && serverFieldErrors
                 ? Object.values(serverFieldErrors)[0]
                 : undefined) ?? failure.message,
+            ...(failure.status === 'REJECTED'
+              ? { beginAttempted: false, sentTitle: undefined }
+              : {}),
           });
           return failure.status;
         }
 
         attemptId = beginBody.data.id;
-        updateQueueItem(queueId, { attemptId, sentTitle: effectiveTitle });
+        updateQueueItem(queueId, { attemptId, sentTitle: frozenTitle });
       } catch {
         if (!isMountedRef.current) return 'INCOMPLETE';
         updateQueueItem(queueId, { status: 'INCOMPLETE', errorMessage: NETWORK_ERROR_MESSAGE });
@@ -960,7 +973,7 @@ export function DocumentUploadForm({
                               ? item.itemTitle
                               : resolveEffectiveTitle(item, pendingQueue)
                           }
-                          disabled={isUploading || Boolean(item.attemptId)}
+                          disabled={isUploading || item.status === 'INCOMPLETE' || Boolean(item.attemptId)}
                           onChange={(e) =>
                             updateQueueItem(item.queueId, {
                               itemTitle: e.target.value,

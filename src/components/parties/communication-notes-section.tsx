@@ -55,7 +55,7 @@ export function CommunicationNotesSection({
   const savingRef = useRef(false);
   const [communicationAtEdited, setCommunicationAtEdited] = useState(Boolean(editable.restored));
   const dirty = !readOnly && isFormOpen && Boolean(communicationAtEdited || summary || followUpRequired || followUpDate || channel !== 'PHONE');
-  useLeaveGuard(dirty, isSubmitting || Boolean(pending));
+  useLeaveGuard(dirty || Boolean(pending), isSubmitting);
   useLayoutEffect(() => {
     if (readOnly || !draft.isCurrent()) return;
     if (!dirty) editable.clear();

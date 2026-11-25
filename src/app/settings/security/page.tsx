@@ -1,6 +1,7 @@
 import React from 'react';
 import SecurityClient from './security-client';
-import { getSecurityOverview } from './actions';
+import { requireActor } from '@/modules/identity/require-actor';
+import { listActiveSessions } from '@/modules/identity/sessions';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 
@@ -9,9 +10,9 @@ export const metadata = {
 };
 
 export default async function SecuritySettingsPage() {
-  let overview;
+  let actor;
   try {
-    overview = await getSecurityOverview();
+    actor = await requireActor({ requiredPermission: 'MANAGE_SECURITY' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       await redirectOnAuthError(error, '/settings/security');
@@ -29,6 +30,16 @@ export default async function SecuritySettingsPage() {
     throw error;
   }
 
+  const activeSessions = await listActiveSessions(actor.id, actor.sessionId);
+  const sessions = activeSessions.map((s) => ({
+    id: s.id,
+    ipAddress: s.ipAddress || 'غير معروف',
+    userAgent: s.userAgent || 'متصفح غير معروف',
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+    isCurrent: s.isCurrent,
+  }));
+
   return (
     <div className="min-h-screen bg-[#F4F6F7] p-4 sm:p-8 overflow-x-hidden" dir="rtl" lang="ar-EG">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -41,9 +52,14 @@ export default async function SecuritySettingsPage() {
         </div>
 
         <SecurityClient
-          key={overview.sessions.find((session) => session.isCurrent)?.id}
-          initialSessions={overview.sessions}
-          actor={overview.actor}
+          key={sessions.find((session) => session.isCurrent)?.id}
+          initialSessions={sessions}
+          actor={{
+            name: actor.name,
+            email: actor.email,
+            role: actor.role,
+            twoFactorVerified: actor.twoFactorVerified,
+          }}
         />
       </div>
     </div>

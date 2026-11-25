@@ -15,13 +15,13 @@ export function isUncertainHearingOutcome(code?: string): boolean {
  */
 export function useHearingModalEffects(options: {
   isOpen: boolean;
-  isSubmitting: boolean;
+  isSubmitting?: boolean;
   hasPending: boolean;
   onClose: () => void;
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef: RefObject<HTMLElement | null>;
 }) {
-  const { isOpen, isSubmitting, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
   const onCloseRef = useRef(onClose);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export function useHearingModalEffects(options: {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isSubmitting) return;
     const frameId = requestAnimationFrame(() => {
       if (hasPending) {
         const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]:not([disabled])');
@@ -61,7 +61,7 @@ export function useHearingModalEffects(options: {
       initialFocusRef.current?.focus();
     });
     return () => cancelAnimationFrame(frameId);
-  }, [isOpen, hasPending, dialogRef, initialFocusRef]);
+  }, [isOpen, isSubmitting, hasPending, dialogRef, initialFocusRef]);
 
   useEffect(() => {
     if (!isOpen) return;

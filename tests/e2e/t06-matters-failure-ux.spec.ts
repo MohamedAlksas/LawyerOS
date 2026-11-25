@@ -192,7 +192,7 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // 2. Create an ACTIVE matter directly with this party as CLIENT
     const matter = await prisma.matter.create({
       data: {
-        fileCode: '2026/9991',
+        fileCode: `2026/9991-${Date.now().toString().slice(-4)}`,
         title: 'قضية حصرية ذات موكل وحيد',
         kind: 'LITIGATION',
         status: 'ACTIVE',
@@ -267,7 +267,7 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // 3. Create active matter with the party as CLIENT
     const matter = await prisma.matter.create({
       data: {
-        fileCode: '2026/8881',
+        fileCode: `2026/8881-${Date.now().toString().slice(-4)}`,
         title: 'ملف اختبار التعارض المتزامن في القيود',
         kind: 'LITIGATION',
         status: 'ACTIVE',
@@ -404,7 +404,7 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
     // 1. Create a test matter in DB
     const matter = await prisma.matter.create({
       data: {
-        fileCode: '2026/7771',
+        fileCode: `2026/7771-${Date.now().toString().slice(-4)}`,
         title: 'ملف تجربة التوجيه الآمن بعد الدخول',
         kind: 'LITIGATION',
         status: 'ACTIVE',

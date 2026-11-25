@@ -2161,4 +2161,99 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     const expectedSwapSha = crypto.createHash('sha256').update(swapBytes2).digest('hex');
     expect(swapDoc.currentVersion?.sha256).toBe(expectedSwapSha);
   });
+
+  it('T11-ARCHIVED-AND-VALIDATING: finalizeUpload rejects archived Matter and cleanup preserves in-flight VALIDATING inside stale window', async () => {
+    const storage = createLocalDocumentStorage(storageRoot);
+    const archivedMatterRes = await openMatter(owner, {
+      title: `ملف قضية لأرشفة منتصف الرفع ${runSuffix}`,
+      kind: 'LITIGATION',
+      initialClientId: partyId,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const archivedMatterId = archivedMatterRes.matter.id;
+    createdMatterIds.push(archivedMatterId);
+
+    const validBytes = buildSyntheticPdf('ARCHIVED-MATTER-FINALIZE');
+    const attemptOnActive = await beginUpload(owner, {
+      matterId: archivedMatterId,
+      title: 'مستند قبل الأرشفة',
+      documentType: 'CONTRACT',
+      originalFilename: 'before-archive.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: validBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(attemptOnActive.id);
+    await uploadAttemptBytes(owner, attemptOnActive.id, validBytes);
+
+    // Archive the Matter before finalizeUpload commits
+    await prisma.matter.update({
+      where: { id: archivedMatterId },
+      data: { status: 'ARCHIVED', archivedAt: new Date() },
+    });
+
+    await expect(
+      finalizeUpload(owner, { attemptId: attemptOnActive.id })
+    ).rejects.toThrow(DocumentValidationError);
+
+    const docsForArchivedMatter = await prisma.document.count({
+      where: { matterId: archivedMatterId },
+    });
+    expect(docsForArchivedMatter).toBe(0);
+
+    // Cleanup preserves an expired attempt currently in VALIDATING inside the 5-minute stale window
+    const now = new Date('2026-11-24T16:00:00.000Z');
+    const valBytes = buildSyntheticPdf('VALIDATING-STALE-WINDOW');
+    const valAttempt = await beginUpload(
+      owner,
+      {
+        matterId: matterAId,
+        title: 'محاولة قيد التحقق داخل النافذة الزمنية',
+        documentType: 'OTHER',
+        originalFilename: 'validating-window.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: valBytes.byteLength,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      { now }
+    );
+    createdAttemptIds.push(valAttempt.id);
+    await uploadAttemptBytes(owner, valAttempt.id, valBytes, { now });
+
+    const insideWindowUpdatedAt = new Date(now.getTime() - 60_000);
+    const expiredAt = new Date(now.getTime() - 60_000);
+    await prisma.$executeRaw`
+      UPDATE "upload_attempt"
+      SET "status" = 'VALIDATING'::"UploadAttemptStatus",
+          "expires_at" = ${expiredAt},
+          "updated_at" = ${insideWindowUpdatedAt}
+      WHERE "id" = ${valAttempt.id}
+    `;
+
+    const firstCleanup = await cleanupExpiredUploadAttempts(storage, { now });
+    expect(firstCleanup.skipped).toBe(false);
+
+    const stillValidating = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: valAttempt.id },
+    });
+    expect(stillValidating.status).toBe('VALIDATING');
+    expect(await storage.exists('quarantine', stillValidating.quarantineKey)).toBe(true);
+
+    // Once updatedAt exceeds the 5-minute stale window, cleanup expires it cleanly
+    const staleUpdatedAt = new Date(now.getTime() - 6 * 60_000);
+    await prisma.$executeRaw`
+      UPDATE "upload_attempt"
+      SET "updated_at" = ${staleUpdatedAt}
+      WHERE "id" = ${valAttempt.id}
+    `;
+
+    const secondCleanup = await cleanupExpiredUploadAttempts(storage, { now });
+    expect(secondCleanup.skipped).toBe(false);
+
+    const expiredValidating = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: valAttempt.id },
+    });
+    expect(expiredValidating.status).toBe('EXPIRED');
+    expect(await storage.exists('quarantine', expiredValidating.quarantineKey)).toBe(false);
+  });
 });
