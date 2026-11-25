@@ -35,12 +35,47 @@ export function schedulingHttpErrorResponse(error: unknown, mapper: (err: unknow
   });
 }
 
+export function isCrossSiteRequest(request: Request): boolean {
+  return request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site';
+}
+
+export function parseQueryIntegerParam(sp: URLSearchParams, name: string): number | undefined {
+  const raw = sp.get(name);
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  if (!/^\d{1,9}$/.test(trimmed)) {
+    throw new SchedulingValidationError('معاملات البحث أو العرض غير صالحة.', {
+      [name]: 'يجب أن تكون القيمة رقماً صحيحاً.',
+    });
+  }
+  return Number(trimmed);
+}
+
+export function parseQueryBooleanParam(sp: URLSearchParams, name: string): boolean | undefined {
+  const raw = sp.get(name);
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '') return undefined;
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  throw new SchedulingValidationError('معاملات البحث أو العرض غير صالحة.', {
+    [name]: 'القيمة يجب أن تكون true أو false.',
+  });
+}
+
 export async function readSchedulingFromRequest<R>(
   request: Request,
   query: (actor: Actor) => Promise<R>,
   mapper: (err: unknown) => ActionResult<never> = hearingError
 ) {
   try {
+    if (isCrossSiteRequest(request)) {
+      return NextResponse.json(
+        { success: false, code: 'FORBIDDEN', error: 'غير مصرح بالوصول من مصدر خارجي.' },
+        { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
+      );
+    }
     const actor = await requireActor({
       headers: request.headers,
       requiredPermission: 'READ_CLIENT_DATA',
@@ -67,7 +102,7 @@ export async function writeSchedulingFromRequest<T, R>(
     if (
       !origin ||
       !getTrustedOrigins().has(origin) ||
-      request.headers.get('sec-fetch-site') === 'cross-site'
+      isCrossSiteRequest(request)
     ) {
       return NextResponse.json(
         { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },

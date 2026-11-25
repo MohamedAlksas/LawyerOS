@@ -8,6 +8,7 @@ import {
   IconCalendar,
   IconDashboard,
   IconDeadline,
+  IconDocument,
   IconFolder,
   IconLogout,
   IconSearch,
@@ -38,6 +39,11 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     setIsLoggingOut(false);
     onClose();
   }, [onClose]);
+  const handleCloseRef = useRef(handleClose);
+
+  useEffect(() => {
+    handleCloseRef.current = handleClose;
+  }, [handleClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -72,8 +78,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        handleClose();
-        restoreFocus();
+        handleCloseRef.current();
         return;
       }
 
@@ -107,7 +112,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
       document.removeEventListener('keydown', handleKeyDown);
       restoreFocus();
     };
-  }, [isOpen, handleClose, triggerRef]);
+  }, [isOpen, triggerRef]);
 
   if (!isOpen) return null;
 
@@ -140,6 +145,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
+  const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
@@ -275,6 +281,17 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
             </Link>
 
             <Link
+              href="/documents"
+              data-testid="nav-link-documents"
+              aria-current={isDocumentsActive ? 'page' : undefined}
+              onNavigate={onClose}
+              className={navItemClass(isDocumentsActive)}
+            >
+              <IconDocument className="w-5 h-5 shrink-0" />
+              <span>المستندات</span>
+            </Link>
+
+            <Link
               href="/settings/security"
               data-testid="nav-link-security"
               aria-current={isSecurityActive ? 'page' : undefined}
@@ -313,7 +330,6 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               </span>
               <div className="space-y-1">
                 <div
-                  aria-disabled="true"
                   className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
                 >
                   <div className="flex items-center gap-2">

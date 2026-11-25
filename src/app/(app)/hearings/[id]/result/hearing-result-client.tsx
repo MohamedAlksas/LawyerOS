@@ -120,7 +120,10 @@ export function HearingResultClient({
   const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
   const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
     Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
-  useLeaveGuard(resultDirty || (isCorrecting && !correctionFrozen), isSubmitting || correctionSubmitting);
+  useLeaveGuard(
+    resultDirty || (isCorrecting && !correctionFrozen),
+    isSubmitting || correctionSubmitting
+  );
 
   const handleAddTask = () => {
     const newTask: FollowUpTaskItem = {
@@ -279,7 +282,7 @@ export function HearingResultClient({
       {/* Navigation Breadcrumb */}
       <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] flex items-center gap-1.5 flex-wrap">
         <Link href={`/matters/${matterId}`} className="hover:text-[#14566B] hover:underline font-mono">
-          {matterFileCode}
+          <bdi dir="ltr">{matterFileCode}</bdi>
         </Link>
         <span>/</span>
         <Link
@@ -290,7 +293,7 @@ export function HearingResultClient({
         </Link>
         <span>/</span>
         <Link href={`/hearings/${hearingId}`} className="hover:text-[#14566B] hover:underline">
-          جلسة {hearingDate}
+          جلسة <bdi dir="ltr">{hearingDate}</bdi>
         </Link>
         <span>/</span>
         <span className="text-[#172A35] font-semibold">تسجيل النتيجة</span>
@@ -304,10 +307,10 @@ export function HearingResultClient({
               <span>تسجيل قرار ونتيجة الجلسة</span>
             </h1>
             <p className="text-xs text-[#4D606A]">
-              جلسة يوم <span className="font-semibold text-[#172A35] font-mono">{hearingDate}</span>
+              جلسة يوم <bdi dir="ltr" className="font-semibold text-[#172A35] font-mono">{hearingDate}</bdi>
               {' • '}
               {hearingTime ? (
-                <span className="font-mono">{hearingTime}</span>
+                <bdi dir="ltr" className="font-mono">{hearingTime}</bdi>
               ) : (
                 <span data-testid="hearing-unknown-time" className="italic text-[#64748B]">
                   الساعة غير محددة
@@ -439,7 +442,7 @@ export function HearingResultClient({
       {linkedNext && (
         <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm">
           <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline">
-            الجلسة المرتبطة {linkedNext.date} ({HEARING_STATUS_LABELS[linkedNext.status]})
+            الجلسة المرتبطة <bdi dir="ltr">{linkedNext.date}</bdi> ({HEARING_STATUS_LABELS[linkedNext.status]})
           </Link>
           {' · '}
           <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline">

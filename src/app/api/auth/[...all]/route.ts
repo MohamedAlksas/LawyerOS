@@ -1,4 +1,5 @@
 import { auth, getPrismaClient, getTrustedOrigins } from '@/lib/auth';
+import { getEnv } from '@/lib/env';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireActor } from '@/modules/identity/require-actor';
 import { regenerateRecoveryCodes } from '@/modules/identity/recovery-codes';
@@ -19,6 +20,27 @@ function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
   const res = NextResponse.json(body, init);
   res.headers.set('Cache-Control', 'private, no-store');
   return res;
+}
+
+function clearAuthCookie(res: NextResponse, name: string): void {
+  res.cookies.set(name, '', {
+    path: '/',
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: name.startsWith('__Secure-'),
+  });
+}
+
+function getActiveTwoFactorCookieName(): '__Secure-better-auth.two_factor' | 'better-auth.two_factor' {
+  return new URL(getEnv().BETTER_AUTH_URL).protocol === 'https:'
+    ? '__Secure-better-auth.two_factor'
+    : 'better-auth.two_factor';
+}
+
+function findNonEmptyCookieEntries(cookies: string[], name: string): string[] {
+  const prefix = `${name}=`;
+  return cookies.filter((c) => c.startsWith(prefix) && c.slice(prefix.length).trim().length > 0);
 }
 
 async function auditIdentityOutcome(userId: string, action: string) {
@@ -139,8 +161,8 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
             },
             { status: 401 }
           );
-          response.cookies.delete('better-auth.session_token');
-          response.cookies.delete('__Secure-better-auth.session_token');
+          clearAuthCookie(response, 'better-auth.session_token');
+          clearAuthCookie(response, '__Secure-better-auth.session_token');
           return response;
         }
       }
@@ -158,21 +180,35 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
 
 async function privateAuthResponse(response: Response): Promise<Response> {
   const headers = new Headers(response.headers);
-  headers.set('Cache-Control', 'no-store');
-  if (response.status === 204 || !response.body || !headers.get('content-type')?.includes('application/json')) {
+  headers.set('Cache-Control', 'private, no-store');
+  if (
+    response.status === 204 ||
+    !response.body ||
+    !headers.get('content-type')?.toLowerCase().includes('application/json')
+  ) {
     return new Response(response.body, { status: response.status, headers });
   }
   const text = await response.text();
   if (!text) {
     return new Response(null, { status: response.status, headers });
   }
-  const data: unknown = JSON.parse(text);
   headers.delete('content-length');
   headers.delete('content-encoding');
-  return new Response(JSON.stringify(data, (key, value) => key === 'token' ? undefined : value), {
-    status: response.status,
-    headers,
-  });
+  try {
+    const data: unknown = JSON.parse(text);
+    return new Response(
+      JSON.stringify(data, (key, value) => (key === 'token' ? undefined : value)),
+      {
+        status: response.status,
+        headers,
+      }
+    );
+  } catch {
+    return new Response(text, {
+      status: response.status,
+      headers,
+    });
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -193,7 +229,8 @@ export async function POST(request: NextRequest) {
   if (pathname.includes('/two-factor/generate-backup-codes')) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
-      if (request.headers.get('sec-fetch-site') === 'cross-site') {
+      const secFetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
+      if (secFetchSite === 'cross-site') {
         return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
       }
 
@@ -234,7 +271,7 @@ export async function POST(request: NextRequest) {
         // and reject untrusted Host header even if request.url was constructed with trusted base
         if (
           !allowedOrigins.has(reqOrigin) ||
-          request.headers.get('sec-fetch-site') !== 'same-origin'
+          secFetchSite !== 'same-origin'
         ) {
           return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
         }
@@ -258,7 +295,16 @@ export async function POST(request: NextRequest) {
 
     try {
       const actor = await requireActor({ headers: request.headers });
-      const body = await request.clone().json().catch(() => ({}));
+      let parsedBody: unknown;
+      try {
+        parsedBody = await request.clone().json();
+      } catch {
+        return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
+      }
+      if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+        return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
+      }
+      const body = parsedBody as Record<string, unknown>;
       const password = body.currentPassword || body.password;
       if (!password || typeof password !== 'string' || password.trim().length === 0) {
         return noStoreJson(
@@ -309,9 +355,9 @@ export async function POST(request: NextRequest) {
     } else {
       email = (await request.clone().json().catch(() => null))?.email;
     }
-    if (typeof email === 'string' && email) {
+    if (typeof email === 'string' && email.trim()) {
       try {
-        signInUserCredentialVersion = await getUserCredentialVersionByEmail(email);
+        signInUserCredentialVersion = await getUserCredentialVersionByEmail(email.trim());
       } catch {
         return noStoreJson(
           { error: 'فشل في قراءة حالة أمان الحساب. يرجى إعادة المحاولة.' },
@@ -334,11 +380,22 @@ export async function POST(request: NextRequest) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
       const cookies = cookieHeader.split(';').map((c) => c.trim());
-      const tfCookie = cookies.find(
-        (c) =>
-          c.startsWith('better-auth.two_factor=') ||
-          c.startsWith('__Secure-better-auth.two_factor=')
-      );
+      const standardTfCookies = findNonEmptyCookieEntries(cookies, 'better-auth.two_factor');
+      const secureTfCookies = findNonEmptyCookieEntries(cookies, '__Secure-better-auth.two_factor');
+      if (standardTfCookies.length > 0 && secureTfCookies.length > 0) {
+        const errRes = noStoreJson(
+          { error: 'جلسة التحقق الثنائي غير صالحة أو متعارضة. يرجى تسجيل الدخول مجدداً.' },
+          { status: 401 }
+        );
+        clearAuthCookie(errRes, 'better-auth.two_factor');
+        clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+        return errRes;
+      }
+      const activeTfName = getActiveTwoFactorCookieName();
+      const tfCookie =
+        activeTfName === '__Secure-better-auth.two_factor'
+          ? secureTfCookies[0]
+          : standardTfCookies[0];
       if (tfCookie) {
         const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
         if (rawToken) {
@@ -379,8 +436,8 @@ export async function POST(request: NextRequest) {
                 },
                 { status: 401 }
               );
-              errRes.cookies.delete('better-auth.two_factor');
-              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              clearAuthCookie(errRes, 'better-auth.two_factor');
+              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
               await auditSignInMfa(targetUserId, false);
               return errRes;
             }
@@ -414,8 +471,8 @@ export async function POST(request: NextRequest) {
                 },
                 { status: 401 }
               );
-              errRes.cookies.delete('better-auth.two_factor');
-              errRes.cookies.delete('__Secure-better-auth.two_factor');
+              clearAuthCookie(errRes, 'better-auth.two_factor');
+              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
               await auditSignInMfa(targetUserId, false);
               return errRes;
             }
@@ -451,6 +508,7 @@ export async function POST(request: NextRequest) {
   }
 
   const response = await auth.handler(reqToExecute);
+  // Successful rotations are audited atomically by DB trigger trg_audit_password_rotation ('CHANGE_PASSWORD').
   if (passwordChangeActorId && !response.ok) {
     await auditIdentityOutcome(passwordChangeActorId, 'REJECT_PASSWORD_CHANGE');
   }
@@ -462,102 +520,131 @@ export async function POST(request: NextRequest) {
     const setCookies = response.headers.getSetCookie?.() || [
       response.headers.get('set-cookie') || '',
     ];
+    const activeTfPrefix = `${getActiveTwoFactorCookieName()}=`;
     const tfCookie = setCookies.find(
-      (c) =>
-        c.startsWith('better-auth.two_factor=') ||
-        c.startsWith('__Secure-better-auth.two_factor=')
+      (c) => c.startsWith(activeTfPrefix) && !/\bmax-age=0\b/i.test(c)
     );
     if (tfCookie) {
       const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
       const companionCandidates = candidateIdentifiers.map((id) => `2fa-cred-ver-${id}`);
-      if (rawToken) {
-        const prisma = getPrismaClient();
-        let verifRecordId: string | null = null;
-        let verifUserId: string | null = null;
-        try {
-          const verifRecord = await prisma.verification.findFirst({
-            where: { identifier: { in: candidateIdentifiers } },
-          });
-          if (!verifRecord) {
-            throw new Error(`Verification challenge record not found for token ${rawToken}`);
-          }
-          verifRecordId = verifRecord.id;
-          verifUserId = verifRecord.value;
+      const prisma = getPrismaClient();
+      let verifRecordId: string | null = null;
+      let verifUserId: string | null = null;
+      try {
+        if (!rawToken) {
+          throw new Error('Failed to extract two-factor challenge token');
+        }
+        const verifRecord = await prisma.verification.findFirst({
+          where: { identifier: { in: candidateIdentifiers } },
+        });
+        if (!verifRecord) {
+          throw new Error(`Verification challenge record not found for token ${rawToken}`);
+        }
+        verifRecordId = verifRecord.id;
+        verifUserId = verifRecord.value;
 
-          const expiresAt =
-            verifRecord.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
+        const expiresAt =
+          verifRecord.expiresAt || new Date(Date.now() + 10 * 60 * 1000);
 
-          // R13-01: Fail closed if credential version was not captured before authentication.
-          // NEVER reconstruct or read credential version after provider authentication!
-          if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
-            throw new Error('Credential version not captured before authentication');
-          }
-          const credVer = signInUserCredentialVersion;
+        // R13-01: Fail closed if credential version was not captured before authentication.
+        // NEVER reconstruct or read credential version after provider authentication!
+        if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
+          throw new Error('Credential version not captured before authentication');
+        }
+        const credVer = signInUserCredentialVersion;
 
-          await prisma.verification.deleteMany({
-            where: { identifier: { in: companionCandidates } },
-          });
+        await prisma.verification.deleteMany({
+          where: { identifier: { in: companionCandidates } },
+        });
 
-          await prisma.verification.create({
-            data: {
-              id: randomUUID(),
-              identifier: `2fa-cred-ver-${rawToken}`,
-              value: String(credVer),
-              expiresAt,
-            },
-          });
-        } catch {
-          // R12-01: Prevent companion insert failure suppression!
-          // If inserting 2fa-cred-ver-${rawToken} fails, clean up created verification record,
-          // clear 2FA cookies, and return HTTP 500 fail-closed
+        await prisma.verification.create({
+          data: {
+            id: randomUUID(),
+            identifier: `2fa-cred-ver-${rawToken}`,
+            value: String(credVer),
+            expiresAt,
+          },
+        });
+      } catch {
+        // R12-01: Prevent companion insert failure suppression!
+        // If inserting 2fa-cred-ver-${rawToken} fails, clean up created verification record,
+        // clear 2FA cookies, and return HTTP 500 fail-closed
+        if (verifRecordId || verifUserId || candidateIdentifiers.length > 0) {
           await prisma.verification.deleteMany({
             where: {
               OR: [
                 ...(verifRecordId ? [{ id: verifRecordId }] : []),
                 ...(verifUserId ? [{ value: verifUserId }] : []),
-                { identifier: { in: candidateIdentifiers } },
-                { identifier: { in: companionCandidates } },
+                ...(candidateIdentifiers.length > 0
+                  ? [
+                      { identifier: { in: candidateIdentifiers } },
+                      { identifier: { in: companionCandidates } },
+                    ]
+                  : []),
               ],
             },
           }).catch(() => {});
-
-          const errRes = noStoreJson(
-            { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
-            { status: 500 }
-          );
-          errRes.cookies.delete('better-auth.two_factor');
-          errRes.cookies.delete('__Secure-better-auth.two_factor');
-          return errRes;
         }
+
+        const errRes = noStoreJson(
+          { error: 'فشل في تهيئة سياق أمان التحقق الثنائي.' },
+          { status: 500 }
+        );
+        clearAuthCookie(errRes, 'better-auth.two_factor');
+        clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+        return errRes;
       }
     }
 
     // Also if a direct session was issued without 2FA:
     const sessionCookie = setCookies.find(
       (c) =>
-        c.startsWith('better-auth.session_token=') ||
-        c.startsWith('__Secure-better-auth.session_token=')
+        (c.startsWith('better-auth.session_token=') ||
+          c.startsWith('__Secure-better-auth.session_token=')) &&
+        !c.includes('Max-Age=0')
     );
-    if (sessionCookie && signInUserCredentialVersion !== null) {
+    if (sessionCookie) {
+      let directSessionId: string | null = null;
+      const prisma = getPrismaClient();
+      const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
       try {
-        const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
-        if (rawToken) {
-          const prisma = getPrismaClient();
-          const session = await prisma.session.findFirst({
-            where: {
-              OR: candidateIdentifiers.map((token) => ({ token })),
-            },
-          });
-          if (session) {
-            await setSessionCredentialVersion(
-              prisma,
-              session.id,
-              signInUserCredentialVersion
-            );
-          }
+        if (signInUserCredentialVersion === null || signInUserCredentialVersion === undefined) {
+          throw new Error('Credential version not captured before authentication');
         }
+        if (!rawToken) {
+          throw new Error('Failed to extract direct session token');
+        }
+        const session = await prisma.session.findFirst({
+          where: {
+            OR: candidateIdentifiers.map((token) => ({ token })),
+          },
+        });
+        if (!session) {
+          throw new Error('Issued session not found in database');
+        }
+        directSessionId = session.id;
+        await setSessionCredentialVersion(
+          prisma,
+          session.id,
+          signInUserCredentialVersion
+        );
       } catch {
-        // Best-effort sign-in metadata stamping
+        if (directSessionId) {
+          await prisma.session.delete({ where: { id: directSessionId } }).catch(() => {});
+        } else if (candidateIdentifiers.length > 0) {
+          await prisma.session
+            .deleteMany({
+              where: { OR: candidateIdentifiers.map((token) => ({ token })) },
+            })
+            .catch(() => {});
+        }
+        const errRes = noStoreJson(
+          { error: 'فشل في تهيئة أمان الجلسة.' },
+          { status: 500 }
+        );
+        clearAuthCookie(errRes, 'better-auth.session_token');
+        clearAuthCookie(errRes, '__Secure-better-auth.session_token');
+        return errRes;
       }
     }
   }
@@ -583,53 +670,59 @@ export async function POST(request: NextRequest) {
       );
       if (sessionCookie) {
         const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
-        if (rawToken) {
-          const newSession = await prisma.session.findFirst({
-            where: {
-              OR: candidateIdentifiers.map((t) => ({ token: t })),
+        if (!rawToken) {
+          throw new Error('Failed to extract issued session token');
+        }
+        const newSession = await prisma.session.findFirst({
+          where: {
+            OR: candidateIdentifiers.map((t) => ({ token: t })),
+          },
+        });
+        if (!newSession) {
+          throw new Error('Issued session not found in database');
+        }
+        newSessionId = newSession.id;
+
+        const uid = targetUserId || newSession.userId;
+        const postCredVer =
+          targetUserId !== null && newSession.userId === targetUserId
+            ? await getUserCredentialVersion(targetUserId)
+            : null;
+
+        if (
+          targetUserId === null ||
+          newSession.userId !== targetUserId ||
+          expectedCredVer === null ||
+          postCredVer !== expectedCredVer ||
+          newSession.credentialVersion !== expectedCredVer
+        ) {
+          // Credential was rotated while completing MFA or session version mismatch! Evict session and fail closed!
+          await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
+          const errRes = noStoreJson(
+            {
+              error:
+                'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
             },
-          });
-          if (!newSession) {
-            throw new Error('Issued session not found in database');
-          }
-          newSessionId = newSession.id;
+            { status: 401 }
+          );
+          clearAuthCookie(errRes, 'better-auth.session_token');
+          clearAuthCookie(errRes, '__Secure-better-auth.session_token');
+          clearAuthCookie(errRes, 'better-auth.two_factor');
+          clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+          await auditSignInMfa(uid, false);
+          return errRes;
+        }
 
-          const uid = targetUserId || newSession.userId;
-          const postCredVer = await getUserCredentialVersion(uid);
-
-          if (
-            expectedCredVer === null ||
-            postCredVer !== expectedCredVer ||
-            newSession.credentialVersion !== expectedCredVer
-          ) {
-            // Credential was rotated while completing MFA or session version mismatch! Evict session and fail closed!
-            await prisma.session.delete({ where: { id: newSession.id } }).catch(() => {});
-            const errRes = noStoreJson(
-              {
-                error:
-                  'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
-              },
-              { status: 401 }
-            );
-            errRes.cookies.delete('better-auth.session_token');
-            errRes.cookies.delete('__Secure-better-auth.session_token');
-            errRes.cookies.delete('better-auth.two_factor');
-            errRes.cookies.delete('__Secure-better-auth.two_factor');
-            await auditSignInMfa(uid, false);
-            return errRes;
-          }
-
-          // Clean up companion verification record
-          if (mfaRawToken) {
-            await prisma.verification.deleteMany({
-              where: {
-                OR: [
-                  { identifier: `2fa-cred-ver-${mfaRawToken}` },
-                  { identifier: `2fa-cred-ver-2fa-${mfaRawToken}` },
-                ],
-              },
-            }).catch(() => {});
-          }
+        // Clean up companion verification record
+        if (mfaRawToken) {
+          await prisma.verification.deleteMany({
+            where: {
+              OR: [
+                { identifier: `2fa-cred-ver-${mfaRawToken}` },
+                { identifier: `2fa-cred-ver-2fa-${mfaRawToken}` },
+              ],
+            },
+          }).catch(() => {});
         }
       }
     } catch {
@@ -641,10 +734,10 @@ export async function POST(request: NextRequest) {
         { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
         { status: 500 }
       );
-      errRes.cookies.delete('better-auth.session_token');
-      errRes.cookies.delete('__Secure-better-auth.session_token');
-      errRes.cookies.delete('better-auth.two_factor');
-      errRes.cookies.delete('__Secure-better-auth.two_factor');
+      clearAuthCookie(errRes, 'better-auth.session_token');
+      clearAuthCookie(errRes, '__Secure-better-auth.session_token');
+      clearAuthCookie(errRes, 'better-auth.two_factor');
+      clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
       return errRes;
     }
   }

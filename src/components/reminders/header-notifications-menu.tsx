@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GuardedLink } from '@/components/navigation-guard';
 import { IconBell, IconCheck, IconClock, IconRefresh, IconWarning } from '@/components/stitch-icons';
 import { generateClientRequestId } from '@/components/matters/matter-ui-types';
@@ -69,7 +69,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
   const abortRef = useRef<AbortController | null>(null);
   const seqRef = useRef(0);
 
-  const runFetch = (controller: AbortController, seq: number) => {
+  const runFetch = useCallback((controller: AbortController, seq: number) => {
     fetchInboxPreview(controller.signal)
       .then((data) => {
         if (controller.signal.aborted || seq !== seqRef.current) return;
@@ -88,9 +88,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
           setLoading(false);
         }
       });
-  };
+  }, []);
 
-  const triggerRefresh = () => {
+  const triggerRefresh = useCallback(() => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -98,7 +98,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
     setLoading(true);
     setLoadError(null);
     runFetch(controller, seq);
-  };
+  }, [runFetch]);
 
   useEffect(() => {
     if (!enabled) {
@@ -129,10 +129,19 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
         }
       });
 
-    return () => {
-      controller.abort();
+    const handleInboxUpdated = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source === 'header') return;
+      triggerRefresh();
     };
-  }, [enabled]);
+    window.addEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+
+    return () => {
+      window.removeEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+      controller.abort();
+      abortRef.current?.abort();
+    };
+  }, [enabled, triggerRefresh]);
 
   const isOpen = enabled && open;
 
@@ -188,11 +197,16 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
         setMarkError(res.error || 'تعذر تأشير التنبيه كمقروء.');
         return;
       }
+      abortRef.current?.abort();
+      abortRef.current = null;
+      ++seqRef.current;
+      setLoading(false);
       setOverview((prev) => {
         if (!prev) return prev;
+        const alreadyRead = prev.items.some((it) => it.id === item.id && it.isRead);
         return {
           ...prev,
-          unreadCount: Math.max(0, prev.unreadCount - 1),
+          unreadCount: alreadyRead ? prev.unreadCount : Math.max(0, prev.unreadCount - 1),
           items: prev.items.map((it) =>
             it.id === item.id
               ? { ...it, isRead: true, readAt: res.data.readAt ?? new Date().toISOString() }
@@ -200,6 +214,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
           ),
         };
       });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lawoffice:inbox-updated', { detail: { source: 'header' } }));
+      }
     } catch {
       setMarkError('تعذر الاتصال بالخادم لتأشير التنبيه كمقروء.');
     } finally {
@@ -271,8 +288,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                 <button
                   type="button"
                   data-testid="header-notifications-filter-all"
+                  aria-pressed={filter === 'all'}
                   onClick={() => setFilter('all')}
-                  className={`px-2 py-1 text-[11px] font-semibold min-h-[32px] transition-colors ${
+                  className={`px-2.5 py-1 text-[11px] font-semibold min-h-[44px] transition-colors ${
                     filter === 'all' ? 'bg-[#14566B] text-white' : 'text-[#4D606A] hover:bg-[#F4F6F7]'
                   }`}
                 >
@@ -281,8 +299,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                 <button
                   type="button"
                   data-testid="header-notifications-filter-unread"
+                  aria-pressed={filter === 'unread'}
                   onClick={() => setFilter('unread')}
-                  className={`px-2 py-1 text-[11px] font-semibold min-h-[32px] transition-colors ${
+                  className={`px-2.5 py-1 text-[11px] font-semibold min-h-[44px] transition-colors ${
                     filter === 'unread' ? 'bg-[#14566B] text-white' : 'text-[#4D606A] hover:bg-[#F4F6F7]'
                   }`}
                 >
@@ -296,7 +315,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                 aria-label="تحديث التنبيهات"
                 disabled={loading}
                 onClick={triggerRefresh}
-                className="flex items-center justify-center w-8 h-8 rounded-[6px] border border-[#D5DFE3] bg-white hover:bg-[#F4F6F7] disabled:opacity-50 text-[#4D606A] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="flex items-center justify-center min-h-[44px] min-w-[44px] rounded-[6px] border border-[#D5DFE3] bg-white hover:bg-[#F4F6F7] disabled:opacity-50 text-[#4D606A] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <IconRefresh className={`w-3.5 h-3.5 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
               </button>
@@ -336,7 +355,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                 <button
                   type="button"
                   onClick={triggerRefresh}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-[6px] bg-[#14566B] text-white hover:bg-[#0F4354]"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-[6px] bg-[#14566B] text-white hover:bg-[#0F4354] min-h-[44px]"
                 >
                   إعادة المحاولة
                 </button>
@@ -380,7 +399,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                       <GuardedLink
                         href={item.targetHref}
                         onNavigate={() => setOpen(false)}
-                        className="block text-xs font-bold text-[#172A35] hover:text-[#14566B] underline-offset-2 hover:underline [overflow-wrap:anywhere]"
+                        className="flex items-center min-h-[44px] py-1 text-xs font-bold text-[#172A35] hover:text-[#14566B] underline-offset-2 hover:underline [overflow-wrap:anywhere]"
                       >
                         {item.title}
                       </GuardedLink>
@@ -405,9 +424,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                         <button
                           type="button"
                           data-testid={`header-notification-read-${item.id}`}
-                          disabled={markingId === item.id}
+                          disabled={Boolean(markingId)}
                           onClick={() => void handleMarkRead(item)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[5px] bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-[11px] font-semibold transition-colors min-h-[30px]"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[5px] bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-[11px] font-semibold transition-colors min-h-[44px]"
                         >
                           <IconCheck className="w-3 h-3" />
                           <span>{markingId === item.id ? 'جارٍ...' : 'تمت القراءة'}</span>
@@ -426,14 +445,17 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
               href="/inbox"
               data-testid="header-notifications-settings-link"
               onNavigate={() => setOpen(false)}
-              className="text-xs font-bold text-[#14566B] hover:text-[#0F4354] hover:underline focus:outline-none focus:ring-2 focus:ring-[#14566B] rounded px-1 py-0.5"
+              className="text-xs font-bold text-[#14566B] hover:text-[#0F4354] hover:underline focus:outline-none focus:ring-2 focus:ring-[#14566B] rounded px-2 py-1 min-h-[44px] inline-flex items-center"
             >
               إعدادات التنبيهات والمهام
             </GuardedLink>
             <button
               type="button"
-              onClick={() => setOpen(false)}
-              className="text-xs font-medium text-[#4D606A] hover:text-[#172A35] px-1.5 py-0.5"
+              onClick={() => {
+                setOpen(false);
+                buttonRef.current?.focus();
+              }}
+              className="text-xs font-medium text-[#4D606A] hover:text-[#172A35] px-2.5 py-1 min-h-[44px] inline-flex items-center rounded"
             >
               إغلاق
             </button>

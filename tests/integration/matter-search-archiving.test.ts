@@ -31,7 +31,7 @@ import {
   cleanupPartyFixtures,
   setupTestEncryptionKeys,
 } from '../helpers/party-test-helper';
-import { cleanupMatterFixtures } from '../helpers/matter-test-helper';
+import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { saveParty, getClientProfile } from '@/modules/parties/service';
 
 describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving', () => {
@@ -40,6 +40,7 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
   const createdMatterIds: string[] = [];
   const createdPartyIds: string[] = [];
   let testCourtId: string;
+  let createdCourtId: string | null = null;
 
   beforeAll(async () => {
     setupTestEncryptionKeys();
@@ -56,6 +57,7 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
           updatedById: actor.id,
         },
       });
+      createdCourtId = court.id;
     }
     testCourtId = court.id;
   });
@@ -70,6 +72,9 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
   afterAll(async () => {
     await cleanupMatterFixtures(prisma, createdMatterIds);
     await cleanupPartyFixtures(prisma, createdPartyIds);
+    if (createdCourtId) {
+      await cleanupReferenceFixtures(prisma, { courtIds: [createdCourtId] });
+    }
   });
 
   it('T07-01: Archives matter, enforces idempotency replay, and increments version in atomic audit transaction', async () => {

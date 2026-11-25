@@ -3,7 +3,7 @@ import { getTrustedOrigins } from '@/lib/auth';
 import { requireActor } from '@/modules/identity/require-actor';
 import type { Actor } from '@/modules/identity/types';
 import { hearingError } from './hearing-errors';
-import { statusFromErrorCode } from './deadline-http';
+import { isCrossSiteRequest, statusFromErrorCode } from './deadline-http';
 import { SchedulingValidationError } from './hearing-types';
 
 const headers = { 'Cache-Control': 'private, no-store' };
@@ -13,7 +13,7 @@ export async function writeHearingFromRequest<T extends { hearingId: string }, R
 ) {
   try {
     const origin = request.headers.get('origin');
-    if (!origin || !getTrustedOrigins().has(origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
+    if (!origin || !getTrustedOrigins().has(origin) || isCrossSiteRequest(request)) {
       return NextResponse.json({ success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' }, { status: 403, headers });
     }
     const actor = await requireActor({ headers: request.headers, requiredPermission: 'WRITE_CLIENT_DATA' });

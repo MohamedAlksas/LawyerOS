@@ -6,6 +6,12 @@ import {
 } from '@/lib/cairo-date';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
 import { computeWorkerHealth } from '@/modules/reminders/reminder-service';
+import { reminderError } from '@/modules/reminders/reminder-errors';
+import {
+  parseQueryBooleanParam,
+  parseQueryIntegerParam,
+} from '@/modules/scheduling/deadline-http';
+import { SchedulingValidationError } from '@/modules/scheduling/hearing-types';
 import { computeRetryBackoffMs } from '@/worker/reminder-worker';
 
 function formatCairoWall(date: Date): string {
@@ -144,5 +150,46 @@ describe('T10 Unit Tests: Cairo Reminder Policy, Redaction, Restore Mode & Backo
     expect(computeWorkerHealth({ ...healthyHeartbeat, restoreMode: true }, 1, now).status).toBe(
       'RESTORE_MODE'
     );
+  });
+
+  it('maps SchedulingValidationError cleanly via reminderError without collapsing to internal error', () => {
+    const result = reminderError(
+      new SchedulingValidationError('معرف غير صالح.', { limit: 'يجب أن يكون رقماً صحيحاً.' })
+    );
+    expect(result).toEqual({
+      success: false,
+      error: 'معرف غير صالح.',
+      code: 'VALIDATION_ERROR',
+      fieldErrors: { limit: 'يجب أن يكون رقماً صحيحاً.' },
+    });
+  });
+
+  it('treats empty and whitespace-only values uniformly as undefined in parseQueryIntegerParam and parseQueryBooleanParam', () => {
+    const blankParams = new URLSearchParams({
+      limit: '',
+      page: '   \t ',
+      unreadOnly: '',
+      archived: '   ',
+    });
+    expect(parseQueryIntegerParam(blankParams, 'limit')).toBeUndefined();
+    expect(parseQueryIntegerParam(blankParams, 'page')).toBeUndefined();
+    expect(parseQueryBooleanParam(blankParams, 'unreadOnly')).toBeUndefined();
+    expect(parseQueryBooleanParam(blankParams, 'archived')).toBeUndefined();
+
+    const validPaddedParams = new URLSearchParams({
+      limit: ' 25 ',
+      unreadOnly: ' true ',
+      archived: ' false ',
+    });
+    expect(parseQueryIntegerParam(validPaddedParams, 'limit')).toBe(25);
+    expect(parseQueryBooleanParam(validPaddedParams, 'unreadOnly')).toBe(true);
+    expect(parseQueryBooleanParam(validPaddedParams, 'archived')).toBe(false);
+
+    expect(() =>
+      parseQueryIntegerParam(new URLSearchParams({ limit: 'abc' }), 'limit')
+    ).toThrow(SchedulingValidationError);
+    expect(() =>
+      parseQueryBooleanParam(new URLSearchParams({ unreadOnly: 'yes' }), 'unreadOnly')
+    ).toThrow(SchedulingValidationError);
   });
 });

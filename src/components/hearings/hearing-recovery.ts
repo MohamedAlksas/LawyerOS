@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 export function hearingDraftOwner(actorId: string, command: 'cancel' | 'reschedule', hearingId: string) {
@@ -15,20 +15,26 @@ export function isUncertainHearingOutcome(code?: string): boolean {
  */
 export function useHearingModalEffects(options: {
   isOpen: boolean;
-  isSubmitting: boolean;
+  isSubmitting?: boolean;
   hasPending: boolean;
   onClose: () => void;
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef: RefObject<HTMLElement | null>;
 }) {
-  const { isOpen, isSubmitting, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const onCloseRef = useRef(onClose);
+  const hasPendingRef = useRef(hasPending);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    hasPendingRef.current = hasPending;
+  }, [hasPending]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const frameId = requestAnimationFrame(() => {
-      if (hasPending) dialogRef.current?.querySelector<HTMLButtonElement>('button[type=submit]')?.focus();
-      else initialFocusRef.current?.focus();
-    });
 
     const shell = document.getElementById('app-shell-content') as (HTMLElement & { inert: boolean }) | null;
     const prevInert = shell?.inert ?? false;
@@ -39,14 +45,32 @@ export function useHearingModalEffects(options: {
     }
 
     return () => {
-      cancelAnimationFrame(frameId);
       if (shell) {
         shell.inert = prevInert;
         if (prevHidden === null) shell.removeAttribute('aria-hidden');
         else shell.setAttribute('aria-hidden', prevHidden);
       }
     };
-  }, [isOpen, hasPending, dialogRef, initialFocusRef]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || hasPendingRef.current) return;
+    const frameId = requestAnimationFrame(() => {
+      initialFocusRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isOpen, initialFocusRef]);
+
+  useEffect(() => {
+    if (!isOpen || !hasPending || isSubmitting) return;
+    const frameId = requestAnimationFrame(() => {
+      const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>(
+        'button[type="submit"]:not([disabled]), button[data-modal-retry="true"]:not([disabled])'
+      );
+      submitBtn?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isOpen, hasPending, isSubmitting, dialogRef]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -54,7 +78,7 @@ export function useHearingModalEffects(options: {
       if (e.key === 'Escape') {
         if (!isSubmitting) {
           e.preventDefault();
-          onClose();
+          onCloseRef.current();
         }
         return;
       }
@@ -71,10 +95,10 @@ export function useHearingModalEffects(options: {
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
 
-        if (e.shiftKey && document.activeElement === first) {
+        if (e.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
           e.preventDefault();
           last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
+        } else if (!e.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
           e.preventDefault();
           first.focus();
         }
@@ -83,7 +107,7 @@ export function useHearingModalEffects(options: {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isSubmitting, onClose, dialogRef]);
+  }, [isOpen, isSubmitting, dialogRef]);
 }
 
 export function renderHearingModalPortal(node: ReactNode) {

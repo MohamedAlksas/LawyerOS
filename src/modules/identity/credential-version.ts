@@ -23,9 +23,13 @@ export async function getUserCredentialVersion(userId: string): Promise<number> 
  * Throws if a database error occurs so caller fails closed.
  */
 export async function getUserCredentialVersionByEmail(email: string): Promise<number | null> {
+  const normalizedEmail = email.trim();
+  if (!normalizedEmail) {
+    return null;
+  }
   const prisma = getPrismaClient();
   const user = await prisma.user.findFirst({
-    where: { email: { equals: email, mode: 'insensitive' } },
+    where: { email: { equals: normalizedEmail, mode: 'insensitive' } },
     select: { credentialVersion: true },
   });
   if (!user) {

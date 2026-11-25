@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createDeadlineAction,
@@ -22,7 +21,7 @@ import type {
 } from '@/modules/scheduling/deadline-types';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic, getCairoTodayDateString } from '@/lib/cairo-date';
-import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { LoadingIndicator, ErrorContainer, EmptyStateContainer } from '@/components/presentation-state';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
@@ -270,15 +269,15 @@ export function DeadlinesView({
     isSubmittingDraftModal ||
     isSubmittingDateChange ||
     isSubmittingComplete ||
-    isSubmittingCancel ||
-    isFrozenDraftRetry ||
-    isFrozenDateRetry ||
-    isFrozenCompleteRetry;
+    isSubmittingCancel;
 
   const anyDirty =
-    (isDraftModalOpen && !isFrozenDraftRetry && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
-    (Boolean(changeDateTarget) && !isFrozenDateRetry && Boolean(dateChangeReason)) ||
-    (Boolean(completeTarget) && !isFrozenCompleteRetry && Boolean(completionNotes));
+    isFrozenDraftRetry ||
+    isFrozenDateRetry ||
+    isFrozenCompleteRetry ||
+    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
+    (Boolean(changeDateTarget) && Boolean(dateChangeReason)) ||
+    (Boolean(completeTarget) && Boolean(completionNotes));
 
   useLeaveGuard(anyDirty, anyBusy);
 
@@ -358,6 +357,12 @@ export function DeadlinesView({
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshSeqRef = useRef(0);
 
+  useEffect(() => {
+    return () => {
+      refreshAbortRef.current?.abort();
+    };
+  }, []);
+
   const refreshDeadlines = useCallback(async () => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
@@ -370,6 +375,9 @@ export function DeadlinesView({
       const sp = new URLSearchParams({ includeClosed: 'true' });
       if (lockedMatterId) sp.set('matterId', lockedMatterId);
       const res = await fetch(`/api/deadlines?${sp.toString()}`, { cache: 'no-store', signal: controller.signal });
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
       const body = (await res.json().catch(() => null)) as ActionResult<DeadlineDTO[]> | null;
       if (seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
@@ -1153,9 +1161,15 @@ export function DeadlinesView({
               بروتوكول التحقق البشري الإلزامي
             </span>
           </div>
-          <h1 className={lockedMatterId ? 'text-lg font-bold text-[#172A35]' : 'text-2xl font-bold text-[#172A35]'}>
-            المواعيد القانونية الحرجة
-          </h1>
+          {lockedMatterId ? (
+            <h2 className="text-lg font-bold text-[#172A35]">
+              المواعيد القانونية الحرجة
+            </h2>
+          ) : (
+            <h1 className="text-2xl font-bold text-[#172A35]">
+              المواعيد القانونية الحرجة
+            </h1>
+          )}
           <p className="text-sm text-[#4D606A]">
             المواعيد القانونية تُحسب وتُعتمد يدوياً بواسطة المحامي ولا يُنشئها النظام أو يغلقها تلقائياً.
           </p>
@@ -1593,6 +1607,7 @@ export function DeadlinesView({
                   <button
                     type="button"
                     data-testid="confirm-deadline-button"
+                    data-modal-retry={isFrozenDraftRetry ? 'true' : undefined}
                     disabled={isSubmittingDraftModal}
                     onClick={handleConfirmDeadline}
                     className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"

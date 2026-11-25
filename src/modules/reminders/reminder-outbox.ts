@@ -142,19 +142,21 @@ export async function enqueueSourceReminderJob(
 }
 
 /**
- * Cancels all pending/running outbox jobs and pending/processing deliveries
- * for a source record inside the business mutation transaction.
+ * Cancels all pending/running/failed outbox jobs and pending/processing deliveries
+ * for one or more source records inside the business mutation transaction.
  */
-export async function cancelSourceReminderJobs(
+export async function cancelSourceReminderJobsBatch(
   tx: Prisma.TransactionClient,
   sourceType: 'Hearing' | 'Deadline' | 'Task',
-  sourceId: string,
+  sourceIds: string[],
   now: Date = new Date()
 ): Promise<void> {
+  if (sourceIds.length === 0) return;
+
   await tx.jobRun.updateMany({
     where: {
       sourceType,
-      sourceId,
+      sourceId: { in: sourceIds },
       status: { in: ['PENDING', 'RUNNING', 'FAILED'] },
     },
     data: {
@@ -168,11 +170,24 @@ export async function cancelSourceReminderJobs(
   await tx.reminderDelivery.updateMany({
     where: {
       sourceType,
-      sourceId,
+      sourceId: { in: sourceIds },
       status: { in: ['PENDING', 'PROCESSING'] },
     },
     data: {
       status: 'CANCELLED',
     },
   });
+}
+
+/**
+ * Cancels all pending/running outbox jobs and pending/processing deliveries
+ * for a source record inside the business mutation transaction.
+ */
+export async function cancelSourceReminderJobs(
+  tx: Prisma.TransactionClient,
+  sourceType: 'Hearing' | 'Deadline' | 'Task',
+  sourceId: string,
+  now: Date = new Date()
+): Promise<void> {
+  await cancelSourceReminderJobsBatch(tx, sourceType, [sourceId], now);
 }

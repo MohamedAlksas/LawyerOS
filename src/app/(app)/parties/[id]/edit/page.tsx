@@ -106,7 +106,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
       </div>
 
       {/* Main Party Form in Edit Mode */}
-      <PartyForm ownerId={actor.id} party={party} />
+      <PartyForm key={`${actor.id}:${party.id}`} ownerId={actor.id} party={party} />
     </div>
   );
 }

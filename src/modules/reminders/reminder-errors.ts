@@ -1,6 +1,7 @@
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { IdempotencyConcurrentConflictError, IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { CalendarValidationError } from '@/lib/cairo-date';
+import { SchedulingValidationError } from '@/modules/scheduling/hearing-types';
 import {
   ConcurrencyConflictError,
   NotFoundError,
@@ -11,7 +12,11 @@ import {
 } from './reminder-types';
 
 export function reminderError(error: unknown): ActionResult<never> {
-  if (error instanceof ReminderValidationError || error instanceof CalendarValidationError) {
+  if (
+    error instanceof ReminderValidationError ||
+    error instanceof CalendarValidationError ||
+    error instanceof SchedulingValidationError
+  ) {
     return {
       success: false,
       error: error.message,

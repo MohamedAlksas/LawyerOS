@@ -14,6 +14,7 @@ import {
   type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
+import { cancelSourceReminderJobsBatch } from '@/modules/reminders/reminder-outbox';
 import {
   MatterDTO,
   MatterPartySummaryDTO,
@@ -729,8 +730,8 @@ export async function openMatter(
           status: targetStatus,
           practiceAreaId: input.practiceAreaId ?? null,
           openingDate: openingDateVal,
-          summary: input.summary?.trim() ?? null,
-          notes: input.notes?.trim() ?? null,
+          summary: input.summary?.trim() || null,
+          notes: input.notes?.trim() || null,
           paperLocationId: input.paperLocationId ?? null,
           version: 1,
           createdById: actor.id,
@@ -876,11 +877,13 @@ export async function updateMatter(
         archivedAt: Date | null;
         practiceAreaId: string | null;
         paperLocationId: string | null;
+        openingDate: Date | null;
+        closingDate: Date | null;
         notes: string | null;
         updatedAt: Date;
         updatedById: string;
       }>>`
-        SELECT "id", "version", "status", "archivedAt", "practiceAreaId", "paperLocationId", "notes", "updatedAt", "updatedById"
+        SELECT "id", "version", "status", "archivedAt", "practiceAreaId", "paperLocationId", "openingDate", "closingDate", "notes", "updatedAt", "updatedById"
         FROM "matter"
         WHERE "id" = ${input.id}
         FOR UPDATE;
@@ -914,6 +917,18 @@ export async function updateMatter(
 
       const openingDateVal = input.openingDate !== undefined ? parseCalendarDateToUtc(input.openingDate) : undefined;
       const closingDateVal = input.closingDate !== undefined ? parseCalendarDateToUtc(input.closingDate) : undefined;
+      const effectiveOpeningDate = openingDateVal !== undefined ? openingDateVal : existing.openingDate;
+      const effectiveClosingDate = closingDateVal !== undefined ? closingDateVal : existing.closingDate;
+      if (
+        effectiveOpeningDate &&
+        effectiveClosingDate &&
+        effectiveOpeningDate.getTime() > effectiveClosingDate.getTime()
+      ) {
+        throw new MatterValidationError(
+          'تاريخ إغلاق الملف لا يمكن أن يكون قبل تاريخ الفتح.',
+          { closingDate: 'تاريخ إغلاق الملف لا يمكن أن يكون قبل تاريخ الفتح.' }
+        );
+      }
 
       const nextVersion = existing.version + 1;
       const notes = input.notes === undefined ? existing.notes : input.notes?.trim() || null;
@@ -942,7 +957,7 @@ export async function updateMatter(
           ...(input.practiceAreaId !== undefined ? { practiceAreaId: input.practiceAreaId ?? null } : {}),
           ...(openingDateVal !== undefined ? { openingDate: openingDateVal } : {}),
           ...(closingDateVal !== undefined ? { closingDate: closingDateVal } : {}),
-          ...(input.summary !== undefined ? { summary: input.summary?.trim() ?? null } : {}),
+          ...(input.summary !== undefined ? { summary: input.summary?.trim() || null } : {}),
           notes,
           paperLocationId,
           version: nextVersion,
@@ -1681,14 +1696,14 @@ export async function addProceeding(
           courtId: input.courtId,
           instance: input.instance,
           parentProceedingId: input.parentProceedingId ?? null,
-          registerType: input.registerType?.trim() ?? null,
-          circuit: input.circuit?.trim() ?? null,
-          numberText: input.numberText?.trim() ?? null,
-          yearLabel: input.yearLabel?.trim() ?? null,
+          registerType: input.registerType?.trim() || null,
+          circuit: input.circuit?.trim() || null,
+          numberText: input.numberText?.trim() || null,
+          yearLabel: input.yearLabel?.trim() || null,
           numberNormalized: normNumber,
           yearNormalized: normYear,
           filingDate: filingDateVal,
-          claimAmount: input.claimAmount?.trim() ?? null,
+          claimAmount: input.claimAmount?.trim() || null,
           status: proceedingStatus,
           version: 1,
           createdById: actor.id,
@@ -1876,10 +1891,10 @@ export async function updateProceeding(
         await validateProceedingHierarchy(tx, input.matterId, input.id, input.parentProceedingId);
       }
 
-      const effectiveRegisterType = input.registerType !== undefined ? (input.registerType?.trim() ?? null) : existing.registerType;
-      const effectiveCircuit = input.circuit !== undefined ? (input.circuit?.trim() ?? null) : existing.circuit;
-      const effectiveNumberText = input.numberText !== undefined ? (input.numberText?.trim() ?? null) : existing.numberText;
-      const effectiveYearLabel = input.yearLabel !== undefined ? (input.yearLabel?.trim() ?? null) : existing.yearLabel;
+      const effectiveRegisterType = input.registerType !== undefined ? (input.registerType?.trim() || null) : existing.registerType;
+      const effectiveCircuit = input.circuit !== undefined ? (input.circuit?.trim() || null) : existing.circuit;
+      const effectiveNumberText = input.numberText !== undefined ? (input.numberText?.trim() || null) : existing.numberText;
+      const effectiveYearLabel = input.yearLabel !== undefined ? (input.yearLabel?.trim() || null) : existing.yearLabel;
 
       // Validate completeness if status is ACTIVE
       validateProceedingCompleteness(
@@ -1924,7 +1939,7 @@ export async function updateProceeding(
           ...(input.numberText !== undefined ? { numberText: effectiveNumberText, numberNormalized: normNumber } : {}),
           ...(input.yearLabel !== undefined ? { yearLabel: effectiveYearLabel, yearNormalized: normYear } : {}),
           ...(filingDateVal !== undefined ? { filingDate: filingDateVal } : {}),
-          ...(input.claimAmount !== undefined ? { claimAmount: input.claimAmount?.trim() ?? null } : {}),
+          ...(input.claimAmount !== undefined ? { claimAmount: input.claimAmount?.trim() || null } : {}),
           status: input.status,
           version: nextVersion,
           updatedById: actor.id,
@@ -2663,8 +2678,10 @@ export async function getMatter(matterId: string, actor?: Actor, includeNoteHist
   const dto = mapMatterToDTO(matter);
   if (includeNoteHistory) {
     const revisions = await prisma.matterNoteRevision.findMany({
-      where: { matterId }, orderBy: { version: 'desc' },
+      where: { matterId },
+      orderBy: { version: 'desc' },
       select: { version: true, notes: true, changedById: true, createdAt: true },
+      take: 200,
     });
     dto.noteRevisions = revisions.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
   }
@@ -3143,6 +3160,23 @@ export async function archiveMatter(
         select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
       });
 
+      const openTasks = await tx.task.findMany({
+        where: {
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          OR: [
+            { matterId: input.matterId },
+            { proceeding: { matterId: input.matterId } },
+          ],
+        },
+        select: { id: true },
+      });
+      await cancelSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks.map((t) => t.id),
+        now
+      );
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'ARCHIVE_MATTER',
@@ -3504,6 +3538,20 @@ export async function archiveProceeding(
         SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
         WHERE "id" = ${input.matterId};
       `;
+
+      const openTasks = await tx.task.findMany({
+        where: {
+          proceedingId: input.proceedingId,
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+        },
+        select: { id: true },
+      });
+      await cancelSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks.map((t) => t.id),
+        now
+      );
 
       await recordAuditEvent(tx, {
         userId: actor.id,

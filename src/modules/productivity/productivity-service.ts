@@ -201,17 +201,11 @@ function mapTaskToItemDTO(row: TaskWithRelations, cairoToday: string): TaskItemD
   };
 }
 
-const taskIncludeConfig = {
+const taskItemIncludeConfig = {
   matter: {
     select: {
       fileCode: true,
       title: true,
-      paperLocation: { select: { name: true } },
-      parties: {
-        where: { role: 'CLIENT' as const },
-        select: { party: { select: { name: true } } },
-        orderBy: { isPrimaryContact: 'desc' as const },
-      },
     },
   },
   proceeding: {
@@ -249,6 +243,22 @@ const taskIncludeConfig = {
   },
 };
 
+const agendaTaskIncludeConfig = {
+  ...taskItemIncludeConfig,
+  matter: {
+    select: {
+      fileCode: true,
+      title: true,
+      paperLocation: { select: { name: true } },
+      parties: {
+        where: { role: 'CLIENT' as const },
+        select: { party: { select: { name: true } } },
+        orderBy: { isPrimaryContact: 'desc' as const },
+      },
+    },
+  },
+};
+
 interface TaskAcknowledgment {
   id: string;
   version: number;
@@ -280,7 +290,7 @@ async function replayTask(
 ): Promise<TaskItemDTO> {
   const row = await tx.task.findUniqueOrThrow({
     where: { id: ack.id },
-    include: taskIncludeConfig,
+    include: taskItemIncludeConfig,
   });
   const base = mapTaskToItemDTO(row, cairoToday);
   const isActive = ack.status === 'OPEN' || ack.status === 'IN_PROGRESS';
@@ -510,6 +520,29 @@ export async function createTask(
 
       await lockTaskParents(tx, effectiveMatterId, effectiveProceedingId);
 
+      if (input.deadlineId) {
+        const verifiedDeadline = await tx.deadline.findUnique({
+          where: { id: input.deadlineId },
+          select: { id: true, matterId: true, proceedingId: true },
+        });
+        if (!verifiedDeadline) {
+          throw new NotFoundError('الموعد القانوني المطلوب غير موجود.');
+        }
+        if (effectiveMatterId && verifiedDeadline.matterId !== effectiveMatterId) {
+          throw new CrossMatterLinkForbiddenError('لا يمكن ربط المهمة بعناصر تابعة لأكثر من ملف قضية.');
+        }
+        if (
+          verifiedDeadline.proceedingId &&
+          effectiveProceedingId &&
+          verifiedDeadline.proceedingId !== effectiveProceedingId
+        ) {
+          throw new CrossMatterLinkForbiddenError('العناصر المرتبطة بالمهمة تتبع قيوداً قضائية مختلفة.');
+        }
+        if (verifiedDeadline.proceedingId !== (deadlineRef?.proceedingId ?? null)) {
+          throw new ConcurrencyConflictError('تم تعديل الموعد القانوني المرتبط بالمهمة. يرجى المحاولة مجدداً.');
+        }
+      }
+
       const created = await tx.task.create({
         data: {
           matterId: effectiveMatterId,
@@ -526,7 +559,7 @@ export async function createTask(
           createdById: actor.id,
           updatedById: actor.id,
         },
-        include: taskIncludeConfig,
+        include: taskItemIncludeConfig,
       });
 
       if (dueDateStr) {
@@ -687,7 +720,7 @@ export async function updateTask(
 
       const reloaded = await tx.task.findUniqueOrThrow({
         where: { id: locked.id },
-        include: taskIncludeConfig,
+        include: taskItemIncludeConfig,
       });
       const dto = mapTaskToItemDTO(reloaded, cairoToday);
       return { value: dto, resultId: dto.id, acknowledgment: buildTaskAck(dto) };
@@ -764,7 +797,7 @@ export async function completeTask(
 
       const reloaded = await tx.task.findUniqueOrThrow({
         where: { id: locked.id },
-        include: taskIncludeConfig,
+        include: taskItemIncludeConfig,
       });
       const dto = mapTaskToItemDTO(reloaded, cairoToday);
       return { value: dto, resultId: dto.id, acknowledgment: buildTaskAck(dto) };
@@ -838,7 +871,7 @@ export async function cancelTask(
 
       const reloaded = await tx.task.findUniqueOrThrow({
         where: { id: locked.id },
-        include: taskIncludeConfig,
+        include: taskItemIncludeConfig,
       });
       const dto = mapTaskToItemDTO(reloaded, cairoToday);
       return { value: dto, resultId: dto.id, acknowledgment: buildTaskAck(dto) };
@@ -856,7 +889,7 @@ export async function getTask(
 
   const row = await prisma.task.findUnique({
     where: { id: taskId },
-    include: taskIncludeConfig,
+    include: taskItemIncludeConfig,
   });
   if (!row) {
     throw new NotFoundError('المهمة المطلوبة غير موجودة.');
@@ -914,7 +947,7 @@ export async function listTasks(
 
   const rows = await prisma.task.findMany({
     where: { AND: andClauses },
-    include: taskIncludeConfig,
+    include: taskItemIncludeConfig,
     orderBy: [{ dueDate: 'asc' }, { dueTime: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
     skip: (page - 1) * limit,
     take: limit,
@@ -997,6 +1030,7 @@ export async function listAgenda(
       where: { isActive: true },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
+      take: 500,
     }),
     includeHearings
       ? prisma.hearing.findMany({
@@ -1125,7 +1159,7 @@ export async function listAgenda(
                 : []),
             ],
           },
-          include: taskIncludeConfig,
+          include: agendaTaskIncludeConfig,
           orderBy: [{ dueDate: 'asc' }, { dueTime: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
           take: 250,
         })

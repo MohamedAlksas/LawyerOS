@@ -32,6 +32,8 @@ interface ClientOptionItem {
   primaryPhone?: string | null;
 }
 
+const EMPTY_PARTIES: ClientOptionItem[] = [];
+
 interface MatterFormProps {
   ownerId: string;
   initialMatter?: MatterDTO;
@@ -70,7 +72,7 @@ export function MatterForm({
   initialMatter,
   practiceAreas,
   storageLocations,
-  parties = [],
+  parties = EMPTY_PARTIES,
   lookupError,
 }: MatterFormProps) {
   const router = useRouter();
@@ -120,6 +122,15 @@ export function MatterForm({
   const [clientSearchTotalPages, setClientSearchTotalPages] = useState(1);
   const searchGenRef = useRef(0);
   const prevMatterRef = useRef(initialMatter);
+  const [prevParties, setPrevParties] = useState(parties);
+
+  if (prevParties !== parties) {
+    setPrevParties(parties);
+    if (!clientSearchQuery.trim()) {
+      setPartiesList(parties);
+      setClientSearchTotalCount(parties.length);
+    }
+  }
 
   const fields = {
     title, kind, status, practiceAreaId, paperLocationId, openingDate, closingDate, summary,
@@ -284,7 +295,6 @@ export function MatterForm({
           !res.code ||
           res.code === 'INTERNAL_ERROR' ||
           res.code === 'DATABASE_UNAVAILABLE' ||
-          res.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
           // Outcome is uncertain: keep the frozen key/payload and never rotate.
@@ -337,7 +347,7 @@ export function MatterForm({
     setIsDirty(true);
   };
 
-  useLeaveGuard(isDirty, isSaving || operationPending);
+  useLeaveGuard(isDirty || operationPending, isSaving);
 
   useEffect(() => {
     if (Object.keys(fieldErrors).length === 0) return;
@@ -360,12 +370,13 @@ export function MatterForm({
           <p className="leading-relaxed">
             حدث خطأ أثناء استرجاع دوائر التخصص أو أماكن الحفظ من الخادم. يمكنك إعادة تحميل الصفحة.
           </p>
-          <Link
-            href={isEdit && initialMatter ? `/matters/${initialMatter.id}/edit` : '/matters/new'}
-            className="inline-block px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs"
+          <button
+            type="button"
+            onClick={() => router.refresh()}
+            className="inline-flex items-center justify-center px-3 py-1.5 bg-[#14566B] text-white rounded font-semibold text-xs min-h-[44px]"
           >
             إعادة تحميل الصفحة
-          </Link>
+          </button>
         </div>
       )}
 
@@ -415,7 +426,7 @@ export function MatterForm({
                 setIsDirty(false);
                 router.refresh();
               }}
-              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px]"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
             >
               تحديث الصفحة وتحميل أحدث البيانات
             </button>

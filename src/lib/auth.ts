@@ -66,8 +66,15 @@ function createAuthInstance() {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     trustedOrigins: Array.from(getTrustedOrigins()),
-    // Session revocation is exposed through the application's audited security actions.
-    disabledPaths: ['/list-sessions', '/revoke-session', '/revoke-sessions', '/revoke-other-sessions'],
+    // Session revocation and sensitive 2FA management endpoints are blocked or exposed through audited application flows.
+    disabledPaths: [
+      '/list-sessions',
+      '/revoke-session',
+      '/revoke-sessions',
+      '/revoke-other-sessions',
+      '/two-factor/get-totp-uri',
+      '/two-factor/disable',
+    ],
     emailAndPassword: {
       enabled: true,
       disableSignUp: true, // Public self-registration is strictly forbidden
@@ -87,7 +94,7 @@ function createAuthInstance() {
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: env.BETTER_AUTH_URL.startsWith('https://'),
+        secure: new URL(env.BETTER_AUTH_URL).protocol === 'https:',
       },
     },
     rateLimit: {

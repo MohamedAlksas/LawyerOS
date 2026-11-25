@@ -164,6 +164,7 @@ model Party {
   communicationNotes      CommunicationNote[]
   powersOfAttorney        PowerOfAttorney[]
   matterParties           MatterParty[]
+  documents               Document[]
 
   @@index([nameNormalized])
   @@index([primaryPhoneNormalized])
@@ -349,6 +350,7 @@ model Matter {
   deadlines       Deadline[]
   noteRevisions   MatterNoteRevision[]
   reminderDeliveries ReminderDelivery[]
+  documents       Document[]
 
   @@index([status])
   @@index([status, updatedAt])
@@ -428,6 +430,7 @@ model Proceeding {
   hearings           Hearing[]
   tasks              Task[]
   deadlines          Deadline[]
+  documents          Document[]
 
   @@index([matterId])
   @@index([courtId])
@@ -646,6 +649,7 @@ model Hearing {
   linksTo              HearingLink[]  @relation("HearingLinksTo")
   supersededBy         Hearing[]      @relation("HearingSupersedes")
   supersedesHearing    Hearing?       @relation("HearingSupersedes", fields: [supersedesHearingId], references: [id])
+  documents            Document[]
 
   @@index([proceedingId, hearingDate])
   @@index([status, hearingDate])
@@ -793,6 +797,7 @@ model JobRun {
   @@index([sourceType, sourceId, status])
   @@index([status, scheduledAt])
   @@index([status, availableAt, leaseUntil])
+  @@index([jobType, status, updatedAt])
   @@map("job_run")
 }
 
@@ -840,6 +845,7 @@ model ReminderDelivery {
 
   @@unique([sourceType, sourceId, sourceVersion, ruleKey, channel, recipientUserId], map: "reminder_delivery_source_rule_channel_recipient_key")
   @@index([recipientUserId, status, scheduledAt])
+  @@index([recipientUserId, status, deliveredAt])
   @@index([status, scheduledAt])
   @@index([matterId])
   @@map("reminder_delivery")
@@ -856,4 +862,179 @@ model WorkerHeartbeat {
   updatedAt     DateTime  @updatedAt @db.Timestamptz(3) @map("updated_at")
 
   @@map("worker_heartbeat")
+}
+
+enum DocumentType {
+  PLEADING
+  MEMORANDUM
+  CONTRACT
+  POA_COPY
+  JUDGMENT
+  EVIDENCE
+  RECEIPT_COPY
+  CORRESPONDENCE
+  ID_COPY
+  OTHER
+}
+
+enum DocumentOriginalPresence {
+  YES
+  NO
+  UNKNOWN
+}
+
+enum DocumentSensitivity {
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum DocumentVersionUploadStatus {
+  UPLOADING
+  QUARANTINED
+  READY
+  REJECTED
+  FAILED
+}
+
+enum DocumentScanStatus {
+  PENDING
+  NOT_SCANNED_POLICY
+  CLEAN
+  INFECTED
+  FAILED
+  TIMEOUT
+  STALE_DEFINITIONS
+}
+
+enum UploadAttemptStatus {
+  INITIATED
+  UPLOADED
+  VALIDATING
+  FINALIZED
+  REJECTED
+  FAILED
+  EXPIRED
+}
+
+model Document {
+  id               String                   @id @default(uuid()) @map("id")
+  matterId         String?                  @map("matter_id")
+  partyId          String?                  @map("party_id")
+  proceedingId     String?                  @map("proceeding_id")
+  hearingId        String?                  @map("hearing_id")
+  title            String                   @map("title")
+  titleNormalized  String                   @map("title_normalized")
+  documentType     DocumentType             @map("document_type")
+  documentDate     DateTime?                @db.Date @map("document_date")
+  description      String?                  @map("description")
+  tags             String[]                 @default([]) @map("tags")
+  originalLocation String?                  @map("original_location")
+  originalPresent  DocumentOriginalPresence @default(UNKNOWN) @map("original_present")
+  sensitivity      DocumentSensitivity      @default(CONFIDENTIAL) @map("sensitivity")
+  currentVersionId String?                  @unique @map("current_version_id")
+  archivedAt       DateTime?                @db.Timestamptz(3) @map("archived_at")
+  version          Int                      @default(1) @map("version")
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById      String                   @map("created_by_id")
+  updatedById      String                   @map("updated_by_id")
+
+  matter           Matter?                  @relation(fields: [matterId], references: [id], onDelete: Cascade)
+  party            Party?                   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  proceeding       Proceeding?              @relation(fields: [proceedingId], references: [id], onDelete: SetNull)
+  hearing          Hearing?                 @relation(fields: [hearingId], references: [id], onDelete: SetNull)
+  versions         DocumentVersion[]        @relation("DocumentVersions")
+  currentVersion   DocumentVersion?         @relation("DocumentCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  uploadAttempts   UploadAttempt[]
+
+  @@index([matterId, createdAt])
+  @@index([partyId, createdAt])
+  @@index([proceedingId])
+  @@index([hearingId])
+  @@index([archivedAt])
+  @@index([titleNormalized])
+  @@map("document")
+}
+
+model DocumentVersion {
+  id                 String                      @id @default(uuid()) @map("id")
+  documentId         String                      @map("document_id")
+  versionNumber      Int                         @map("version_number")
+  objectKey          String                      @unique @map("object_key")
+  originalFilename   String                      @map("original_filename")
+  declaredMime       String?                     @map("declared_mime")
+  detectedMime       String?                     @map("detected_mime")
+  sizeBytes          Int                         @map("size_bytes")
+  sha256             String?                     @map("sha256")
+  uploadStatus       DocumentVersionUploadStatus @map("upload_status")
+  scanStatus         DocumentScanStatus          @default(PENDING) @map("scan_status")
+  scanPolicyCode     String?                     @map("scan_policy_code")
+  scanPolicyVersion  String?                     @map("scan_policy_version")
+  scanCheckedAt      DateTime?                   @db.Timestamptz(3) @map("scan_checked_at")
+  scanError          String?                     @map("scan_error")
+  createdAt          DateTime                    @default(now()) @db.Timestamptz(3) @map("created_at")
+  createdById        String                      @map("created_by_id")
+
+  document           Document                    @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentForDocument Document?                   @relation("DocumentCurrentVersion")
+  uploadAttempt      UploadAttempt?
+  backupPins         BackupFilePin[]
+
+  @@unique([documentId, versionNumber])
+  @@index([sha256])
+  @@index([uploadStatus, createdAt])
+  @@map("document_version")
+}
+
+model UploadAttempt {
+  id                      String                   @id @default(uuid()) @map("id")
+  documentId              String?                  @map("document_id")
+  targetDocumentVersionId String?                  @unique @map("target_document_version_id")
+  idempotencyRecordId     String                   @unique @map("idempotency_record_id")
+  actorId                 String                   @map("actor_id")
+  matterId                String?                  @map("matter_id")
+  partyId                 String?                  @map("party_id")
+  proceedingId            String?                  @map("proceeding_id")
+  hearingId               String?                  @map("hearing_id")
+  title                   String                   @map("title")
+  documentType            DocumentType             @map("document_type")
+  documentDate            DateTime?                @db.Date @map("document_date")
+  description             String?                  @map("description")
+  tags                    String[]                 @default([]) @map("tags")
+  originalLocation        String?                  @map("original_location")
+  originalPresent         DocumentOriginalPresence @default(UNKNOWN) @map("original_present")
+  sensitivity             DocumentSensitivity      @default(CONFIDENTIAL) @map("sensitivity")
+  originalFilename        String                   @map("original_filename")
+  declaredMime            String                   @map("declared_mime")
+  expectedSizeBytes       Int                      @map("expected_size_bytes")
+  quarantineKey           String                   @unique @map("quarantine_key")
+  bytesWritten            Int                      @default(0) @map("bytes_written")
+  sha256                  String?                  @map("sha256")
+  status                  UploadAttemptStatus      @default(INITIATED) @map("status")
+  failureReason           String?                  @map("failure_reason")
+  expiresAt               DateTime                 @db.Timestamptz(3) @map("expires_at")
+  finalizedAt             DateTime?                @db.Timestamptz(3) @map("finalized_at")
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  document                Document?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  targetDocumentVersion   DocumentVersion?         @relation(fields: [targetDocumentVersionId], references: [id], onDelete: SetNull)
+
+  @@index([status, expiresAt])
+  @@index([actorId, createdAt])
+  @@map("upload_attempt")
+}
+
+model BackupFilePin {
+  id                String          @id @default(uuid()) @map("id")
+  backupId          String          @map("backup_id")
+  documentVersionId String          @map("document_version_id")
+  pinnedAt          DateTime        @default(now()) @db.Timestamptz(3) @map("pinned_at")
+  releasedAt        DateTime?       @db.Timestamptz(3) @map("released_at")
+
+  documentVersion   DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([backupId, documentVersionId])
+  @@index([documentVersionId])
+  @@map("backup_file_pin")
 }

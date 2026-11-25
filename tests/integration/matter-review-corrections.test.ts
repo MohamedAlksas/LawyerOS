@@ -550,8 +550,10 @@ describe('T06 Review Round 1 Corrections Verification', () => {
     });
     createdMatterIds.push(matter.matter.id);
 
-    // 1. Search with Arabic numerals (e.g. ٢٠٢٦) matches the generated file code
-    const searchDigits = await searchMatters({ query: '٢٠٢٦' }, owner);
+    // 1. Search with Arabic numerals matches the generated file code
+    const yearMatch = matter.matter.fileCode.match(/\d{4}/)?.[0] || '2026';
+    const easternArabicYear = yearMatch.replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[parseInt(d, 10)]!);
+    const searchDigits = await searchMatters({ query: easternArabicYear }, owner);
     const foundByDigits = searchDigits.matters.some((m) => m.id === matter.matter.id);
     expect(foundByDigits).toBe(true);
 

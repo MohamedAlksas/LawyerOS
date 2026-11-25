@@ -4,7 +4,9 @@ import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { TaskPriority, TaskStatus } from '@/modules/productivity/productivity-types';
 import type { DeadlineStatus } from '@/modules/scheduling/deadline-types';
-import { CAIRO_TIMEZONE, addCairoDays, getCairoMonthRange } from '@/lib/cairo-date';
+import { addCairoDays, formatCairoInstantArabic, getCairoMonthRange } from '@/lib/cairo-date';
+
+export { formatCairoInstantArabic };
 
 export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
   LOW: 'منخفضة',
@@ -52,25 +54,6 @@ export function isUncertainMutationOutcome(code?: string): boolean {
   return !code || ['INTERNAL_ERROR', 'DATABASE_UNAVAILABLE', 'IDEMPOTENCY_CONCURRENT_CONFLICT'].includes(code);
 }
 
-export function formatCairoInstantArabic(isoString?: string | null): string {
-  if (!isoString) return '—';
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return isoString;
-    return new Intl.DateTimeFormat('ar-EG', {
-      timeZone: CAIRO_TIMEZONE,
-      calendar: 'gregory',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(d);
-  } catch {
-    return isoString;
-  }
-}
-
 export function shiftCairoMonth(anchorDate: string, deltaMonths: number): string {
   const { startDate } = getCairoMonthRange(anchorDate);
   if (deltaMonths === 0) return startDate;
@@ -113,33 +96,27 @@ export function renderModalPortal(node: ReactNode) {
  */
 export function useAccessibleModal(options: {
   isOpen: boolean;
-  isSubmitting: boolean;
+  isSubmitting?: boolean;
   hasPending: boolean;
   onClose: () => void;
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef: RefObject<HTMLElement | null>;
 }) {
-  const { isOpen, isSubmitting, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
   const onCloseRef = useRef(onClose);
+  const hasPendingRef = useRef(hasPending);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
+    hasPendingRef.current = hasPending;
+  }, [hasPending]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-
-    const frameId = requestAnimationFrame(() => {
-      if (hasPending) {
-        const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]');
-        if (submitBtn) {
-          submitBtn.focus();
-          return;
-        }
-      }
-      initialFocusRef.current?.focus();
-    });
 
     const shell = document.getElementById('app-shell-content') as (HTMLElement & { inert: boolean }) | null;
     const prevInert = shell?.inert ?? false;
@@ -150,7 +127,6 @@ export function useAccessibleModal(options: {
     }
 
     return () => {
-      cancelAnimationFrame(frameId);
       if (shell) {
         shell.inert = prevInert;
         if (prevHidden === null) shell.removeAttribute('aria-hidden');
@@ -162,7 +138,26 @@ export function useAccessibleModal(options: {
         });
       }
     };
-  }, [isOpen, hasPending, dialogRef, initialFocusRef]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || hasPendingRef.current) return;
+    const frameId = requestAnimationFrame(() => {
+      initialFocusRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isOpen, initialFocusRef]);
+
+  useEffect(() => {
+    if (!isOpen || !hasPending || isSubmitting) return;
+    const frameId = requestAnimationFrame(() => {
+      const submitBtn = dialogRef.current?.querySelector<HTMLButtonElement>(
+        'button[type="submit"]:not([disabled]), button[data-modal-retry="true"]:not([disabled])'
+      );
+      submitBtn?.focus();
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [isOpen, hasPending, isSubmitting, dialogRef]);
 
   useEffect(() => {
     if (!isOpen) return;

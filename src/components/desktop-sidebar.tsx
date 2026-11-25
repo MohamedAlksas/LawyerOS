@@ -8,6 +8,7 @@ import {
   IconCalendar,
   IconDashboard,
   IconDeadline,
+  IconDocument,
   IconFolder,
   IconLogout,
   IconSearch,
@@ -54,6 +55,7 @@ export function DesktopSidebar() {
   const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
+  const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
@@ -142,6 +144,16 @@ export function DesktopSidebar() {
           </Link>
 
           <Link
+            href="/documents"
+            data-testid="nav-link-documents"
+            aria-current={isDocumentsActive ? 'page' : undefined}
+            className={navItemClass(isDocumentsActive)}
+          >
+            <IconDocument className={`w-5 h-5 shrink-0 ${isDocumentsActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
+            <span>المستندات</span>
+          </Link>
+
+          <Link
             href="/settings/security"
             data-testid="nav-link-security"
             aria-current={isSecurityActive ? 'page' : undefined}
@@ -178,7 +190,6 @@ export function DesktopSidebar() {
             </span>
             <div className="space-y-1">
               <div
-                aria-disabled="true"
                 className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
               >
                 <div className="flex items-center gap-2">

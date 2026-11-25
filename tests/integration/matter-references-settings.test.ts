@@ -32,9 +32,11 @@ describe('T06-08: Reference Settings Maintenance & Inactive Reference Guards', (
   const createdCourtIds: string[] = [];
   const createdPracticeAreaIds: string[] = [];
   const createdStorageLocationIds: string[] = [];
+  let originalOfficeSettings: Awaited<ReturnType<typeof prisma.officeSettings.findFirst>> = null;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setupTestEncryptionKeys();
+    originalOfficeSettings = await prisma.officeSettings.findFirst();
   });
 
   afterEach(async () => {
@@ -57,6 +59,27 @@ describe('T06-08: Reference Settings Maintenance & Inactive Reference Guards', (
       practiceAreaIds: createdPracticeAreaIds,
       storageLocationIds: createdStorageLocationIds,
     });
+    if (originalOfficeSettings) {
+      await prisma.officeSettings.upsert({
+        where: { id: originalOfficeSettings.id },
+        update: {
+          officeName: originalOfficeSettings.officeName,
+          lawyerName: originalOfficeSettings.lawyerName,
+          phone: originalOfficeSettings.phone,
+          email: originalOfficeSettings.email,
+          address: originalOfficeSettings.address,
+          taxNumber: originalOfficeSettings.taxNumber,
+          currency: originalOfficeSettings.currency,
+          timeZone: originalOfficeSettings.timeZone,
+          version: originalOfficeSettings.version,
+          updatedById: originalOfficeSettings.updatedById,
+          updatedAt: originalOfficeSettings.updatedAt,
+        },
+        create: originalOfficeSettings,
+      });
+    } else {
+      await prisma.officeSettings.deleteMany({ where: { id: 'singleton' } });
+    }
   });
 
   it('maintains office profile singleton with versioning and defaults', async () => {

@@ -184,6 +184,8 @@ export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean 
   return false;
 }
 
+const LOOPBACK_BETTER_AUTH_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+
 /**
  * Server-only environment schema for LawOffice OS.
  * Validates presence, formatting, and safety of operational variables.
@@ -224,12 +226,40 @@ const baseEnvSchema = z.object({
   BETTER_AUTH_URL: z
     .string()
     .url('BETTER_AUTH_URL must be a valid URL')
-    .default('http://127.0.0.1:3000'),
+    .superRefine((val, ctx) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(val);
+      } catch {
+        // .url() already reported the malformed URL issue.
+        return;
+      }
+
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'BETTER_AUTH_URL must use http:// or https:// protocol',
+        });
+        return;
+      }
+
+      if (parsed.protocol === 'http:' && !LOOPBACK_BETTER_AUTH_HOSTS.has(parsed.hostname.toLowerCase())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'BETTER_AUTH_URL must use https:// for non-loopback hosts (http:// is allowed only for 127.0.0.1, localhost, or [::1])',
+        });
+      }
+    }),
   PARTY_IDENTITY_ENCRYPTION_KEY: z.string().optional(),
   PARTY_IDENTITY_KEY_ID: z.string().optional(),
   RESTORE_MODE: z.string().optional(),
   REMINDER_DISPATCH_DISABLED: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().optional(),
+  DOCUMENTS_STORAGE_ROOT: z.string().trim().min(1).optional(),
+  DOCUMENT_SCAN_POLICY_MODE: z
+    .enum(['INITIAL_DEFERRED', 'REQUIRED'])
+    .default('INITIAL_DEFERRED'),
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;
@@ -260,6 +290,17 @@ export function validateEnv(
   const effectiveSource = { ...source };
   const nodeEnv = effectiveSource.NODE_ENV || 'development';
   const isTest = nodeEnv === 'test';
+  const nextPhase =
+    'NEXT_PHASE' in source
+      ? source.NEXT_PHASE
+      : source === process.env
+        ? process.env.NEXT_PHASE
+        : undefined;
+  const isProdRuntime = nodeEnv === 'production' && nextPhase !== 'phase-production-build';
+
+  if (!isProdRuntime && effectiveSource.BETTER_AUTH_URL === undefined) {
+    effectiveSource.BETTER_AUTH_URL = 'http://127.0.0.1:3000';
+  }
 
   // Deterministic CI precedence (R11):
   // When caller explicitly specifies CI in source, that takes precedence over ambient process.env.CI

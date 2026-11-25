@@ -33,6 +33,7 @@ export const T04_TEST_IDS = {
   navDeadlines: 'nav-link-deadlines',
   navMatters: 'nav-link-matters',
   navParties: 'nav-link-parties',
+  navDocuments: 'nav-link-documents',
   navReference: 'nav-link-reference',
   navSecurity: 'nav-link-security',
   navSearch: 'nav-link-search',
@@ -52,6 +53,7 @@ export const T04_ROUTES = {
   verify: '/verify',
   matters: '/matters',
   parties: '/parties',
+  documents: '/documents',
   reference: '/settings/reference',
   security: '/settings/security',
   search: '/search',
@@ -60,7 +62,7 @@ export const T04_ROUTES = {
   manifest: '/manifest.webmanifest',
 } as const;
 
-/** Routes that exist and are reachable in T04/T05/T06/T07/T09 (section 2.1). */
+/** Routes that exist and are reachable in T04/T05/T06/T07/T09/T11 (section 2.1). */
 export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.home,
   T04_ROUTES.today,
@@ -72,6 +74,7 @@ export const T04_AVAILABLE_ROUTES: readonly string[] = [
   T04_ROUTES.verify,
   T04_ROUTES.matters,
   T04_ROUTES.parties,
+  T04_ROUTES.documents,
   T04_ROUTES.reference,
   T04_ROUTES.security,
   T04_ROUTES.search,
@@ -89,6 +92,7 @@ export const T04_ALLOWED_NAV_HREFS: readonly string[] = [
   T04_ROUTES.deadlines,
   T04_ROUTES.matters,
   T04_ROUTES.parties,
+  T04_ROUTES.documents,
   T04_ROUTES.security,
   T04_ROUTES.reference,
   T04_ROUTES.search,
@@ -103,7 +107,6 @@ export const T04_FORBIDDEN_MODULE_ROUTES: readonly string[] = [
   '/hearings',
   '/finance',
   '/clients',
-  '/documents',
   '/reports',
   '/settings',
 ];

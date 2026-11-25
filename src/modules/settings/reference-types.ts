@@ -90,7 +90,7 @@ export const createReferenceItemSchema = z
     type: z.nativeEnum(ReferenceItemType, { message: 'نوع الجدول المرجعي غير صالح' }),
     name: z.string().trim().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف'),
     code: z.string().max(50).nullable().optional(),
-    circuitTypes: z.array(z.string().max(100)).optional(),
+    circuitTypes: z.array(z.string().max(100)).max(50, 'الحد الأقصى لأنواع الدوائر هو 50 نوعاً').optional(),
     notes: z.string().max(1000).nullable().optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
@@ -103,7 +103,7 @@ export const updateReferenceItemSchema = z
     expectedVersion: z.number().int().positive('رقم النسخة المتوقعة مطلوب'),
     name: z.string().trim().min(1, 'اسم العنصر المرجعي مطلوب').max(200, 'الاسم لا يتجاوز 200 حرف'),
     code: z.string().max(50).nullable().optional(),
-    circuitTypes: z.array(z.string().max(100)).optional(),
+    circuitTypes: z.array(z.string().max(100)).max(50, 'الحد الأقصى لأنواع الدوائر هو 50 نوعاً').optional(),
     notes: z.string().max(1000).nullable().optional(),
     isActive: z.boolean(),
     idempotencyKey: z.string().min(1).max(128),

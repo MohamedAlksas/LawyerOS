@@ -351,7 +351,7 @@ export function MatterListClient({
               placeholder="ابحث بالعنوان أو كود الملف (مثال: 2026/0001)..."
               aria-label="البحث في ملفات القضايا"
               data-testid="matters-search-input"
-              className="w-full pl-3 pr-10 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
+              className="w-full px-3 py-2 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
             />
             </div>
 
@@ -385,7 +385,7 @@ export function MatterListClient({
               data-testid="filter-kind-all"
               onClick={() => handleKindChange(undefined)}
               aria-pressed={selectedKind === undefined}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 selectedKind === undefined
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -400,7 +400,7 @@ export function MatterListClient({
                 data-testid={`filter-kind-${kind.toLowerCase()}`}
                 onClick={() => handleKindChange(kind)}
                 aria-pressed={selectedKind === kind}
-                className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+                className={`px-3 py-1.5 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                   selectedKind === kind
                     ? 'bg-[#14566B] text-white shadow-xs'
                     : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -418,7 +418,7 @@ export function MatterListClient({
               data-testid="filter-status-all"
               onClick={() => handleStatusChange(undefined)}
               aria-pressed={selectedStatus === undefined}
-              className={`px-2.5 py-1 text-xs font-medium rounded-[6px] min-h-[32px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                 selectedStatus === undefined
                   ? 'bg-[#14566B] text-white'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -433,7 +433,7 @@ export function MatterListClient({
                 data-testid={`filter-status-${st.toLowerCase()}`}
                 onClick={() => handleStatusChange(st)}
                 aria-pressed={selectedStatus === st}
-                className={`px-2.5 py-1 text-xs font-medium rounded-[6px] min-h-[32px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+                className={`px-2.5 py-1 text-xs font-medium rounded-[6px] min-h-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                   selectedStatus === st
                     ? 'bg-[#14566B] text-white'
                     : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -446,7 +446,7 @@ export function MatterListClient({
 
           {/* Include Archived Toggle */}
           <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7] min-h-[44px]">
               <input
                 type="checkbox"
                 data-testid="include-archived-checkbox"
@@ -474,7 +474,7 @@ export function MatterListClient({
                 data-testid="filter-court-select"
                 value={selectedCourtId || ''}
                 onChange={(e) => handleCourtChange(e.target.value || undefined)}
-                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل المحاكم</option>
                 {courts.map((c) => (
@@ -491,7 +491,7 @@ export function MatterListClient({
                 data-testid="filter-client-select"
                 value={selectedClientId || ''}
                 onChange={(e) => handleClientChange(clientSelectOptions.find(({ id }) => id === e.target.value))}
-                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[36px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل الموكلين</option>
                 {clientSelectOptions.map((cl) => (
@@ -513,7 +513,7 @@ export function MatterListClient({
                     void fetchClientOptions(clientPickerQuery, 1, includesArchivedClients(view));
                   }
                 }}
-                className="px-2 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[36px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="px-3 py-1.5 text-xs bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] text-[#14566B] font-medium min-h-[44px] min-w-[44px] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 title="بحث موسع في الموكلين"
               >
                 بحث
@@ -528,7 +528,7 @@ export function MatterListClient({
                       dismissClientPicker();
                     }
                   }}
-                  className="absolute top-full mt-1.5 right-0 z-30 w-72 bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
+                  className="absolute top-full mt-1.5 right-0 z-30 w-72 max-w-[calc(100vw-2rem)] bg-white border border-[#D5DFE3] rounded-[6px] shadow-lg p-3 space-y-2 text-xs"
                 >
                   <div className="flex items-center justify-between pb-1 border-b border-[#E8EEF1]">
                     <span className="font-semibold text-[#172A35]">اختيار موكل</span>
@@ -537,7 +537,7 @@ export function MatterListClient({
                       data-testid="close-client-picker-button"
                       aria-label="إغلاق اختيار الموكل"
                       onClick={dismissClientPicker}
-                      className="text-[#4D606A] hover:text-[#172A35] text-sm p-1"
+                      className="text-[#4D606A] hover:text-[#172A35] text-sm p-1 min-h-[44px] min-w-[44px] flex items-center justify-center rounded"
                     >
                       ✕
                     </button>
@@ -550,7 +550,7 @@ export function MatterListClient({
                     value={clientPickerQuery}
                     onChange={(e) => handleClientPickerQueryChange(e.target.value)}
                     placeholder="ابحث بالاسم أو الهاتف..."
-                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-xs text-[#172A35] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-xs text-[#172A35] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                   />
 
                   {isSearchingClients ? (
@@ -572,7 +572,7 @@ export function MatterListClient({
                           handleClientChange(undefined);
                           dismissClientPicker();
                         }}
-                        className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium block"
+                        className="w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] text-[#172A35] font-medium flex items-center min-h-[44px]"
                       >
                         كل الموكلين
                       </button>
@@ -585,7 +585,7 @@ export function MatterListClient({
                             handleClientChange(cl);
                             dismissClientPicker();
                           }}
-                          className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] block transition-colors ${
+                          className={`w-full text-right px-2.5 py-1.5 hover:bg-[#F4F6F7] flex items-center min-h-[44px] transition-colors ${
                             selectedClientId === cl.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : 'text-[#172A35]'
                           }`}
                         >
@@ -609,7 +609,7 @@ export function MatterListClient({
                             const p = clientPickerPage - 1;
                             void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
                           }}
-                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                          className="px-2.5 py-1 border border-[#D5DFE3] rounded disabled:opacity-40 min-h-[44px] min-w-[44px]"
                         >
                           السابق
                         </button>
@@ -621,7 +621,7 @@ export function MatterListClient({
                             const p = clientPickerPage + 1;
                             void fetchClientOptions(clientPickerQuery, p, includesArchivedClients(view));
                           }}
-                          className="px-1.5 py-0.5 border border-[#D5DFE3] rounded disabled:opacity-40"
+                          className="px-2.5 py-1 border border-[#D5DFE3] rounded disabled:opacity-40 min-h-[44px] min-w-[44px]"
                         >
                           التالي
                         </button>
@@ -633,7 +633,7 @@ export function MatterListClient({
             </div>
 
             {/* Incomplete Data Toggle */}
-            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7]">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs font-medium text-[#172A35] py-1 px-2 rounded hover:bg-[#F4F6F7] min-h-[44px]">
               <input
                 type="checkbox"
                 data-testid="incomplete-data-checkbox"
@@ -795,7 +795,7 @@ export function MatterListClient({
                           <Link
                             href={`/matters/${matter.id}`}
                             data-testid={`view-matter-${matter.id}`}
-                            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-[#14566B] hover:bg-[#E8EEF1] rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px]"
+                            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-semibold text-[#14566B] hover:bg-[#E8EEF1] rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
                           >
                             عرض الملف
                           </Link>

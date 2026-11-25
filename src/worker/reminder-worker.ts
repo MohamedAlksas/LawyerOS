@@ -253,15 +253,20 @@ export async function claimNextReminderJob(
   return null;
 }
 
-interface SourceEligibilityResult {
-  eligible: boolean;
-  eventType?: ReminderEventType;
-  eventDateYmd?: string;
-  matterId?: string | null;
-  sourceOwnerId?: string;
-  title?: string;
-  body?: string;
-}
+type SourceEligibilityResult =
+  | {
+      eligible: true;
+      eventType: ReminderEventType;
+      eventDateYmd: string;
+      matterId: string | null;
+      sourceOwnerId: string;
+      title: string;
+      body: string;
+    }
+  | {
+      eligible: false;
+      reason: 'stale_version' | 'source_ineligible';
+    };
 
 async function evaluateLiveSourceEligibility(
   tx: Prisma.TransactionClient,
@@ -295,31 +300,31 @@ async function evaluateLiveSourceEligibility(
     });
 
     if (!hearing || hearing.status !== 'SCHEDULED') {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (
       hearing.proceeding.archivedAt !== null ||
       hearing.proceeding.matter.archivedAt !== null ||
       hearing.proceeding.matter.status === 'ARCHIVED'
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (
       typeof job.payload.sourceVersion === 'number' &&
       hearing.version !== job.payload.sourceVersion
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'stale_version' };
     }
 
     const eventDateYmd = formatUtcDateToIsoDate(hearing.hearingDate);
     if (!eventDateYmd) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (
       typeof job.payload.hearingDate === 'string' &&
       job.payload.hearingDate !== eventDateYmd
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'stale_version' };
     }
 
     const matter = hearing.proceeding.matter;
@@ -354,31 +359,31 @@ async function evaluateLiveSourceEligibility(
     });
 
     if (!deadline || deadline.status !== 'CONFIRMED' || !deadline.dueDate) {
-      return { eligible: false };
-    }
-    if (deadline.version !== job.sourceVersion) {
-      return { eligible: false };
-    }
-    if (
-      typeof job.payload.version === 'number' &&
-      deadline.version !== job.payload.version
-    ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (
       deadline.matter.archivedAt !== null ||
       deadline.matter.status === 'ARCHIVED' ||
       (deadline.proceeding && deadline.proceeding.archivedAt !== null)
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
+    }
+    if (deadline.version !== job.sourceVersion) {
+      return { eligible: false, reason: 'stale_version' };
+    }
+    if (
+      typeof job.payload.version === 'number' &&
+      deadline.version !== job.payload.version
+    ) {
+      return { eligible: false, reason: 'stale_version' };
     }
 
     const eventDateYmd = formatUtcDateToIsoDate(deadline.dueDate);
     if (!eventDateYmd) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (typeof job.payload.dueDate === 'string' && job.payload.dueDate !== eventDateYmd) {
-      return { eligible: false };
+      return { eligible: false, reason: 'stale_version' };
     }
 
     return {
@@ -417,14 +422,14 @@ async function evaluateLiveSourceEligibility(
       (task.status !== 'OPEN' && task.status !== 'IN_PROGRESS') ||
       !task.dueDate
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (
       (task.matter &&
         (task.matter.archivedAt !== null || task.matter.status === 'ARCHIVED')) ||
       (task.proceeding && task.proceeding.archivedAt !== null)
     ) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
 
     // Non-date edits (e.g. OPEN -> IN_PROGRESS, title, priority, dueTime) increment task.version
@@ -439,15 +444,15 @@ async function evaluateLiveSourceEligibility(
       select: { id: true },
     });
     if (newerTaskJob) {
-      return { eligible: false };
+      return { eligible: false, reason: 'stale_version' };
     }
 
     const eventDateYmd = formatUtcDateToIsoDate(task.dueDate);
     if (!eventDateYmd) {
-      return { eligible: false };
+      return { eligible: false, reason: 'source_ineligible' };
     }
     if (typeof job.payload.dueDate === 'string' && job.payload.dueDate !== eventDateYmd) {
-      return { eligible: false };
+      return { eligible: false, reason: 'stale_version' };
     }
 
     return {
@@ -461,7 +466,7 @@ async function evaluateLiveSourceEligibility(
     };
   }
 
-  return { eligible: false };
+  return { eligible: false, reason: 'source_ineligible' };
 }
 
 export async function processClaimedReminderJob(
@@ -522,7 +527,7 @@ export async function processClaimedReminderJob(
       payload: payloadObj,
     });
 
-    if (!live.eligible || !live.eventType || !live.eventDateYmd) {
+    if (!live.eligible) {
       await tx.jobRun.update({
         where: { id: lockedJob.id },
         data: {
@@ -536,6 +541,9 @@ export async function processClaimedReminderJob(
         where: {
           sourceType: lockedJob.source_type,
           sourceId: lockedJob.source_id,
+          ...(live.reason === 'stale_version'
+            ? { sourceVersion: lockedJob.source_version }
+            : {}),
           status: { in: ['PENDING', 'PROCESSING'] },
         },
         data: { status: 'CANCELLED' },
@@ -551,7 +559,7 @@ export async function processClaimedReminderJob(
       .map((rule) => ({
         rule,
         instant: computeCairoReminderInstant(
-          live.eventDateYmd!,
+          live.eventDateYmd,
           rule.dayOffset,
           rule.reminderTime
         ),
@@ -659,9 +667,43 @@ export async function processClaimedReminderJob(
       const nextDedupKey = `reminder_${lockedJob.source_type}_${lockedJob.source_id}_v${lockedJob.source_version}_r${rule.dayOffset}`;
       const existingNextJob = await tx.jobRun.findUnique({
         where: { deduplicationKey: nextDedupKey },
-        select: { id: true },
+        select: { id: true, status: true },
       });
+
+      let targetDedupKey: string | null = null;
       if (!existingNextJob) {
+        targetDedupKey = nextDedupKey;
+      } else if (
+        existingNextJob.status === 'CANCELLED' ||
+        existingNextJob.status === 'SUCCEEDED'
+      ) {
+        const activeSibling = await tx.jobRun.findFirst({
+          where: {
+            jobType: 'REMINDER_DELIVERY',
+            sourceType: lockedJob.source_type,
+            sourceId: lockedJob.source_id,
+            sourceVersion: lockedJob.source_version,
+            status: { in: ['PENDING', 'RUNNING'] },
+            OR: [
+              { deduplicationKey: { startsWith: `${nextDedupKey}_resched_` } },
+              { deduplicationKey: { startsWith: `${nextDedupKey}_chain_` } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!activeSibling) {
+          const fallbackChainKey = `${nextDedupKey}_chain_${lockedJob.id}`;
+          const existingFallback = await tx.jobRun.findUnique({
+            where: { deduplicationKey: fallbackChainKey },
+            select: { id: true },
+          });
+          if (!existingFallback) {
+            targetDedupKey = fallbackChainKey;
+          }
+        }
+      }
+
+      if (targetDedupKey) {
         await tx.jobRun.create({
           data: {
             jobType: 'REMINDER_DELIVERY',
@@ -673,7 +715,7 @@ export async function processClaimedReminderJob(
             availableAt: instant,
             maxAttempts: lockedJob.max_attempts,
             status: 'PENDING',
-            deduplicationKey: nextDedupKey,
+            deduplicationKey: targetDedupKey,
             payload: (lockedJob.payload ?? {}) as Prisma.InputJsonValue,
           },
         });

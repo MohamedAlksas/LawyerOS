@@ -1,14 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { Prisma } from '@prisma/client';
-import { extractRawTokens } from '@/modules/identity/credential-version';
+import { extractRawTokens, getUserCredentialVersionByEmail } from '@/modules/identity/credential-version';
 import { sanitizeAuditPayload } from '@/lib/audit';
-import { runWithIdempotencyRetry, IdempotencyConcurrentConflictError } from '@/lib/idempotency';
+import {
+  canonicalizeJson,
+  computePayloadHash,
+  runWithIdempotencyRetry,
+  IdempotencyConcurrentConflictError,
+  isIdempotencyUniqueConflict,
+} from '@/lib/idempotency';
+import { parseTargetUrl } from '@/cli/baseline-identity';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import {
   searchMattersParamsSchema,
   searchProceedingsParamsSchema,
   getPartyMatterAssociationsSchema,
 } from '@/modules/matters/matter-types';
+import { parseQueryBooleanParam, parseQueryIntegerParam } from '@/modules/scheduling/deadline-http';
+import { SchedulingValidationError } from '@/modules/scheduling/hearing-types';
 
 describe('Audit fixes unit regressions', () => {
   describe('extractRawTokens', () => {
@@ -160,6 +169,121 @@ describe('Audit fixes unit regressions', () => {
       expect(
         getPartyMatterAssociationsSchema.safeParse({ partyId: validUuid, offset: maxOffset + 1 }).success
       ).toBe(false);
+    });
+  });
+
+  describe('Phase 1 hardening helpers', () => {
+    it('canonicalizes Date and bigint deterministically inside canonicalizeJson and computePayloadHash', () => {
+      const sampleDate = new Date('2026-11-24T12:34:56.789Z');
+      const a = canonicalizeJson({ count: BigInt(42), at: sampleDate, nested: { b: 2, a: 1 } });
+      const b = canonicalizeJson({
+        nested: { a: 1, b: 2 },
+        at: new Date('2026-11-24T12:34:56.789Z'),
+        count: BigInt(42),
+      });
+
+      expect(a).toBe(b);
+      expect(a).toContain('"2026-11-24T12:34:56.789Z"');
+      expect(a).toContain('{"$bigint":"42"}');
+      expect(computePayloadHash({ at: sampleDate, amount: BigInt(100) })).toBe(
+        computePayloadHash({ amount: BigInt(100), at: sampleDate })
+      );
+    });
+
+    it('redacts snake_case and hyphenated MFA, auth, crypto, and PII keys in sanitizeAuditPayload', () => {
+      const sanitized = sanitizeAuditPayload({
+        backup_code: '123456',
+        recovery_code: 'rec-999',
+        totp_secret: 'JBSWY3DPEHPK3PXP',
+        national_id: '29901011234567',
+        'passport-number': 'A12345678',
+        auth_tag: 'tag-val',
+        cipher_text: 'enc-val',
+        encryption_key: 'key-val',
+        initialization_vector: 'iv-val',
+        cookie: 'session=abc',
+        authorization: 'Bearer xyz',
+        safeField: 'visible',
+      });
+
+      expect(sanitized).toEqual({
+        backup_code: '[REDACTED_SECRET]',
+        recovery_code: '[REDACTED_SECRET]',
+        totp_secret: '[REDACTED_SECRET]',
+        national_id: '[REDACTED_SECRET]',
+        'passport-number': '[REDACTED_SECRET]',
+        auth_tag: '[REDACTED_SECRET]',
+        cipher_text: '[REDACTED_SECRET]',
+        encryption_key: '[REDACTED_SECRET]',
+        initialization_vector: '[REDACTED_SECRET]',
+        cookie: '[REDACTED_SECRET]',
+        authorization: '[REDACTED_SECRET]',
+        safeField: 'visible',
+      });
+    });
+
+    it('validates scheduling query integer and boolean parameters fail-closed', () => {
+      const validSp = new URLSearchParams({ page: '3', archived: 'false' });
+      expect(parseQueryIntegerParam(validSp, 'page')).toBe(3);
+      expect(parseQueryIntegerParam(validSp, 'missing')).toBeUndefined();
+      expect(parseQueryBooleanParam(validSp, 'archived')).toBe(false);
+      expect(parseQueryBooleanParam(validSp, 'missing')).toBeUndefined();
+
+      expect(() => parseQueryIntegerParam(new URLSearchParams({ page: '12abc' }), 'page')).toThrow(
+        SchedulingValidationError
+      );
+      expect(() => parseQueryIntegerParam(new URLSearchParams({ page: '-1' }), 'page')).toThrow(
+        SchedulingValidationError
+      );
+      expect(() => parseQueryIntegerParam(new URLSearchParams({ page: '1000000000' }), 'page')).toThrow(
+        SchedulingValidationError
+      );
+      expect(() => parseQueryBooleanParam(new URLSearchParams({ archived: '1' }), 'archived')).toThrow(
+        SchedulingValidationError
+      );
+    });
+
+    it('returns null from getUserCredentialVersionByEmail without querying when email is blank', async () => {
+      expect(await getUserCredentialVersionByEmail('')).toBeNull();
+      expect(await getUserCredentialVersionByEmail('   ')).toBeNull();
+    });
+
+    it('returns false from isIdempotencyUniqueConflict on non-IdempotencyRecord P2002', () => {
+      const nonModelP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { modelName: 'DocumentVersion', target: ['objectKey'] },
+      });
+      expect(isIdempotencyUniqueConflict(nonModelP2002)).toBe(false);
+
+      const missingCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['objectKey'] },
+      });
+      expect(isIdempotencyUniqueConflict(missingCompositeP2002)).toBe(false);
+
+      const partialCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['actorId', 'key'] },
+      });
+      expect(isIdempotencyUniqueConflict(partialCompositeP2002)).toBe(false);
+
+      const validCompositeP2002 = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: '6.0.0',
+        meta: { target: ['actorId', 'commandType', 'key'] },
+      });
+      expect(isIdempotencyUniqueConflict(validCompositeP2002)).toBe(true);
+    });
+
+    it('strips IPv6 brackets in host while preserving them in canonicalUrl in parseTargetUrl', () => {
+      const parsed = parseTargetUrl(
+        'postgresql://lawoffice_user:secret@[::1]:5432/lawoffice_test?sslmode=disable'
+      );
+      expect(parsed.host).toBe('::1');
+      expect(parsed.canonicalUrl).toContain('@[::1]:5432/');
     });
   });
 });

@@ -32,7 +32,6 @@ jobs:
           --health-retries 5
 
     env:
-      NODE_ENV: test
       CI: 'true'
       DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_dev?schema=public
       TEST_DATABASE_URL: postgresql://lawoffice_user:lawoffice_dev_secret@localhost:5432/lawoffice_test?schema=public
@@ -68,18 +67,39 @@ jobs:
 
       - name: Lint check
         run: npm run lint
+        env:
+          NODE_ENV: test
 
       - name: TypeScript strict typecheck
         run: npm run typecheck
+        env:
+          NODE_ENV: test
 
       - name: Run unit tests
         run: npm run test
+        env:
+          NODE_ENV: test
 
       - name: Production build
         run: npm run build
+        env:
+          NODE_ENV: production
 
       - name: Run integration tests
         run: npm run test:integration
+        env:
+          NODE_ENV: test
 
       - name: Run Playwright E2E tests
         run: npm run test:e2e
+        env:
+          NODE_ENV: test
+
+      - name: Upload test artifacts on failure
+        if: ${{ !cancelled() && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14
+          if-no-files-found: ignore

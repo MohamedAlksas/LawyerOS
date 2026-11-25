@@ -64,7 +64,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
     else draft.clear();
   });
-  useLeaveGuard(!readOnly && isFormOpen && isDirty, !readOnly && (isSubmitting || Boolean(pending)));
+  useLeaveGuard(!readOnly && isFormOpen && (isDirty || Boolean(pending)), !readOnly && isSubmitting);
 
   const getIdempotencyKey = (): string => {
     if (!idempotencyKeyRef.current) {
@@ -91,6 +91,28 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     idempotencyKeyRef.current = null;
     setPending(null);
     setIsFormOpen(true);
+  };
+
+  const closeForm = () => {
+    if (isSubmitting || pending) return;
+    if (isDirty && !window.confirm('لديك تغييرات غير محفوظة على التوكيل. هل تريد الإغلاق وفقدانها؟')) {
+      return;
+    }
+    setEditing(null);
+    setIsDirty(false);
+    setPoaNumberText('');
+    setPoaYearLabel('');
+    setNotarizationOffice('');
+    setPoaType('LITIGATION');
+    setIssueDate('');
+    setHumanReviewStatus('UNREVIEWED');
+    setNotes('');
+    setError(null);
+    setSessionExpired(false);
+    idempotencyKeyRef.current = null;
+    setPending(null);
+    setIsFormOpen(false);
+    draft.clear();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -169,8 +191,11 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
       draft.clear();
 
       // Reset form and clear idempotency key
+      setEditing(null);
+      setIsDirty(false);
       setPoaNumberText('');
       setNotarizationOffice('');
+      setPoaType('LITIGATION');
       setNotes('');
       setIssueDate('');
       setHumanReviewStatus('UNREVIEWED');
@@ -204,7 +229,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
           <button
             type="button"
             data-testid="add-poa-button"
-            onClick={() => isFormOpen ? setIsFormOpen(false) : openForm(null)}
+            onClick={() => (isFormOpen ? closeForm() : openForm(null))}
             disabled={isSubmitting || !!pending}
             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
           >
@@ -248,7 +273,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 onChange={(e) => setPoaNumberText(e.target.value)}
                 placeholder="0045"
                 dir="ltr"
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono"
               />
             </div>
 
@@ -265,7 +290,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 onChange={(e) => setPoaYearLabel(e.target.value)}
                 placeholder="2026"
                 dir="ltr"
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono"
               />
             </div>
 
@@ -278,7 +303,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 data-testid="poa-type-select"
                 value={poaType}
                 onChange={(e) => setPoaType(e.target.value as PoAType)}
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="GENERAL">{POA_TYPE_LABELS.GENERAL}</option>
                 <option value="SPECIAL">{POA_TYPE_LABELS.SPECIAL}</option>
@@ -302,7 +327,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 value={notarizationOffice}
                 onChange={(e) => setNotarizationOffice(e.target.value)}
                 placeholder="مثال: مكتب توثيق الأهرام النموذجي"
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
 
@@ -314,9 +339,10 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 id="issueDate"
                 data-testid="poa-date-input"
                 type="date"
+                dir="ltr"
                 value={issueDate}
                 onChange={(e) => setIssueDate(e.target.value)}
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
           </div>
@@ -331,7 +357,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 data-testid="poa-status-select"
                 value={humanReviewStatus}
                 onChange={(e) => setHumanReviewStatus(e.target.value as PoAReviewStatus)}
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="UNREVIEWED">{POA_REVIEW_STATUS_CONFIG.UNREVIEWED.label}</option>
                 <option value="VALID">{POA_REVIEW_STATUS_CONFIG.VALID.label}</option>
@@ -355,7 +381,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="حدود الوكالة، أية شروط خاصة، رقم الحفظ..."
-                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-xs bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               />
             </div>
           </div>
@@ -364,7 +390,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
             <button
               type="button"
               disabled={isSubmitting || !!pending}
-              onClick={() => setIsFormOpen(false)}
+              onClick={closeForm}
               className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px]"
             >
               إلغاء

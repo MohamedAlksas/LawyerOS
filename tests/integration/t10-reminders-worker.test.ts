@@ -978,50 +978,56 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     const rules = await listReminderRules(owner);
     expect(rules.length).toBeGreaterThanOrEqual(7);
     const taskRule = rules.find((r) => r.eventType === 'TASK')!;
-    const updatedRule = await updateReminderRule(owner, {
-      ruleId: taskRule.id,
-      expectedVersion: taskRule.version,
-      reminderTime: '10:00',
-      idempotencyKey: crypto.randomUUID(),
-    });
-    expect(updatedRule.reminderTime).toBe('10:00');
-    expect(updatedRule.version).toBe(taskRule.version + 1);
-
-    await expect(
-      updateReminderRule(owner, {
+    let updatedRule: typeof taskRule;
+    try {
+      updatedRule = await updateReminderRule(owner, {
         ruleId: taskRule.id,
-        expectedVersion: taskRule.version, // stale version
-        reminderTime: '11:00',
+        expectedVersion: taskRule.version,
+        reminderTime: '10:00',
         idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ConcurrencyConflictError);
+      });
+      expect(updatedRule.reminderTime).toBe('10:00');
+      expect(updatedRule.version).toBe(taskRule.version + 1);
 
-    await expect(
-      updateReminderRule(owner, {
-        ruleId: updatedRule.id,
-        expectedVersion: updatedRule.version,
-        reminderTime: '25:00',
-        idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ReminderValidationError);
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: taskRule.id,
+          expectedVersion: taskRule.version, // stale version
+          reminderTime: '11:00',
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ConcurrencyConflictError);
 
-    const hearingRule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7)!;
-    await expect(
-      updateReminderRule(owner, {
-        ruleId: hearingRule7.id,
-        expectedVersion: hearingRule7.version,
-        dayOffset: 3, // duplicates existing HEARING dayOffset=3 rule
-        idempotencyKey: crypto.randomUUID(),
-      })
-    ).rejects.toThrow(ReminderValidationError);
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: updatedRule.id,
+          expectedVersion: updatedRule.version,
+          reminderTime: '25:00',
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ReminderValidationError);
 
-    // Restore original rule time
-    await updateReminderRule(owner, {
-      ruleId: updatedRule.id,
-      expectedVersion: updatedRule.version,
-      reminderTime: '09:00',
-      idempotencyKey: crypto.randomUUID(),
-    });
+      const hearingRule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7)!;
+      await expect(
+        updateReminderRule(owner, {
+          ruleId: hearingRule7.id,
+          expectedVersion: hearingRule7.version,
+          dayOffset: 3, // duplicates existing HEARING dayOffset=3 rule
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(ReminderValidationError);
+    } finally {
+      // Restore original rule time
+      const currentRule = await prisma.reminderRule.findUniqueOrThrow({ where: { id: taskRule.id } });
+      if (currentRule.reminderTime !== '09:00') {
+        await updateReminderRule(owner, {
+          ruleId: currentRule.id,
+          expectedVersion: currentRule.version,
+          reminderTime: '09:00',
+          idempotencyKey: crypto.randomUUID(),
+        });
+      }
+    }
 
     // REMINDER_DISPATCH_DISABLED blocks all dispatch without advancing deliveries
     const blockedTask = await createTask(owner, {
@@ -1255,6 +1261,230 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     expect(healthyDeliveries[0]!.status).toBe('SENT');
   });
 
+  it('Reschedules pulled-forward chained jobs over CANCELLED collisions via _resched_, preserves future chaining without dropping rules, and leaves RUNNING jobs untouched', async () => {
+    const rules = await listReminderRules(owner);
+    const rule7 = rules.find((r) => r.eventType === 'HEARING' && r.dayOffset === 7);
+    expect(rule7).toBeDefined();
+    expect(rules.some((r) => r.eventType === 'HEARING' && r.dayOffset === 5)).toBe(false);
+
+    const h1 = await scheduleHearing(owner, {
+      proceedingId,
+      hearingDate: '2028-02-20',
+      hearingTime: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(h1.id);
+
+    const hRunning = await scheduleHearing(owner, {
+      proceedingId,
+      hearingDate: '2028-02-22',
+      hearingTime: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hRunning.id);
+
+    const runningPrimaryKey = `hearing_reminder_${hRunning.id}`;
+    const runningOriginalLease = new Date('2028-02-25T00:00:00.000Z');
+    const runningJobBefore = await prisma.jobRun.update({
+      where: { deduplicationKey: runningPrimaryKey },
+      data: {
+        status: 'RUNNING',
+        lockedBy: 'worker-concurrent-lease',
+        leaseUntil: runningOriginalLease,
+        attemptCount: 1,
+      },
+    });
+
+    let updatedRule7Version: number | null = null;
+    try {
+      // Tick 1: 7 days before 2028-02-20 @ 09:00 Cairo (UTC+2) => delivers offset_7 and chains r3
+      await runReminderWorkerTick({
+        now: new Date('2028-02-13T07:05:00.000Z'),
+        workerId: 'worker-resched-init',
+      });
+
+      const jobR3 = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `reminder_Hearing_${h1.id}_v1_r3` },
+      });
+      expect(jobR3.status).toBe('PENDING');
+
+      // Seed prior CANCELLED collision rows at r5 (for _resched_ collision) and r1 (for _chain_ collision)
+      const cancelledR5 = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Hearing',
+          sourceId: h1.id,
+          sourceVersion: 1,
+          scheduledAt: new Date('2028-02-15T07:00:00.000Z'),
+          availableAt: new Date('2028-02-15T07:00:00.000Z'),
+          status: 'CANCELLED',
+          completedAt: new Date('2028-02-13T07:06:00.000Z'),
+          deduplicationKey: `reminder_Hearing_${h1.id}_v1_r5`,
+          payload: jobR3.payload as object,
+        },
+      });
+      const cancelledR1 = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Hearing',
+          sourceId: h1.id,
+          sourceVersion: 1,
+          scheduledAt: new Date('2028-02-19T07:00:00.000Z'),
+          availableAt: new Date('2028-02-19T07:00:00.000Z'),
+          status: 'CANCELLED',
+          completedAt: new Date('2028-02-13T07:06:00.000Z'),
+          deduplicationKey: `reminder_Hearing_${h1.id}_v1_r1`,
+          payload: jobR3.payload as object,
+        },
+      });
+
+      // Pull forward rule 7 -> 5: collides with CANCELLED _r5, so jobR3 moves to _resched_<id>
+      const updatedRule7 = await updateReminderRule(owner, {
+        ruleId: rule7!.id,
+        expectedVersion: rule7!.version,
+        dayOffset: 5,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      updatedRule7Version = updatedRule7.version;
+
+      const expectedReschedKey = `reminder_Hearing_${h1.id}_v1_r5_resched_${jobR3.id}`;
+      const rescheduledJob = await prisma.jobRun.findUniqueOrThrow({
+        where: { id: jobR3.id },
+      });
+      expect(rescheduledJob.status).toBe('PENDING');
+      expect(rescheduledJob.deduplicationKey).toBe(expectedReschedKey);
+      expect(rescheduledJob.scheduledAt.toISOString()).toBe('2028-02-15T07:00:00.000Z');
+      expect(rescheduledJob.availableAt.toISOString()).toBe('2028-02-15T07:00:00.000Z');
+
+      // Cancelled collision rows stay CANCELLED, and concurrently RUNNING job is untouched
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: cancelledR5.id } })).status).toBe('CANCELLED');
+      const runningAfterRuleUpdate = await prisma.jobRun.findUniqueOrThrow({ where: { id: runningJobBefore.id } });
+      expect(runningAfterRuleUpdate.status).toBe('RUNNING');
+      expect(runningAfterRuleUpdate.lockedBy).toBe('worker-concurrent-lease');
+      expect(runningAfterRuleUpdate.leaseUntil?.getTime()).toBe(runningOriginalLease.getTime());
+      expect(runningAfterRuleUpdate.scheduledAt.getTime()).toBe(runningJobBefore.scheduledAt.getTime());
+      expect(runningAfterRuleUpdate.availableAt.getTime()).toBe(runningJobBefore.availableAt.getTime());
+      expect(runningAfterRuleUpdate.deduplicationKey).toBe(runningPrimaryKey);
+
+      // Tick 2: 5 days before 2028-02-20 => delivers offset_5 and chains r3 without dropping it
+      await runReminderWorkerTick({
+        now: new Date('2028-02-15T07:05:00.000Z'),
+        workerId: 'worker-resched-r5',
+      });
+
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: jobR3.id } })).status).toBe('SUCCEEDED');
+      const chainedR3AfterTick2 = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `reminder_Hearing_${h1.id}_v1_r3` },
+      });
+      expect(chainedR3AfterTick2.status).toBe('PENDING');
+      expect(chainedR3AfterTick2.scheduledAt.toISOString()).toBe('2028-02-17T07:00:00.000Z');
+
+      // Tick 3: 3 days before 2028-02-20 => delivers offset_3 and chains r1 via _chain_ over CANCELLED _r1
+      await runReminderWorkerTick({
+        now: new Date('2028-02-17T07:05:00.000Z'),
+        workerId: 'worker-resched-r3',
+      });
+
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: chainedR3AfterTick2.id } })).status).toBe('SUCCEEDED');
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: cancelledR1.id } })).status).toBe('CANCELLED');
+      const chainedR1AfterTick3 = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `reminder_Hearing_${h1.id}_v1_r1_chain_${chainedR3AfterTick2.id}` },
+      });
+      expect(chainedR1AfterTick3.status).toBe('PENDING');
+      expect(chainedR1AfterTick3.scheduledAt.toISOString()).toBe('2028-02-19T07:00:00.000Z');
+
+      const deliveries = await prisma.reminderDelivery.findMany({
+        where: { sourceType: 'Hearing', sourceId: h1.id },
+        orderBy: { scheduledAt: 'asc' },
+      });
+      expect(deliveries.map((d) => d.ruleKey)).toEqual(['offset_7', 'offset_5', 'offset_3']);
+
+      const runningAfterTicks = await prisma.jobRun.findUniqueOrThrow({ where: { id: runningJobBefore.id } });
+      expect(runningAfterTicks.status).toBe('RUNNING');
+      expect(runningAfterTicks.lockedBy).toBe('worker-concurrent-lease');
+      expect(runningAfterTicks.leaseUntil?.getTime()).toBe(runningOriginalLease.getTime());
+    } finally {
+      await prisma.reminderDelivery.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: { in: [h1.id, hRunning.id] } },
+      });
+      await prisma.jobRun.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: { in: [h1.id, hRunning.id] } },
+      });
+      await prisma.hearing.deleteMany({
+        where: { id: { in: [h1.id, hRunning.id] } },
+      });
+      if (updatedRule7Version !== null) {
+        const latestRules = await listReminderRules(owner);
+        const currentRule = latestRules.find((r) => r.id === rule7!.id);
+        if (currentRule && currentRule.dayOffset !== 7) {
+          await updateReminderRule(owner, {
+            ruleId: currentRule.id,
+            expectedVersion: currentRule.version,
+            dayOffset: 7,
+            idempotencyKey: crypto.randomUUID(),
+          });
+        }
+      }
+    }
+  });
+
+  it('Continues reminder chaining via _chain_ fallback when existingNextJob.status === SUCCEEDED', async () => {
+    const hSucc = await scheduleHearing(owner, {
+      proceedingId,
+      hearingDate: '2028-03-20',
+      hearingTime: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hSucc.id);
+
+    try {
+      const primaryJob = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `hearing_reminder_${hSucc.id}` },
+      });
+      expect(primaryJob.status).toBe('PENDING');
+
+      // Seed a prior SUCCEEDED row holding the canonical _r3 deduplication key
+      const succeededR3 = await prisma.jobRun.create({
+        data: {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Hearing',
+          sourceId: hSucc.id,
+          sourceVersion: 1,
+          scheduledAt: new Date('2028-03-17T07:00:00.000Z'),
+          availableAt: new Date('2028-03-17T07:00:00.000Z'),
+          status: 'SUCCEEDED',
+          completedAt: new Date('2028-03-13T06:00:00.000Z'),
+          deduplicationKey: `reminder_Hearing_${hSucc.id}_v1_r3`,
+          payload: primaryJob.payload as object,
+        },
+      });
+
+      await runReminderWorkerTick({
+        now: new Date('2028-03-13T07:05:00.000Z'),
+        workerId: 'worker-succ-chain',
+      });
+
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: primaryJob.id } })).status).toBe('SUCCEEDED');
+      expect((await prisma.jobRun.findUniqueOrThrow({ where: { id: succeededR3.id } })).status).toBe('SUCCEEDED');
+
+      const chainedR3 = await prisma.jobRun.findUniqueOrThrow({
+        where: { deduplicationKey: `reminder_Hearing_${hSucc.id}_v1_r3_chain_${primaryJob.id}` },
+      });
+      expect(chainedR3.status).toBe('PENDING');
+      expect(chainedR3.scheduledAt.toISOString()).toBe('2028-03-17T07:00:00.000Z');
+    } finally {
+      await prisma.reminderDelivery.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: hSucc.id },
+      });
+      await prisma.jobRun.deleteMany({
+        where: { sourceType: 'Hearing', sourceId: hSucc.id },
+      });
+      await prisma.hearing.deleteMany({
+        where: { id: hSucc.id },
+      });
+    }
+  });
+
   it('Migration verification: fresh deploy, SQL CHECK constraints, and populated T09-to-T10 upgrade with available_at backfill', async () => {
     const fresh = await createDedicatedTestDatabase();
     try {
@@ -1291,8 +1521,8 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
     }
 
     // Populated T09 -> T10 upgrade preserves existing rows and backfills job_run.available_at from scheduled_at
-    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t09-baseline-'));
     const upgraded = await createDedicatedTestDatabase();
+    const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lawoffice-t09-baseline-'));
     try {
       const schema = path.join(stageDir, 'schema.prisma');
       const migrations = path.join(stageDir, 'migrations');

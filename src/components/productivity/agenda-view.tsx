@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import type {
   ActionResult,
@@ -83,6 +83,12 @@ export function AgendaView({
   const requestSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const fetchAgenda = useCallback(
     async (params: {
       nextView: AgendaViewMode;
@@ -111,6 +117,9 @@ export function AgendaView({
           cache: 'no-store',
           signal: controller.signal,
         });
+        if (res.status === 401 && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         const body = (await res.json().catch(() => null)) as ActionResult<AgendaDTO> | null;
         if (seq !== requestSeqRef.current) return;
 
@@ -125,6 +134,9 @@ export function AgendaView({
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
         setLoadError(err instanceof Error ? err.message : 'تعذر تحميل الأجندة من الخادم.');
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         if (seq === requestSeqRef.current) {
           setIsLoading(false);
         }
@@ -630,7 +642,13 @@ export function AgendaView({
                       </td>
                       <td className="border border-black px-2 py-1.5 font-semibold">{t.title}</td>
                       <td className="border border-black px-2 py-1.5">
-                        {t.matterTitle ? `${t.matterFileCode} — ${t.matterTitle}` : 'مهمة عامة للمكتب'}
+                        {t.matterTitle ? (
+                          <>
+                            <bdi dir="ltr">{t.matterFileCode}</bdi> — {t.matterTitle}
+                          </>
+                        ) : (
+                          'مهمة عامة للمكتب'
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -732,6 +750,7 @@ export function AgendaView({
               id="agenda-date-input"
               data-testid="agenda-date-input"
               type="date"
+              dir="ltr"
               value={anchorDate}
               onChange={(e) => {
                 if (e.target.value) applyFilterChange({ anchorDate: e.target.value });

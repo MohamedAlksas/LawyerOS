@@ -205,11 +205,11 @@ export async function updateOfficeSettings(
           create: {
             id: SINGLETON_ID,
             officeName: input.officeName.trim(),
-            lawyerName: input.lawyerName?.trim() ?? null,
-            phone: input.phone?.trim() ?? null,
-            email: input.email?.trim() ?? null,
-            address: input.address?.trim() ?? null,
-            taxNumber: input.taxNumber?.trim() ?? null,
+            lawyerName: input.lawyerName?.trim() || null,
+            phone: input.phone?.trim() || null,
+            email: input.email?.trim() || null,
+            address: input.address?.trim() || null,
+            taxNumber: input.taxNumber?.trim() || null,
             currency: 'EGP',
             timeZone: 'Africa/Cairo',
             version: nextVersion,
@@ -217,11 +217,11 @@ export async function updateOfficeSettings(
           },
           update: {
             officeName: input.officeName.trim(),
-            ...(input.lawyerName !== undefined ? { lawyerName: input.lawyerName?.trim() ?? null } : {}),
-            ...(input.phone !== undefined ? { phone: input.phone?.trim() ?? null } : {}),
-            ...(input.email !== undefined ? { email: input.email?.trim() ?? null } : {}),
-            ...(input.address !== undefined ? { address: input.address?.trim() ?? null } : {}),
-            ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber?.trim() ?? null } : {}),
+            ...(input.lawyerName !== undefined ? { lawyerName: input.lawyerName?.trim() || null } : {}),
+            ...(input.phone !== undefined ? { phone: input.phone?.trim() || null } : {}),
+            ...(input.email !== undefined ? { email: input.email?.trim() || null } : {}),
+            ...(input.address !== undefined ? { address: input.address?.trim() || null } : {}),
+            ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber?.trim() || null } : {}),
             version: nextVersion,
             updatedById: actor.id,
           },
@@ -300,6 +300,7 @@ export async function listReferenceItems(
     const courts = await prisma.court.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const c of courts) {
       results.push({
@@ -321,6 +322,7 @@ export async function listReferenceItems(
     const areas = await prisma.practiceArea.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const a of areas) {
       results.push({
@@ -341,6 +343,7 @@ export async function listReferenceItems(
     const locations = await prisma.storageLocation.findMany({
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: 'asc' },
+      take: 500,
     });
     for (const l of locations) {
       results.push({
@@ -454,9 +457,9 @@ export async function createReferenceItem(
           const item = await tx.court.create({
             data: {
               name: input.name.trim(),
-              code: input.code?.trim() ?? null,
+              code: input.code?.trim() || null,
               circuitTypes: input.circuitTypes ?? [],
-              notes: input.notes?.trim() ?? null,
+              notes: input.notes?.trim() || null,
               isActive: true,
               version: 1,
               createdById: actor.id,
@@ -479,8 +482,8 @@ export async function createReferenceItem(
           const item = await tx.practiceArea.create({
             data: {
               name: input.name.trim(),
-              code: input.code?.trim() ?? null,
-              notes: input.notes?.trim() ?? null,
+              code: input.code?.trim() || null,
+              notes: input.notes?.trim() || null,
               isActive: true,
               version: 1,
               createdById: actor.id,
@@ -502,8 +505,8 @@ export async function createReferenceItem(
           const item = await tx.storageLocation.create({
             data: {
               name: input.name.trim(),
-              code: input.code?.trim() ?? null,
-              notes: input.notes?.trim() ?? null,
+              code: input.code?.trim() || null,
+              notes: input.notes?.trim() || null,
               isActive: true,
               version: 1,
               createdById: actor.id,
@@ -604,8 +607,8 @@ export async function updateReferenceItem(
 
         let updatedDTO: ReferenceItemDTO;
         const optionalFields = {
-          ...(input.code !== undefined ? { code: input.code?.trim() ?? null } : {}),
-          ...(input.notes !== undefined ? { notes: input.notes?.trim() ?? null } : {}),
+          ...(input.code !== undefined ? { code: input.code?.trim() || null } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
         };
 
         if (input.type === 'COURT') {

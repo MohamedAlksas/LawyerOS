@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from 'pg';
-import { getEnv } from './env';
+import { getEnv, redactErrorMessage } from './env';
 
 declare global {
   var __lawoffice_pg_pool: Pool | undefined;
@@ -32,8 +32,7 @@ export function getDbPool(): Pool {
   // Handle background pool errors cleanly without crashing process unhandled
   pool.on('error', (err) => {
     // Redact any possible credentials from pool-level errors
-    const sanitized = err.message ? err.message.replace(/:\/\/.*@/, '://[REDACTED]@') : 'Pool error';
-    console.error('[Database Pool Error]:', sanitized);
+    console.error('[Database Pool Error]:', redactErrorMessage(err));
   });
 
   singletonPool = pool;

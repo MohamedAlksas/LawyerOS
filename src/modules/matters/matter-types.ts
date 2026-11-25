@@ -618,6 +618,14 @@ export const proceedingPartyInputSchema = z
     }
   );
 
+const proceedingPartiesSchema = z
+  .array(proceedingPartyInputSchema)
+  .max(100, 'الحد الأقصى لأطراف القيد القضائي هو 100 طرف')
+  .refine(
+    (parties) => new Set(parties.map((p) => p.matterPartyId)).size === parties.length,
+    { message: 'لا يمكن تكرار نفس الطرف في القيد القضائي.' }
+  );
+
 export const addProceedingSchema = z
   .object({
     matterId: z.string().uuid('معرف الملف غير صالح'),
@@ -631,7 +639,7 @@ export const addProceedingSchema = z
     filingDate: strictDateSchema.nullable().optional(),
     claimAmount: z.string().max(50).nullable().optional(),
     status: z.nativeEnum(ProceedingStatus).optional(),
-    parties: z.array(proceedingPartyInputSchema).optional(),
+    parties: proceedingPartiesSchema.optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();
@@ -651,7 +659,7 @@ export const updateProceedingSchema = z
     filingDate: strictDateSchema.nullable().optional(),
     claimAmount: z.string().max(50).nullable().optional(),
     status: z.nativeEnum(ProceedingStatus, { message: 'حالة القيد القضائي غير صالحة' }),
-    parties: z.array(proceedingPartyInputSchema).optional(),
+    parties: proceedingPartiesSchema.optional(),
     idempotencyKey: z.string().min(1).max(128),
   })
   .strict();

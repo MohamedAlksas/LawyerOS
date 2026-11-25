@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import type { Actor, Permission } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
+import { validateOptionalCalendarTime } from '@/lib/cairo-date';
 import { claimIdempotencyKey, completeIdempotencyKey, resolveConcurrentIdempotency, runWithIdempotencyRetry } from '@/lib/idempotency';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import {
@@ -113,6 +114,7 @@ interface TaskRecord {
   hearingId?: string | null;
   title: string;
   dueDate?: Date | null;
+  dueTime?: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   version: number;
@@ -192,6 +194,7 @@ function mapTaskToDTO(raw: TaskRecord): TaskDTO {
     hearingId: raw.hearingId ?? null,
     title: raw.title,
     dueDate: raw.dueDate ? toDateString(raw.dueDate) : null,
+    dueTime: raw.dueTime ?? null,
     priority: raw.priority,
     status: raw.status,
     version: raw.version,
@@ -244,7 +247,15 @@ function resultAcknowledgment(value: RecordHearingResultResult) {
     resultId: value.resultId,
     hearing: hearingAcknowledgment(value.hearing),
     next: value.nextHearing ? hearingAcknowledgment(value.nextHearing) : null,
-    tasks: value.tasks?.map(({ id, hearingId, dueDate, status, version, updatedAt }) => ({ id, hearingId, dueDate, status, version, updatedAt })) ?? [],
+    tasks: value.tasks?.map(({ id, hearingId, dueDate, dueTime, status, version, updatedAt }) => ({
+      id,
+      hearingId,
+      dueDate,
+      dueTime: dueTime ?? null,
+      status,
+      version,
+      updatedAt,
+    })) ?? [],
   };
 }
 
@@ -421,9 +432,16 @@ export async function recordHearingResult(
   const nextCourtHall = input.nextHearing?.courtHall || input.nextHearing?.locationRoom || null;
   const nextPurpose = input.nextHearing?.purpose || null;
   const nextRoll = input.nextHearing?.rollNumber || null;
-  const tasks = (input.tasks ?? []).map(({ title, dueDate, priority }) => ({
-    title, dueDate: dueDate ?? null, priority: priority ?? 'NORMAL',
-  }));
+  const tasks = (input.tasks ?? []).map(({ title, dueDate, dueTime, priority }) => {
+    const normDueDate = dueDate ?? null;
+    const normDueTime = validateOptionalCalendarTime(normDueDate, dueTime, 'dueTime');
+    return {
+      title,
+      dueDate: normDueDate,
+      dueTime: normDueTime,
+      priority: priority ?? 'NORMAL',
+    };
+  });
   const intent = {
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, decision,
     summary: input.summary || null, attendance: input.attendance || null, notes: input.notes || null,
@@ -561,7 +579,7 @@ export async function recordHearingResult(
     const createdTasksDTO: TaskDTO[] = [];
     const taskIds: string[] = [];
     if (tasks.length > 0) {
-      for (const { title, dueDate, priority } of tasks) {
+      for (const { title, dueDate, dueTime, priority } of tasks) {
         const taskDueDate = parseCalendarDateToUtc(dueDate);
         const task = await tx.task.create({
           data: {
@@ -570,6 +588,7 @@ export async function recordHearingResult(
             hearingId: hearing.id,
             title,
             dueDate: taskDueDate,
+            dueTime,
             priority,
             status: 'OPEN',
             version: 1,
@@ -591,7 +610,7 @@ export async function recordHearingResult(
               proceedingId: hearing.proceedingId,
               hearingId: hearing.id,
               dueDate,
-              dueTime: null,
+              dueTime,
               sourceVersion: task.version,
               recipientUserId: actor.id,
             },
@@ -895,26 +914,36 @@ export async function rescheduleHearing(
     }
     for (const task of taskChanges) {
       const updated = await tx.task.updateMany({
-        where: { id: task.taskId, proceedingId: hearing.proceedingId, hearingId: { in: taskSources }, status: 'OPEN', version: task.expectedVersion },
-        data: { hearingId: replacementHearing.id, dueDate: parseCalendarDateToUtc(task.dueDate), version: { increment: 1 }, updatedById: actor.id },
+        where: { id: task.taskId, proceedingId: hearing.proceedingId, hearingId: { in: taskSources }, status: { in: ['OPEN', 'IN_PROGRESS'] }, version: task.expectedVersion },
+        data: {
+          hearingId: replacementHearing.id,
+          dueDate: parseCalendarDateToUtc(task.dueDate),
+          ...(task.dueDate === null ? { dueTime: null } : {}),
+          version: { increment: 1 },
+          updatedById: actor.id,
+        },
       });
       if (updated.count !== 1) throw new ConcurrencyConflictError('تم تغيير إحدى مهام الجلسة. أعد فتح النموذج.');
       await cancelSourceReminderJobs(tx, 'Task', task.taskId);
       if (task.dueDate) {
-        const nextTaskVersion = task.expectedVersion + 1;
+        const updatedTask = await tx.task.findUniqueOrThrow({
+          where: { id: task.taskId },
+          select: { matterId: true, dueTime: true, version: true },
+        });
         await enqueueSourceReminderJob(tx, {
           sourceType: 'Task',
           sourceId: task.taskId,
-          sourceVersion: nextTaskVersion,
+          sourceVersion: updatedTask.version,
           eventDateYmd: task.dueDate,
-          deduplicationKey: `task_reminder_${task.taskId}_v${nextTaskVersion}`,
+          deduplicationKey: `task_reminder_${task.taskId}_v${updatedTask.version}`,
           payload: {
             taskId: task.taskId,
+            matterId: updatedTask.matterId,
             proceedingId: hearing.proceedingId,
             hearingId: replacementHearing.id,
             dueDate: task.dueDate,
-            dueTime: null,
-            sourceVersion: nextTaskVersion,
+            dueTime: updatedTask.dueTime ?? null,
+            sourceVersion: updatedTask.version,
             recipientUserId: actor.id,
           },
         });
@@ -1094,7 +1123,7 @@ export async function listHearingsForProceeding(
         orderBy: { revision: 'desc' },
         take: 1,
       },
-      tasks: { where: { status: 'OPEN' }, orderBy: { createdAt: 'asc' } },
+      tasks: { where: { status: { in: ['OPEN', 'IN_PROGRESS'] } }, orderBy: { createdAt: 'asc' }, take: 200 },
       linksTo: {
         where: { relation: { in: ['ADJOURNED_TO', 'RESCHEDULED_TO'] } },
         select: { fromHearingId: true, relation: true },
@@ -1104,6 +1133,7 @@ export async function listHearingsForProceeding(
       { hearingDate: 'asc' },
       { id: 'asc' },
     ],
+    take: 500,
   });
 
   const byId = new Map(hearings.map((hearing) => [hearing.id, hearing]));

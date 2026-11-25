@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import { isWorkerDispatchDisabled, redactErrorMessage } from '@/lib/env';
 import { recordAuditEvent } from '@/lib/audit';
@@ -9,6 +9,7 @@ import {
   runWithIdempotencyRetry,
 } from '@/lib/idempotency';
 import {
+  computeCairoReminderInstant,
   formatCairoDateArabic,
   formatTimeOrUnspecified,
   formatUtcDateToIsoDate,
@@ -366,7 +367,12 @@ export async function listInbox(
       include: {
         matter: { select: { fileCode: true, title: true } },
       },
-      orderBy: [{ deliveredAt: 'desc' }, { scheduledAt: 'desc' }, { id: 'asc' }],
+      orderBy: [
+        { readAt: { sort: 'asc', nulls: 'first' } },
+        { deliveredAt: 'desc' },
+        { scheduledAt: 'desc' },
+        { id: 'asc' },
+      ],
       take: params.limit,
     }),
     prisma.jobRun.findMany({
@@ -649,6 +655,309 @@ export async function listReminderRules(actor: Actor): Promise<ReminderRuleDTO[]
   return rules.map(mapRuleToDTO);
 }
 
+const CHAINED_REMINDER_KEY_RE = /^reminder_.+_v\d+_r\d+(?:_(?:resched|chain)_.+)?$/;
+
+function asJobPayload(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return {};
+}
+
+async function loadActiveSourceEventDates(
+  tx: Prisma.TransactionClient,
+  sourceType: 'Hearing' | 'Deadline' | 'Task',
+  sourceIds: string[]
+): Promise<{
+  byId: Map<string, { eventDateYmd: string; version: number }>;
+  maxTaskJobVersionById: Map<string, number>;
+}> {
+  const byId = new Map<string, { eventDateYmd: string; version: number }>();
+  const maxTaskJobVersionById = new Map<string, number>();
+  if (sourceIds.length === 0) {
+    return { byId, maxTaskJobVersionById };
+  }
+
+  if (sourceType === 'Hearing') {
+    const hearings = await tx.hearing.findMany({
+      where: {
+        id: { in: sourceIds },
+        status: 'SCHEDULED',
+        proceeding: {
+          archivedAt: null,
+          matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+        },
+      },
+      select: { id: true, hearingDate: true, version: true },
+    });
+    for (const h of hearings) {
+      const ymd = formatUtcDateToIsoDate(h.hearingDate);
+      if (ymd) byId.set(h.id, { eventDateYmd: ymd, version: h.version });
+    }
+    return { byId, maxTaskJobVersionById };
+  }
+
+  if (sourceType === 'Deadline') {
+    const deadlines = await tx.deadline.findMany({
+      where: {
+        id: { in: sourceIds },
+        status: 'CONFIRMED',
+        dueDate: { not: null },
+        matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+        OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }],
+      },
+      select: { id: true, dueDate: true, version: true },
+    });
+    for (const d of deadlines) {
+      const ymd = formatUtcDateToIsoDate(d.dueDate);
+      if (ymd) byId.set(d.id, { eventDateYmd: ymd, version: d.version });
+    }
+    return { byId, maxTaskJobVersionById };
+  }
+
+  const [tasks, maxTaskVersions] = await Promise.all([
+    tx.task.findMany({
+      where: {
+        id: { in: sourceIds },
+        status: { in: ['OPEN', 'IN_PROGRESS'] },
+        dueDate: { not: null },
+        AND: [
+          {
+            OR: [
+              { matterId: null },
+              { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } },
+            ],
+          },
+          { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+        ],
+      },
+      select: { id: true, dueDate: true, version: true },
+    }),
+    tx.jobRun.groupBy({
+      by: ['sourceId'],
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType: 'Task',
+        sourceId: { in: sourceIds },
+      },
+      _max: { sourceVersion: true },
+    }),
+  ]);
+  for (const t of tasks) {
+    const ymd = formatUtcDateToIsoDate(t.dueDate);
+    if (ymd) byId.set(t.id, { eventDateYmd: ymd, version: t.version });
+  }
+  for (const row of maxTaskVersions) {
+    if (row._max.sourceVersion !== null) {
+      maxTaskJobVersionById.set(row.sourceId, row._max.sourceVersion);
+    }
+  }
+  return { byId, maxTaskJobVersionById };
+}
+
+/**
+ * Atomically updates a PENDING reminder job's schedule (and optional deduplicationKey),
+ * clearing nextAttemptAt only while live attemptCount === 0 so concurrent retry backoffs
+ * set by a worker after an unlocked read are never wiped out.
+ */
+async function updatePendingReminderJobSchedule(
+  tx: Prisma.TransactionClient,
+  jobId: string,
+  scheduledAt: Date,
+  deduplicationKey?: string
+): Promise<number> {
+  const baseData = {
+    ...(deduplicationKey !== undefined ? { deduplicationKey } : {}),
+    scheduledAt,
+    availableAt: scheduledAt,
+  };
+  const zeroAttemptResult = await tx.jobRun.updateMany({
+    where: { id: jobId, status: 'PENDING', attemptCount: 0 },
+    data: { ...baseData, nextAttemptAt: null },
+  });
+  if (zeroAttemptResult.count > 0) {
+    return zeroAttemptResult.count;
+  }
+  const retriedResult = await tx.jobRun.updateMany({
+    where: { id: jobId, status: 'PENDING', attemptCount: { not: 0 } },
+    data: baseData,
+  });
+  return retriedResult.count;
+}
+
+/**
+ * Recomputes scheduledAt/availableAt (and chained deduplication keys safely) for active PENDING
+ * reminder jobs after a ReminderRule update so schedule shifts take effect without recreating jobs.
+ */
+async function reschedulePendingReminderJobs(
+  tx: Prisma.TransactionClient,
+  eventType: ReminderRuleDTO['eventType'],
+  now: Date
+): Promise<void> {
+  const sourceType: 'Hearing' | 'Deadline' | 'Task' =
+    eventType === 'HEARING' ? 'Hearing' : eventType === 'DEADLINE' ? 'Deadline' : 'Task';
+
+  const enabledRules = await tx.reminderRule.findMany({
+    where: {
+      eventType,
+      channel: 'IN_APP',
+      enabled: true,
+    },
+    orderBy: [{ dayOffset: 'desc' }, { reminderTime: 'asc' }],
+  });
+  if (enabledRules.length === 0) {
+    return;
+  }
+
+  let cursorId: string | undefined;
+  while (true) {
+    const batch = await tx.jobRun.findMany({
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType,
+        status: 'PENDING',
+        ...(cursorId ? { id: { gt: cursorId } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: 500,
+    });
+    if (batch.length === 0) break;
+    cursorId = batch[batch.length - 1]!.id;
+
+    const sourceIds = Array.from(new Set(batch.map((j) => j.sourceId)));
+    const [{ byId: activeSources, maxTaskJobVersionById }, existingDeliveries] = await Promise.all([
+      loadActiveSourceEventDates(tx, sourceType, sourceIds),
+      tx.reminderDelivery.findMany({
+        where: {
+          sourceType,
+          sourceId: { in: sourceIds },
+          channel: 'IN_APP',
+        },
+        select: {
+          sourceId: true,
+          sourceVersion: true,
+          ruleKey: true,
+        },
+      }),
+    ]);
+
+    const deliveredRuleKeysBySourceVer = new Map<string, Set<string>>();
+    for (const del of existingDeliveries) {
+      const k = `${del.sourceId}:${del.sourceVersion}`;
+      let set = deliveredRuleKeysBySourceVer.get(k);
+      if (!set) {
+        set = new Set<string>();
+        deliveredRuleKeysBySourceVer.set(k, set);
+      }
+      set.add(del.ruleKey);
+    }
+
+    for (const job of batch) {
+      const source = activeSources.get(job.sourceId);
+      if (!source) continue;
+
+      const payload = asJobPayload(job.payload);
+      if (sourceType === 'Hearing') {
+        if (typeof payload.sourceVersion === 'number' && source.version !== payload.sourceVersion) {
+          continue;
+        }
+        if (typeof payload.hearingDate === 'string' && payload.hearingDate !== source.eventDateYmd) {
+          continue;
+        }
+      } else if (sourceType === 'Deadline') {
+        if (source.version !== job.sourceVersion) continue;
+        if (typeof payload.version === 'number' && source.version !== payload.version) continue;
+        if (typeof payload.dueDate === 'string' && payload.dueDate !== source.eventDateYmd) continue;
+      } else {
+        const maxVer = maxTaskJobVersionById.get(job.sourceId);
+        if (maxVer !== undefined && job.sourceVersion < maxVer) continue;
+        if (typeof payload.dueDate === 'string' && payload.dueDate !== source.eventDateYmd) continue;
+      }
+
+      const deliveredKeys =
+        deliveredRuleKeysBySourceVer.get(`${job.sourceId}:${job.sourceVersion}`) ?? new Set<string>();
+
+      const candidates = enabledRules
+        .filter((r) => !deliveredKeys.has(`offset_${r.dayOffset}`))
+        .map((r) => ({
+          rule: r,
+          instant: computeCairoReminderInstant(source.eventDateYmd, r.dayOffset, r.reminderTime),
+        }))
+        .sort((a, b) => a.instant.getTime() - b.instant.getTime());
+
+      const nextCandidate = candidates[0];
+      if (!nextCandidate) continue;
+
+      const nextInstant = nextCandidate.instant;
+      const isChained = CHAINED_REMINDER_KEY_RE.test(job.deduplicationKey);
+      const nextChainedKey = isChained
+        ? `reminder_${job.sourceType}_${job.sourceId}_v${job.sourceVersion}_r${nextCandidate.rule.dayOffset}`
+        : job.deduplicationKey;
+
+      if (isChained && nextChainedKey !== job.deduplicationKey) {
+        const collision = await tx.jobRun.findUnique({
+          where: { deduplicationKey: nextChainedKey },
+          select: { id: true, status: true },
+        });
+        let handled = false;
+        if (!collision) {
+          await tx.$executeRaw`SAVEPOINT sp_resched_dedup`;
+          try {
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant, nextChainedKey);
+            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
+            handled = true;
+          } catch (err) {
+            if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
+              throw err;
+            }
+            await tx.$executeRaw`ROLLBACK TO SAVEPOINT sp_resched_dedup`;
+            await tx.$executeRaw`RELEASE SAVEPOINT sp_resched_dedup`;
+          }
+        } else if (collision.status === 'PENDING') {
+          const updatedCollisionCount = await updatePendingReminderJobSchedule(
+            tx,
+            collision.id,
+            nextInstant
+          );
+          if (updatedCollisionCount === 1) {
+            await tx.jobRun.updateMany({
+              where: { id: job.id, status: 'PENDING' },
+              data: {
+                status: 'CANCELLED',
+                completedAt: now,
+                leaseUntil: null,
+                lockedBy: null,
+              },
+            });
+            handled = true;
+          }
+        }
+        if (!handled) {
+          // Never leave a pulled-forward job holding a future rule's canonical deduplicationKey,
+          // otherwise ReminderWorker will later see this job as SUCCEEDED on that key and skip the future rule.
+          const fallbackKey = `${nextChainedKey}_resched_${job.id}`;
+          if (fallbackKey !== job.deduplicationKey) {
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant, fallbackKey);
+          } else if (
+            job.scheduledAt.getTime() !== nextInstant.getTime() ||
+            job.availableAt.getTime() !== nextInstant.getTime()
+          ) {
+            await updatePendingReminderJobSchedule(tx, job.id, nextInstant);
+          }
+        }
+        continue;
+      }
+
+      if (
+        job.scheduledAt.getTime() !== nextInstant.getTime() ||
+        job.availableAt.getTime() !== nextInstant.getTime()
+      ) {
+        await updatePendingReminderJobSchedule(tx, job.id, nextInstant);
+      }
+    }
+  }
+}
+
 export async function updateReminderRule(
   actor: Actor,
   rawInput: UpdateReminderRuleInput
@@ -683,7 +992,16 @@ export async function updateReminderRule(
         return claim.resultPayload as ReminderRuleDTO;
       }
 
-      const [locked] = await tx.$queryRaw<
+      const target = await tx.reminderRule.findUnique({
+        where: { id: input.ruleId },
+        select: { id: true, eventType: true },
+      });
+
+      if (!target) {
+        throw new NotFoundError('سياسة التذكير المطلوبة غير موجودة.');
+      }
+
+      const lockedRules = await tx.$queryRaw<
         Array<{
           id: string;
           event_type: ReminderRuleDTO['eventType'];
@@ -696,9 +1014,12 @@ export async function updateReminderRule(
       >`
         SELECT "id", "event_type", "day_offset", "reminder_time", "channel", "enabled", "version"
         FROM "reminder_rule"
-        WHERE "id" = ${input.ruleId}
+        WHERE "event_type" = ${target.eventType}::"ReminderEventType"
+        ORDER BY "id" ASC
         FOR UPDATE
       `;
+
+      const locked = lockedRules.find((r) => r.id === input.ruleId);
 
       if (!locked) {
         throw new NotFoundError('سياسة التذكير المطلوبة غير موجودة.');
@@ -744,6 +1065,14 @@ export async function updateReminderRule(
       });
       if (updated.count !== 1) {
         throw new ConcurrencyConflictError();
+      }
+
+      if (
+        nextDayOffset !== locked.day_offset ||
+        nextTime !== locked.reminder_time ||
+        nextEnabled !== locked.enabled
+      ) {
+        await reschedulePendingReminderJobs(tx, locked.event_type, new Date());
       }
 
       await recordAuditEvent(tx, {

@@ -380,51 +380,121 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     const searchInput = page.getByTestId('party-search-input');
     await expect(searchInput).toBeVisible();
 
+    let resolveQuery1Started!: () => void;
+    const query1Started = new Promise<void>((resolve) => {
+      resolveQuery1Started = resolve;
+    });
+    let releaseQuery1!: () => void;
+    const query1Gate = new Promise<void>((resolve) => {
+      releaseQuery1 = resolve;
+    });
+    let resolveQuery2Started!: () => void;
+    const query2Started = new Promise<void>((resolve) => {
+      resolveQuery2Started = resolve;
+    });
+    let releaseQuery2!: () => void;
+    const query2Gate = new Promise<void>((resolve) => {
+      releaseQuery2 = resolve;
+    });
+
     let postCount = 0;
     let query1Fulfilled = false;
+    let query2Fulfilled = false;
     await page.route('**/parties**', async (route) => {
       if (route.request().method() === 'POST') {
         postCount++;
         if (postCount === 1) {
-          // Controlled delay of 400ms for Query 1
-          await new Promise((r) => setTimeout(r, 400));
-          const response = await route.fetch();
-          await route.fulfill({ response });
-          query1Fulfilled = true;
+          resolveQuery1Started();
+          await query1Gate;
+          try {
+            const response = await route.fetch();
+            await route.fulfill({ response });
+            query1Fulfilled = true;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (
+              !msg.includes('Target page, context or browser has been closed') &&
+              !msg.includes('Route is already handled')
+            ) {
+              throw err;
+            }
+          }
+        } else if (postCount === 2) {
+          resolveQuery2Started();
+          await query2Gate;
+          try {
+            const response = await route.fetch();
+            await route.fulfill({ response });
+            query2Fulfilled = true;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (
+              !msg.includes('Target page, context or browser has been closed') &&
+              !msg.includes('Route is already handled')
+            ) {
+              throw err;
+            }
+          }
         } else {
-          const response = await route.fetch();
-          await route.fulfill({ response });
+          try {
+            const response = await route.fetch();
+            await route.fulfill({ response });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (
+              !msg.includes('Target page, context or browser has been closed') &&
+              !msg.includes('Route is already handled')
+            ) {
+              throw err;
+            }
+          }
         }
       } else {
         await route.continue();
       }
     });
 
-    // 1. Dispatch Query 1 ("بطيء")
-    await searchInput.fill('بطيء');
-    await page.getByTestId('party-search-submit').click();
+    try {
+      // 1. Dispatch Query 1 ("بطيء") and wait deterministically until it is intercepted in flight
+      await searchInput.fill('بطيء');
+      await page.getByTestId('party-search-submit').click();
+      await query1Started;
 
-    // 2. Dispatch Query 2 ("سريع")
-    await searchInput.fill('سريع');
-    await page.getByTestId('party-search-submit').click();
+      // 2. Dispatch Query 2 ("سريع") while Query 1 is held (advances requestGenRef past gen=1 while Next.js queues Request 2)
+      await searchInput.fill('سريع');
+      await page.getByTestId('party-search-submit').click();
 
-    // Query 2 arrives and updates the UI with Party 2 (Fast)
-    const fastPartyEntry = page
-      .locator(`[data-testid="party-row-${fastParty.id}"], [data-testid="party-card-${fastParty.id}"]`)
-      .filter({ visible: true });
-    await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
+      // 3. Release Query 1 while Query 2 is held by query2Gate; Query 1's stale response must settle and be discarded
+      releaseQuery1();
+      await expect.poll(() => query1Fulfilled, { timeout: 10_000 }).toBe(true);
+      await query2Started;
 
-    // Await completion of late Query 1 deterministically via route fulfillment flag
-    await expect.poll(() => query1Fulfilled, { timeout: 10_000 }).toBe(true);
+      // Let React settle any pending microtasks/frames from Query 1 while Query 2 is still held
+      await page.evaluate(
+        () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      );
 
-    // 4. Assert UI still displays Party 2 (Fast) and has NOT been overwritten by Party 1 (Slow)
-    await expect(fastPartyEntry).toBeVisible();
-    const slowPartyEntry = page
-      .locator(`[data-testid="party-row-${slowParty.id}"], [data-testid="party-card-${slowParty.id}"]`)
-      .filter({ visible: true });
-    await expect(slowPartyEntry).toBeHidden();
+      const fastPartyEntry = page
+        .locator(`[data-testid="party-row-${fastParty.id}"], [data-testid="party-card-${fastParty.id}"]`)
+        .filter({ visible: true });
+      const slowPartyEntry = page
+        .locator(`[data-testid="party-row-${slowParty.id}"], [data-testid="party-card-${slowParty.id}"]`)
+        .filter({ visible: true });
+      await expect(page.getByTestId('loading-indicator')).toBeVisible();
+      await expect(slowPartyEntry).toBeHidden();
+      await expect(fastPartyEntry).toBeHidden();
 
-    await page.unroute('**/parties**');
+      // 4. Release Query 2 and verify Fast party renders while Slow party stays hidden
+      releaseQuery2();
+      await expect.poll(() => query2Fulfilled, { timeout: 10_000 }).toBe(true);
+      await expect(fastPartyEntry).toBeVisible({ timeout: 15_000 });
+      await expect(slowPartyEntry).toBeHidden();
+      expect(postCount).toBeGreaterThanOrEqual(2);
+    } finally {
+      releaseQuery1();
+      releaseQuery2();
+      await page.unroute('**/parties**');
+    }
   });
 
   test('search handles transport failures with accessible retry banner @parties', async ({ page }) => {
@@ -469,49 +539,51 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
       timezoneId: 'America/New_York',
       locale: 'ar-EG',
     });
-    const page = await context.newPage();
-    await signInWithTotp(page, owner);
+    try {
+      const page = await context.newPage();
+      await signInWithTotp(page, owner);
 
-    // Create a temporary party for this test
-    const timeParty = await prisma.party.create({
-      data: {
-        kind: 'PERSON',
-        name: 'طرف فحص توقيت القاهرة الخارجي',
-        nameNormalized: 'طرف فحص توقيت القاهرة الخارجي',
-        primaryPhone: '01055556666',
-        primaryPhoneNormalized: '01055556666',
-        createdById: owner.id,
-        updatedById: owner.id,
-        version: 1,
-      },
-    });
-    createdPartyIds.push(timeParty.id);
+      // Create a temporary party for this test
+      const timeParty = await prisma.party.create({
+        data: {
+          kind: 'PERSON',
+          name: 'طرف فحص توقيت القاهرة الخارجي',
+          nameNormalized: 'طرف فحص توقيت القاهرة الخارجي',
+          primaryPhone: '01055556666',
+          primaryPhoneNormalized: '01055556666',
+          createdById: owner.id,
+          updatedById: owner.id,
+          version: 1,
+        },
+      });
+      createdPartyIds.push(timeParty.id);
 
-    await page.goto(`/parties/${timeParty.id}`);
-    await page.getByTestId('add-note-button').click();
+      await page.goto(`/parties/${timeParty.id}`);
+      await page.getByTestId('add-note-button').click();
 
-    // Specific Cairo wall-clock time: 2026-11-25T14:30
-    // In November 2026, Cairo is UTC+2 (Standard Time).
-    // So 14:30 Cairo wall-clock time must correspond strictly to 12:30:00.000Z in UTC
-    const targetWallTime = '2026-11-25T14:30';
-    await page.getByTestId('note-date-input').fill(targetWallTime);
-    await page.getByTestId('note-channel-select').selectOption('PHONE');
-    await page.getByTestId('note-summary-input').fill('محادثة مسجلة بتوقيت القاهرة من عميل في نيويورك');
-    await page.getByTestId('save-note-button').click();
+      // Specific Cairo wall-clock time: 2026-11-25T14:30
+      // In November 2026, Cairo is UTC+2 (Standard Time).
+      // So 14:30 Cairo wall-clock time must correspond strictly to 12:30:00.000Z in UTC
+      const targetWallTime = '2026-11-25T14:30';
+      await page.getByTestId('note-date-input').fill(targetWallTime);
+      await page.getByTestId('note-channel-select').selectOption('PHONE');
+      await page.getByTestId('note-summary-input').fill('محادثة مسجلة بتوقيت القاهرة من عميل في نيويورك');
+      await page.getByTestId('save-note-button').click();
 
-    // Verify note is rendered in timeline
-    const noteItem = page.getByTestId('communication-note-item').first();
-    await expect(noteItem).toBeVisible();
-    await expect(noteItem.getByTestId('note-cairo-timestamp')).toBeVisible();
+      // Verify note is rendered in timeline
+      const noteItem = page.getByTestId('communication-note-item').first();
+      await expect(noteItem).toBeVisible();
+      await expect(noteItem.getByTestId('note-cairo-timestamp')).toBeVisible();
 
-    // Check exact UTC instant stored in the database
-    const savedNote = await prisma.communicationNote.findFirst({
-      where: { partyId: timeParty.id },
-      orderBy: { createdAt: 'desc' },
-    });
-    expect(savedNote).not.toBeNull();
-    expect(savedNote!.communicationAt.toISOString()).toBe('2026-11-25T12:30:00.000Z');
-
-    await context.close();
+      // Check exact UTC instant stored in the database
+      const savedNote = await prisma.communicationNote.findFirst({
+        where: { partyId: timeParty.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(savedNote).not.toBeNull();
+      expect(savedNote!.communicationAt.toISOString()).toBe('2026-11-25T12:30:00.000Z');
+    } finally {
+      await context.close();
+    }
   });
 });

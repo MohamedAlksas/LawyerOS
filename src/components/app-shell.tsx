@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useRef, useEffect, useLayoutEffect, useTransition, Suspense } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useTransition, useCallback, Suspense } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { clearSearchSessionStore } from '@/lib/search-session-store';
 import type { UserRole } from '@/modules/identity/types';
@@ -23,6 +23,7 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const handleCloseDrawer = useCallback(() => setIsDrawerOpen(false), []);
   const [sessionStatus, setSessionStatus] = useState<'checking' | 'ready' | 'expired' | 'unavailable'>('checking');
   const [viewUser, setViewUser] = useState<{ name?: string; email?: string; role?: UserRole } | null>(null);
   const [refreshingSession, startSessionRefresh] = useTransition();
@@ -138,7 +139,14 @@ export function AppShell({ children }: AppShellProps) {
         if (!response.ok) throw new Error('Session check unavailable');
         const session: ViewSession = await response.json();
         if (request.signal.aborted) return;
-        setViewUser({ name: session.name, email: session.email, role: session.role });
+        setViewUser((prev) =>
+          prev &&
+          prev.name === session.name &&
+          prev.email === session.email &&
+          prev.role === session.role
+            ? prev
+            : { name: session.name, email: session.email, role: session.role }
+        );
         const previous = sessionRef.current;
         sessionRef.current = session;
         if (previous && (previous.actorId !== session.actorId || previous.role !== session.role || previous.sessionId !== session.sessionId)) {
@@ -200,7 +208,7 @@ export function AppShell({ children }: AppShellProps) {
         <Suspense fallback={null}>
           <SessionExpiredAlert />
         </Suspense>
-        <ConnectivityBanner />
+        {!pathname.startsWith('/offline') && <ConnectivityBanner />}
         {children}
       </>
     );
@@ -237,7 +245,7 @@ export function AppShell({ children }: AppShellProps) {
         id="app-shell-content"
         inert={isDrawerOpen ? true : undefined}
         aria-hidden={isDrawerOpen ? true : undefined}
-        className="min-h-screen flex flex-col bg-[#F4F6F7] text-[#172A35] overflow-x-hidden max-w-full"
+        className="min-h-screen flex flex-col bg-[#F4F6F7] text-[#172A35] overflow-x-clip max-w-full"
       >
         {/* 1. Skip to Content Link */}
         <SkipLink />
@@ -272,7 +280,7 @@ export function AppShell({ children }: AppShellProps) {
             dir="rtl"
             tabIndex={-1}
             data-testid="main-content"
-            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-[max(5rem,calc(var(--mobile-nav-height,0px)+1rem))] sm:pb-8 overflow-x-hidden lg:mr-[232px] focus:outline-hidden"
+            className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-[max(5rem,calc(var(--mobile-nav-height,0px)+1rem))] sm:pb-8 overflow-x-clip lg:mr-[232px] focus:outline-hidden"
           >
             {children}
           </main>
@@ -284,6 +292,7 @@ export function AppShell({ children }: AppShellProps) {
         {/* 6. Mobile Bottom Nav Bar */}
         <MobileBottomNav
           navRef={mobileNavRef}
+          isDrawerOpen={isDrawerOpen}
           onOpenDrawer={(opener) => {
             drawerOpenerRef.current = opener;
             setIsDrawerOpen(true);
@@ -294,7 +303,7 @@ export function AppShell({ children }: AppShellProps) {
       {/* 7. Accessible Tablet/Mobile Drawer Modal & Portal Target (outside #app-shell-content, inside auth-locked wrapper) */}
       <TabletDrawer
         isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
+        onClose={handleCloseDrawer}
         triggerRef={drawerOpenerRef}
       />
       <div id="app-shell-modal-root" />

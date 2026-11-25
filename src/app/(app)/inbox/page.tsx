@@ -44,7 +44,7 @@ export default async function InboxPage() {
 
   return (
     <InboxView
-      key={actor.sessionId}
+      key={actor.id}
       initialOverview={initialOverview}
       initialError={initialError}
     />

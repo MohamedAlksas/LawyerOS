@@ -58,7 +58,7 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
   return (
     <div className="max-w-5xl mx-auto">
       <DeadlinesView
-        key={actor.sessionId}
+        key={actor.id}
         actorId={actor.id}
         initialDeadlines={initialDeadlines}
         selectableMatters={selectableMatters}

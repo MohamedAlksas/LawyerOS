@@ -58,14 +58,14 @@ export default defineConfig({
       use: {
         viewport: { width: 768, height: 1024 },
       },
-      grep: /@(?:responsive|a11y|t08)\b/,
+      grep: /@(?:responsive|a11y|tablet)\b/,
     },
     {
       name: 'mobile-390',
       use: {
         viewport: { width: 390, height: 844 },
       },
-      grep: /@(?:responsive|mobile|t08)\b/,
+      grep: /@(?:responsive|a11y|mobile)\b/,
     },
     {
       name: 'cairo-profile',

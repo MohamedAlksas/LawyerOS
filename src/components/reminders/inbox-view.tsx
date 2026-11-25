@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import {
   markReminderReadAction,
@@ -95,29 +95,60 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [savingRuleId, setSavingRuleId] = useState<string | null>(null);
   const [ruleDrafts, setRuleDrafts] = useState<
-    Record<string, { dayOffset: number; reminderTime: string; enabled: boolean }>
+    Record<string, { dayOffset: string; reminderTime: string; enabled: boolean }>
   >(() => {
-    const initial: Record<string, { dayOffset: number; reminderTime: string; enabled: boolean }> = {};
+    const initial: Record<string, { dayOffset: string; reminderTime: string; enabled: boolean }> = {};
     for (const r of initialOverview?.rules ?? []) {
-      initial[r.id] = { dayOffset: r.dayOffset, reminderTime: r.reminderTime, enabled: r.enabled };
+      initial[r.id] = { dayOffset: String(r.dayOffset), reminderTime: r.reminderTime, enabled: r.enabled };
     }
     return initial;
   });
 
+  const overviewRef = useRef<InboxOverviewDTO | null>(initialOverview);
   const retryJobKeysRef = useRef<Map<string, string>>(new Map());
   const ruleKeysRef = useRef<Map<string, string>>(new Map());
   const refreshAbortRef = useRef<AbortController | null>(null);
   const refreshSeqRef = useRef(0);
 
-  const syncRuleDrafts = useCallback((rules: ReminderRuleDTO[]) => {
-    setRuleDrafts(() => {
-      const next: Record<string, { dayOffset: number; reminderTime: string; enabled: boolean }> = {};
-      for (const r of rules) {
-        next[r.id] = { dayOffset: r.dayOffset, reminderTime: r.reminderTime, enabled: r.enabled };
-      }
-      return next;
-    });
-  }, []);
+  const hasUnsavedRuleDrafts = Boolean(
+    overview?.rules.some((rule) => {
+      const draft = ruleDrafts[rule.id];
+      if (!draft) return false;
+      return (
+        draft.dayOffset !== String(rule.dayOffset) ||
+        draft.reminderTime !== rule.reminderTime ||
+        draft.enabled !== rule.enabled
+      );
+    })
+  );
+  useLeaveGuard(hasUnsavedRuleDrafts, Boolean(markingId || retryingJobId || savingRuleId));
+
+  const syncRuleDrafts = useCallback(
+    (nextRules: ReminderRuleDTO[], prevRules: ReminderRuleDTO[] = [], resetRuleId?: string) => {
+      const prevRuleMap = new Map(prevRules.map((r) => [r.id, r]));
+      setRuleDrafts((prev) => {
+        const next: Record<string, { dayOffset: string; reminderTime: string; enabled: boolean }> = {};
+        for (const r of nextRules) {
+          const prevDraft = prev[r.id];
+          const prevRule = prevRuleMap.get(r.id);
+          const isDirty =
+            r.id !== resetRuleId &&
+            Boolean(
+              prevDraft &&
+                prevRule &&
+                (prevDraft.dayOffset !== String(prevRule.dayOffset) ||
+                  prevDraft.reminderTime !== prevRule.reminderTime ||
+                  prevDraft.enabled !== prevRule.enabled)
+            );
+          next[r.id] = isDirty
+            ? prevDraft
+            : { dayOffset: String(r.dayOffset), reminderTime: r.reminderTime, enabled: r.enabled };
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     return () => {
@@ -125,7 +156,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
     };
   }, []);
 
-  const refreshInbox = useCallback(async () => {
+  const refreshInbox = useCallback(async (resetRuleId?: string) => {
     refreshAbortRef.current?.abort();
     const controller = new AbortController();
     refreshAbortRef.current = controller;
@@ -150,8 +181,10 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             : 'تعذر تحديث صندوق التنبيهات من الخادم. تحقق من الاتصال وأعد المحاولة.'
         );
       }
+      const prevRules = overviewRef.current?.rules ?? [];
+      overviewRef.current = body.data;
       setOverview(body.data);
-      syncRuleDrafts(body.data.rules);
+      syncRuleDrafts(body.data.rules, prevRules, resetRuleId);
     } catch (err) {
       if (controller.signal.aborted || seq !== refreshSeqRef.current) return;
       setLoadError(
@@ -168,6 +201,18 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
       }
     }
   }, [syncRuleDrafts]);
+
+  useEffect(() => {
+    const handleInboxUpdated = (event: Event) => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source === 'inbox') return;
+      void refreshInbox();
+    };
+    window.addEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+    return () => {
+      window.removeEventListener('lawoffice:inbox-updated', handleInboxUpdated);
+    };
+  }, [refreshInbox]);
 
   const handleMarkRead = async (item: InboxItemDTO) => {
     if (markingId || item.isRead) return;
@@ -187,6 +232,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         'تم تأشير التنبيه كمقروء في الصندوق (ولم تتغير حالة المهمة أو الموعد القانوني المرتبط).'
       );
       await refreshInbox();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lawoffice:inbox-updated', { detail: { source: 'inbox' } }));
+      }
       router.refresh();
     } catch {
       setActionError('تعذر الاتصال بالخادم لتأشير التنبيه. يمكنك إعادة المحاولة.');
@@ -222,6 +270,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
       retryJobKeysRef.current.delete(opKey);
       setActionNotice('تمت إعادة جدولة مهمة التذكير للتنفيذ عند الفحص التالي للعامل.');
       await refreshInbox();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lawoffice:inbox-updated', { detail: { source: 'inbox' } }));
+      }
       router.refresh();
     } catch {
       setActionError('تعذر الاتصال بالخادم لإعادة تشغيل مهمة التذكير. يمكنك إعادة المحاولة.');
@@ -238,7 +289,18 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
     setActionError(null);
     setActionNotice(null);
 
-    const opKey = `rule:${rule.id}:${rule.version}:${draft.dayOffset}:${draft.reminderTime}:${draft.enabled}`;
+    const trimmedOffset = draft.dayOffset.trim();
+    if (!/^\d+$/.test(trimmedOffset)) {
+      setActionError('عدد الأيام يجب أن يكون رقماً صحيحاً بين 0 و 365.');
+      return;
+    }
+    const parsedDayOffset = Number.parseInt(trimmedOffset, 10);
+    if (parsedDayOffset < 0 || parsedDayOffset > 365) {
+      setActionError('عدد الأيام يجب أن يكون رقماً صحيحاً بين 0 و 365.');
+      return;
+    }
+
+    const opKey = `rule:${rule.id}:${rule.version}:${parsedDayOffset}:${draft.reminderTime}:${draft.enabled}`;
     const idempotencyKey =
       ruleKeysRef.current.get(opKey) ?? generateClientRequestId('inbox-rule');
     ruleKeysRef.current.set(opKey, idempotencyKey);
@@ -248,7 +310,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
       const res = await updateReminderRuleAction({
         ruleId: rule.id,
         expectedVersion: rule.version,
-        dayOffset: Number(draft.dayOffset),
+        dayOffset: parsedDayOffset,
         reminderTime: draft.reminderTime,
         enabled: draft.enabled,
         idempotencyKey,
@@ -262,8 +324,30 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
       }
 
       ruleKeysRef.current.delete(opKey);
+      const savedRule = res.data;
+      const nextOverview = overviewRef.current
+        ? {
+            ...overviewRef.current,
+            rules: overviewRef.current.rules.map((r) => (r.id === savedRule.id ? savedRule : r)),
+          }
+        : null;
+      if (nextOverview) {
+        overviewRef.current = nextOverview;
+        setOverview(nextOverview);
+      }
+      setRuleDrafts((prev) => ({
+        ...prev,
+        [savedRule.id]: {
+          dayOffset: String(savedRule.dayOffset),
+          reminderTime: savedRule.reminderTime,
+          enabled: savedRule.enabled,
+        },
+      }));
       setActionNotice('تم تحديث سياسة التذكير بنجاح.');
-      await refreshInbox();
+      await refreshInbox(rule.id);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('lawoffice:inbox-updated', { detail: { source: 'inbox' } }));
+      }
       router.refresh();
     } catch {
       setActionError('تعذر الاتصال بالخادم لحفظ سياسة التذكير.');
@@ -288,7 +372,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         <ErrorContainer
           title="تعذر تحميل صندوق التنبيهات"
           message={loadError || 'حدث خطأ أثناء الاتصال بالخادم.'}
-          onRetry={refreshInbox}
+          onRetry={() => void refreshInbox()}
           isRetrying={isRefreshing}
         />
       </div>
@@ -339,11 +423,11 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-refresh-button"
-              onClick={refreshInbox}
+              onClick={() => void refreshInbox()}
               disabled={isRefreshing}
               className="min-h-[44px] min-w-[44px] px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white rounded-[6px] text-sm font-semibold inline-flex items-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
             >
-              <IconRefresh className={`w-4 h-4 shrink-0 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <IconRefresh className={`w-4 h-4 shrink-0 ${isRefreshing ? 'animate-spin motion-reduce:animate-none' : ''}`} />
               <span>{isRefreshing ? 'جارٍ التحديث...' : 'تحديث الصندوق'}</span>
             </button>
             <Link
@@ -369,7 +453,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-error-retry-button"
-              onClick={refreshInbox}
+              onClick={() => void refreshInbox()}
               disabled={isRefreshing}
               className="min-h-[44px] px-4 py-2 bg-[#A4262C] hover:bg-[#861F24] text-white text-xs font-bold rounded-[6px] shrink-0 transition-colors"
             >
@@ -525,7 +609,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                   <button
                     type="button"
                     data-testid={`retry-failed-job-${job.id}`}
-                    disabled={retryingJobId === job.id}
+                    disabled={Boolean(retryingJobId)}
                     onClick={() => handleRetryFailedJob(job)}
                     className="min-h-[44px] px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded-[6px] inline-flex items-center gap-1.5 transition-colors"
                   >
@@ -572,6 +656,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-all"
+              aria-pressed={filter === 'all'}
               onClick={() => setFilter('all')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'all'
@@ -584,6 +669,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-unread"
+              aria-pressed={filter === 'unread'}
               onClick={() => setFilter('unread')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'unread'
@@ -596,6 +682,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             <button
               type="button"
               data-testid="inbox-filter-overdue"
+              aria-pressed={filter === 'overdue'}
               onClick={() => setFilter('overdue')}
               className={`min-h-[44px] px-3 py-1.5 rounded-[6px] text-xs font-bold border transition-colors ${
                 filter === 'overdue'
@@ -688,7 +775,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                       </span>
                     )}
                     <span>
-                      وقت التسليم (SENT):{' '}
+                      {item.deliveredAt ? 'وقت التسليم بالصندوق:' : 'الموعد المجدول للتنبيه:'}{' '}
                       <strong className="text-[#172A35]">
                         {formatCairoInstantArabic(item.deliveredAt ?? item.scheduledAt)}
                       </strong>
@@ -709,7 +796,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <button
                       type="button"
                       data-testid={`mark-reminder-read-${item.id}`}
-                      disabled={markingId === item.id}
+                      disabled={Boolean(markingId)}
                       onClick={() => handleMarkRead(item)}
                       className="min-h-[44px] px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded-[6px] inline-flex items-center gap-1.5 transition-colors"
                     >
@@ -756,7 +843,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         <div className="divide-y divide-[#E5ECEE]">
           {overview.rules.map((rule) => {
             const draft = ruleDrafts[rule.id] ?? {
-              dayOffset: rule.dayOffset,
+              dayOffset: String(rule.dayOffset),
               reminderTime: rule.reminderTime,
               enabled: rule.enabled,
             };
@@ -771,7 +858,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     {RULE_EVENT_LABELS[rule.eventType]}
                   </div>
                   <div className="text-xs text-[#4D606A]">
-                    القناة: إشعار داخل التطبيق (IN_APP) • الإصدار {rule.version}
+                    القناة: إشعار داخل التطبيق • الإصدار {rule.version}
                   </div>
                 </div>
 
@@ -780,6 +867,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <span>قبل الموعد بـ</span>
                     <input
                       type="number"
+                      dir="ltr"
                       min={0}
                       max={365}
                       value={draft.dayOffset}
@@ -787,12 +875,12 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
-                            dayOffset: Number(e.target.value),
+                            ...(prev[rule.id] ?? draft),
+                            dayOffset: e.target.value,
                           },
                         }))
                       }
-                      className="w-20 min-h-[40px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
+                      className="w-20 min-h-[44px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
                       aria-label={`عدد الأيام قبل الموعد (${RULE_EVENT_LABELS[rule.eventType]})`}
                     />
                     <span>يوم</span>
@@ -802,22 +890,23 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                     <span>الساعة</span>
                     <input
                       type="time"
+                      dir="ltr"
                       value={draft.reminderTime}
                       onChange={(e) =>
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
+                            ...(prev[rule.id] ?? draft),
                             reminderTime: e.target.value,
                           },
                         }))
                       }
-                      className="min-h-[40px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
+                      className="min-h-[44px] px-2 py-1 border border-[#D5DFE3] rounded-[4px] text-sm text-[#172A35] bg-white"
                       aria-label={`ساعة التذكير (${RULE_EVENT_LABELS[rule.eventType]})`}
                     />
                   </label>
 
-                  <label className="inline-flex items-center gap-2 min-h-[40px] text-xs font-semibold text-[#172A35] cursor-pointer">
+                  <label className="inline-flex items-center gap-2 min-h-[44px] px-1 text-xs font-semibold text-[#172A35] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={draft.enabled}
@@ -825,7 +914,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                         setRuleDrafts((prev) => ({
                           ...prev,
                           [rule.id]: {
-                            ...draft,
+                            ...(prev[rule.id] ?? draft),
                             enabled: e.target.checked,
                           },
                         }))
@@ -838,7 +927,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
                   <button
                     type="button"
                     data-testid={`save-rule-${rule.id}`}
-                    disabled={savingRuleId === rule.id}
+                    disabled={Boolean(savingRuleId)}
                     onClick={() => handleSaveRule(rule)}
                     className="min-h-[44px] px-3.5 py-2 bg-white hover:bg-[#E9F2F5] text-[#14566B] border border-[#14566B] rounded-[6px] text-xs font-bold transition-colors disabled:opacity-50"
                   >

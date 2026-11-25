@@ -803,7 +803,7 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
 
   it('C08b: cold concurrent reads directly from zero rows resolve cleanly without P2002 errors', async () => {
     const actor = createSyntheticActor();
-    const dedicated = await createDedicatedTestDatabase('c08_cold_reads_test');
+    const dedicated = await createDedicatedTestDatabase();
     try {
       const prismaJs = path.resolve(process.cwd(), 'node_modules/prisma/build/index.js');
       const migRes = spawnSync(process.execPath, [prismaJs, 'migrate', 'deploy'], {

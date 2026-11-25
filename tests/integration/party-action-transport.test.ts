@@ -262,7 +262,9 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
         client.release();
       }
     } finally {
-      process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      if (originalTestDatabaseUrl === undefined) delete process.env.TEST_DATABASE_URL;
+      else process.env.TEST_DATABASE_URL = originalTestDatabaseUrl;
+      getEnv(true);
       await clearGlobalSingletons();
     }
 
@@ -280,10 +282,14 @@ describe('T05-R3-04: Real Server Action HTTP Transport Authorization & Wire Veri
           },
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+        const stdoutChunks: Buffer[] = [];
+        const stderrChunks: Buffer[] = [];
+        build.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+        build.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
         build.on('error', reject);
         build.on('close', (code) => {
           if (code === 0) resolve();
-          else reject(new Error(`Fallback next build failed with exit code ${code}`));
+          else reject(new Error(`Fallback next build failed with exit code ${code}\nSTDOUT: ${Buffer.concat(stdoutChunks).toString()}\nSTDERR: ${Buffer.concat(stderrChunks).toString()}`));
         });
       });
     }

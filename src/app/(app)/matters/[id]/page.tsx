@@ -7,7 +7,7 @@ import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
 import { MatterDetailClient } from '@/components/matters/matter-detail-client';
 import { EmptyStateContainer } from '@/components/presentation-state';
-import { listTasks } from '@/modules/productivity';
+import { listTasks, ProductivityValidationError } from '@/modules/productivity';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
 import { listDeadlines } from '@/modules/scheduling';
 import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
@@ -66,19 +66,34 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     throw error;
   }
 
-  const [initialTasks, initialDeadlines] = await Promise.all([
-    listTasks(actor, { matterId: id, includeCompleted: true }).catch(() => [] as TaskItemDTO[]),
-    listDeadlines(actor, { matterId: id, includeClosed: true }).catch(() => [] as DeadlineDTO[]),
+  const [tasksResult, deadlinesResult] = await Promise.allSettled([
+    listTasks(actor, { matterId: id, includeCompleted: true }),
+    listDeadlines(actor, { matterId: id, includeClosed: true }),
   ]);
+
+  const initialTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : ([] as TaskItemDTO[]);
+  const initialDeadlines = deadlinesResult.status === 'fulfilled' ? deadlinesResult.value : ([] as DeadlineDTO[]);
+  const tasksError =
+    tasksResult.status === 'rejected'
+      ? tasksResult.reason instanceof ProductivityValidationError
+        ? tasksResult.reason.message
+        : 'تعذر تحميل قائمة المهام من الخادم.'
+      : undefined;
+  const deadlinesError =
+    deadlinesResult.status === 'rejected'
+      ? 'تعذر تحميل المواعيد القانونية من الخادم.'
+      : undefined;
 
   return (
     <div className="py-2">
       <MatterDetailClient
-        key={actor.id}
+        key={`${actor.id}:${matter.id}`}
         ownerId={actor.id}
         initialMatter={matter}
         initialTasks={initialTasks}
         initialDeadlines={initialDeadlines}
+        tasksError={tasksError}
+        deadlinesError={deadlinesError}
       />
     </div>
   );

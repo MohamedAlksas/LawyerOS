@@ -29,6 +29,8 @@ const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${PORT}`;
 
 const env = validateTestEnvironment();
+// Worker-side Prisma fixtures must use the same isolated database as the server.
+Object.assign(process.env, { NODE_ENV: 'test' });
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -89,6 +91,10 @@ export default defineConfig({
       TEST_DATABASE_URL: env.TEST_DATABASE_URL!,
       BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
       BETTER_AUTH_URL: BASE_URL,
+      PARTY_IDENTITY_ENCRYPTION_KEY:
+        process.env.PARTY_IDENTITY_ENCRYPTION_KEY ||
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      PARTY_IDENTITY_KEY_ID: process.env.PARTY_IDENTITY_KEY_ID || 'k2026_01',
     },
   },
 });

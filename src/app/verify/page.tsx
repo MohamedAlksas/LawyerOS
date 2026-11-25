@@ -6,6 +6,20 @@ import { twoFactor } from '@/lib/auth-client';
 import { parseAndValidateOtp } from '@/modules/identity/otp-input';
 import { sanitizeReturnTo } from '@/lib/sanitize-return-to';
 
+function formatVerifyError(error: { status?: number; code?: string }, fallback: string): string {
+  if (
+    error.status === 429 ||
+    error.code === 'TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE' ||
+    error.code === 'ACCOUNT_TEMPORARILY_LOCKED'
+  ) {
+    return 'تم تجاوز الحد المسموح به من المحاولات. برجاء الانتظار قليلاً والمحاولة لاحقاً.';
+  }
+  if (error.code === 'INVALID_TWO_FACTOR_COOKIE' || (error.status === 401 && !error.code)) {
+    return 'انتهت صلاحية جلسة التحقق الثنائي. برجاء العودة لتسجيل الدخول مجدداً.';
+  }
+  return fallback;
+}
+
 function VerifyForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,7 +49,7 @@ function VerifyForm() {
         });
 
         if (res.error) {
-          setError('رمز التحقق غير صحيح أو انتهت صلاحيته.');
+          setError(formatVerifyError(res.error, 'رمز التحقق غير صحيح أو انتهت صلاحيته.'));
           setIsLoading(false);
           return;
         }
@@ -59,7 +73,7 @@ function VerifyForm() {
         });
 
         if (res.error) {
-          setError('رمز الاسترداد غير صحيح أو تم استخدامه مسبقاً.');
+          setError(formatVerifyError(res.error, 'رمز الاسترداد غير صحيح أو تم استخدامه مسبقاً.'));
           setIsLoading(false);
           return;
         }

@@ -36,24 +36,32 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
 
   for (const [key, value] of Object.entries(payload)) {
     const lowerKey = key.toLowerCase();
+    const normalizedKey = lowerKey.replace(/[_-]/g, '');
 
-    // Redact secret keys, passwords, tokens
+    // Redact secret keys, passwords, tokens, MFA secrets, auth headers, and sensitive identity keys
     if (
-      lowerKey.includes('secret') ||
-      lowerKey.includes('password') ||
-      lowerKey.includes('token') ||
-      lowerKey.includes('encryptionkey') ||
-      lowerKey.includes('ciphertext') ||
-      lowerKey.includes('authtag') ||
-      lowerKey === 'iv' ||
-      lowerKey === 'initializationvector'
+      normalizedKey.includes('secret') ||
+      normalizedKey.includes('password') ||
+      normalizedKey.includes('token') ||
+      normalizedKey.includes('encryptionkey') ||
+      normalizedKey.includes('ciphertext') ||
+      normalizedKey.includes('authtag') ||
+      normalizedKey.includes('backupcode') ||
+      normalizedKey.includes('recoverycode') ||
+      normalizedKey.includes('totp') ||
+      normalizedKey.includes('cookie') ||
+      normalizedKey.includes('authorization') ||
+      normalizedKey.includes('nationalid') ||
+      normalizedKey.includes('passport') ||
+      normalizedKey === 'iv' ||
+      normalizedKey === 'initializationvector'
     ) {
       sanitized[key] = '[REDACTED_SECRET]';
       continue;
     }
 
     // Keep only the identity document type in audit history.
-    if (lowerKey === 'identity' && typeof value === 'object' && value !== null) {
+    if (normalizedKey === 'identity' && typeof value === 'object' && value !== null && !Array.isArray(value)) {
       const idObj = value as Record<string, unknown>;
       sanitized[key] = {
         identificationType: idObj.identificationType,
@@ -61,7 +69,7 @@ export function sanitizeAuditPayload(payload?: Record<string, unknown> | null): 
       continue;
     }
 
-    if (lowerKey === 'number' && typeof value === 'string' && value.length > 4) {
+    if (normalizedKey === 'number' && typeof value === 'string' && value.length > 4) {
       sanitized[key] = `****${value.slice(-4)}`;
       continue;
     }

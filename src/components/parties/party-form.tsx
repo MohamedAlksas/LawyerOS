@@ -62,10 +62,14 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
 
   const savingRef = useRef(false);
   const savedRef = useRef(false);
+  const identityNumberError = fieldErrors.identityNumber ?? fieldErrors['identity.number'];
+  const additionalPhonesError =
+    fieldErrors.additionalPhones ??
+    Object.entries(fieldErrors).find(([key]) => key.startsWith('additionalPhones.'))?.[1];
   const dirty = name !== (party?.name ?? '') || kind !== (party?.kind ?? 'PERSON') ||
     primaryPhone !== (party?.primaryPhone ?? '') || additionalPhones !== (party?.additionalPhones?.join(', ') ?? '') ||
     email !== (party?.email ?? '') || address !== (party?.address ?? '') || notes !== (party?.notes ?? '') || hasIdentity;
-  useLeaveGuard(dirty && duplicateWarnings.length === 0, isSubmitting || Boolean(pending));
+  useLeaveGuard((dirty && duplicateWarnings.length === 0) || Boolean(pending), isSubmitting);
   useLayoutEffect(() => {
     if (!draft.isCurrent()) return;
     if (savedRef.current || !dirty) editable.clear();
@@ -340,13 +344,13 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
       )}
 
       {/* 3. General / Validation Error Summary */}
-      {generalError && (
+      {(generalError || Object.keys(fieldErrors).length > 0) && (
         <div
           role="alert"
           data-testid="form-error-summary"
           className="p-3 bg-red-50 border border-red-200 rounded-[6px] text-xs text-[#A4262C] space-y-2"
         >
-          <div className="font-bold">{generalError}</div>
+          <div className="font-bold">{generalError || 'يرجى مراجعة الأخطاء الموضحة أدناه.'}</div>
           {sessionExpired && (
             <div>
               <a
@@ -511,11 +515,35 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
               data-testid="party-phones-input"
               type="text"
               value={additionalPhones}
-              onChange={(e) => setAdditionalPhones(e.target.value)}
+              onChange={(e) => {
+                setAdditionalPhones(e.target.value);
+                setFieldErrors((prev) => {
+                  const hasAdditionalPhoneError = Object.keys(prev).some(
+                    (key) => key === 'additionalPhones' || key.startsWith('additionalPhones.')
+                  );
+                  if (!hasAdditionalPhoneError) return prev;
+                  const n = { ...prev };
+                  for (const key of Object.keys(n)) {
+                    if (key === 'additionalPhones' || key.startsWith('additionalPhones.')) {
+                      delete n[key];
+                    }
+                  }
+                  return n;
+                });
+              }}
               dir="ltr"
               placeholder="0123456789, 0233445566"
-              className="w-full px-3.5 py-2.5 rounded-[6px] border border-[#A7B9C1] text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right"
+              aria-invalid={Boolean(additionalPhonesError)}
+              aria-describedby={additionalPhonesError ? 'additionalPhones-error' : undefined}
+              className={`w-full px-3.5 py-2.5 rounded-[6px] border text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right ${
+                additionalPhonesError ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+              }`}
             />
+            {additionalPhonesError && (
+              <p id="additionalPhones-error" className="text-xs text-[#A4262C] mt-1 font-medium">
+                {additionalPhonesError}
+              </p>
+            )}
           </div>
         </div>
 
@@ -564,10 +592,28 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
               data-testid="party-address-input"
               type="text"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                setAddress(e.target.value);
+                if (fieldErrors.address) {
+                  setFieldErrors((prev) => {
+                    const n = { ...prev };
+                    delete n.address;
+                    return n;
+                  });
+                }
+              }}
+              aria-invalid={Boolean(fieldErrors.address)}
+              aria-describedby={fieldErrors.address ? 'address-error' : undefined}
               placeholder="مثال: 15 شارع قصر النيل، القاهرة"
-              className="w-full px-3.5 py-2.5 rounded-[6px] border border-[#A7B9C1] text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              className={`w-full px-3.5 py-2.5 rounded-[6px] border text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] ${
+                fieldErrors.address ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+              }`}
             />
+            {fieldErrors.address && (
+              <p id="address-error" className="text-xs text-[#A4262C] mt-1 font-medium">
+                {fieldErrors.address}
+              </p>
+            )}
           </div>
         </div>
 
@@ -587,7 +633,28 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
               <button
                 type="button"
                 data-testid="toggle-identity-fields"
-                onClick={() => setHasIdentity((prev) => !prev)}
+                onClick={() => {
+                  const next = !hasIdentity;
+                  setHasIdentity(next);
+                  if (!next) {
+                    setFieldErrors((prev) => {
+                      if (
+                        !prev.identityNumber &&
+                        !prev['identity.number'] &&
+                        !prev.identity &&
+                        !prev['identity.identificationType']
+                      ) {
+                        return prev;
+                      }
+                      const n = { ...prev };
+                      delete n.identityNumber;
+                      delete n['identity.number'];
+                      delete n.identity;
+                      delete n['identity.identificationType'];
+                      return n;
+                    });
+                  }
+                }}
                 className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] px-2 flex items-center"
               >
                 {hasIdentity ? 'إلغاء تسجيل الهوية' : '＋ إضافة وثيقة هوية'}
@@ -632,11 +699,30 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
                     data-testid="identity-number-input"
                     type="text"
                     value={identityNumber}
-                    onChange={(e) => setIdentityNumber(e.target.value)}
+                    onChange={(e) => {
+                      setIdentityNumber(e.target.value);
+                      if (fieldErrors.identityNumber || fieldErrors['identity.number']) {
+                        setFieldErrors((prev) => {
+                          const n = { ...prev };
+                          delete n.identityNumber;
+                          delete n['identity.number'];
+                          return n;
+                        });
+                      }
+                    }}
                     dir="ltr"
                     placeholder="29001011234567"
-                    className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono"
+                    aria-invalid={Boolean(identityNumberError)}
+                    aria-describedby={identityNumberError ? 'identityNumber-error' : undefined}
+                    className={`w-full px-3 py-2 rounded-[6px] border text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px] text-right font-mono ${
+                      identityNumberError ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+                    }`}
                   />
+                  {identityNumberError && (
+                    <p id="identityNumber-error" className="text-xs text-[#A4262C] mt-1 font-medium">
+                      {identityNumberError}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -653,10 +739,28 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
             data-testid="party-notes-input"
             rows={3}
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              if (fieldErrors.notes) {
+                setFieldErrors((prev) => {
+                  const n = { ...prev };
+                  delete n.notes;
+                  return n;
+                });
+              }
+            }}
+            aria-invalid={Boolean(fieldErrors.notes)}
+            aria-describedby={fieldErrors.notes ? 'notes-error' : undefined}
             placeholder="أية ملاحظات إضافية تخص الطرف أو صفته أو التوجيهات الخاصة به..."
-            className="w-full px-3.5 py-2.5 rounded-[6px] border border-[#A7B9C1] text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+            className={`w-full px-3.5 py-2.5 rounded-[6px] border text-sm text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+              fieldErrors.notes ? 'border-red-500 bg-red-50/20' : 'border-[#A7B9C1]'
+            }`}
           />
+          {fieldErrors.notes && (
+            <p id="notes-error" className="text-xs text-[#A4262C] mt-1 font-medium">
+              {fieldErrors.notes}
+            </p>
+          )}
         </div>
       </fieldset>
 
@@ -682,7 +786,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
         >
           {isSubmitting ? (
             <>
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin motion-reduce:animate-none" />
               <span>جارٍ الحفظ...</span>
             </>
           ) : (

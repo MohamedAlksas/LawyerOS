@@ -42,7 +42,7 @@ export function CancelHearingModal({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [isFrozenRetry, setIsFrozenRetry] = useState(Boolean(draft.restored));
   const [sessionExpired, setSessionExpired] = useState(false);
-  useLeaveGuard(isOpen && Boolean(reason.trim()), isSubmitting || isFrozenRetry);
+  useLeaveGuard((isOpen && Boolean(reason.trim())) || isFrozenRetry, isSubmitting);
 
   useHearingModalEffects({
     isOpen,
@@ -217,13 +217,17 @@ export function CancelHearingModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={isSubmitting || isFrozenRetry}
+              aria-invalid={Boolean(fieldErrors.reason)}
+              aria-describedby={fieldErrors.reason ? 'cancel-hearing-reason-error' : undefined}
               data-testid="cancel-hearing-reason-input"
-              className={`w-full p-2.5 bg-white border rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-red-500 ${
+              className={`w-full p-2.5 bg-white border rounded-[6px] text-base sm:text-sm text-[#172A35] focus:outline-none focus:ring-2 focus:ring-red-500 ${
                 fieldErrors.reason ? 'border-red-500' : 'border-[#D5DFE3]'
               }`}
             />
             {fieldErrors.reason && (
-              <p className="text-red-600 text-[11px] font-semibold">{fieldErrors.reason}</p>
+              <p id="cancel-hearing-reason-error" role="alert" className="text-red-600 text-[11px] font-semibold">
+                {fieldErrors.reason}
+              </p>
             )}
           </div>
 
