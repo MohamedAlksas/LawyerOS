@@ -649,5 +649,25 @@ describe('Environment validation (src/lib/env.ts)', () => {
       });
       expect(buildEnv.BETTER_AUTH_URL).toBe('http://127.0.0.1:3000');
     });
+
+    it('rejects omitted BETTER_AUTH_URL for explicit custom source without NEXT_PHASE even when ambient NEXT_PHASE is phase-production-build', () => {
+      const originalAmbientNextPhase = process.env.NEXT_PHASE;
+      try {
+        process.env.NEXT_PHASE = 'phase-production-build';
+
+        expect(() => validateEnv({ ...baseProdEnv })).toThrow(EnvironmentValidationError);
+        try {
+          validateEnv({ ...baseProdEnv });
+        } catch (err) {
+          expect((err as EnvironmentValidationError).missingKeys).toContain('BETTER_AUTH_URL');
+        }
+      } finally {
+        if (originalAmbientNextPhase === undefined) {
+          delete process.env.NEXT_PHASE;
+        } else {
+          process.env.NEXT_PHASE = originalAmbientNextPhase;
+        }
+      }
+    });
   });
 });

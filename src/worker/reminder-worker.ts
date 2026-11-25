@@ -667,9 +667,40 @@ export async function processClaimedReminderJob(
       const nextDedupKey = `reminder_${lockedJob.source_type}_${lockedJob.source_id}_v${lockedJob.source_version}_r${rule.dayOffset}`;
       const existingNextJob = await tx.jobRun.findUnique({
         where: { deduplicationKey: nextDedupKey },
-        select: { id: true },
+        select: { id: true, status: true },
       });
+
+      let targetDedupKey: string | null = null;
       if (!existingNextJob) {
+        targetDedupKey = nextDedupKey;
+      } else if (existingNextJob.status === 'CANCELLED') {
+        const activeSibling = await tx.jobRun.findFirst({
+          where: {
+            jobType: 'REMINDER_DELIVERY',
+            sourceType: lockedJob.source_type,
+            sourceId: lockedJob.source_id,
+            sourceVersion: lockedJob.source_version,
+            status: { in: ['PENDING', 'RUNNING'] },
+            OR: [
+              { deduplicationKey: { startsWith: `${nextDedupKey}_resched_` } },
+              { deduplicationKey: { startsWith: `${nextDedupKey}_chain_` } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!activeSibling) {
+          const fallbackChainKey = `${nextDedupKey}_chain_${lockedJob.id}`;
+          const existingFallback = await tx.jobRun.findUnique({
+            where: { deduplicationKey: fallbackChainKey },
+            select: { id: true },
+          });
+          if (!existingFallback) {
+            targetDedupKey = fallbackChainKey;
+          }
+        }
+      }
+
+      if (targetDedupKey) {
         await tx.jobRun.create({
           data: {
             jobType: 'REMINDER_DELIVERY',
@@ -681,7 +712,7 @@ export async function processClaimedReminderJob(
             availableAt: instant,
             maxAttempts: lockedJob.max_attempts,
             status: 'PENDING',
-            deduplicationKey: nextDedupKey,
+            deduplicationKey: targetDedupKey,
             payload: (lockedJob.payload ?? {}) as Prisma.InputJsonValue,
           },
         });

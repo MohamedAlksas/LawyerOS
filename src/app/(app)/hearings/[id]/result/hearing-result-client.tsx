@@ -122,7 +122,7 @@ export function HearingResultClient({
     Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
   useLeaveGuard(
     resultDirty || (isCorrecting && !correctionFrozen),
-    isSubmitting || correctionSubmitting || isFrozenRetry || correctionFrozen
+    isSubmitting || correctionSubmitting
   );
 
   const handleAddTask = () => {

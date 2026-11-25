@@ -650,7 +650,7 @@ export async function listReminderRules(actor: Actor): Promise<ReminderRuleDTO[]
   return rules.map(mapRuleToDTO);
 }
 
-const CHAINED_REMINDER_KEY_RE = /^reminder_.+_v\d+_r\d+$/;
+const CHAINED_REMINDER_KEY_RE = /^reminder_.+_v\d+_r\d+(?:_(?:resched|chain)_.+)?$/;
 
 function asJobPayload(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -796,6 +796,7 @@ async function reschedulePendingReminderJobs(
         where: {
           sourceType,
           sourceId: { in: sourceIds },
+          channel: 'IN_APP',
         },
         select: {
           sourceId: true,
@@ -864,8 +865,8 @@ async function reschedulePendingReminderJobs(
           select: { id: true, status: true },
         });
         if (!collision) {
-          await tx.jobRun.update({
-            where: { id: job.id },
+          await tx.jobRun.updateMany({
+            where: { id: job.id, status: 'PENDING' },
             data: {
               deduplicationKey: nextChainedKey,
               scheduledAt: nextInstant,
@@ -874,31 +875,51 @@ async function reschedulePendingReminderJobs(
             },
           });
         } else if (collision.status === 'PENDING') {
-          await tx.jobRun.update({
-            where: { id: collision.id },
+          const updatedCollision = await tx.jobRun.updateMany({
+            where: { id: collision.id, status: 'PENDING' },
             data: {
               scheduledAt: nextInstant,
               availableAt: nextInstant,
             },
           });
-          await tx.jobRun.update({
-            where: { id: job.id },
-            data: {
-              status: 'CANCELLED',
-              completedAt: now,
-              leaseUntil: null,
-              lockedBy: null,
-            },
-          });
+          if (updatedCollision.count === 1) {
+            await tx.jobRun.updateMany({
+              where: { id: job.id, status: 'PENDING' },
+              data: {
+                status: 'CANCELLED',
+                completedAt: now,
+                leaseUntil: null,
+                lockedBy: null,
+              },
+            });
+          }
         } else {
-          await tx.jobRun.update({
-            where: { id: job.id },
-            data: {
-              scheduledAt: nextInstant,
-              availableAt: nextInstant,
-              ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
-            },
-          });
+          // Never leave a pulled-forward job holding a future rule's canonical deduplicationKey,
+          // otherwise ReminderWorker will later see this job as SUCCEEDED on that key and skip the future rule.
+          const fallbackKey = `${nextChainedKey}_resched_${job.id}`;
+          if (fallbackKey !== job.deduplicationKey) {
+            await tx.jobRun.updateMany({
+              where: { id: job.id, status: 'PENDING' },
+              data: {
+                deduplicationKey: fallbackKey,
+                scheduledAt: nextInstant,
+                availableAt: nextInstant,
+                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
+              },
+            });
+          } else if (
+            job.scheduledAt.getTime() !== nextInstant.getTime() ||
+            job.availableAt.getTime() !== nextInstant.getTime()
+          ) {
+            await tx.jobRun.updateMany({
+              where: { id: job.id, status: 'PENDING' },
+              data: {
+                scheduledAt: nextInstant,
+                availableAt: nextInstant,
+                ...(job.attemptCount === 0 ? { nextAttemptAt: null } : {}),
+              },
+            });
+          }
         }
         continue;
       }
@@ -907,8 +928,8 @@ async function reschedulePendingReminderJobs(
         job.scheduledAt.getTime() !== nextInstant.getTime() ||
         job.availableAt.getTime() !== nextInstant.getTime()
       ) {
-        await tx.jobRun.update({
-          where: { id: job.id },
+        await tx.jobRun.updateMany({
+          where: { id: job.id, status: 'PENDING' },
           data: {
             scheduledAt: nextInstant,
             availableAt: nextInstant,

@@ -19,8 +19,12 @@ export function documentHttpErrorResponse(error: unknown) {
   });
 }
 
+function isCrossSiteRequest(request: Request): boolean {
+  return request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site';
+}
+
 export function verifyDocumentReadOrigin(request: Request): NextResponse | null {
-  if (request.headers.get('sec-fetch-site') === 'cross-site') {
+  if (isCrossSiteRequest(request)) {
     return NextResponse.json(
       { success: false, code: 'FORBIDDEN', error: 'غير مصرح بالوصول من مصدر خارجي.' },
       { status: 403, headers: DOCUMENT_NO_STORE_HEADERS }
@@ -34,7 +38,7 @@ export function verifyDocumentMutationOrigin(request: Request): NextResponse | n
   if (
     !origin ||
     !getTrustedOrigins().has(origin) ||
-    request.headers.get('sec-fetch-site') === 'cross-site'
+    isCrossSiteRequest(request)
   ) {
     return NextResponse.json(
       { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },

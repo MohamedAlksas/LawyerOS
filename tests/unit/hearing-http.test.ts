@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  isCrossSiteRequest,
+  readSchedulingFromRequest,
+} from '@/modules/scheduling/deadline-http';
 import { writeHearingFromRequest } from '@/modules/scheduling/hearing-http';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 
@@ -52,5 +56,57 @@ describe('hearing write HTTP boundary', () => {
     const body = await failed.json();
     expect(body.code).toBe('INTERNAL_ERROR');
     expect(body.error).not.toContain('private schema detail');
+  });
+
+  it('handles sec-fetch-site case-insensitively with whitespace in isCrossSiteRequest and HTTP boundaries', async () => {
+    expect(
+      isCrossSiteRequest(
+        new Request('https://lawoffice.test/api/deadlines', {
+          headers: { 'sec-fetch-site': ' Cross-Site ' },
+        })
+      )
+    ).toBe(true);
+    expect(
+      isCrossSiteRequest(
+        new Request('https://lawoffice.test/api/deadlines', {
+          headers: { 'sec-fetch-site': 'CROSS-SITE' },
+        })
+      )
+    ).toBe(true);
+    expect(
+      isCrossSiteRequest(
+        new Request('https://lawoffice.test/api/deadlines', {
+          headers: { 'sec-fetch-site': ' same-origin ' },
+        })
+      )
+    ).toBe(false);
+    expect(isCrossSiteRequest(new Request('https://lawoffice.test/api/deadlines'))).toBe(false);
+
+    const writeRes = await writeHearingFromRequest(
+      new Request('https://lawoffice.test/api/scheduling/hearings/hearing-fixture/result', {
+        method: 'POST',
+        headers: {
+          origin: 'https://lawoffice.test',
+          'sec-fetch-site': ' Cross-Site ',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'قرار تجريبي' }),
+      }),
+      id,
+      command
+    );
+    expect(writeRes.status).toBe(403);
+
+    const query = vi.fn();
+    const readRes = await readSchedulingFromRequest(
+      new Request('https://lawoffice.test/api/deadlines', {
+        headers: { 'sec-fetch-site': ' Cross-Site ' },
+      }),
+      query
+    );
+    expect(readRes.status).toBe(403);
+    expect(requireActor).not.toHaveBeenCalled();
+    expect(command).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
   });
 });

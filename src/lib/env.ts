@@ -290,7 +290,12 @@ export function validateEnv(
   const effectiveSource = { ...source };
   const nodeEnv = effectiveSource.NODE_ENV || 'development';
   const isTest = nodeEnv === 'test';
-  const nextPhase = effectiveSource.NEXT_PHASE ?? process.env.NEXT_PHASE;
+  const nextPhase =
+    'NEXT_PHASE' in source
+      ? source.NEXT_PHASE
+      : source === process.env
+        ? process.env.NEXT_PHASE
+        : undefined;
   const isProdRuntime = nodeEnv === 'production' && nextPhase !== 'phase-production-build';
 
   if (!isProdRuntime && effectiveSource.BETTER_AUTH_URL === undefined) {

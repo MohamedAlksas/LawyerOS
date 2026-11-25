@@ -291,9 +291,7 @@ export function MatterDetailClient({
       (showAddPoaModal && selectedPoaId)
   );
   const hasPendingOperations = Boolean(
-    pendingLifecycleOp ||
-      pendingAssocOp ||
-      isLifecycleSubmitting ||
+    isLifecycleSubmitting ||
       isProceedingLifecycleSubmitting ||
       isAssocSubmitting ||
       isSubmittingParty ||
@@ -2566,13 +2564,7 @@ export function MatterDetailClient({
       {showArchiveMatterModal &&
         renderModalPortal(
           <div
-            ref={archiveMatterModalRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="archive-matter-title"
-            data-testid="archive-matter-modal"
-            dir="rtl"
-            lang="ar-EG"
+            role="presentation"
             onClick={(e) => {
               if (e.target === e.currentTarget && !isLifecycleSubmitting) {
                 closeArchiveMatterModal();
@@ -2580,7 +2572,16 @@ export function MatterDetailClient({
             }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
           >
-          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div
+              ref={archiveMatterModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="archive-matter-title"
+              data-testid="archive-matter-modal"
+              dir="rtl"
+              lang="ar-EG"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+            >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
                 أرشفة ملف القضية
@@ -2686,13 +2687,7 @@ export function MatterDetailClient({
       {showReopenMatterModal &&
         renderModalPortal(
           <div
-            ref={reopenMatterModalRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reopen-matter-title"
-            data-testid="reopen-matter-modal"
-            dir="rtl"
-            lang="ar-EG"
+            role="presentation"
             onClick={(e) => {
               if (e.target === e.currentTarget && !isLifecycleSubmitting) {
                 closeReopenMatterModal();
@@ -2700,7 +2695,16 @@ export function MatterDetailClient({
             }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
           >
-          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div
+              ref={reopenMatterModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reopen-matter-title"
+              data-testid="reopen-matter-modal"
+              dir="rtl"
+              lang="ar-EG"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+            >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
                 إعادة فتح ملف القضية
@@ -2807,13 +2811,7 @@ export function MatterDetailClient({
         proceedingLifecycleAction &&
         renderModalPortal(
           <div
-            ref={procLifecycleModalRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="proceeding-lifecycle-title"
-            data-testid="proceeding-lifecycle-modal"
-            dir="rtl"
-            lang="ar-EG"
+            role="presentation"
             onClick={(e) => {
               if (e.target === e.currentTarget && !isProceedingLifecycleSubmitting) {
                 closeProceedingLifecycleModal();
@@ -2821,7 +2819,16 @@ export function MatterDetailClient({
             }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
           >
-          <div className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4">
+            <div
+              ref={procLifecycleModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="proceeding-lifecycle-title"
+              data-testid="proceeding-lifecycle-modal"
+              dir="rtl"
+              lang="ar-EG"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+            >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
                 {proceedingLifecycleAction === 'archive' ? 'أرشفة القيد القضائي' : 'إعادة فتح القيد القضائي'}
