@@ -424,7 +424,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                         <button
                           type="button"
                           data-testid={`header-notification-read-${item.id}`}
-                          disabled={markingId === item.id}
+                          disabled={Boolean(markingId)}
                           onClick={() => void handleMarkRead(item)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[5px] bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-[11px] font-semibold transition-colors min-h-[44px]"
                         >

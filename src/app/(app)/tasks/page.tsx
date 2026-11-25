@@ -52,7 +52,7 @@ export default async function TasksPage() {
   return (
     <div className="max-w-5xl mx-auto">
       <TasksView
-        key={actor.sessionId}
+        key={actor.id}
         actorId={actor.id}
         initialTasks={initialTasks}
         selectableMatters={selectableMatters}
