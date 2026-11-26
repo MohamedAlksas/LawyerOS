@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { NextResponse } from 'next/server';
 import {
+  DOCUMENT_NO_STORE_HEADERS,
   documentHttpErrorResponse,
   requireDocumentActor,
   verifyDocumentReadOrigin,
@@ -37,7 +38,15 @@ export async function GET(
       disposition = rawDisposition;
     }
 
-    const versionId = sp.get('versionId') || undefined;
+    const rawVersionId = sp.get('versionId');
+    let versionId: string | undefined;
+    if (rawVersionId !== null) {
+      const trimmedVersionId = rawVersionId.trim();
+      if (!trimmedVersionId) {
+        throw new DocumentValidationError('معرف نسخة المستند غير صالح.');
+      }
+      versionId = trimmedVersionId;
+    }
     const authorized = await authorizeDownload(actor, id, versionId, {
       disposition,
       requestId: sanitizeRequestId(request.headers.get('x-request-id')),
@@ -59,6 +68,6 @@ export async function GET(
 export function HEAD() {
   return new NextResponse(null, {
     status: 405,
-    headers: { Allow: 'GET', 'Cache-Control': 'private, no-store' },
+    headers: { ...DOCUMENT_NO_STORE_HEADERS, Allow: 'GET' },
   });
 }

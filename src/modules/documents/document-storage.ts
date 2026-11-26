@@ -516,7 +516,14 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
           if (entry.isDirectory()) {
             await walk(fullPath, relKey);
           } else if (entry.isFile()) {
-            const st = await fs.promises.lstat(fullPath);
+            let st: fs.Stats;
+            try {
+              st = await fs.promises.lstat(fullPath);
+            } catch (err) {
+              const code = (err as NodeJS.ErrnoException).code;
+              if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+              throw err;
+            }
             if (st.isFile()) {
               results.push({
                 key: relKey,
@@ -543,11 +550,17 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         throw err;
       }
 
-      return await new Promise<string>((resolve, reject) => {
+      return await new Promise<string | null>((resolve, reject) => {
         const hash = crypto.createHash('sha256');
         const stream = fs.createReadStream(targetPath);
         stream.on('data', (chunk) => hash.update(chunk));
-        stream.on('error', reject);
+        stream.on('error', (err) => {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            resolve(null);
+            return;
+          }
+          reject(err);
+        });
         stream.on('end', () => resolve(hash.digest('hex')));
       });
     },

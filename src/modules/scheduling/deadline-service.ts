@@ -187,7 +187,7 @@ function mapDeadlineToDTO(
   row: DeadlineWithRelations,
   pendingReminderCount: number,
   cairoToday: string,
-  canReadDocuments = true
+  canReadDocuments: boolean
 ): DeadlineDTO {
   const dueDate = formatUtcDateToIsoDate(row.dueDate);
   const completedDate = formatUtcDateToIsoDate(row.completedDate);
@@ -265,7 +265,7 @@ async function replayDeadline(
   tx: Prisma.TransactionClient,
   ack: DeadlineAcknowledgment,
   cairoToday: string,
-  canReadDocuments = true
+  canReadDocuments: boolean
 ): Promise<DeadlineDTO> {
   const row = (await tx.deadline.findUniqueOrThrow({
     where: { id: ack.id },
@@ -433,7 +433,7 @@ async function loadDeadlineDTO(
   tx: Prisma.TransactionClient,
   id: string,
   cairoToday: string,
-  canReadDocuments = true
+  canReadDocuments: boolean
 ): Promise<DeadlineDTO> {
   const row = (await tx.deadline.findUniqueOrThrow({
     where: { id },
@@ -564,7 +564,7 @@ export async function updateDeadlineDraft(
     dueTime: input.dueTime,
     source: input.source,
     basisNotes: input.basisNotes,
-    sourceDocumentId: input.sourceDocumentId,
+    ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
   };
 
   return deadlineCommand(
@@ -586,20 +586,35 @@ export async function updateDeadlineDraft(
         );
       }
 
+      if (
+        locked.source_document_id !== null &&
+        input.sourceDocumentId !== undefined &&
+        input.sourceDocumentId !== locked.source_document_id
+      ) {
+        assertAuthorized(actor, 'READ_DOCUMENTS');
+      }
+
       const effectiveProceedingId =
         input.proceedingId !== undefined ? input.proceedingId : locked.proceeding_id;
       const effectiveSourceDocumentId =
         input.sourceDocumentId !== undefined ? input.sourceDocumentId : locked.source_document_id;
 
       if (
-        (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) ||
-        (input.proceedingId !== undefined && effectiveSourceDocumentId !== null)
+        effectiveSourceDocumentId !== null &&
+        (input.sourceDocumentId !== undefined || input.proceedingId !== undefined)
       ) {
-        await assertLinkableDocument(tx, effectiveSourceDocumentId!, {
-          kind: 'MATTER',
-          matterId: locked.matter_id,
-          proceedingId: effectiveProceedingId,
-        });
+        const isUnchangedExistingLink =
+          input.sourceDocumentId === undefined || input.sourceDocumentId === locked.source_document_id;
+        await assertLinkableDocument(
+          tx,
+          effectiveSourceDocumentId,
+          {
+            kind: 'MATTER',
+            matterId: locked.matter_id,
+            proceedingId: effectiveProceedingId,
+          },
+          { allowExistingArchived: isUnchangedExistingLink }
+        );
       }
 
       const nextDueDateStr =
@@ -683,7 +698,7 @@ export async function confirmDeadline(
     dueTime: normTime,
     source: input.source,
     basisNotes: input.basisNotes,
-    sourceDocumentId: input.sourceDocumentId,
+    ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
     confirmed: true,
   };
 
@@ -701,12 +716,29 @@ export async function confirmDeadline(
         );
       }
 
-      if (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) {
-        await assertLinkableDocument(tx, input.sourceDocumentId, {
-          kind: 'MATTER',
-          matterId: locked.matter_id,
-          proceedingId: locked.proceeding_id,
-        });
+      if (
+        locked.source_document_id !== null &&
+        input.sourceDocumentId !== undefined &&
+        input.sourceDocumentId !== locked.source_document_id
+      ) {
+        assertAuthorized(actor, 'READ_DOCUMENTS');
+      }
+
+      const effectiveSourceDocumentId =
+        input.sourceDocumentId !== undefined ? input.sourceDocumentId : locked.source_document_id;
+      if (effectiveSourceDocumentId !== null) {
+        const isUnchangedExistingLink =
+          input.sourceDocumentId === undefined || input.sourceDocumentId === locked.source_document_id;
+        await assertLinkableDocument(
+          tx,
+          effectiveSourceDocumentId,
+          {
+            kind: 'MATTER',
+            matterId: locked.matter_id,
+            proceedingId: locked.proceeding_id,
+          },
+          { allowExistingArchived: isUnchangedExistingLink }
+        );
       }
 
       const nextVersion = locked.version + 1;

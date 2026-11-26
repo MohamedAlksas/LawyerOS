@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import zlib from 'node:zlib';
 import type { DocumentType } from '@prisma/client';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getAuth, getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
+import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
+import * as identityAuthorize from '@/modules/identity/authorize';
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
@@ -22,6 +23,7 @@ import {
   createLocalDocumentStorage,
   finalizeUpload,
   getDocumentDetail,
+  listDocuments,
   pinDocumentVersionsForBackup,
   reconcileAndCleanupDocumentStorage,
   releaseBackupFilePins,
@@ -31,11 +33,14 @@ import {
 import { AuthorizationError, type UserRole } from '@/modules/identity/types';
 import {
   addProceeding,
+  archiveMatter,
   archiveProceeding,
+  linkMatterParty,
   openMatter,
   unifiedSearch,
 } from '@/modules/matters/matter-service';
 import { savePowerOfAttorney } from '@/modules/parties/service';
+import { listAgenda } from '@/modules/productivity/productivity-service';
 import {
   confirmDeadline,
   correctHearingResult,
@@ -45,10 +50,14 @@ import {
 } from '@/modules/scheduling';
 import { GET as listDocumentsRoute } from '@/app/api/documents/route';
 import { GET as getDocumentRoute, PATCH as patchDocumentRoute } from '@/app/api/documents/[id]/route';
-import { GET as getDocumentContentRoute } from '@/app/api/documents/[id]/content/route';
+import {
+  GET as getDocumentContentRoute,
+  HEAD as headDocumentContentRoute,
+} from '@/app/api/documents/[id]/content/route';
 import { POST as postDocumentVersionRoute } from '@/app/api/documents/[id]/versions/route';
 import { POST as postHearingResultRoute } from '@/app/api/scheduling/hearings/[id]/result/route';
 import { POST as postDeadlinesRoute } from '@/app/api/deadlines/route';
+import { PATCH as patchDeadlineRoute } from '@/app/api/deadlines/[id]/route';
 import {
   cleanupPartyFixtures,
   createSyntheticActor,
@@ -57,55 +66,14 @@ import {
 } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
-
-function buildSyntheticPdf(marker: string, padBytes = 0): Buffer {
-  const header = Buffer.from(
-    `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Marker (${marker}) >>\nendobj\n`,
-    'ascii'
-  );
-  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
-  if (padBytes <= 0) {
-    return Buffer.concat([header, footer]);
-  }
-  return Buffer.concat([header, Buffer.alloc(padBytes, 0x20), footer]);
-}
-
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
-function buildSyntheticPng(markerByte: number): Buffer {
-  const ihdr = Buffer.from([
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00,
-  ]);
-  const idat = zlib.deflateSync(Buffer.from([0x00, markerByte & 0xff, 0x10, 0x20]));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', idat),
-    makePngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
+import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
 
 function sha256Hex(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
+  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function signSessionTokenCookie(token: string, secret: string): string {
@@ -142,7 +110,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     email: `t12.maintainer.${runSuffix}@lawoffice.test`,
   });
 
-  const storageRoot = path.resolve(process.cwd(), 'storage', `t12-integ-${runSuffix}`);
+  let storageRoot: string;
   let prevStorageRootEnv: string | undefined;
   let trustedOrigin: string;
   let ownerCookie: string;
@@ -170,6 +138,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
   const createdAttemptIds: string[] = [];
   const createdPoaIds: string[] = [];
   const createdDeadlineIds: string[] = [];
+  const createdHearingIds: string[] = [];
   const createdHearingResultIds: string[] = [];
   const createdBackupIds: string[] = [];
 
@@ -210,7 +179,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
   beforeAll(async () => {
     setupTestEncryptionKeys();
-    fs.mkdirSync(storageRoot, { recursive: true });
+    storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), `lawoffice-t12-int-${runSuffix}-`));
     prevStorageRootEnv = process.env.DOCUMENTS_STORAGE_ROOT;
     process.env.DOCUMENTS_STORAGE_ROOT = storageRoot;
 
@@ -370,14 +339,14 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const hA1 = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: '2027-06-15',
+      hearingDate: formatOffsetYmd(30),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingA1Id = hA1.id;
 
     const hA2 = await scheduleHearing(owner, {
       proceedingId: proceedingA2Id,
-      hearingDate: '2027-07-20',
+      hearingDate: formatOffsetYmd(45),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingA2Id = hA2.id;
@@ -404,20 +373,14 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const hB = await scheduleHearing(owner, {
       proceedingId: proceedingBId,
-      hearingDate: '2027-08-10',
+      hearingDate: formatOffsetYmd(60),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingBId = hB.id;
-  });
+  }, 60_000);
 
   afterAll(async () => {
     try {
-      if (prevStorageRootEnv === undefined) {
-        delete process.env.DOCUMENTS_STORAGE_ROOT;
-      } else {
-        process.env.DOCUMENTS_STORAGE_ROOT = prevStorageRootEnv;
-      }
-
       const actorIds = [owner.id, maintainer.id];
 
       if (createdHearingResultIds.length > 0) {
@@ -439,7 +402,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         });
       }
 
-      const hearingIds = [hearingA1Id, hearingA2Id, hearingBId].filter(Boolean);
+      const hearingIds = [hearingA1Id, hearingA2Id, hearingBId, ...createdHearingIds].filter(Boolean);
       if (hearingIds.length > 0) {
         await prisma.jobRun.deleteMany({
           where: { sourceType: 'Hearing', sourceId: { in: hearingIds } },
@@ -518,11 +481,16 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
       }
     } finally {
-      if (fs.existsSync(storageRoot)) {
+      if (prevStorageRootEnv === undefined) {
+        delete process.env.DOCUMENTS_STORAGE_ROOT;
+      } else {
+        process.env.DOCUMENTS_STORAGE_ROOT = prevStorageRootEnv;
+      }
+      if (storageRoot && fs.existsSync(storageRoot)) {
         fs.rmSync(storageRoot, { recursive: true, force: true });
       }
     }
-  });
+  }, 60_000);
 
   it('T12-MIGRATION: Deploys 20261126000000_t12_document_versions_and_links onto populated pre-T12 DB and enforces CHECK + 3 FKs', async () => {
     const db = await createDedicatedTestDatabase();
@@ -587,8 +555,8 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       );
       await db.pool.query(
         `INSERT INTO "hearing" ("id", "proceeding_id", "hearing_date", "status", "created_by_id", "updated_by_id", "updated_at")
-         VALUES ($1, $2, '2027-05-01', 'COMPLETED', $3, $3, NOW())`,
-        [seedHearingId, seedProcId, seedUserId]
+         VALUES ($1, $2, $3::date, 'COMPLETED', $4, $4, NOW())`,
+        [seedHearingId, seedProcId, formatOffsetYmd(20), seedUserId]
       );
       await db.pool.query(
         `INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "createdById", "updatedById", "updatedAt")
@@ -631,7 +599,28 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       );
       expect(hrPre.rows[0].decision_document_id).toBeNull();
 
-      // Verify upload_attempt_expected_document_version_check rejects <= 0 and allows NULL / >= 1
+      // Verify upload_attempt_expected_document_version_check accepts NULL and >= 1 while rejecting <= 0
+      const nullVerAttemptId = crypto.randomUUID();
+      const posVerAttemptId = crypto.randomUUID();
+      await db.pool.query(
+        `INSERT INTO "upload_attempt" ("id", "idempotency_record_id", "actor_id", "matter_id", "title", "document_type", "original_filename", "declared_mime", "expected_size_bytes", "quarantine_key", "expected_document_version", "expires_at")
+         VALUES ($1, $2, $3, $4, 'إصدار فارغ', 'OTHER', 'vnull.pdf', 'application/pdf', 100, 'q/vnull.pdf', NULL, NOW() + interval '1 day')`,
+        [nullVerAttemptId, crypto.randomUUID(), seedUserId, seedMatterId]
+      );
+      await db.pool.query(
+        `INSERT INTO "upload_attempt" ("id", "idempotency_record_id", "actor_id", "matter_id", "title", "document_type", "original_filename", "declared_mime", "expected_size_bytes", "quarantine_key", "expected_document_version", "expires_at")
+         VALUES ($1, $2, $3, $4, 'إصدار موجب', 'OTHER', 'v1.pdf', 'application/pdf', 100, 'q/v1.pdf', 1, NOW() + interval '1 day')`,
+        [posVerAttemptId, crypto.randomUUID(), seedUserId, seedMatterId]
+      );
+      const validAttemptsRes = await db.pool.query(
+        `SELECT "id", "expected_document_version" FROM "upload_attempt" WHERE "id" IN ($1, $2) ORDER BY "original_filename"`,
+        [nullVerAttemptId, posVerAttemptId]
+      );
+      expect(validAttemptsRes.rows).toEqual([
+        { id: posVerAttemptId, expected_document_version: 1 },
+        { id: nullVerAttemptId, expected_document_version: null },
+      ]);
+
       await expect(
         db.pool.query(
           `INSERT INTO "upload_attempt" ("id", "idempotency_record_id", "actor_id", "matter_id", "title", "document_type", "original_filename", "declared_mime", "expected_size_bytes", "quarantine_key", "expected_document_version", "expires_at")
@@ -829,9 +818,9 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const dlV2 = await authorizeDownload(owner, docV1.id);
     expect(await dlV2.readBytes()).toEqual(v2Bytes);
-  });
+  }, 60_000);
 
-  it('T12-TC-02: rejected candidate, injected DB failure, and concurrent addVersion race preserve currentVersionId and block stale overwrite', async () => {
+  it('T12-TC-02: rejected candidate, injected DB failure, archived parents, and concurrent addVersion race preserve currentVersionId and block stale overwrite', async () => {
     const v1Bytes = buildSyntheticPdf(`T12-TC02-V1-${runSuffix}`);
     const v1Hash = sha256Hex(v1Bytes);
     const doc = await createReadyMatterDocument({
@@ -864,9 +853,17 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(afterRejected.versions).toHaveLength(1);
     expect(sha256Hex(await (await authorizeDownload(owner, doc.id)).readBytes())).toBe(v1Hash);
 
-    // 2) Injected DB failure during version finalization + verify no orphan ready/ object
+    // 2) Pre-tx writeReadyBytes + injected DB failure during version finalization deletes ready/ on rollback
     const storage = createLocalDocumentStorage(storageRoot);
     const readyKeysBeforeDbFail = (await storage.listKeys!('ready')).map((f) => f.key);
+    let wroteReadyKey: string | null = null;
+    const spiedStorage = {
+      ...storage,
+      async writeReadyBytes(key: string, bytes: Buffer) {
+        wroteReadyKey = key;
+        return storage.writeReadyBytes(key, bytes);
+      },
+    };
     const v2FailBytes = buildSyntheticPdf(`T12-TC02-DBFAIL-${runSuffix}`);
     const failAttempt = await beginVersionUpload(owner, {
       documentId: doc.id,
@@ -879,9 +876,11 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     createdAttemptIds.push(failAttempt.id);
     await uploadAttemptBytes(owner, failAttempt.id, v2FailBytes);
     await expect(
-      finalizeUpload(owner, { attemptId: failAttempt.id }, { simulateDbFailure: true, storage })
+      finalizeUpload(owner, { attemptId: failAttempt.id }, { simulateDbFailure: true, storage: spiedStorage })
     ).rejects.toThrow('SIMULATED_DB_FINALIZATION_FAILURE');
 
+    expect(wroteReadyKey).not.toBeNull();
+    expect(await storage.exists('ready', wroteReadyKey!)).toBe(false);
     const readyKeysAfterDbFail = (await storage.listKeys!('ready')).map((f) => f.key);
     expect(readyKeysAfterDbFail).toEqual(readyKeysBeforeDbFail);
 
@@ -918,7 +917,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     });
     expect(policyAttemptAfter.status).toBe('UPLOADED');
 
-    // 2c) Archived proceeding rejection on addVersion (beginVersionUpload & pre-begun finalizeUpload)
+    // 2c) Archived parents (proceeding, hearingId->archived proceeding, Matter, Party, Document) reject addVersion
     const disposableProc = await addProceeding(owner, {
       matterId: matterAId,
       courtId,
@@ -928,12 +927,26 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       registerType: 'مدني',
       idempotencyKey: crypto.randomUUID(),
     });
+    const disposableHearing = await scheduleHearing(owner, {
+      proceedingId: disposableProc.id,
+      hearingDate: formatOffsetYmd(25),
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(disposableHearing.id);
     const procDoc = await createReadyMatterDocument({
       matterId: matterAId,
       proceedingId: disposableProc.id,
       title: `مستند قيد سيؤرشف T12 ${runSuffix}`,
       filename: 'proc-v1.pdf',
       bytes: buildSyntheticPdf(`T12-TC02-PROC-${runSuffix}`),
+    });
+    const hearingDoc = await createReadyMatterDocument({
+      matterId: matterAId,
+      proceedingId: null,
+      hearingId: disposableHearing.id,
+      title: `مستند جلسة قيد سيؤرشف T12 ${runSuffix}`,
+      filename: 'hearing-proc-v1.pdf',
+      bytes: buildSyntheticPdf(`T12-TC02-HEAR-PROC-${runSuffix}`),
     });
     const preArchivedAttempt = await beginVersionUpload(owner, {
       documentId: procDoc.id,
@@ -945,6 +958,14 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     });
     createdAttemptIds.push(preArchivedAttempt.id);
     await uploadAttemptBytes(owner, preArchivedAttempt.id, policyFailBytes);
+    const disposableHr = await recordHearingResult(owner, {
+      hearingId: disposableHearing.id,
+      expectedVersion: 1,
+      decision: 'قفل الجلسة تمهيداً لأرشفة القيد',
+      nextDateDisposition: 'NONE',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingResultIds.push(disposableHr.resultId);
     await archiveProceeding(owner, {
       proceedingId: disposableProc.id,
       matterId: matterAId,
@@ -952,18 +973,111 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       reason: 'أرشفة لاختبار رفض إضافة نسخة جديدة',
       idempotencyKey: crypto.randomUUID(),
     });
+    for (const targetId of [procDoc.id, hearingDoc.id]) {
+      await expect(
+        beginVersionUpload(owner, {
+          documentId: targetId,
+          expectedDocumentVersion: 1,
+          originalFilename: 'proc-v2-after.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 256,
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(DocumentValidationError);
+    }
+    await expect(
+      finalizeUpload(owner, { attemptId: preArchivedAttempt.id }, { storage })
+    ).rejects.toThrow(DocumentValidationError);
+
+    // Archived Matter rejects addVersion
+    const archMatter = await openMatter(owner, {
+      title: `قضية أرشفة إضافة نسخة ${runSuffix}`,
+      kind: 'LITIGATION',
+      initialClientId: partyClientAId,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(archMatter.matter.id);
+    const archMatterDoc = await createReadyMatterDocument({
+      matterId: archMatter.matter.id,
+      title: `مستند قضية مؤرشفة ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC02-ARCH-MATTER-${runSuffix}`),
+    });
+    await archiveMatter(owner, {
+      matterId: archMatter.matter.id,
+      expectedVersion: archMatter.matter.version,
+      reason: 'أرشفة القضية لمنع إضافة نسخ',
+      idempotencyKey: crypto.randomUUID(),
+    });
     await expect(
       beginVersionUpload(owner, {
-        documentId: procDoc.id,
-        expectedDocumentVersion: procDoc.version,
-        originalFilename: 'proc-v2-after.pdf',
+        documentId: archMatterDoc.id,
+        expectedDocumentVersion: 1,
+        originalFilename: 'arch-matter-v2.pdf',
         declaredMime: 'application/pdf',
         expectedSizeBytes: 256,
         idempotencyKey: crypto.randomUUID(),
       })
     ).rejects.toThrow(DocumentValidationError);
+
+    // Archived Party rejects addVersion
+    const archParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `طرف مؤرشف إضافة نسخة ${runSuffix}`,
+        nameNormalized: `طرف مؤرشف اضافه نسخه ${runSuffix}`,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(archParty.id);
+    const archPartyBytes = buildSyntheticPdf(`T12-TC02-ARCH-PARTY-${runSuffix}`);
+    const archPartyInit = await beginUpload(owner, {
+      partyId: archParty.id,
+      title: `مستند طرف سيؤرشف ${runSuffix}`,
+      documentType: 'ID_COPY',
+      originalFilename: 'party-v1.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: archPartyBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(archPartyInit.id);
+    await uploadAttemptBytes(owner, archPartyInit.id, archPartyBytes);
+    const archPartyDoc = await finalizeUpload(owner, { attemptId: archPartyInit.id });
+    createdDocumentIds.push(archPartyDoc.id);
+    await prisma.party.update({
+      where: { id: archParty.id },
+      data: { archivedAt: new Date() },
+    });
     await expect(
-      finalizeUpload(owner, { attemptId: preArchivedAttempt.id }, { storage })
+      beginVersionUpload(owner, {
+        documentId: archPartyDoc.id,
+        expectedDocumentVersion: 1,
+        originalFilename: 'arch-party-v2.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: 256,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(DocumentValidationError);
+
+    // Archived Document itself rejects addVersion
+    const archSelfDoc = await createReadyMatterDocument({
+      matterId: matterAId,
+      title: `مستند ذاته مؤرشف ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC02-ARCH-DOC-${runSuffix}`),
+    });
+    await prisma.document.update({
+      where: { id: archSelfDoc.id },
+      data: { archivedAt: new Date() },
+    });
+    await expect(
+      beginVersionUpload(owner, {
+        documentId: archSelfDoc.id,
+        expectedDocumentVersion: 1,
+        originalFilename: 'arch-doc-v2.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: 256,
+        idempotencyKey: crypto.randomUUID(),
+      })
     ).rejects.toThrow(DocumentValidationError);
 
     // 3) Concurrent addVersion race from the same expectedDocumentVersion
@@ -1010,6 +1124,11 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(rejected).toHaveLength(1);
     expect(rejected[0].reason).toBeInstanceOf(ConcurrencyConflictError);
 
+    const raceAttempts = await prisma.uploadAttempt.findMany({
+      where: { id: { in: [attemptA.id, attemptB.id] } },
+    });
+    expect(raceAttempts.map((a) => a.status).sort()).toEqual(['FINALIZED', 'REJECTED']);
+
     const winnerDoc = fulfilled[0].value;
     expect(winnerDoc.version).toBe(2);
     expect(winnerDoc.currentVersion?.versionNumber).toBe(2);
@@ -1020,6 +1139,41 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(afterRace.versions).toHaveLength(2);
     const currentBytesHash = sha256Hex(await (await authorizeDownload(owner, doc.id)).readBytes());
     expect(currentBytesHash).toBe(afterRace.currentVersion?.sha256);
+
+    // Explicit stale expectedDocumentVersion at finalizeUpload leaves attempt 'REJECTED' and cleans quarantine
+    const staleBytes = buildSyntheticPdf(`T12-TC02-STALE-FIN-${runSuffix}`);
+    const advanceBytes = buildSyntheticPdf(`T12-TC02-ADVANCE-V3-${runSuffix}`);
+    const staleFinAttempt = await beginVersionUpload(owner, {
+      documentId: doc.id,
+      expectedDocumentVersion: 2,
+      originalFilename: 'stale-fin.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: staleBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(staleFinAttempt.id);
+    await uploadAttemptBytes(owner, staleFinAttempt.id, staleBytes);
+
+    const advanceAttempt = await beginVersionUpload(owner, {
+      documentId: doc.id,
+      expectedDocumentVersion: 2,
+      originalFilename: 'advance-v3.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: advanceBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(advanceAttempt.id);
+    await uploadAttemptBytes(owner, advanceAttempt.id, advanceBytes);
+    await finalizeUpload(owner, { attemptId: advanceAttempt.id });
+
+    await expect(
+      finalizeUpload(owner, { attemptId: staleFinAttempt.id }, { storage })
+    ).rejects.toThrow(ConcurrencyConflictError);
+    const staleAttemptRow = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: staleFinAttempt.id },
+    });
+    expect(staleAttemptRow.status).toBe('REJECTED');
+    expect(await storage.exists('quarantine', staleAttemptRow.quarantineKey)).toBe(false);
 
     // HTTP beginVersionUpload with stale expectedDocumentVersion must return 409
     const staleBeginRes = await postDocumentVersionRoute(
@@ -1042,9 +1196,9 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       { params: Promise.resolve({ id: doc.id }) }
     );
     expect(staleBeginRes.status).toBe(409);
-  });
+  }, 60_000);
 
-  it('T12-TC-03: updateDocumentMetadata updates originalPresent & location independently of immutable bytes and enforces expectedVersion', async () => {
+  it('T12-TC-03: updateDocumentMetadata updates originalPresent & location independently of immutable bytes, enforces expectedVersion, idempotency, archive & auth boundaries', async () => {
     const v1Bytes = buildSyntheticPdf(`T12-TC03-ORIGINAL-${runSuffix}`);
     const v1Hash = sha256Hex(v1Bytes);
 
@@ -1062,6 +1216,25 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       where: { id: doc.currentVersionId! },
     });
 
+    // Empty no-op PATCH payload must reject with 400
+    const emptyPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          expectedVersion: doc.version,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(emptyPatchRes.status).toBe(400);
+
     // UNKNOWN -> YES + paper location
     const yesUpdated = await updateDocumentMetadata(owner, {
       documentId: doc.id,
@@ -1075,7 +1248,14 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(yesUpdated.version).toBe(2);
     expect(yesUpdated.currentVersionId).toBe(doc.currentVersionId);
 
-    // YES -> NO via PATCH /api/documents/[id] while scan bytes remain untouched
+    // YES -> NO via PATCH /api/documents/[id] + verify idempotency replay & mismatch
+    const noPatchIdemKey = crypto.randomUUID();
+    const noPatchPayload = {
+      expectedVersion: yesUpdated.version,
+      idempotencyKey: noPatchIdemKey,
+      originalPresent: 'NO',
+      originalLocation: null,
+    };
     const patchRes = await patchDocumentRoute(
       new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
         method: 'PATCH',
@@ -1085,12 +1265,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
           'content-type': 'application/json',
           cookie: ownerCookie,
         },
-        body: JSON.stringify({
-          expectedVersion: yesUpdated.version,
-          idempotencyKey: crypto.randomUUID(),
-          originalPresent: 'NO',
-          originalLocation: null,
-        }),
+        body: JSON.stringify(noPatchPayload),
       }),
       { params: Promise.resolve({ id: doc.id }) }
     );
@@ -1103,6 +1278,71 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(patchJson.data.originalPresent).toBe('NO');
     expect(patchJson.data.originalLocation).toBeNull();
     expect(patchJson.data.version).toBe(3);
+
+    const replayPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify(noPatchPayload),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(replayPatchRes.status).toBe(200);
+    const replayPatchJson = (await replayPatchRes.json()) as {
+      success: boolean;
+      data: { version: number; originalPresent: string };
+    };
+    expect(replayPatchJson.data.version).toBe(3);
+    expect(replayPatchJson.data.originalPresent).toBe('NO');
+
+    const mismatchPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          ...noPatchPayload,
+          originalPresent: 'UNKNOWN',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(mismatchPatchRes.status).toBe(409);
+
+    // NO -> UNKNOWN via PATCH /api/documents/[id]
+    const unknownPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          expectedVersion: 3,
+          idempotencyKey: crypto.randomUUID(),
+          originalPresent: 'UNKNOWN',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(unknownPatchRes.status).toBe(200);
+    const unknownPatchJson = (await unknownPatchRes.json()) as {
+      success: boolean;
+      data: { originalPresent: string; version: number };
+    };
+    expect(unknownPatchJson.data.originalPresent).toBe('UNKNOWN');
+    expect(unknownPatchJson.data.version).toBe(4);
 
     // Stale expectedVersion returns 409
     const stalePatchRes = await patchDocumentRoute(
@@ -1117,12 +1357,196 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         body: JSON.stringify({
           expectedVersion: 1,
           idempotencyKey: crypto.randomUUID(),
-          originalPresent: 'UNKNOWN',
+          originalPresent: 'YES',
         }),
       }),
       { params: Promise.resolve({ id: doc.id }) }
     );
     expect(stalePatchRes.status).toBe(409);
+
+    // Auth & cross-site boundaries on PATCH /api/documents/[id]
+    const unauthPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          expectedVersion: 4,
+          idempotencyKey: crypto.randomUUID(),
+          originalPresent: 'YES',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(unauthPatchRes.status).toBe(401);
+
+    const revokedPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: revokedOwnerCookie,
+        },
+        body: JSON.stringify({
+          expectedVersion: 4,
+          idempotencyKey: crypto.randomUUID(),
+          originalPresent: 'YES',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(revokedPatchRes.status).toBe(401);
+
+    const maintPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: maintainerCookie,
+        },
+        body: JSON.stringify({
+          expectedVersion: 4,
+          idempotencyKey: crypto.randomUUID(),
+          originalPresent: 'YES',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(maintPatchRes.status).toBe(403);
+
+    const crossSitePatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'cross-site',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          expectedVersion: 4,
+          idempotencyKey: crypto.randomUUID(),
+          originalPresent: 'YES',
+        }),
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(crossSitePatchRes.status).toBe(403);
+
+    // Archived Matter, Proceeding, Party, and Document reject PATCH /api/documents/[id]
+    const patchArchMatter = await openMatter(owner, {
+      title: `قضية أرشفة تعديل مستند ${runSuffix}`,
+      kind: 'LITIGATION',
+      initialClientId: partyClientAId,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(patchArchMatter.matter.id);
+    const patchArchProc = await addProceeding(owner, {
+      matterId: matterAId,
+      courtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: `3301-${runSuffix}`,
+      yearLabel: '2026',
+      registerType: 'مدني',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const patchArchParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `طرف أرشفة تعديل ${runSuffix}`,
+        nameNormalized: `طرف ارشفه تعديل ${runSuffix}`,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(patchArchParty.id);
+
+    const docOnArchMatter = await createReadyMatterDocument({
+      matterId: patchArchMatter.matter.id,
+      title: `مستند قضية ستؤرشف للتعديل ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC03-ARCH-M-${runSuffix}`),
+    });
+    const docOnArchProc = await createReadyMatterDocument({
+      matterId: matterAId,
+      proceedingId: patchArchProc.id,
+      title: `مستند قيد سيؤرشف للتعديل ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC03-ARCH-PR-${runSuffix}`),
+    });
+    const archPartyPatchBytes = buildSyntheticPdf(`T12-TC03-ARCH-PA-${runSuffix}`);
+    const archPartyPatchAttempt = await beginUpload(owner, {
+      partyId: patchArchParty.id,
+      title: `مستند طرف سيؤرشف للتعديل ${runSuffix}`,
+      documentType: 'ID_COPY',
+      originalFilename: 'party-meta.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: archPartyPatchBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(archPartyPatchAttempt.id);
+    await uploadAttemptBytes(owner, archPartyPatchAttempt.id, archPartyPatchBytes);
+    const docOnArchParty = await finalizeUpload(owner, { attemptId: archPartyPatchAttempt.id });
+    createdDocumentIds.push(docOnArchParty.id);
+
+    const docArchSelf = await createReadyMatterDocument({
+      matterId: matterAId,
+      title: `مستند ذاته سيؤرشف للتعديل ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC03-ARCH-SELF-${runSuffix}`),
+    });
+
+    await archiveMatter(owner, {
+      matterId: patchArchMatter.matter.id,
+      expectedVersion: patchArchMatter.matter.version,
+      reason: 'أرشفة لاختبار PATCH',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await archiveProceeding(owner, {
+      proceedingId: patchArchProc.id,
+      matterId: matterAId,
+      expectedVersion: patchArchProc.version,
+      reason: 'أرشفة لاختبار PATCH',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await prisma.party.update({
+      where: { id: patchArchParty.id },
+      data: { archivedAt: new Date() },
+    });
+    await prisma.document.update({
+      where: { id: docArchSelf.id },
+      data: { archivedAt: new Date() },
+    });
+
+    for (const archivedTargetId of [
+      docOnArchMatter.id,
+      docOnArchProc.id,
+      docOnArchParty.id,
+      docArchSelf.id,
+    ]) {
+      const archivedPatchRes = await patchDocumentRoute(
+        new Request(`${trustedOrigin}/api/documents/${archivedTargetId}`, {
+          method: 'PATCH',
+          headers: {
+            origin: trustedOrigin,
+            'sec-fetch-site': 'same-origin',
+            'content-type': 'application/json',
+            cookie: ownerCookie,
+          },
+          body: JSON.stringify({
+            expectedVersion: 1,
+            idempotencyKey: crypto.randomUUID(),
+            originalPresent: 'YES',
+          }),
+        }),
+        { params: Promise.resolve({ id: archivedTargetId }) }
+      );
+      expect(archivedPatchRes.status).toBe(400);
+    }
 
     // Verify immutable digital version bytes/checksum/objectKey
     const versionRowAfter = await prisma.documentVersion.findUniqueOrThrow({
@@ -1131,7 +1555,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(versionRowAfter.objectKey).toBe(versionRowBefore.objectKey);
     expect(versionRowAfter.sha256).toBe(v1Hash);
     expect(sha256Hex(await (await authorizeDownload(owner, doc.id)).readBytes())).toBe(v1Hash);
-  });
+  }, 60_000);
 
   it('T12-TC-04: validates matter/principal/READY/archive lineage for HearingResult, Deadline, and POA links without auto-approval', async () => {
     const docABytes = buildSyntheticPdf(`T12-TC04-MATTER-A-${runSuffix}`);
@@ -1539,6 +1963,8 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     ).rejects.toThrow(CrossMatterLinkForbiddenError);
 
     // Updating draft and confirming with valid sourceDocumentId keeps link intact
+    const dueYmd = formatOffsetYmd(45);
+    const agendaAnchorYmd = formatOffsetYmd(0);
     const updatedDraft = await updateDeadlineDraft(owner, {
       deadlineId: validDeadlineJson.data.id,
       expectedVersion: validDeadlineJson.data.version,
@@ -1551,7 +1977,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     const confirmedDeadline = await confirmDeadline(owner, {
       deadlineId: updatedDraft.id,
       expectedVersion: updatedDraft.version,
-      dueDate: '2027-07-15',
+      dueDate: dueYmd,
       source: 'ملف القضية وصورة الحكم المرفقة',
       basisNotes: 'تم احتساب الميعاد يدوياً بعد مراجعة صورة الحكم',
       sourceDocumentId: docMatterA.id,
@@ -1561,7 +1987,57 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(confirmedDeadline.status).toBe('CONFIRMED');
     expect(confirmedDeadline.sourceDocumentId).toBe(docMatterA.id);
 
-    // 3) PowerOfAttorney.documentId: party-owned + client-matter-linked accepted (staying UNREVIEWED); wrong principal / non-READY / archived rejected
+    // Different-hearing same-proceeding document is rejected on HearingResult
+    const hearingA1Alt = await scheduleHearing(owner, {
+      proceedingId: proceedingA1Id,
+      hearingDate: formatOffsetYmd(31),
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const hearingA1Target = await scheduleHearing(owner, {
+      proceedingId: proceedingA1Id,
+      hearingDate: formatOffsetYmd(32),
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hearingA1Alt.id, hearingA1Target.id);
+    const docAltHearing = await createReadyMatterDocument({
+      matterId: matterAId,
+      proceedingId: proceedingA1Id,
+      hearingId: hearingA1Alt.id,
+      title: `مستند جلسة أخرى نفس القيد T12 ${runSuffix}`,
+      documentType: 'JUDGMENT',
+      bytes: buildSyntheticPdf(`T12-TC04-ALT-HEARING-${runSuffix}`),
+    });
+    await expect(
+      recordHearingResult(owner, {
+        hearingId: hearingA1Target.id,
+        expectedVersion: 1,
+        decision: 'محاولة ربط مستند جلسة أخرى',
+        nextDateDisposition: 'NONE',
+        decisionDocumentId: docAltHearing.id,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(CrossMatterLinkForbiddenError);
+
+    // 3) PowerOfAttorney.documentId: party-owned + client-matter-linked accepted (staying UNREVIEWED); wrong principal / OPPONENT / non-READY / archived rejected
+    await linkMatterParty(owner, {
+      matterId: matterAId,
+      partyId: partyOtherId,
+      role: 'OPPONENT',
+      isPrimaryContact: false,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await expect(
+      savePowerOfAttorney(owner, {
+        partyId: partyOtherId,
+        documentId: docMatterA.id,
+        poaNumberText: '9000',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب توثيق الجيزة',
+        poaType: 'GENERAL',
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(CrossMatterLinkForbiddenError);
+
     await expect(
       savePowerOfAttorney(owner, {
         partyId: partyClientAId,
@@ -1652,6 +2128,402 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       })
     ).rejects.toThrow(CrossMatterLinkForbiddenError);
 
+    // 4) listAgenda sourceDocumentId visibility & READ_DOCUMENTS clearance requirement
+    const agendaAuthorized = await listAgenda(owner, { view: 'list', anchorDate: agendaAnchorYmd });
+    const agendaItemAuthorized = agendaAuthorized.confirmedDeadlines.find(
+      (d) => d.id === confirmedDeadline.id
+    );
+    expect(agendaItemAuthorized?.sourceDocumentId).toBe(docMatterA.id);
+
+    const draftForClearRes = await postDeadlinesRoute(
+      new Request(`${trustedOrigin}/api/deadlines`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          matterId: matterAId,
+          proceedingId: proceedingA1Id,
+          title: `مسودة لاختبار فك الربط ${runSuffix}`,
+          sourceDocumentId: docMatterA.id,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    expect(draftForClearRes.status).toBe(200);
+    const draftForClear = (
+      (await draftForClearRes.json()) as { data: { id: string; version: number } }
+    ).data;
+    createdDeadlineIds.push(draftForClear.id);
+
+    const realAuthorize = identityAuthorize.authorize;
+    const realAssertAuthorized = identityAuthorize.assertAuthorized;
+    const authSpy = vi
+      .spyOn(identityAuthorize, 'authorize')
+      .mockImplementation((actor, perm) => (perm === 'READ_DOCUMENTS' ? false : realAuthorize(actor, perm)));
+    const assertSpy = vi
+      .spyOn(identityAuthorize, 'assertAuthorized')
+      .mockImplementation((actor, perm) => {
+        if (perm === 'READ_DOCUMENTS') {
+          throw new AuthorizationError('غير مصرح بقراءة المستندات.');
+        }
+        return realAssertAuthorized(actor, perm);
+      });
+    try {
+      const agendaNoDocs = await listAgenda(owner, { view: 'list', anchorDate: agendaAnchorYmd });
+      const agendaItemNoDocs = agendaNoDocs.confirmedDeadlines.find(
+        (d) => d.id === confirmedDeadline.id
+      );
+      expect(agendaItemNoDocs?.sourceDocumentId).toBeNull();
+      const agendaDraftNoDocs = agendaNoDocs.draftDeadlines.find((d) => d.id === draftForClear.id);
+      expect(agendaDraftNoDocs?.sourceDocumentId).toBeNull();
+
+      await expect(
+        savePowerOfAttorney(owner, {
+          id: poaPartyOwned.id,
+          expectedVersion: poaPartyOwned.version,
+          partyId: partyClientAId,
+          documentId: null,
+          poaNumberText: poaPartyOwned.poaNumberText,
+          poaYearLabel: poaPartyOwned.poaYearLabel,
+          notarizationOffice: poaPartyOwned.notarizationOffice,
+          poaType: poaPartyOwned.poaType,
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(AuthorizationError);
+
+      await expect(
+        updateDeadlineDraft(owner, {
+          deadlineId: draftForClear.id,
+          expectedVersion: draftForClear.version,
+          sourceDocumentId: null,
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(AuthorizationError);
+
+      const clearViaHttpDenied = await patchDeadlineRoute(
+        new Request(`${trustedOrigin}/api/deadlines/${draftForClear.id}`, {
+          method: 'PATCH',
+          headers: {
+            origin: trustedOrigin,
+            'sec-fetch-site': 'same-origin',
+            'content-type': 'application/json',
+            cookie: ownerCookie,
+          },
+          body: JSON.stringify({
+            deadlineId: draftForClear.id,
+            expectedVersion: draftForClear.version,
+            sourceDocumentId: null,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        }),
+        { params: Promise.resolve({ id: draftForClear.id }) }
+      );
+      expect(clearViaHttpDenied.status).toBe(403);
+
+      await expect(
+        confirmDeadline(owner, {
+          deadlineId: draftForClear.id,
+          expectedVersion: draftForClear.version,
+          dueDate: dueYmd,
+          source: 'سند',
+          basisNotes: 'ملاحظات',
+          sourceDocumentId: null,
+          confirmationAccepted: true,
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(AuthorizationError);
+
+      await expect(
+        correctHearingResult(owner, {
+          hearingId: hearingA1Id,
+          expectedVersion: 1,
+          currentResultId: validHearingJson.data.resultId,
+          decision: 'محاولة إزالة مستند القرار بدون صلاحية',
+          reason: 'اختبار صلاحية READ_DOCUMENTS',
+          decisionDocumentId: null,
+          idempotencyKey: crypto.randomUUID(),
+        })
+      ).rejects.toThrow(AuthorizationError);
+    } finally {
+      authSpy.mockRestore();
+      assertSpy.mockRestore();
+    }
+
+    // 5) Idempotency hash distinguishes omitted (undefined) vs explicit null
+    const idemDraftKey = crypto.randomUUID();
+    const draftOmitRes = await updateDeadlineDraft(owner, {
+      deadlineId: draftForClear.id,
+      expectedVersion: draftForClear.version,
+      title: `مسودة مقارنة التطابق ${runSuffix}`,
+      idempotencyKey: idemDraftKey,
+    });
+    expect(draftOmitRes.sourceDocumentId).toBe(docMatterA.id);
+    await expect(
+      updateDeadlineDraft(owner, {
+        deadlineId: draftForClear.id,
+        expectedVersion: draftForClear.version,
+        title: `مسودة مقارنة التطابق ${runSuffix}`,
+        sourceDocumentId: null,
+        idempotencyKey: idemDraftKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    const idemConfirmKey = crypto.randomUUID();
+    const confirmOmit = await confirmDeadline(owner, {
+      deadlineId: draftForClear.id,
+      expectedVersion: draftOmitRes.version,
+      dueDate: dueYmd,
+      source: 'مصدر الاعتماد',
+      basisNotes: 'مراجعة الاعتماد',
+      confirmationAccepted: true,
+      idempotencyKey: idemConfirmKey,
+    });
+    expect(confirmOmit.sourceDocumentId).toBe(docMatterA.id);
+    await expect(
+      confirmDeadline(owner, {
+        deadlineId: draftForClear.id,
+        expectedVersion: draftOmitRes.version,
+        dueDate: dueYmd,
+        source: 'مصدر الاعتماد',
+        basisNotes: 'مراجعة الاعتماد',
+        sourceDocumentId: null,
+        confirmationAccepted: true,
+        idempotencyKey: idemConfirmKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    const idemCorrectKey = crypto.randomUUID();
+    const correctOmit = await correctHearingResult(owner, {
+      hearingId: hearingA2Id,
+      expectedVersion: correctedHrA2.revision,
+      currentResultId: correctedHrA2.id,
+      decision: 'تصويب مع إبقاء المستند',
+      reason: 'اختبار بصمة التكرار',
+      idempotencyKey: idemCorrectKey,
+    });
+    createdHearingResultIds.push(correctOmit.id);
+    expect(correctOmit.decisionDocumentId).toBe(docProceedingA2.id);
+    await expect(
+      correctHearingResult(owner, {
+        hearingId: hearingA2Id,
+        expectedVersion: correctedHrA2.revision,
+        currentResultId: correctedHrA2.id,
+        decision: 'تصويب مع إبقاء المستند',
+        reason: 'اختبار بصمة التكرار',
+        decisionDocumentId: null,
+        idempotencyKey: idemCorrectKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    // 6) Unchanged existing link on an archived doc allows unrelated POA/Deadline/Correction edits while cross-proceeding change rejects
+    const archivableDoc = await createReadyMatterDocument({
+      matterId: matterAId,
+      proceedingId: proceedingA1Id,
+      title: `مستند مرتبط سيؤرشف لاحقاً ${runSuffix}`,
+      documentType: 'CONTRACT',
+      bytes: buildSyntheticPdf(`T12-TC04-ARCH-LATER-${runSuffix}`),
+    });
+    const poaArch = await savePowerOfAttorney(owner, {
+      partyId: partyClientAId,
+      documentId: archivableDoc.id,
+      poaNumberText: `0773-${runSuffix}`,
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب التوثيق',
+      poaType: 'GENERAL',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdPoaIds.push(poaArch.id);
+    const dlArchRes = await postDeadlinesRoute(
+      new Request(`${trustedOrigin}/api/deadlines`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          matterId: matterAId,
+          proceedingId: proceedingA1Id,
+          title: `مسودة بمستند سيؤرشف ${runSuffix}`,
+          sourceDocumentId: archivableDoc.id,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    const dlArch = ((await dlArchRes.json()) as { data: { id: string; version: number } }).data;
+    createdDeadlineIds.push(dlArch.id);
+
+    const hArch = await scheduleHearing(owner, {
+      proceedingId: proceedingA1Id,
+      hearingDate: formatOffsetYmd(33),
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hArch.id);
+    const hrArch = await recordHearingResult(owner, {
+      hearingId: hArch.id,
+      expectedVersion: 1,
+      decision: 'قرار مرتبط بمستند سيؤرشف',
+      nextDateDisposition: 'NONE',
+      decisionDocumentId: archivableDoc.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingResultIds.push(hrArch.resultId);
+
+    await prisma.document.update({
+      where: { id: archivableDoc.id },
+      data: { archivedAt: new Date() },
+    });
+
+    const poaArchSaved = await savePowerOfAttorney(owner, {
+      id: poaArch.id,
+      expectedVersion: poaArch.version,
+      partyId: partyClientAId,
+      documentId: archivableDoc.id,
+      poaNumberText: poaArch.poaNumberText,
+      poaYearLabel: poaArch.poaYearLabel,
+      notarizationOffice: poaArch.notarizationOffice,
+      poaType: poaArch.poaType,
+      notes: 'تعديل ملاحظة مع إبقاء المستند المؤرشف',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(poaArchSaved.documentId).toBe(archivableDoc.id);
+
+    const dlArchUpdated = await updateDeadlineDraft(owner, {
+      deadlineId: dlArch.id,
+      expectedVersion: dlArch.version,
+      title: `تعديل عنوان مع بقاء المستند المؤرشف ${runSuffix}`,
+      sourceDocumentId: archivableDoc.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(dlArchUpdated.sourceDocumentId).toBe(archivableDoc.id);
+
+    await expect(
+      updateDeadlineDraft(owner, {
+        deadlineId: dlArch.id,
+        expectedVersion: dlArchUpdated.version,
+        proceedingId: proceedingA2Id,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(CrossMatterLinkForbiddenError);
+
+    const dlArchConfirmed = await confirmDeadline(owner, {
+      deadlineId: dlArch.id,
+      expectedVersion: dlArchUpdated.version,
+      dueDate: dueYmd,
+      source: 'ملف القضية',
+      basisNotes: 'اعتماد مع إبقاء المستند المؤرشف',
+      sourceDocumentId: archivableDoc.id,
+      confirmationAccepted: true,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(dlArchConfirmed.sourceDocumentId).toBe(archivableDoc.id);
+
+    const hrArchCorrected = await correctHearingResult(owner, {
+      hearingId: hArch.id,
+      expectedVersion: 1,
+      currentResultId: hrArch.resultId,
+      decision: 'تصحيح منطوق مع إبقاء المستند المؤرشف',
+      reason: 'تصحيح صياغة فقط',
+      decisionDocumentId: archivableDoc.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingResultIds.push(hrArchCorrected.id);
+    expect(hrArchCorrected.decisionDocumentId).toBe(archivableDoc.id);
+
+    // 7) Authorized unlinking via explicit null across POA, Deadline (draft + confirm), and HearingResult correction
+    const poaCleared = await savePowerOfAttorney(owner, {
+      id: poaPartyOwned.id,
+      expectedVersion: poaPartyOwned.version,
+      partyId: partyClientAId,
+      documentId: null,
+      poaNumberText: poaPartyOwned.poaNumberText,
+      poaYearLabel: poaPartyOwned.poaYearLabel,
+      notarizationOffice: poaPartyOwned.notarizationOffice,
+      poaType: poaPartyOwned.poaType,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(poaCleared.documentId).toBeNull();
+    expect(poaCleared.linkedDocument).toBeNull();
+
+    const dlUnlinkRes = await postDeadlinesRoute(
+      new Request(`${trustedOrigin}/api/deadlines`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          matterId: matterAId,
+          proceedingId: proceedingA1Id,
+          title: `مسودة لفك الربط بنجاح ${runSuffix}`,
+          sourceDocumentId: docMatterA.id,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    const dlUnlink = ((await dlUnlinkRes.json()) as { data: { id: string; version: number } }).data;
+    createdDeadlineIds.push(dlUnlink.id);
+    const dlUnlinkedDraft = await updateDeadlineDraft(owner, {
+      deadlineId: dlUnlink.id,
+      expectedVersion: dlUnlink.version,
+      sourceDocumentId: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(dlUnlinkedDraft.sourceDocumentId).toBeNull();
+
+    const dlConfirmUnlinkRes = await postDeadlinesRoute(
+      new Request(`${trustedOrigin}/api/deadlines`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          matterId: matterAId,
+          proceedingId: proceedingA1Id,
+          title: `مسودة لفك الربط عند الاعتماد ${runSuffix}`,
+          sourceDocumentId: docMatterA.id,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+    );
+    const dlConfirmUnlink = (
+      (await dlConfirmUnlinkRes.json()) as { data: { id: string; version: number } }
+    ).data;
+    createdDeadlineIds.push(dlConfirmUnlink.id);
+    const dlConfirmedNull = await confirmDeadline(owner, {
+      deadlineId: dlConfirmUnlink.id,
+      expectedVersion: dlConfirmUnlink.version,
+      dueDate: dueYmd,
+      source: 'مراجعة يدوية',
+      basisNotes: 'تمت المراجعة وفك المستند المصدري',
+      sourceDocumentId: null,
+      confirmationAccepted: true,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(dlConfirmedNull.sourceDocumentId).toBeNull();
+
+    const hrUnlinked = await correctHearingResult(owner, {
+      hearingId: hArch.id,
+      expectedVersion: hrArchCorrected.revision,
+      currentResultId: hrArchCorrected.id,
+      decision: 'تصحيح مع فك ربط المستند',
+      reason: 'إلغاء ربط المستند المصرح به',
+      decisionDocumentId: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingResultIds.push(hrUnlinked.id);
+    expect(hrUnlinked.decisionDocumentId).toBeNull();
+
     // READ_DOCUMENTS & WRITE_DOCUMENTS authorization checks fail closed for MAINTAINER
     await expect(getDocumentDetail(maintainer, docMatterA.id)).rejects.toThrow(AuthorizationError);
     await expect(authorizeDownload(maintainer, docMatterA.id)).rejects.toThrow(AuthorizationError);
@@ -1688,20 +2560,21 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       { params: Promise.resolve({ id: docMatterA.id }) }
     );
     expect(maintVerRes.status).toBe(403);
-  });
+  }, 60_000);
 
-  it('T12-TC-05: unifiedSearch returns authorized metadata without PDF-body matches or storage keys, and old-version download fails closed when unauthorized', async () => {
+  it('T12-TC-05: unifiedSearch returns authorized metadata without PDF-body matches or storage keys, filters archived parents, and download routes fail closed', async () => {
     const bodyOnlyPhrase = `SECRET_PDF_BODY_ONLY_TOKEN_${runSuffix}`;
     const v1Bytes = buildSyntheticPdf(bodyOnlyPhrase);
     const v2Bytes = buildSyntheticPdf(`V2_UPDATED_CONTENT_${runSuffix}`);
     const searchableTitle = `عقد إيجار تجاري للبحث التلقائي ${runSuffix}`;
+    const docTag = `وسم_${runSuffix}`;
 
     const doc = await createReadyMatterDocument({
       matterId: matterAId,
       title: searchableTitle,
-      documentType: 'CONTRACT',
+      documentType: 'JUDGMENT',
       documentDate: '2026-10-15',
-      tags: [`وسم_${runSuffix}`],
+      tags: [docTag],
       filename: 'lease-search-v1.pdf',
       bytes: v1Bytes,
     });
@@ -1755,7 +2628,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       data: { currentVersionId: unreadyVerId },
     });
 
-    // 1) Authorized search in DOCUMENT tab & ALL tab matches title metadata
+    // 1) Authorized search in DOCUMENT tab & ALL tab matches title, documentType, documentDate, and tags
     const docTabRes = await unifiedSearch(
       { query: searchableTitle, type: 'DOCUMENT' },
       owner
@@ -1768,6 +2641,15 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(serializedDocRes).not.toContain('objectKey');
     expect(serializedDocRes).not.toContain('quarantineKey');
     expect(serializedDocRes).not.toContain(storageRoot);
+
+    const byTypeRes = await unifiedSearch({ query: 'صورة حكم', type: 'DOCUMENT' }, owner);
+    expect(byTypeRes.items.some((item) => item.id === doc.id)).toBe(true);
+
+    const byDateRes = await unifiedSearch({ query: '2026-10-15', type: 'DOCUMENT' }, owner);
+    expect(byDateRes.items.some((item) => item.id === doc.id)).toBe(true);
+
+    const byTagRes = await unifiedSearch({ query: docTag, type: 'DOCUMENT' }, owner);
+    expect(byTagRes.items.some((item) => item.id === doc.id)).toBe(true);
 
     const allTabRes = await unifiedSearch({ query: searchableTitle, type: 'ALL' }, owner);
     expect(allTabRes.items.some((item) => item.id === doc.id && item.entityType === 'DOCUMENT')).toBe(
@@ -1785,45 +2667,45 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     );
     expect(bodyOnlyDocTab.items).toHaveLength(0);
 
-    // 3) Non-READY, PENDING/FAILED scanStatus, and archived DOCUMENTs excluded (unless includeArchived)
+    // 3) Non-READY (QUARANTINED, UPLOADING+PENDING scanStatus, FAILED) and archived docs/parents excluded
     const unreadySearch = await unifiedSearch({ query: unreadyTitle, type: 'DOCUMENT' }, owner);
     expect(unreadySearch.items).toHaveLength(0);
 
-    const pendingReadyTitle = `مستند جاهز بانتظار الفحص للبحث ${runSuffix}`;
-    const pendingReadyDocId = crypto.randomUUID();
-    const pendingReadyVerId = crypto.randomUUID();
+    const uploadingPendingTitle = `مستند قيد الرفع وبانتظار الفحص للبحث ${runSuffix}`;
+    const uploadingPendingDocId = crypto.randomUUID();
+    const uploadingPendingVerId = crypto.randomUUID();
     await prisma.document.create({
       data: {
-        id: pendingReadyDocId,
+        id: uploadingPendingDocId,
         matterId: matterAId,
-        title: pendingReadyTitle,
-        titleNormalized: pendingReadyTitle,
+        title: uploadingPendingTitle,
+        titleNormalized: uploadingPendingTitle,
         documentType: 'OTHER',
         createdById: owner.id,
         updatedById: owner.id,
       },
     });
-    createdDocumentIds.push(pendingReadyDocId);
+    createdDocumentIds.push(uploadingPendingDocId);
     await prisma.documentVersion.create({
       data: {
-        id: pendingReadyVerId,
-        documentId: pendingReadyDocId,
+        id: uploadingPendingVerId,
+        documentId: uploadingPendingDocId,
         versionNumber: 1,
-        objectKey: `q/search-pending-${pendingReadyVerId}.pdf`,
-        originalFilename: 'pending.pdf',
+        objectKey: `q/search-uploading-pending-${uploadingPendingVerId}.pdf`,
+        originalFilename: 'uploading-pending.pdf',
         declaredMime: 'application/pdf',
         sizeBytes: 100,
-        uploadStatus: 'QUARANTINED',
+        uploadStatus: 'UPLOADING',
         scanStatus: 'PENDING',
         createdById: owner.id,
       },
     });
     await prisma.document.update({
-      where: { id: pendingReadyDocId },
-      data: { currentVersionId: pendingReadyVerId },
+      where: { id: uploadingPendingDocId },
+      data: { currentVersionId: uploadingPendingVerId },
     });
     expect(
-      (await unifiedSearch({ query: pendingReadyTitle, type: 'DOCUMENT' }, owner)).items
+      (await unifiedSearch({ query: uploadingPendingTitle, type: 'DOCUMENT' }, owner)).items
     ).toHaveLength(0);
 
     const failedScanTitle = `مستند فشل الفحص مستبعد من البحث ${runSuffix}`;
@@ -1886,12 +2768,159 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       )
     ).toBe(true);
 
+    // Docs in archived Matter, archived Proceeding, and archived Party are excluded from unifiedSearch & listDocuments
+    const searchArchMatter = await openMatter(owner, {
+      title: `قضية أرشفة البحث ${runSuffix}`,
+      kind: 'LITIGATION',
+      initialClientId: partyClientAId,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(searchArchMatter.matter.id);
+    const searchArchProc = await addProceeding(owner, {
+      matterId: matterAId,
+      courtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: `4401-${runSuffix}`,
+      yearLabel: '2026',
+      registerType: 'مدني',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const searchArchParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `طرف أرشفة البحث ${runSuffix}`,
+        nameNormalized: `طرف ارشفه البحث ${runSuffix}`,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(searchArchParty.id);
+
+    const docInArchMatterTitle = `مستند ضمن قضية مؤرشفة ${runSuffix}`;
+    const docInArchProcTitle = `مستند ضمن قيد مؤرشف ${runSuffix}`;
+    const docInArchPartyTitle = `مستند ضمن طرف مؤرشف ${runSuffix}`;
+    const docInArchMatter = await createReadyMatterDocument({
+      matterId: searchArchMatter.matter.id,
+      title: docInArchMatterTitle,
+      bytes: buildSyntheticPdf(`T12-TC05-ARCHM-${runSuffix}`),
+    });
+    const docInArchProc = await createReadyMatterDocument({
+      matterId: matterAId,
+      proceedingId: searchArchProc.id,
+      title: docInArchProcTitle,
+      bytes: buildSyntheticPdf(`T12-TC05-ARCHPR-${runSuffix}`),
+    });
+    const partySearchBytes = buildSyntheticPdf(`T12-TC05-ARCHPA-${runSuffix}`);
+    const partySearchAttempt = await beginUpload(owner, {
+      partyId: searchArchParty.id,
+      title: docInArchPartyTitle,
+      documentType: 'ID_COPY',
+      originalFilename: 'search-party.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: partySearchBytes.byteLength,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(partySearchAttempt.id);
+    await uploadAttemptBytes(owner, partySearchAttempt.id, partySearchBytes);
+    const docInArchParty = await finalizeUpload(owner, { attemptId: partySearchAttempt.id });
+    createdDocumentIds.push(docInArchParty.id);
+
+    await archiveMatter(owner, {
+      matterId: searchArchMatter.matter.id,
+      expectedVersion: searchArchMatter.matter.version,
+      reason: 'أرشفة قضية البحث',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await archiveProceeding(owner, {
+      proceedingId: searchArchProc.id,
+      matterId: matterAId,
+      expectedVersion: searchArchProc.version,
+      reason: 'أرشفة قيد البحث',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await prisma.party.update({
+      where: { id: searchArchParty.id },
+      data: { archivedAt: new Date() },
+    });
+
+    for (const [excludedId, excludedTitle] of [
+      [docInArchMatter.id, docInArchMatterTitle],
+      [docInArchProc.id, docInArchProcTitle],
+      [docInArchParty.id, docInArchPartyTitle],
+    ] as const) {
+      expect((await unifiedSearch({ query: excludedTitle, type: 'DOCUMENT' }, owner)).items).toHaveLength(0);
+      expect((await listDocuments(owner, { q: excludedTitle })).documents).toHaveLength(0);
+      expect(
+        (await unifiedSearch({ query: excludedTitle, type: 'DOCUMENT', includeArchived: true }, owner)).items.some(
+          (i) => i.id === excludedId
+        )
+      ).toBe(true);
+      expect(
+        (await listDocuments(owner, { q: excludedTitle, includeArchived: true })).documents.some(
+          (d) => d.id === excludedId
+        )
+      ).toBe(true);
+    }
+
     // 4) MAINTAINER (lacks READ_CLIENT_DATA & READ_DOCUMENTS) fails closed on unifiedSearch
     await expect(
       unifiedSearch({ query: searchableTitle, type: 'DOCUMENT' }, maintainer)
     ).rejects.toThrow(AuthorizationError);
 
-    // 5) Cross-document versionId mismatch fails closed (404)
+    // 5) authorizeDownload fails closed (409) when currentVersionId is null, blank ?versionId= returns 400, HEAD returns 405 with nosniff
+    const nullCurDocId = crypto.randomUUID();
+    const nullCurVerId = crypto.randomUUID();
+    await prisma.document.create({
+      data: {
+        id: nullCurDocId,
+        matterId: matterAId,
+        title: `مستند بدون نسخة حالية ${runSuffix}`,
+        titleNormalized: `مستند بدون نسخه حاليه ${runSuffix}`,
+        documentType: 'OTHER',
+        currentVersionId: null,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdDocumentIds.push(nullCurDocId);
+    await prisma.documentVersion.create({
+      data: {
+        id: nullCurVerId,
+        documentId: nullCurDocId,
+        versionNumber: 1,
+        objectKey: `ready/null-current-${nullCurVerId}.pdf`,
+        originalFilename: 'orphan-ready.pdf',
+        declaredMime: 'application/pdf',
+        sizeBytes: 100,
+        uploadStatus: 'READY',
+        scanStatus: 'NOT_SCANNED_POLICY',
+        createdById: owner.id,
+      },
+    });
+    await expect(authorizeDownload(owner, nullCurDocId)).rejects.toThrow(DocumentNotReadyError);
+    const nullCurHttpRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${nullCurDocId}/content`, {
+        headers: { cookie: ownerCookie, 'sec-fetch-site': 'same-origin' },
+      }),
+      { params: Promise.resolve({ id: nullCurDocId }) }
+    );
+    expect(nullCurHttpRes.status).toBe(409);
+
+    const blankVerRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${doc.id}/content?versionId=%20%20`, {
+        headers: { cookie: ownerCookie, 'sec-fetch-site': 'same-origin' },
+      }),
+      { params: Promise.resolve({ id: doc.id }) }
+    );
+    expect(blankVerRes.status).toBe(400);
+
+    const headRes = headDocumentContentRoute();
+    expect(headRes.status).toBe(405);
+    expect(headRes.headers.get('allow')).toBe('GET');
+    expect(headRes.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(headRes.headers.get('cache-control')).toBe('private, no-store');
+
+    // Cross-document versionId mismatch fails closed (404)
     const otherDoc = await createReadyMatterDocument({
       matterId: matterBId,
       title: `مستند قضية ب للمطابقة ${runSuffix}`,
@@ -1946,11 +2975,13 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     const detailText = await detailHttpRes.text();
     expect(detailText).not.toContain('objectKey');
     expect(detailText).not.toContain('quarantineKey');
-  });
+  }, 60_000);
 
-  it('T12-TC-06: pin/release and reconcileAndCleanupDocumentStorage delete ONLY expired temp objects and block under RESTORE_MODE', async () => {
+  it('T12-TC-06: pin/release and reconcileAndCleanupDocumentStorage protect READY, pinned, linked, .part- < grace, Phase-1 protected attempts & TOCTOU saves, while draining >200 batches and blocking RESTORE_MODE', async () => {
     const storage = createLocalDocumentStorage(storageRoot);
-    const now = new Date('2026-11-26T10:00:00.000Z');
+    const now = new Date();
+    const pastGraceDate = new Date(now.getTime() - 10 * 60_000);
+    const insideGraceDate = new Date(now.getTime() - 60_000);
 
     // 1) Two-version READY document (v1 prior + v2 current)
     const v1Bytes = buildSyntheticPdf(`T12-TC06-V1-${runSuffix}`);
@@ -1999,8 +3030,6 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(releaseRes.releasedCount).toBe(2);
 
     // 2) Pinned orphan (non-READY version with an active BackupFilePin releasedAt: null)
-    // Backdate mtime past max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS) so only the active pin protects it.
-    const pastGraceDate = new Date(Date.now() - 10 * 60_000);
     const orphanDocId = crypto.randomUUID();
     const orphanVerId = crypto.randomUUID();
     const orphanBytes = buildSyntheticPdf(`T12-TC06-PINNED-ORPHAN-${runSuffix}`);
@@ -2042,6 +3071,166 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       { now }
     );
     expect(pinOrphanRes.pinnedCount).toBe(1);
+
+    // 2b) Phase-1 protected expired attempt (targetDocumentVersionId -> READY/BackupFilePin) survives BOTH Phase 1 and Phase 2
+    const extraReadyVerId = crypto.randomUUID();
+    const extraReadyBytes = buildSyntheticPdf(`P1-EXTRA-READY-${runSuffix}`);
+    const extraReadyKey = storage.generateReadyKey(doc.id, 3, '.pdf', now);
+    await storage.writeReadyBytes(extraReadyKey, extraReadyBytes);
+    await prisma.documentVersion.create({
+      data: {
+        id: extraReadyVerId,
+        documentId: doc.id,
+        versionNumber: 3,
+        objectKey: extraReadyKey,
+        originalFilename: 'p1-extra-ready.pdf',
+        declaredMime: 'application/pdf',
+        detectedMime: 'application/pdf',
+        sizeBytes: extraReadyBytes.byteLength,
+        sha256: sha256Hex(extraReadyBytes),
+        uploadStatus: 'READY',
+        scanStatus: 'NOT_SCANNED_POLICY',
+        scanPolicyCode: ADR_0003_POLICY_CODE,
+        scanPolicyVersion: ADR_0003_POLICY_VERSION,
+        scanCheckedAt: now,
+        createdById: owner.id,
+      },
+    });
+
+    const phase1ProtReadyAttemptId = crypto.randomUUID();
+    const phase1ProtReadyQKey = `q/t12-phase1-ready-prot-${phase1ProtReadyAttemptId}.pdf`;
+    const phase1ProtPinAttemptId = crypto.randomUUID();
+    const phase1ProtPinQKey = `q/t12-phase1-pin-prot-${phase1ProtPinAttemptId}.pdf`;
+    await storage.writeQuarantineStream(phase1ProtReadyQKey, buildSyntheticPdf(`P1-READY-${runSuffix}`));
+    await storage.writeQuarantineStream(phase1ProtPinQKey, buildSyntheticPdf(`P1-PIN-${runSuffix}`));
+    await fs.promises.utimes(path.join(storage.quarantineDir, phase1ProtReadyQKey), pastGraceDate, pastGraceDate);
+    await fs.promises.utimes(path.join(storage.quarantineDir, phase1ProtPinQKey), pastGraceDate, pastGraceDate);
+
+    await prisma.uploadAttempt.createMany({
+      data: [
+        {
+          id: phase1ProtReadyAttemptId,
+          documentId: doc.id,
+          targetDocumentVersionId: extraReadyVerId,
+          idempotencyRecordId: crypto.randomUUID(),
+          actorId: owner.id,
+          matterId: matterAId,
+          title: 'محاولة محمية بإصدار جاهز',
+          documentType: 'OTHER',
+          originalFilename: 'p1-ready.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          quarantineKey: phase1ProtReadyQKey,
+          status: 'UPLOADED',
+          expiresAt: pastGraceDate,
+        },
+        {
+          id: phase1ProtPinAttemptId,
+          documentId: orphanDocId,
+          targetDocumentVersionId: orphanVerId,
+          idempotencyRecordId: crypto.randomUUID(),
+          actorId: owner.id,
+          matterId: matterAId,
+          title: 'محاولة محمية بتثبيت احتياطي',
+          documentType: 'OTHER',
+          originalFilename: 'p1-pin.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          quarantineKey: phase1ProtPinQKey,
+          status: 'UPLOADED',
+          expiresAt: pastGraceDate,
+        },
+      ],
+    });
+    createdAttemptIds.push(phase1ProtReadyAttemptId, phase1ProtPinAttemptId);
+
+    // 2c) Non-READY versions on linked POA, HearingResult, and Deadline survive cleanup
+    const makeLinkedNonReady = async (label: string) => {
+      const dId = crypto.randomUUID();
+      const vId = crypto.randomUUID();
+      const k = `orphan/t12-linked-${label}-${vId}.pdf`;
+      const b = buildSyntheticPdf(`T12-LINKED-NONREADY-${label}-${runSuffix}`);
+      await storage.writeReadyBytes(k, b);
+      await fs.promises.utimes(path.join(storage.readyDir, k), pastGraceDate, pastGraceDate);
+      await prisma.document.create({
+        data: {
+          id: dId,
+          matterId: matterAId,
+          title: `مستند غير جاهز مرتبط ${label} ${runSuffix}`,
+          titleNormalized: `مستند غير جاهز مرتبط ${label} ${runSuffix}`,
+          documentType: 'OTHER',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      createdDocumentIds.push(dId);
+      await prisma.documentVersion.create({
+        data: {
+          id: vId,
+          documentId: dId,
+          versionNumber: 1,
+          objectKey: k,
+          originalFilename: `${label}.pdf`,
+          declaredMime: 'application/pdf',
+          sizeBytes: b.byteLength,
+          sha256: sha256Hex(b),
+          uploadStatus: 'FAILED',
+          scanStatus: 'FAILED',
+          createdById: owner.id,
+        },
+      });
+      return { docId: dId, key: k };
+    };
+
+    const linkedPoaNonReady = await makeLinkedNonReady('poa');
+    const linkedHrNonReady = await makeLinkedNonReady('hr');
+    const linkedDlNonReady = await makeLinkedNonReady('dl');
+
+    const linkedPoaRec = await prisma.powerOfAttorney.create({
+      data: {
+        partyId: partyClientAId,
+        documentId: linkedPoaNonReady.docId,
+        poaNumberText: `8801-${runSuffix}`,
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب التوثيق',
+        poaType: 'GENERAL',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPoaIds.push(linkedPoaRec.id);
+
+    const linkedHrHearing = await scheduleHearing(owner, {
+      proceedingId: proceedingA1Id,
+      hearingDate: formatOffsetYmd(34),
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(linkedHrHearing.id);
+    const linkedHrRec = await prisma.hearingResult.create({
+      data: {
+        hearingId: linkedHrHearing.id,
+        decisionDocumentId: linkedHrNonReady.docId,
+        decisionText: 'قرار مرتبط بمستند غير جاهز للحماية',
+        nextDateDisposition: 'NONE',
+        recordedAt: now,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdHearingResultIds.push(linkedHrRec.id);
+
+    const linkedDlRec = await prisma.deadline.create({
+      data: {
+        matterId: matterAId,
+        proceedingId: proceedingA1Id,
+        sourceDocumentId: linkedDlNonReady.docId,
+        title: `ميعاد مرتبط بمستند غير جاهز ${runSuffix}`,
+        status: 'DRAFT',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdDeadlineIds.push(linkedDlRec.id);
 
     // 3) Active un-expired upload in quarantine
     const activeBytes = buildSyntheticPdf(`T12-TC06-ACTIVE-${runSuffix}`);
@@ -2095,26 +3284,73 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       where: { id: expiredUploaded.id },
     });
 
-    // 5) Fresh unreferenced files (inside STALE_VALIDATING_MIN_WINDOW_MS) survive, while stale unreferenced orphans past grace are deleted
+    // 5) Fresh unreferenced files & .part- inside grace survive; stale unreferenced orphans & stale .part- past grace deleted
     const freshReadyOrphanKey = `orphan/t12-fresh-ready-${runSuffix}.pdf`;
     const freshQuarantineOrphanKey = `orphan-t12-fresh-q-${runSuffix}.bin`;
     const staleReadyOrphanKey = `orphan/t12-stale-ready-${runSuffix}.pdf`;
     const staleQuarantineOrphanKey = `orphan-t12-stale-q-${runSuffix}.bin`;
+    const freshPartKey = `q/t12-fresh.pdf.part-${runSuffix}`;
+    const stalePartKey = `q/t12-stale.pdf.part-${runSuffix}`;
 
     await storage.writeReadyBytes(freshReadyOrphanKey, buildSyntheticPdf(`FRESH-READY-${runSuffix}`));
     await storage.writeQuarantineStream(freshQuarantineOrphanKey, Buffer.from('FRESH-Q'));
     await storage.writeReadyBytes(staleReadyOrphanKey, buildSyntheticPdf(`STALE-READY-${runSuffix}`));
     await storage.writeQuarantineStream(staleQuarantineOrphanKey, Buffer.from('STALE-Q'));
-    await fs.promises.utimes(
-      path.join(storage.readyDir, staleReadyOrphanKey),
-      pastGraceDate,
-      pastGraceDate
-    );
-    await fs.promises.utimes(
-      path.join(storage.quarantineDir, staleQuarantineOrphanKey),
-      pastGraceDate,
-      pastGraceDate
-    );
+
+    await fs.promises.mkdir(path.join(storage.quarantineDir, 'q'), { recursive: true });
+    await fs.promises.writeFile(path.join(storage.quarantineDir, freshPartKey), 'PART-FRESH');
+    await fs.promises.writeFile(path.join(storage.quarantineDir, stalePartKey), 'PART-STALE');
+    await fs.promises.utimes(path.join(storage.readyDir, freshReadyOrphanKey), insideGraceDate, insideGraceDate);
+    await fs.promises.utimes(path.join(storage.quarantineDir, freshQuarantineOrphanKey), insideGraceDate, insideGraceDate);
+    await fs.promises.utimes(path.join(storage.quarantineDir, freshPartKey), insideGraceDate, insideGraceDate);
+    await fs.promises.utimes(path.join(storage.readyDir, staleReadyOrphanKey), pastGraceDate, pastGraceDate);
+    await fs.promises.utimes(path.join(storage.quarantineDir, staleQuarantineOrphanKey), pastGraceDate, pastGraceDate);
+    await fs.promises.utimes(path.join(storage.quarantineDir, stalePartKey), pastGraceDate, pastGraceDate);
+
+    // 5b) TOCTOU fresh DB re-check: file present at disk list but committed in DB before unlink runs
+    const toctouDocId = crypto.randomUUID();
+    const toctouBytes = buildSyntheticPdf(`T12-TOCTOU-${runSuffix}`);
+    const toctouSavedKey = `orphan/z-t12-toctou-${runSuffix}.pdf`;
+    await storage.writeReadyBytes(toctouSavedKey, toctouBytes);
+    await fs.promises.utimes(path.join(storage.readyDir, toctouSavedKey), pastGraceDate, pastGraceDate);
+    await prisma.document.create({
+      data: {
+        id: toctouDocId,
+        matterId: matterAId,
+        title: `مستند سباق TOCTOU ${runSuffix}`,
+        titleNormalized: `مستند سباق TOCTOU ${runSuffix}`,
+        documentType: 'OTHER',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdDocumentIds.push(toctouDocId);
+
+    let toctouInjected = false;
+    const toctouAwareStorage = {
+      ...storage,
+      async computeSha256(zone: 'quarantine' | 'ready', key: string) {
+        if (!toctouInjected && zone === 'ready' && key === orphanKey) {
+          toctouInjected = true;
+          await prisma.documentVersion.create({
+            data: {
+              id: crypto.randomUUID(),
+              documentId: toctouDocId,
+              versionNumber: 1,
+              objectKey: toctouSavedKey,
+              originalFilename: 'toctou.pdf',
+              declaredMime: 'application/pdf',
+              sizeBytes: toctouBytes.byteLength,
+              sha256: sha256Hex(toctouBytes),
+              uploadStatus: 'READY',
+              scanStatus: 'NOT_SCANNED_POLICY',
+              createdById: owner.id,
+            },
+          });
+        }
+        return storage.computeSha256!(zone, key);
+      },
+    };
 
     // Verify MANAGE_OPERATIONS authorization denial on pin, release, and reconcile
     const unauthorizedOpsActor = {
@@ -2138,10 +3374,24 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       reconcileAndCleanupDocumentStorage(storage, { now, actor: unauthorizedOpsActor })
     ).rejects.toThrow(AuthorizationError);
 
-    // Verify RESTORE_MODE blocks reconciliation & cleanup completely
+    // Verify RESTORE_MODE=true blocks pinDocumentVersionsForBackup, releaseBackupFilePins, AND cleanup
     const prevRestore = process.env.RESTORE_MODE;
     process.env.RESTORE_MODE = 'true';
     try {
+      await expect(
+        pinDocumentVersionsForBackup({
+          backupId: `restore-blocked-${runSuffix}`,
+          documentVersionIds: [v1Id],
+          actor: owner,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+      await expect(
+        releaseBackupFilePins({
+          backupId: activeBackupId,
+          actor: owner,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+
       const blocked = await reconcileAndCleanupDocumentStorage(storage, { now, actor: owner });
       expect(blocked.skipped).toBe(true);
       expect(blocked.reason).toBe('RESTORE_MODE');
@@ -2153,40 +3403,93 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     }
 
     // Run normal reconciliation/cleanup (gracePeriodMs: 60_000 -> pastGraceDate is past max(60s, 5m))
-    const reconcileRes = await reconcileAndCleanupDocumentStorage(storage, {
+    const reconcileRes = await reconcileAndCleanupDocumentStorage(toctouAwareStorage, {
       now,
       gracePeriodMs: 60_000,
       actor: owner,
     });
     expect(reconcileRes.skipped).toBe(false);
+    expect(reconcileRes.expiredAttemptCount).toBe(1);
+    // 1 expired attempt in Phase 1 + 2 quarantine deletions in Phase 2 (staleQuarantineOrphanKey + stalePartKey)
+    expect(reconcileRes.deletedQuarantineCount).toBe(3);
+
     expect(reconcileRes.deletedKeys).toContain(expiredAttemptRow.quarantineKey);
     expect(reconcileRes.deletedKeys).toContain(staleReadyOrphanKey);
     expect(reconcileRes.deletedKeys).toContain(staleQuarantineOrphanKey);
+    expect(reconcileRes.deletedKeys).toContain(stalePartKey);
     expect(reconcileRes.deletedKeys).not.toContain(freshReadyOrphanKey);
     expect(reconcileRes.deletedKeys).not.toContain(freshQuarantineOrphanKey);
+    expect(reconcileRes.deletedKeys).not.toContain(freshPartKey);
     expect(reconcileRes.deletedKeys).not.toContain(v1Row.objectKey);
     expect(reconcileRes.deletedKeys).not.toContain(v2Row.objectKey);
     expect(reconcileRes.deletedKeys).not.toContain(orphanKey);
     expect(reconcileRes.deletedKeys).not.toContain(activeAttemptRow.quarantineKey);
+    expect(reconcileRes.deletedKeys).not.toContain(phase1ProtReadyQKey);
+    expect(reconcileRes.deletedKeys).not.toContain(phase1ProtPinQKey);
+    expect(reconcileRes.deletedKeys).not.toContain(linkedPoaNonReady.key);
+    expect(reconcileRes.deletedKeys).not.toContain(linkedHrNonReady.key);
+    expect(reconcileRes.deletedKeys).not.toContain(linkedDlNonReady.key);
+    expect(reconcileRes.deletedKeys).not.toContain(toctouSavedKey);
 
-    // Verify stale unreferenced orphans & expired attempt deleted; fresh unreferenced files & pinned orphan survive
     expect(await storage.exists('quarantine', expiredAttemptRow.quarantineKey)).toBe(false);
     expect(await storage.exists('ready', staleReadyOrphanKey)).toBe(false);
     expect(await storage.exists('quarantine', staleQuarantineOrphanKey)).toBe(false);
+    expect(await storage.exists('quarantine', stalePartKey)).toBe(false);
     expect(await storage.exists('ready', freshReadyOrphanKey)).toBe(true);
     expect(await storage.exists('quarantine', freshQuarantineOrphanKey)).toBe(true);
+    expect(await storage.exists('quarantine', freshPartKey)).toBe(true);
     expect(await storage.exists('ready', v1Row.objectKey)).toBe(true);
     expect(await storage.exists('ready', v2Row.objectKey)).toBe(true);
     expect(await storage.exists('ready', orphanKey)).toBe(true);
+    expect(await storage.exists('quarantine', phase1ProtReadyQKey)).toBe(true);
+    expect(await storage.exists('quarantine', phase1ProtPinQKey)).toBe(true);
+    expect(await storage.exists('ready', linkedPoaNonReady.key)).toBe(true);
+    expect(await storage.exists('ready', linkedHrNonReady.key)).toBe(true);
+    expect(await storage.exists('ready', linkedDlNonReady.key)).toBe(true);
+    expect(await storage.exists('ready', toctouSavedKey)).toBe(true);
+
     const activeRow = await prisma.uploadAttempt.findUniqueOrThrow({
       where: { id: activeAttempt.id },
     });
     expect(await storage.exists('quarantine', activeRow.quarantineKey)).toBe(true);
 
+    // Verify protectedKeys and checksums
+    for (const expectedProtected of [
+      v1Row.objectKey,
+      v2Row.objectKey,
+      orphanKey,
+      activeRow.quarantineKey,
+      phase1ProtReadyQKey,
+      phase1ProtPinQKey,
+      linkedPoaNonReady.key,
+      linkedHrNonReady.key,
+      linkedDlNonReady.key,
+      toctouSavedKey,
+    ]) {
+      expect(reconcileRes.protectedKeys).toContain(expectedProtected);
+    }
     expect(reconcileRes.checksums[v1Row.objectKey]).toBe(sha256Hex(v1Bytes));
     expect(reconcileRes.checksums[v2Row.objectKey]).toBe(sha256Hex(v2Bytes));
     expect(reconcileRes.checksums[orphanKey]).toBe(sha256Hex(orphanBytes));
     expect(reconcileRes.checksums[activeRow.quarantineKey]).toBe(sha256Hex(activeBytes));
+    expect(reconcileRes.checksums[toctouSavedKey]).toBe(sha256Hex(toctouBytes));
+
+    // Verify RECONCILE_DOCUMENT_STORAGE AuditEvent recorded when actor passed
+    const reconcileAudit = await prisma.auditEvent.findFirstOrThrow({
+      where: {
+        userId: owner.id,
+        action: 'RECONCILE_DOCUMENT_STORAGE',
+        entityType: 'DocumentStorage',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(reconcileAudit.changedFields).toMatchObject({
+      deletedCount: reconcileRes.deletedKeys.length,
+      protectedCount: reconcileRes.protectedKeys.length,
+      expiredAttemptCount: reconcileRes.expiredAttemptCount,
+      deletedQuarantineCount: reconcileRes.deletedQuarantineCount,
+      skippedProtectedCount: reconcileRes.skippedProtectedCount,
+    });
 
     // Releasing activeBackupId makes its previously pinned non-READY orphan eligible for deletion
     const releaseActiveRes = await releaseBackupFilePins(
@@ -2204,5 +3507,34 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(await storage.exists('ready', orphanKey)).toBe(false);
     expect(await storage.exists('ready', v1Row.objectKey)).toBe(true);
     expect(await storage.exists('ready', v2Row.objectKey)).toBe(true);
-  });
+
+    // Batch drain > 200 expired attempts (CLEANUP_BATCH_SIZE = 200) drains all 205 rows without stranding #201+
+    const batchAttemptIds = Array.from({ length: 205 }, () => crypto.randomUUID());
+    await prisma.uploadAttempt.createMany({
+      data: batchAttemptIds.map((id, idx) => ({
+        id,
+        idempotencyRecordId: crypto.randomUUID(),
+        actorId: owner.id,
+        matterId: matterAId,
+        title: `دفعة منتهية ${idx}`,
+        documentType: 'OTHER',
+        originalFilename: `batch-${idx}.pdf`,
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: 100,
+        quarantineKey: `q/batch-drain-${runSuffix}-${idx}.pdf`,
+        status: 'INITIATED',
+        expiresAt: pastGraceDate,
+      })),
+    });
+    const drainRes = await reconcileAndCleanupDocumentStorage(storage, {
+      now,
+      gracePeriodMs: 60_000,
+      actor: owner,
+    });
+    expect(drainRes.expiredAttemptCount).toBe(205);
+    const remainingOpenBatch = await prisma.uploadAttempt.count({
+      where: { id: { in: batchAttemptIds }, status: { not: 'EXPIRED' } },
+    });
+    expect(remainingOpenBatch).toBe(0);
+  }, 60_000);
 });

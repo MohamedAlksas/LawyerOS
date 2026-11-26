@@ -22,13 +22,17 @@ import { PoaSection } from './poa-section';
 interface PartyProfileClientProps {
   ownerId: string;
   party: ClientProfileDTO;
+  canReadDocuments?: boolean;
   availablePoaDocuments?: LinkableDocumentSummary[];
+  poaDocumentsError?: string;
 }
 
 export function PartyProfileClient({
   ownerId,
   party,
+  canReadDocuments = true,
   availablePoaDocuments = [],
+  poaDocumentsError,
 }: PartyProfileClientProps) {
   const isArchived = Boolean(party.archivedAt);
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
@@ -397,7 +401,9 @@ export function PartyProfileClient({
         ownerId={ownerId}
         partyId={party.id}
         initialPoas={party.powersOfAttorney}
+        canReadDocuments={canReadDocuments}
         availableDocuments={availablePoaDocuments}
+        documentsLoadError={poaDocumentsError}
         readOnly={isArchived}
       />
 
@@ -519,13 +525,13 @@ export function PartyProfileClient({
         )}
       </div>
 
-      {/* 6. Future Financial & Documents Modules Indicator */}
+      {/* 6. Future Financial Modules Indicator */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          الحسابات المالية والمستندات الرقمية
+          الحسابات المالية والأتعاب
         </span>
         <p>
-          وحدات المستندات الرقمية وحسابات الأتعاب والمصروفات
+          وحدات حسابات الأتعاب والمصروفات
           غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
         </p>
       </div>

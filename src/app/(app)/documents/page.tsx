@@ -33,6 +33,7 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
     if (error instanceof AuthorizationError) {
       return (
         <div
+          role="alert"
           data-testid="documents-forbidden"
           className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
         >

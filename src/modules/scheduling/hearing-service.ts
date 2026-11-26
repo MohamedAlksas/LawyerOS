@@ -138,8 +138,8 @@ interface TaskRecord {
 
 function mapHearingToDTO(
   raw: HearingRecord,
-  duplicateWarning = false,
-  canReadDocuments = true
+  duplicateWarning: boolean,
+  canReadDocuments: boolean
 ): HearingDTO {
   const latestResultRaw = raw.results && raw.results.length > 0 ? raw.results[0] : null;
   const latestResult: HearingResultSummaryDTO | null = latestResultRaw
@@ -185,7 +185,7 @@ function mapHearingToDTO(
   };
 }
 
-function mapHearingResultToDTO(raw: HearingResultRecord, canReadDocuments = true): HearingResultDTO {
+function mapHearingResultToDTO(raw: HearingResultRecord, canReadDocuments: boolean): HearingResultDTO {
   return {
     id: raw.id,
     hearingId: raw.hearingId,
@@ -261,8 +261,8 @@ type HearingAcknowledgment = ReturnType<typeof hearingAcknowledgment>;
 async function replayHearing(
   tx: Prisma.TransactionClient,
   ack: HearingAcknowledgment,
-  resultId?: string,
-  canReadDocuments = true
+  resultId: string | undefined,
+  canReadDocuments: boolean
 ) {
   const record = await tx.hearing.findUniqueOrThrow({
     where: { id: ack.id },
@@ -280,7 +280,7 @@ async function replayHearing(
       rescheduleReason: ack.status === 'RESCHEDULED' ? record.rescheduleReason : null,
       cancellationReason: ack.status === 'CANCELLED' ? record.cancellationReason : null,
     },
-    ack.duplicateDateWarning,
+    Boolean(ack.duplicateDateWarning),
     canReadDocuments
   );
 }
@@ -305,7 +305,7 @@ function resultAcknowledgment(value: RecordHearingResultResult) {
 async function replayResult(
   tx: Prisma.TransactionClient,
   raw: unknown,
-  canReadDocuments = true
+  canReadDocuments: boolean
 ): Promise<RecordHearingResultResult> {
   const ack = raw as ReturnType<typeof resultAcknowledgment>;
   const result = mapHearingResultToDTO(
@@ -370,6 +370,7 @@ export async function scheduleHearing(
   const purpose = input.purpose || input.hearingPurpose || null;
   const courtHall = input.courtHall || input.locationRoom || null;
   const rollNumber = input.rollNumber || null;
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const intent = {
     proceedingId: input.proceedingId, hearingDate: input.hearingDate, hearingTime: normTime, courtHall, purpose, rollNumber,
   };
@@ -442,10 +443,10 @@ export async function scheduleHearing(
       },
     });
 
-    const dto = mapHearingToDTO(hearing, duplicateWarning);
+    const dto = mapHearingToDTO(hearing, duplicateWarning, canReadDocuments);
 
     return { value: dto, resultId: dto.id, acknowledgment: hearingAcknowledgment(dto) };
-  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment));
+  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment, undefined, canReadDocuments));
 }
 
 export async function recordHearingResult(
@@ -648,7 +649,7 @@ export async function recordHearingResult(
         },
       });
 
-      nextHearingDTO = mapHearingToDTO(nextHearing);
+      nextHearingDTO = mapHearingToDTO(nextHearing, false, canReadDocuments);
     }
 
     // 6. Create selected follow-up tasks
@@ -767,7 +768,7 @@ export async function correctHearingResult(
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, currentResultId: input.currentResultId,
     reason, decision, summary: input.summary === '' ? null : input.summary,
     attendance: input.attendance === '' ? null : input.attendance, notes: input.notes === '' ? null : input.notes,
-    decisionDocumentId: input.decisionDocumentId,
+    ...(input.decisionDocumentId !== undefined ? { decisionDocumentId: input.decisionDocumentId } : {}),
     nextDateDisposition: input.nextDateDisposition, nextHearingDate: input.nextHearingDate ?? null, nextHearingTime,
   };
   const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
@@ -811,17 +812,33 @@ export async function correctHearingResult(
       }
     }
 
-    if (input.decisionDocumentId) {
-      await assertLinkableDocument(tx, input.decisionDocumentId, {
-        kind: 'MATTER',
-        matterId,
-        proceedingId,
-        hearingId: input.hearingId,
-      });
+    if (
+      latestResult.decisionDocumentId !== null &&
+      input.decisionDocumentId !== undefined &&
+      input.decisionDocumentId !== latestResult.decisionDocumentId
+    ) {
+      assertAuthorized(actor, 'READ_DOCUMENTS');
     }
 
     const nextDecisionDocumentId =
       input.decisionDocumentId === undefined ? latestResult.decisionDocumentId : input.decisionDocumentId;
+
+    if (nextDecisionDocumentId !== null) {
+      const isUnchangedExistingLink =
+        input.decisionDocumentId === undefined ||
+        input.decisionDocumentId === latestResult.decisionDocumentId;
+      await assertLinkableDocument(
+        tx,
+        nextDecisionDocumentId,
+        {
+          kind: 'MATTER',
+          matterId,
+          proceedingId,
+          hearingId: input.hearingId,
+        },
+        { allowExistingArchived: isUnchangedExistingLink }
+      );
+    }
 
     // 3. Create new Revision of HearingResult preserving history
     const nextRevision = latestResult.revision + 1;
@@ -906,6 +923,7 @@ export async function rescheduleHearing(
   const purpose = hasPurpose ? (input.purpose || null) : undefined;
   const hasRollNumber = input.rollNumber !== undefined;
   const rollNumber = hasRollNumber ? (input.rollNumber || null) : undefined;
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const taskChanges = (input.taskChanges ?? []).toSorted((left, right) => left.taskId.localeCompare(right.taskId));
   const intent = {
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, newHearingDate: input.newHearingDate,
@@ -1093,8 +1111,8 @@ export async function rescheduleHearing(
       },
     });
 
-    const originalDTO = mapHearingToDTO(updatedOriginal);
-    const replacementDTO = mapHearingToDTO(replacementHearing);
+    const originalDTO = mapHearingToDTO(updatedOriginal, false, canReadDocuments);
+    const replacementDTO = mapHearingToDTO(replacementHearing, false, canReadDocuments);
 
     const result: RescheduleHearingResult = {
       originalHearing: originalDTO,
@@ -1107,8 +1125,8 @@ export async function rescheduleHearing(
     } };
   }, async (tx, raw) => {
     const ack = raw as { original: HearingAcknowledgment; replacement: HearingAcknowledgment };
-    const originalHearing = await replayHearing(tx, ack.original);
-    const replacementHearing = await replayHearing(tx, ack.replacement);
+    const originalHearing = await replayHearing(tx, ack.original, undefined, canReadDocuments);
+    const replacementHearing = await replayHearing(tx, ack.replacement, undefined, canReadDocuments);
     return { originalHearing, replacementHearing, newHearing: replacementHearing };
   });
 }
@@ -1130,6 +1148,7 @@ export async function cancelHearing(
   }
   const input = parsed.data;
   const reason = input.reason.trim();
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const intent = { hearingId: input.hearingId, expectedVersion: input.expectedVersion, reason };
   return hearingCommand(actor, 'cancelHearing', input.idempotencyKey, intent, async (tx) => {
@@ -1183,10 +1202,10 @@ export async function cancelHearing(
       reason,
     });
 
-    const dto = mapHearingToDTO(cancelled);
+    const dto = mapHearingToDTO(cancelled, false, canReadDocuments);
 
     return { value: dto, resultId: dto.id, acknowledgment: hearingAcknowledgment(dto) };
-  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment));
+  }, (tx, ack) => replayHearing(tx, ack as HearingAcknowledgment, undefined, canReadDocuments));
 }
 
 export async function getHearing(

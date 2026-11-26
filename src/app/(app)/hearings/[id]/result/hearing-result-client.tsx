@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
 import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, LinkableDocumentSummary, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
-import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
+import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
 import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
 import {
   HearingStatus,
@@ -40,6 +40,7 @@ interface HearingResultClientProps {
   proceedingId: string;
   canReadDocuments?: boolean;
   availableDocuments?: LinkableDocumentSummary[];
+  documentsLoadError?: string;
   latestResult: {
     id: string;
     decisionText: string;
@@ -78,6 +79,7 @@ export function HearingResultClient({
   proceedingId,
   canReadDocuments = true,
   availableDocuments = [],
+  documentsLoadError,
   latestResult: initialLatestResult,
 }: HearingResultClientProps) {
   const router = useRouter();
@@ -90,6 +92,9 @@ export function HearingResultClient({
   const [linkedNext, setLinkedNext] = useState(nextHearing);
   const [currentStatus, setCurrentStatus] = useState<HearingStatus>(initialStatus);
   const [latestResult, setLatestResult] = useState(initialLatestResult);
+  const [docsList, setDocsList] = useState<LinkableDocumentSummary[]>(availableDocuments);
+  const [docsError, setDocsError] = useState<string | null>(documentsLoadError ?? null);
+  const [isRetryingDocs, setIsRetryingDocs] = useState(false);
 
   // Form state
   const [decision, setDecision] = useState(resultDraft.restored?.decision ?? '');
@@ -180,7 +185,7 @@ export function HearingResultClient({
         decision: decision.trim(),
         summary: summary.trim() || null,
         attendance: attendance.trim() || null,
-        decisionDocumentId: decisionDocumentId || null,
+        ...(canReadDocuments ? { decisionDocumentId: decisionDocumentId || null } : {}),
         nextDateDisposition,
         nextHearing: nextDateDisposition === 'KNOWN'
           ? { hearingDate: nextHearingDate, hearingTime: nextHearingTime || null, courtName, circuit }
@@ -251,7 +256,7 @@ export function HearingResultClient({
         currentResultId: latestResult.id,
         decision: correctedDecision.trim(),
         reason: correctionReason.trim(),
-        decisionDocumentId: correctedDecisionDocumentId || null,
+        ...(canReadDocuments ? { decisionDocumentId: correctedDecisionDocumentId || null } : {}),
         idempotencyKey: generateClientRequestId('corr'),
       };
       correctionDraft.keep(pendingCorrection.current);
@@ -279,13 +284,14 @@ export function HearingResultClient({
       correctionDraft.clear();
       setCorrectionFrozen(false);
       setSessionExpiredFor(null);
+      setCorrectionReason('');
       setCorrectionSuccess(true);
       setIsCorrecting(false);
       setLatestResult({
         ...response.data,
         correctionReason: response.data.correctionReason ?? null,
-        decisionDocumentId: response.data.decisionDocumentId ?? null,
-        decisionDocument: response.data.decisionDocument ?? null,
+        decisionDocumentId: canReadDocuments ? (response.data.decisionDocumentId ?? null) : null,
+        decisionDocument: canReadDocuments ? (response.data.decisionDocument ?? null) : null,
       });
       router.refresh();
     } catch {
@@ -296,16 +302,71 @@ export function HearingResultClient({
     }
   };
 
+  const retryLoadDocuments = async () => {
+    if (!canReadDocuments || isRetryingDocs) return;
+    setIsRetryingDocs(true);
+    setDocsError(null);
+    try {
+      const res = await fetch(`/api/documents?matterId=${encodeURIComponent(matterId)}&limit=100`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { success: true; data: { documents: DocumentDTO[] } }
+        | { success: false; error?: string }
+        | null;
+      if (!res.ok || !body || !body.success) {
+        setDocsError(
+          (body && !body.success && body.error) || 'تعذر تحميل مستندات الملف الجاهزة من الخادم.'
+        );
+        return;
+      }
+      setDocsList(
+        body.data.documents
+          .filter(
+            (d) =>
+              !d.archivedAt &&
+              d.currentVersionId &&
+              d.currentVersion?.isReady &&
+              (!d.proceedingId || d.proceedingId === proceedingId) &&
+              (!d.hearingId || d.hearingId === hearingId)
+          )
+          .map((d) => ({
+            id: d.id,
+            title: d.title,
+            documentType: d.documentType,
+            currentVersionId: d.currentVersionId,
+            scanStatusLabel: d.currentVersion!.scanStatusLabel,
+            proceedingId: d.proceedingId,
+            hearingId: d.hearingId,
+          }))
+      );
+      setDocsError(null);
+    } catch {
+      setDocsError('تعذر تحميل مستندات الملف بسبب انقطاع الاتصال.');
+    } finally {
+      setIsRetryingDocs(false);
+    }
+  };
+
   const summaryText = formatRecordResultSummary({
     nextDate: nextDateDisposition === 'KNOWN' && nextHearingDate.trim() ? nextHearingDate.trim() : null,
     taskCount: tasks.filter((t) => t.title.trim().length > 0).length,
   });
 
+  const isPreservedDecisionDocExcluded =
+    Boolean(latestResult?.decisionDocument) &&
+    !docsError &&
+    !docsList.some((doc) => doc.id === latestResult?.decisionDocument?.id);
+
   const correctionSelectableDocuments =
     latestResult?.decisionDocument &&
-    !availableDocuments.some((doc) => doc.id === latestResult.decisionDocument?.id)
-      ? [latestResult.decisionDocument, ...availableDocuments]
-      : availableDocuments;
+    !docsList.some((doc) => doc.id === latestResult.decisionDocument?.id)
+      ? [latestResult.decisionDocument, ...docsList]
+      : docsList;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
@@ -470,6 +531,11 @@ export function HearingResultClient({
                 <bdi className="[overflow-wrap:anywhere]">
                   {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
                 </bdi>
+                {latestResult.decisionDocument && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestResult.decisionDocument.documentType]})
+                  </span>
+                )}
                 {latestResult.decisionDocument?.scanStatusLabel && (
                   <span
                     className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestResult.decisionDocument.scanStatusLabel)}`}
@@ -529,11 +595,14 @@ export function HearingResultClient({
                 type="button"
                 onClick={() => {
                   setIsCorrecting(true);
+                  setCorrectionReason('');
+                  setCorrectionSuccess(false);
+                  setCorrectionError(null);
                   setCorrectedDecision(latestResult?.decisionText || '');
                   setCorrectedDecisionDocumentId(latestResult?.decisionDocumentId ?? '');
                 }}
                 data-testid="correct-result-button"
-                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 تصحيح نتيجة الجلسة
               </button>
@@ -651,21 +720,48 @@ export function HearingResultClient({
                     className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                   >
                     <option value="">بدون مستند قرار مرتبط (اختياري)</option>
-                    {correctionSelectableDocuments.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
-                      </option>
-                    ))}
+                    {correctionSelectableDocuments.map((doc) => {
+                      const isArchivedPreserved =
+                        isPreservedDecisionDocExcluded &&
+                        doc.id === latestResult?.decisionDocument?.id;
+                      return (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                          {isArchivedPreserved ? ' (مؤرشف)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {docsError && (
+                    <div
+                      role="alert"
+                      data-testid="hearing-documents-load-error"
+                      className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                    >
+                      <span>{docsError}</span>
+                      <button
+                        type="button"
+                        disabled={isRetryingDocs}
+                        onClick={() => void retryLoadDocuments()}
+                        className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                      >
+                        {isRetryingDocs ? 'جارٍ التحميل...' : 'إعادة المحاولة'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsCorrecting(false)}
+                  onClick={() => {
+                    setIsCorrecting(false);
+                    setCorrectionReason('');
+                    setCorrectionError(null);
+                  }}
                   disabled={correctionFieldsDisabled}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-semibold rounded-[6px] min-h-[44px]"
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   إلغاء
                 </button>
@@ -674,7 +770,7 @@ export function HearingResultClient({
                   onClick={handleSaveCorrection}
                   disabled={correctionSubmitting}
                   data-testid="save-correction-btn"
-                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
+                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   {correctionSubmitting ? 'جارٍ حفظ التصحيح...' : correctionFrozen ? 'إعادة محاولة حفظ التصحيح' : 'حفظ التصحيح'}
                 </button>
@@ -699,13 +795,13 @@ export function HearingResultClient({
           <div className="flex flex-wrap gap-2 pt-1">
             <Link
               href={`/hearings/${hearingId}`}
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] min-h-[40px] inline-flex items-center"
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] min-h-[44px] inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
             >
               العودة لتفاصيل الجلسة
             </Link>
             <Link
               href={`/matters/${matterId}/proceedings/${proceedingId}`}
-              className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] inline-flex items-center"
+              className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
             >
               عرض القيد القضائي
             </Link>
@@ -766,12 +862,29 @@ export function HearingResultClient({
                 className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
               >
                 <option value="">بدون مستند قرار مرتبط (اختياري)</option>
-                {availableDocuments.map((doc) => (
+                {docsList.map((doc) => (
                   <option key={doc.id} value={doc.id}>
                     {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
                   </option>
                 ))}
               </select>
+              {docsError && (
+                <div
+                  role="alert"
+                  data-testid="hearing-documents-load-error"
+                  className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                >
+                  <span>{docsError}</span>
+                  <button
+                    type="button"
+                    disabled={isRetryingDocs}
+                    onClick={() => void retryLoadDocuments()}
+                    className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                  >
+                    {isRetryingDocs ? 'جارٍ التحميل...' : 'إعادة المحاولة'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {/* Next Date Radio Group */}

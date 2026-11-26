@@ -33,7 +33,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض هذا الملف.</p>
         </div>
@@ -68,18 +68,19 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     throw error;
   }
 
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const [tasksResult, deadlinesResult, docsResult] = await Promise.allSettled([
     listTasks(actor, { matterId: id, includeCompleted: true }),
     listDeadlines(actor, { matterId: id, includeClosed: true }),
-    authorize(actor, 'READ_DOCUMENTS')
+    canReadDocuments
       ? listDocuments(actor, { matterId: id, limit: 100 })
       : Promise.resolve(null),
   ]);
 
   const initialTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : ([] as TaskItemDTO[]);
   const initialDeadlines = deadlinesResult.status === 'fulfilled' ? deadlinesResult.value : ([] as DeadlineDTO[]);
-  const initialDocuments: LinkableDocumentSummary[] =
-    docsResult.status === 'fulfilled' && docsResult.value
+  const initialDocuments: LinkableDocumentSummary[] | undefined =
+    canReadDocuments && docsResult.status === 'fulfilled' && docsResult.value
       ? docsResult.value.documents
           .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
           .map((d) => ({
@@ -88,8 +89,14 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
             documentType: d.documentType,
             currentVersionId: d.currentVersionId,
             scanStatusLabel: d.currentVersion!.scanStatusLabel,
+            proceedingId: d.proceedingId,
+            hearingId: d.hearingId,
           }))
-      : [];
+      : undefined;
+  const documentsError =
+    canReadDocuments && docsResult.status === 'rejected'
+      ? 'تعذر تحميل مستندات القضية من الخادم.'
+      : undefined;
   const tasksError =
     tasksResult.status === 'rejected'
       ? tasksResult.reason instanceof ProductivityValidationError
@@ -110,6 +117,8 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         initialTasks={initialTasks}
         initialDeadlines={initialDeadlines}
         initialDocuments={initialDocuments}
+        canReadDocuments={canReadDocuments}
+        documentsError={documentsError}
         tasksError={tasksError}
         deadlinesError={deadlinesError}
       />

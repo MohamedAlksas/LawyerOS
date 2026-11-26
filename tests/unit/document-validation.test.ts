@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { getEnv, validateEnv } from '@/lib/env';
 import type { Actor } from '@/modules/identity/types';
+import {
+  SCAN_STATUS_BADGE_CLASSES,
+  getScanStatusBadgeClassFromLabel,
+} from '@/components/documents/document-ui-helpers';
 import {
   verifyDocumentReadOrigin,
   verifyDocumentMutationOrigin,
@@ -15,6 +18,7 @@ import {
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
+  DocumentNotFoundError,
   DocumentScanPolicyUnavailableError,
   DocumentStoragePathError,
   DocumentValidationError,
@@ -34,16 +38,11 @@ import {
   sanitizeDisplayFilename,
   updateDocumentMetadataSchema,
 } from '@/modules/documents';
-
-function buildSyntheticPdf(extraBytes = 0): Buffer {
-  const header = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n', 'ascii');
-  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
-  if (extraBytes <= 0) {
-    return Buffer.concat([header, footer]);
-  }
-  const pad = Buffer.alloc(extraBytes, 0x20);
-  return Buffer.concat([header, pad, footer]);
-}
+import {
+  buildSyntheticPdf,
+  buildSyntheticPng,
+  makePngChunk,
+} from '../helpers/synthetic-files';
 
 function buildSyntheticJpeg(entropyBytes: number[] = [0x11, 0x22, 0x33, 0x44]): Buffer {
   return Buffer.from([
@@ -53,40 +52,6 @@ function buildSyntheticJpeg(entropyBytes: number[] = [0x11, 0x22, 0x33, 0x44]): 
     0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
     ...entropyBytes,
     0xff, 0xd9, // EOI
-  ]);
-}
-
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
-function buildSyntheticPng(): Buffer {
-  const ihdr = Buffer.from([
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00,
-  ]);
-  const idat = zlib.deflateSync(Buffer.from([0x00, 0xff, 0x00, 0x00]));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', idat),
-    makePngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
@@ -802,9 +767,35 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
           sha256: 'cannot-override-bytes',
         }).success
       ).toBe(false);
+
+      // Empty no-op payload without any mutable metadata field must reject
+      const emptyNoOp = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 1,
+        idempotencyKey: 'meta-empty-noop',
+      });
+      expect(emptyNoOp.success).toBe(false);
     });
 
-    it('validates backup pin & release inputs (backupId bounds, UUID version IDs, and deduplication)', async () => {
+    it('maps UI scan status labels to expected ADR 0003 badge classes', () => {
+      expect(getScanStatusBadgeClassFromLabel('بانتظار الفحص')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.PENDING
+      );
+      expect(getScanStatusBadgeClassFromLabel('قيد الفحص')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.PENDING
+      );
+      expect(getScanStatusBadgeClassFromLabel('مفحوص وسليم')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.CLEAN
+      );
+      expect(getScanStatusBadgeClassFromLabel('مرفوض أمنياً')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.INFECTED
+      );
+      expect(getScanStatusBadgeClassFromLabel('لم يُفحص ضد الفيروسات')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY
+      );
+    });
+
+    it('validates backup pin & release inputs (backupId bounds, UUID version IDs, deduplication, audit, missing IDs & RESTORE_MODE)', async () => {
       // Note: document-types.ts does not export Zod schemas for backup pins; validation is enforced
       // directly in pinDocumentVersionsForBackup / releaseBackupFilePins via assertValidBackupId & assertUuidOrThrow.
       const ownerActor: Actor = {
@@ -846,26 +837,39 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
 
       const verA = crypto.randomUUID();
       const verB = crypto.randomUUID();
+      let capturedFindManyIds: string[] = [];
+      let capturedCreateManyIds: string[] = [];
+      const auditEvents: Array<{ action: string; entityType: string; entityId: string }> = [];
+
       const mockTx = {
+        documentVersion: {
+          findMany: async (args: { where?: { id?: { in?: string[] } } }) => {
+            capturedFindManyIds = args.where?.id?.in ?? [];
+            return capturedFindManyIds.map((id) => ({ id }));
+          },
+        },
         backupFilePin: {
-          createMany: async () => ({ count: 2 }),
+          createMany: async (args: { data: Array<{ documentVersionId: string }> }) => {
+            capturedCreateManyIds = args.data.map((d) => d.documentVersionId);
+            return { count: args.data.length };
+          },
           updateMany: async (args: { where?: { releasedAt?: unknown } }) => ({
             count: args?.where?.releasedAt === null ? 2 : 0,
           }),
         },
         auditEvent: {
-          create: async () => ({ id: crypto.randomUUID() }),
+          create: async (args: { data: { action: string; entityType: string; entityId: string } }) => {
+            auditEvents.push({
+              action: args.data.action,
+              entityType: args.data.entityType,
+              entityId: args.data.entityId,
+            });
+            return { id: crypto.randomUUID() };
+          },
         },
       };
       const mockPrisma = {
-        documentVersion: {
-          findMany: async () => [{ id: verA }, { id: verB }],
-        },
-        backupFilePin: {
-          updateMany: async () => ({ count: 2 }),
-        },
-        $transaction: async <T>(fn: (tx: typeof mockTx & { backupFilePin: typeof mockTx.backupFilePin }) => Promise<T>) =>
-          fn(mockTx),
+        $transaction: async <T>(fn: (tx: typeof mockTx) => Promise<T>) => fn(mockTx),
       } as unknown as PrismaClient;
 
       const pinRes = await pinDocumentVersionsForBackup(
@@ -879,6 +883,8 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(pinRes.backupId).toBe('backup-2026-11-26');
       expect(pinRes.pinnedCount).toBe(2);
       expect(pinRes.documentVersionIds).toEqual([verA, verB]);
+      expect(capturedFindManyIds).toEqual([verA, verB]);
+      expect(capturedCreateManyIds).toEqual([verA, verB]);
 
       const relRes = await releaseBackupFilePins(
         {
@@ -890,6 +896,63 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(relRes.backupId).toBe('backup-2026-11-26');
       expect(relRes.releasedCount).toBe(2);
       expect(relRes.releasedAt).toBe('2026-11-26T01:00:00.000Z');
+      expect(auditEvents).toEqual([
+        {
+          action: 'PIN_DOCUMENT_VERSIONS_FOR_BACKUP',
+          entityType: 'BackupFilePin',
+          entityId: 'backup-2026-11-26',
+        },
+        {
+          action: 'RELEASE_BACKUP_FILE_PINS',
+          entityType: 'BackupFilePin',
+          entityId: 'backup-2026-11-26',
+        },
+      ]);
+
+      // Missing version ID in DB rejects with DocumentNotFoundError
+      const missingMockPrisma = {
+        $transaction: async <T>(
+          fn: (tx: {
+            documentVersion: { findMany: () => Promise<Array<{ id: string }>> };
+          }) => Promise<T>
+        ) =>
+          fn({
+            documentVersion: {
+              findMany: async () => [{ id: verA }],
+            },
+          }),
+      } as unknown as PrismaClient;
+      await expect(
+        pinDocumentVersionsForBackup(
+          {
+            backupId: 'backup-missing-ver',
+            documentVersionIds: [verA, verB],
+            actor: ownerActor,
+          },
+          { prismaOverride: missingMockPrisma }
+        )
+      ).rejects.toThrow(DocumentNotFoundError);
+
+      // RESTORE_MODE blocks pin & release
+      const prevRestore = process.env.RESTORE_MODE;
+      process.env.RESTORE_MODE = 'true';
+      try {
+        await expect(
+          pinDocumentVersionsForBackup(
+            { backupId: 'backup-restore-block', documentVersionIds: [verA], actor: ownerActor },
+            { prismaOverride: mockPrisma }
+          )
+        ).rejects.toThrow(DocumentValidationError);
+        await expect(
+          releaseBackupFilePins(
+            { backupId: 'backup-restore-block', actor: ownerActor },
+            { prismaOverride: mockPrisma }
+          )
+        ).rejects.toThrow(DocumentValidationError);
+      } finally {
+        if (prevRestore === undefined) delete process.env.RESTORE_MODE;
+        else process.env.RESTORE_MODE = prevRestore;
+      }
     });
   });
 });

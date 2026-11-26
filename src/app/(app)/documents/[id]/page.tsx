@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
+import { authorize } from '@/modules/identity/authorize';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { getDocument } from '@/modules/documents/document-service';
 import {
@@ -22,6 +23,7 @@ interface DocumentDetailPageProps {
 function renderForbidden() {
   return (
     <div
+      role="alert"
       data-testid="document-detail-forbidden"
       className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
     >
@@ -75,9 +77,15 @@ export default async function DocumentDetailPage({ params }: DocumentDetailPageP
     throw error;
   }
 
+  const canWriteDocuments = authorize(actor, 'WRITE_DOCUMENTS');
+
   return (
     <div className="max-w-5xl mx-auto">
-      <DocumentDetailView key={`${actor.id}:${document.id}`} document={document} />
+      <DocumentDetailView
+        key={`${actor.id}:${document.id}`}
+        document={document}
+        canWriteDocuments={canWriteDocuments}
+      />
     </div>
   );
 }

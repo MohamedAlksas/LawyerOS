@@ -301,6 +301,7 @@ function mapUploadAttemptToDTO(attempt: Prisma.UploadAttemptGetPayload<object>):
     id: attempt.id,
     documentId: attempt.documentId,
     targetDocumentVersionId: attempt.targetDocumentVersionId,
+    expectedDocumentVersion: attempt.expectedDocumentVersion,
     matterId: attempt.matterId,
     partyId: attempt.partyId,
     proceedingId: attempt.proceedingId,
@@ -727,8 +728,12 @@ async function assertActiveDocumentParentForVersion(
     partyId: string | null;
     proceedingId?: string | null;
     hearingId?: string | null;
-  }
+  },
+  options?: { actionLabel?: string; allowArchived?: boolean }
 ): Promise<void> {
+  const actionLabel = options?.actionLabel ?? 'إضافة نسخة جديدة لمستند';
+  const allowArchived = options?.allowArchived ?? false;
+
   if (doc.matterId) {
     const [matter] = await tx.$queryRaw<
       Array<{ id: string; status: string; archivedAt: Date | null }>
@@ -741,8 +746,8 @@ async function assertActiveDocumentParentForVersion(
     if (!matter) {
       throw new DocumentNotFoundError('ملف القضية المرتبط بالمستند غير موجود.');
     }
-    if (matter.archivedAt !== null || matter.status === 'ARCHIVED') {
-      throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في ملف قضية مؤرشف.');
+    if (!allowArchived && (matter.archivedAt !== null || matter.status === 'ARCHIVED')) {
+      throw new DocumentValidationError(`لا يمكن ${actionLabel} في ملف قضية مؤرشف.`);
     }
 
     let proceedingIdToCheck = doc.proceedingId ?? null;
@@ -769,8 +774,8 @@ async function assertActiveDocumentParentForVersion(
       if (!proceeding) {
         throw new DocumentNotFoundError('القيد القضائي المرتبط بالمستند غير موجود.');
       }
-      if (proceeding.archivedAt !== null) {
-        throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في قيد قضائي مؤرشف.');
+      if (!allowArchived && proceeding.archivedAt !== null) {
+        throw new DocumentValidationError(`لا يمكن ${actionLabel} في قيد قضائي مؤرشف.`);
       }
     }
   } else if (doc.partyId) {
@@ -783,10 +788,63 @@ async function assertActiveDocumentParentForVersion(
     if (!party) {
       throw new DocumentNotFoundError('الطرف المرتبط بالمستند غير موجود.');
     }
-    if (party.archivedAt !== null) {
-      throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند تابع لطرف مؤرشف.');
+    if (!allowArchived && party.archivedAt !== null) {
+      throw new DocumentValidationError(`لا يمكن ${actionLabel} تابع لطرف مؤرشف.`);
     }
   }
+}
+
+/**
+ * Canonical lock order: read parent IDs without locking -> lock matter -> proceeding (or party)
+ * FOR UPDATE -> lock document FOR UPDATE LAST -> re-read locked document and assert active state.
+ */
+async function lockActiveDocumentForMutation(
+  tx: Prisma.TransactionClient,
+  documentId: string,
+  options?: {
+    actionLabel?: string;
+    archivedDocumentMessage?: string;
+    allowArchived?: boolean;
+  }
+) {
+  const actionLabel = options?.actionLabel ?? 'إضافة نسخة جديدة لمستند';
+  const archivedDocumentMessage =
+    options?.archivedDocumentMessage ?? 'لا يمكن إضافة نسخة جديدة لمستند مؤرشف.';
+  const allowArchived = options?.allowArchived ?? false;
+
+  const docRef = await tx.document.findUnique({
+    where: { id: documentId },
+    select: { id: true, matterId: true, partyId: true, proceedingId: true, hearingId: true },
+  });
+  if (!docRef) {
+    throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
+  }
+
+  await assertActiveDocumentParentForVersion(tx, docRef, { actionLabel, allowArchived });
+
+  const lockedDocs = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "document" WHERE "id" = ${documentId} FOR UPDATE
+  `;
+  if (lockedDocs.length === 0) {
+    throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
+  }
+
+  const lockedDoc = await tx.document.findUniqueOrThrow({
+    where: { id: documentId },
+  });
+  if (!allowArchived && lockedDoc.archivedAt !== null) {
+    throw new DocumentValidationError(archivedDocumentMessage);
+  }
+  if (
+    lockedDoc.matterId !== docRef.matterId ||
+    lockedDoc.partyId !== docRef.partyId ||
+    lockedDoc.proceedingId !== docRef.proceedingId ||
+    lockedDoc.hearingId !== docRef.hearingId
+  ) {
+    await assertActiveDocumentParentForVersion(tx, lockedDoc, { actionLabel, allowArchived });
+  }
+
+  return lockedDoc;
 }
 
 export async function beginVersionUpload(
@@ -829,21 +887,7 @@ export async function beginVersionUpload(
           return claim.resultId;
         }
 
-        const lockedDocs = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id" FROM "document" WHERE "id" = ${parsed.documentId} FOR UPDATE
-        `;
-        if (lockedDocs.length === 0) {
-          throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
-        }
-
-        const doc = await tx.document.findUniqueOrThrow({
-          where: { id: parsed.documentId },
-        });
-        if (doc.archivedAt !== null) {
-          throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند مؤرشف.');
-        }
-
-        await assertActiveDocumentParentForVersion(tx, doc);
+        const doc = await lockActiveDocumentForMutation(tx, parsed.documentId);
 
         if (doc.version !== parsed.expectedDocumentVersion) {
           throw new ConcurrencyConflictError(
@@ -1248,12 +1292,20 @@ export async function finalizeUpload(
       throw err;
     }
 
-    // Check duplicate SHA-256 against existing READY DocumentVersions
+    // Check duplicate SHA-256 against existing READY DocumentVersions of non-archived documents/parents
     const duplicateVersions = await db.documentVersion.findMany({
       where: {
         sha256: inspected.sha256,
         uploadStatus: 'READY',
-        document: { archivedAt: null },
+        document: {
+          archivedAt: null,
+          AND: [
+            { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
+            { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+            { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+            { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
+          ],
+        },
       },
       include: {
         document: {
@@ -1291,10 +1343,87 @@ export async function finalizeUpload(
     }
 
     const titleNormalized = normalizeArabicText(attempt.title);
+    let tentativeVersionNumber = 1;
     if (!isVersionUpload) {
       readyKey = storage.generateReadyKey(documentId, 1, inspected.extension, now);
       // Promote the exact validated buffer in memory into private ready/ storage inside try/catch
       await storage.writeReadyBytes(readyKey, rawBytes);
+    } else {
+      if (attempt.expectedDocumentVersion == null) {
+        throw new DocumentValidationError(
+          'رقم إصدار المستند المتوقع مفقود في محاولة رفع النسخة.'
+        );
+      }
+      const targetDoc = await db.document.findUnique({
+        where: { id: documentId },
+        include: {
+          matter: { select: { id: true, status: true, archivedAt: true } },
+          party: { select: { id: true, archivedAt: true } },
+          proceeding: { select: { id: true, archivedAt: true } },
+          hearing: {
+            select: {
+              id: true,
+              proceeding: { select: { id: true, archivedAt: true } },
+            },
+          },
+        },
+      });
+      if (!targetDoc) {
+        throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
+      }
+      if (targetDoc.archivedAt !== null) {
+        throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند مؤرشف.');
+      }
+      if (targetDoc.matterId) {
+        if (!targetDoc.matter) {
+          throw new DocumentNotFoundError('ملف القضية المرتبط بالمستند غير موجود.');
+        }
+        if (targetDoc.matter.archivedAt !== null || targetDoc.matter.status === 'ARCHIVED') {
+          throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في ملف قضية مؤرشف.');
+        }
+        if (targetDoc.proceedingId) {
+          if (!targetDoc.proceeding) {
+            throw new DocumentNotFoundError('القيد القضائي المرتبط بالمستند غير موجود.');
+          }
+          if (targetDoc.proceeding.archivedAt !== null) {
+            throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في قيد قضائي مؤرشف.');
+          }
+        } else if (targetDoc.hearingId) {
+          if (!targetDoc.hearing) {
+            throw new DocumentNotFoundError('الجلسة المرتبطة بالمستند غير موجودة.');
+          }
+          if (targetDoc.hearing.proceeding.archivedAt !== null) {
+            throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في قيد قضائي مؤرشف.');
+          }
+        }
+      } else if (targetDoc.partyId) {
+        if (!targetDoc.party) {
+          throw new DocumentNotFoundError('الطرف المرتبط بالمستند غير موجود.');
+        }
+        if (targetDoc.party.archivedAt !== null) {
+          throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند تابع لطرف مؤرشف.');
+        }
+      }
+      if (targetDoc.version !== attempt.expectedDocumentVersion) {
+        throw new ConcurrencyConflictError(
+          'تم تعديل حالة المستند من جلسة أخرى قبل اعتماد النسخة الجديدة. يرجى إعادة المحاولة.'
+        );
+      }
+
+      const maxVersionAgg = await db.documentVersion.aggregate({
+        where: { documentId: targetDoc.id },
+        _max: { versionNumber: true },
+      });
+      tentativeVersionNumber = (maxVersionAgg._max.versionNumber ?? 0) + 1;
+      const versionReadyKey = storage.generateReadyKey(
+        targetDoc.id,
+        tentativeVersionNumber,
+        inspected.extension,
+        now
+      );
+      readyKey = versionReadyKey;
+      // Write candidate bytes before opening the DB transaction so fsync never holds row locks.
+      await storage.writeReadyBytes(versionReadyKey, rawBytes);
     }
 
     const txResult = await runWithIdempotencyRetry(
@@ -1347,20 +1476,7 @@ export async function finalizeUpload(
           }
 
           if (lockedAttempt.documentId != null) {
-            const targetDocId = lockedAttempt.documentId;
-            const lockedDocRows = await tx.$queryRaw<Array<{ id: string }>>`
-              SELECT "id" FROM "document" WHERE "id" = ${targetDocId} FOR UPDATE
-            `;
-            if (lockedDocRows.length === 0) {
-              throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
-            }
-            const lockedDoc = await tx.document.findUniqueOrThrow({
-              where: { id: targetDocId },
-            });
-            if (lockedDoc.archivedAt !== null) {
-              throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند مؤرشف.');
-            }
-            await assertActiveDocumentParentForVersion(tx, lockedDoc);
+            const lockedDoc = await lockActiveDocumentForMutation(tx, lockedAttempt.documentId);
 
             if (lockedAttempt.expectedDocumentVersion == null) {
               throw new DocumentValidationError(
@@ -1378,117 +1494,107 @@ export async function finalizeUpload(
               _max: { versionNumber: true },
             });
             const nextVersionNumber = (maxVersionAgg._max.versionNumber ?? 0) + 1;
-            const versionReadyKey = storage.generateReadyKey(
-              lockedDoc.id,
-              nextVersionNumber,
-              inspected.extension,
-              now
-            );
-            readyKey = versionReadyKey;
-            await storage.writeReadyBytes(versionReadyKey, rawBytes);
-
-            try {
-              await tx.documentVersion.create({
-                data: {
-                  id: versionId,
-                  documentId: lockedDoc.id,
-                  versionNumber: nextVersionNumber,
-                  objectKey: versionReadyKey,
-                  originalFilename: inspected.displayFilename,
-                  declaredMime: inspected.declaredMime,
-                  detectedMime: inspected.detectedMime,
-                  sizeBytes: inspected.sizeBytes,
-                  sha256: inspected.sha256,
-                  uploadStatus: 'READY',
-                  scanStatus: scanPolicy.scanStatus,
-                  scanPolicyCode: scanPolicy.policyCode,
-                  scanPolicyVersion: scanPolicy.policyVersion,
-                  scanCheckedAt: scanPolicy.checkedAt,
-                  createdById: actor.id,
-                },
-              });
-
-              await tx.document.update({
-                where: { id: lockedDoc.id },
-                data: {
-                  currentVersionId: versionId,
-                  version: { increment: 1 },
-                  updatedById: actor.id,
-                },
-              });
-
-              await tx.uploadAttempt.update({
-                where: { id: lockedAttempt.id },
-                data: {
-                  status: 'FINALIZED',
-                  documentId: lockedDoc.id,
-                  targetDocumentVersionId: versionId,
-                  bytesWritten: inspected.sizeBytes,
-                  sha256: inspected.sha256,
-                  finalizedAt: now,
-                  failureReason: null,
-                },
-              });
-
-              await recordAuditEvent(tx, {
-                userId: actor.id,
-                action: 'ADD_DOCUMENT_VERSION',
-                entityType: 'Document',
-                entityId: lockedDoc.id,
-                changedFields: {
-                  versionId,
-                  versionNumber: nextVersionNumber,
-                  previousVersionId: lockedDoc.currentVersionId,
-                  previousDocumentVersion: lockedDoc.version,
-                  newDocumentVersion: lockedDoc.version + 1,
-                  originalFilename: inspected.displayFilename,
-                  detectedMime: inspected.detectedMime,
-                  sizeBytes: inspected.sizeBytes,
-                  sha256: inspected.sha256,
-                  uploadStatus: 'READY',
-                  scanStatus: scanPolicy.scanStatus,
-                  scanPolicyCode: scanPolicy.policyCode,
-                  scanPolicyVersion: scanPolicy.policyVersion,
-                  duplicateConfirmed: parsed.confirmDuplicate,
-                  duplicateMatchCount: duplicateVersions.length,
-                },
-              });
-
-              await completeIdempotencyKey(tx, {
-                actorId: actor.id,
-                commandType: 'finalizeDocumentUpload',
-                key: idemKey,
-                resultType: 'Document',
-                resultId: lockedDoc.id,
-                resultPayload: {
-                  documentId: lockedDoc.id,
-                  versionId,
-                  versionNumber: nextVersionNumber,
-                  sha256: inspected.sha256,
-                  scanStatus: scanPolicy.scanStatus,
-                  scanPolicyCode: scanPolicy.policyCode,
-                },
-              });
-
-              if (options?.simulateDbFailure) {
-                throw new Error('SIMULATED_DB_FINALIZATION_FAILURE');
-              }
-              if (options?.beforeCommit) {
-                await options.beforeCommit(tx);
-              }
-
-              return {
-                isReplay: false,
-                documentId: lockedDoc.id,
-                quarantineKey: lockedAttempt.quarantineKey,
-              };
-            } catch (txErr) {
-              await storage.deleteReady(versionReadyKey).catch(() => false);
-              if (readyKey === versionReadyKey) {
-                readyKey = null;
-              }
-              throw txErr;
+            if (nextVersionNumber !== tentativeVersionNumber) {
+              throw new ConcurrencyConflictError(
+                'تم تسجيل إصدار أحدث للمستند بالتزامن. يرجى إعادة المحاولة.'
+              );
             }
+            const versionReadyKey = readyKey!;
+
+            await tx.documentVersion.create({
+              data: {
+                id: versionId,
+                documentId: lockedDoc.id,
+                versionNumber: nextVersionNumber,
+                objectKey: versionReadyKey,
+                originalFilename: inspected.displayFilename,
+                declaredMime: inspected.declaredMime,
+                detectedMime: inspected.detectedMime,
+                sizeBytes: inspected.sizeBytes,
+                sha256: inspected.sha256,
+                uploadStatus: 'READY',
+                scanStatus: scanPolicy.scanStatus,
+                scanPolicyCode: scanPolicy.policyCode,
+                scanPolicyVersion: scanPolicy.policyVersion,
+                scanCheckedAt: scanPolicy.checkedAt,
+                createdById: actor.id,
+              },
+            });
+
+            await tx.document.update({
+              where: { id: lockedDoc.id },
+              data: {
+                currentVersionId: versionId,
+                version: { increment: 1 },
+                updatedById: actor.id,
+              },
+            });
+
+            await tx.uploadAttempt.update({
+              where: { id: lockedAttempt.id },
+              data: {
+                status: 'FINALIZED',
+                documentId: lockedDoc.id,
+                targetDocumentVersionId: versionId,
+                bytesWritten: inspected.sizeBytes,
+                sha256: inspected.sha256,
+                finalizedAt: now,
+                failureReason: null,
+              },
+            });
+
+            await recordAuditEvent(tx, {
+              userId: actor.id,
+              action: 'ADD_DOCUMENT_VERSION',
+              entityType: 'Document',
+              entityId: lockedDoc.id,
+              changedFields: {
+                versionId,
+                versionNumber: nextVersionNumber,
+                previousVersionId: lockedDoc.currentVersionId,
+                previousDocumentVersion: lockedDoc.version,
+                newDocumentVersion: lockedDoc.version + 1,
+                originalFilename: inspected.displayFilename,
+                detectedMime: inspected.detectedMime,
+                sizeBytes: inspected.sizeBytes,
+                sha256: inspected.sha256,
+                uploadStatus: 'READY',
+                scanStatus: scanPolicy.scanStatus,
+                scanPolicyCode: scanPolicy.policyCode,
+                scanPolicyVersion: scanPolicy.policyVersion,
+                duplicateConfirmed: parsed.confirmDuplicate,
+                duplicateMatchCount: duplicateVersions.length,
+              },
+            });
+
+            await completeIdempotencyKey(tx, {
+              actorId: actor.id,
+              commandType: 'finalizeDocumentUpload',
+              key: idemKey,
+              resultType: 'Document',
+              resultId: lockedDoc.id,
+              resultPayload: {
+                documentId: lockedDoc.id,
+                versionId,
+                versionNumber: nextVersionNumber,
+                sha256: inspected.sha256,
+                scanStatus: scanPolicy.scanStatus,
+                scanPolicyCode: scanPolicy.policyCode,
+              },
+            });
+
+            if (options?.simulateDbFailure) {
+              throw new Error('SIMULATED_DB_FINALIZATION_FAILURE');
+            }
+            if (options?.beforeCommit) {
+              await options.beforeCommit(tx);
+            }
+
+            return {
+              isReplay: false,
+              documentId: lockedDoc.id,
+              quarantineKey: lockedAttempt.quarantineKey,
+            };
           }
 
           // Re-validate and lock parent links inside the DB transaction (matter -> proceeding)
@@ -1638,8 +1744,10 @@ export async function finalizeUpload(
     // Committed: from here no failure may delete the ready/ file this transaction (or its replay winner) owns.
     const promotedReadyKey = readyKey;
     readyKey = null;
-    if (txResult.isReplay && promotedReadyKey && txResult.documentId !== documentId) {
-      await storage.deleteReady(promotedReadyKey).catch(() => false);
+    if (txResult.isReplay) {
+      if (promotedReadyKey) {
+        await storage.deleteReady(promotedReadyKey).catch(() => false);
+      }
     } else {
       await storage.deleteQuarantine(txResult.quarantineKey).catch(() => false);
     }
@@ -1660,14 +1768,26 @@ export async function finalizeUpload(
       const retryable =
         err instanceof IdempotencyPayloadMismatchError ||
         err instanceof IdempotencyConcurrentConflictError;
-      await db.uploadAttempt
+      // Stale expectedDocumentVersion / missing or archived parents cannot succeed on retry.
+      const terminalRejected =
+        err instanceof ConcurrencyConflictError ||
+        err instanceof DocumentNotFoundError ||
+        err instanceof CrossMatterLinkForbiddenError ||
+        err instanceof DocumentValidationError;
+      const updated = await db.uploadAttempt
         .updateMany({
           where: { id: attempt.id, status: 'VALIDATING' },
           data: retryable
             ? { status: 'UPLOADED' }
-            : { status: 'FAILED', failureReason: toSafeFailureReason(err) },
+            : {
+                status: terminalRejected ? 'REJECTED' : 'FAILED',
+                failureReason: toSafeFailureReason(err),
+              },
         })
-        .catch(() => {});
+        .catch(() => ({ count: 0 }));
+      if (terminalRejected && updated.count > 0) {
+        await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      }
     }
 
     throw err;
@@ -1696,12 +1816,19 @@ export async function authorizeDownload(
     throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
   }
 
-  const targetVersion = validVersionId
-    ? doc.versions.find((v) => v.id === validVersionId)
-    : doc.currentVersion ?? doc.versions[0] ?? null;
-
-  if (!targetVersion) {
-    throw new DocumentNotFoundError('نسخة المستند المطلوبة غير موجودة.');
+  let targetVersion: DocumentVersionRow | null = null;
+  if (validVersionId) {
+    targetVersion = doc.versions.find((v) => v.id === validVersionId) ?? null;
+    if (!targetVersion) {
+      throw new DocumentNotFoundError('نسخة المستند المطلوبة غير موجودة.');
+    }
+  } else {
+    if (!doc.currentVersion) {
+      throw new DocumentNotReadyError(
+        'المستند غير جاهز للعرض أو التحميل بعد (لم تكتمل مرحلة التحقق والاعتماد).'
+      );
+    }
+    targetVersion = doc.currentVersion;
   }
 
   const isScanApproved =
@@ -1784,7 +1911,17 @@ export async function listDocuments(
   const normalizedQuery = parsed.q ? normalizeArabicText(parsed.q) : '';
 
   const where: Prisma.DocumentWhereInput = {
-    ...(parsed.includeArchived ? {} : { archivedAt: null }),
+    ...(parsed.includeArchived
+      ? {}
+      : {
+          archivedAt: null,
+          AND: [
+            { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
+            { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+            { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+            { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
+          ],
+        }),
     ...(parsed.matterId ? { matterId: parsed.matterId } : {}),
     ...(parsed.partyId ? { partyId: parsed.partyId } : {}),
     ...(parsed.proceedingId ? { proceedingId: parsed.proceedingId } : {}),
@@ -1919,19 +2056,10 @@ export async function updateDocumentMetadata(
           return claim.resultId;
         }
 
-        const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id" FROM "document" WHERE "id" = ${parsed.documentId} FOR UPDATE
-        `;
-        if (lockedRows.length === 0) {
-          throw new DocumentNotFoundError('المستند المطلوب غير موجود.');
-        }
-
-        const existing = await tx.document.findUniqueOrThrow({
-          where: { id: parsed.documentId },
+        const existing = await lockActiveDocumentForMutation(tx, parsed.documentId, {
+          actionLabel: 'تعديل بيانات مستند',
+          archivedDocumentMessage: 'لا يمكن تعديل بيانات مستند مؤرشف.',
         });
-        if (existing.archivedAt !== null) {
-          throw new DocumentValidationError('لا يمكن تعديل بيانات مستند مؤرشف.');
-        }
         if (existing.version !== parsed.expectedVersion) {
           throw new ConcurrencyConflictError(
             'تم تعديل بيانات المستند من جلسة أخرى. يرجى تحديث البيانات والمحاولة مجدداً.'
@@ -2042,9 +2170,11 @@ export async function updateDocumentMetadata(
 export async function assertLinkableDocument(
   tx: Prisma.TransactionClient,
   documentId: string,
-  scope: DocumentLinkScope
+  scope: DocumentLinkScope,
+  options?: { allowExistingArchived?: boolean }
 ): Promise<LinkableDocumentSummary> {
   const validDocId = assertUuidOrThrow(documentId, 'المستند');
+  const allowExistingArchived = options?.allowExistingArchived ?? false;
   if (scope.kind === 'MATTER') {
     assertUuidOrThrow(scope.matterId, 'ملف القضية');
     if (scope.proceedingId) {
@@ -2057,27 +2187,107 @@ export async function assertLinkableDocument(
     assertUuidOrThrow(scope.partyId, 'الطرف');
   }
 
+  const linkableInclude = {
+    currentVersion: true,
+    matter: { select: { id: true, status: true, archivedAt: true } },
+    party: { select: { id: true, archivedAt: true } },
+    proceeding: { select: { id: true, archivedAt: true } },
+    hearing: {
+      select: {
+        id: true,
+        proceedingId: true,
+        proceeding: { select: { id: true, archivedAt: true } },
+      },
+    },
+  } as const;
+
+  // Verify scope ownership before locking so cross-matter/cross-principal checks fail fast without foreign locks.
+  const preDoc = await tx.document.findUnique({
+    where: { id: validDocId },
+    include: linkableInclude,
+  });
+  if (!preDoc) {
+    throw new DocumentNotFoundError('المستند المحدد غير موجود.');
+  }
+
+  let scopeProceedingId: string | null = null;
+  if (scope.kind === 'MATTER') {
+    if (preDoc.matterId !== scope.matterId) {
+      throw new CrossMatterLinkForbiddenError(
+        'لا يمكن ربط مستند لا يتبع ملف القضية المحدد.'
+      );
+    }
+    scopeProceedingId = scope.proceedingId ?? null;
+    if (!scopeProceedingId && scope.hearingId) {
+      const scopeHearing = await tx.hearing.findUnique({
+        where: { id: scope.hearingId },
+        select: { proceedingId: true },
+      });
+      scopeProceedingId = scopeHearing?.proceedingId ?? null;
+    }
+    const preDocProceedingId = preDoc.proceedingId ?? preDoc.hearing?.proceedingId ?? null;
+    if (preDocProceedingId && scopeProceedingId && preDocProceedingId !== scopeProceedingId) {
+      throw new CrossMatterLinkForbiddenError(
+        'لا يمكن ربط مستند مرتبط بقيد قضائي مختلف.'
+      );
+    }
+    if (preDoc.hearingId && scope.hearingId && preDoc.hearingId !== scope.hearingId) {
+      throw new CrossMatterLinkForbiddenError(
+        'لا يمكن ربط مستند مرتبط بجلسة مختلفة.'
+      );
+    }
+  } else if (preDoc.partyId !== scope.partyId) {
+    if (preDoc.matterId === null) {
+      throw new CrossMatterLinkForbiddenError(
+        'لا يمكن ربط مستند يخص طرفاً آخر بهذا التوكيل.'
+      );
+    }
+    const clientLink = await tx.matterParty.findFirst({
+      where: {
+        matterId: preDoc.matterId,
+        partyId: scope.partyId,
+        role: 'CLIENT',
+      },
+      select: { id: true },
+    });
+    if (!clientLink) {
+      throw new CrossMatterLinkForbiddenError(
+        'لا يمكن ربط هذا المستند بالتوكيل لأنه لا يتبع الموكل أو ملف قضية يمثله الموكل.'
+      );
+    }
+  }
+
+  await lockActiveDocumentForMutation(tx, validDocId, {
+    actionLabel: 'ربط مستند',
+    archivedDocumentMessage: 'لا يمكن ربط مستند مؤرشف.',
+    allowArchived: allowExistingArchived,
+  });
+
   const doc = await tx.document.findUnique({
     where: { id: validDocId },
-    include: {
-      currentVersion: true,
-      matter: { select: { id: true, status: true, archivedAt: true } },
-      party: { select: { id: true, archivedAt: true } },
-      hearing: { select: { id: true, proceedingId: true } },
-    },
+    include: linkableInclude,
   });
 
   if (!doc) {
     throw new DocumentNotFoundError('المستند المحدد غير موجود.');
   }
-  if (doc.archivedAt !== null) {
-    throw new DocumentValidationError('لا يمكن ربط مستند مؤرشف.');
-  }
-  if (doc.matter && (doc.matter.archivedAt !== null || doc.matter.status === 'ARCHIVED')) {
-    throw new DocumentValidationError('لا يمكن ربط مستند تابع لملف قضية مؤرشف.');
-  }
-  if (doc.party && doc.party.archivedAt !== null) {
-    throw new DocumentValidationError('لا يمكن ربط مستند تابع لطرف مؤرشف.');
+
+  if (!allowExistingArchived) {
+    if (doc.archivedAt !== null) {
+      throw new DocumentValidationError('لا يمكن ربط مستند مؤرشف.');
+    }
+    if (doc.matter && (doc.matter.archivedAt !== null || doc.matter.status === 'ARCHIVED')) {
+      throw new DocumentValidationError('لا يمكن ربط مستند تابع لملف قضية مؤرشف.');
+    }
+    if (doc.party && doc.party.archivedAt !== null) {
+      throw new DocumentValidationError('لا يمكن ربط مستند تابع لطرف مؤرشف.');
+    }
+    if (doc.proceeding && doc.proceeding.archivedAt !== null) {
+      throw new DocumentValidationError('لا يمكن ربط مستند تابع لقيد قضائي مؤرشف.');
+    }
+    if (doc.hearing?.proceeding && doc.hearing.proceeding.archivedAt !== null) {
+      throw new DocumentValidationError('لا يمكن ربط مستند تابع لجلسة في قيد قضائي مؤرشف.');
+    }
   }
 
   const ver = doc.currentVersion;
@@ -2096,14 +2306,6 @@ export async function assertLinkableDocument(
       throw new CrossMatterLinkForbiddenError(
         'لا يمكن ربط مستند لا يتبع ملف القضية المحدد.'
       );
-    }
-    let scopeProceedingId = scope.proceedingId ?? null;
-    if (!scopeProceedingId && scope.hearingId) {
-      const scopeHearing = await tx.hearing.findUnique({
-        where: { id: scope.hearingId },
-        select: { proceedingId: true },
-      });
-      scopeProceedingId = scopeHearing?.proceedingId ?? null;
     }
     const docProceedingId = doc.proceedingId ?? doc.hearing?.proceedingId ?? null;
     if (docProceedingId && scopeProceedingId && docProceedingId !== scopeProceedingId) {
@@ -2128,8 +2330,12 @@ export async function assertLinkableDocument(
           matterId: doc.matterId,
           partyId: scope.partyId,
           role: 'CLIENT',
-          matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
-          party: { archivedAt: null },
+          ...(allowExistingArchived
+            ? {}
+            : {
+                matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+                party: { archivedAt: null },
+              }),
         },
         select: { id: true },
       });
@@ -2145,6 +2351,8 @@ export async function assertLinkableDocument(
     id: doc.id,
     title: doc.title,
     documentType: doc.documentType,
+    proceedingId: doc.proceedingId ?? null,
+    hearingId: doc.hearingId ?? null,
     currentVersionId: doc.currentVersionId,
     scanStatusLabel: getScanStatusLabel(ver.scanStatus),
   };
@@ -2189,6 +2397,10 @@ function assertValidBackupId(backupId: string): string {
   return trimmed;
 }
 
+function isRestoreModeEnabled(): boolean {
+  return isWorkerDispatchDisabled({ RESTORE_MODE: process.env.RESTORE_MODE });
+}
+
 export async function pinDocumentVersionsForBackup(
   params: { backupId: string; documentVersionIds?: string[]; actor?: Actor },
   options?: DocumentServiceOptions
@@ -2197,39 +2409,54 @@ export async function pinDocumentVersionsForBackup(
     assertActorAuthorized(params.actor, 'MANAGE_OPERATIONS');
   }
   const backupId = assertValidBackupId(params.backupId);
+  const requestedIds =
+    params.documentVersionIds !== undefined
+      ? Array.from(
+          new Set(params.documentVersionIds.map((id) => assertUuidOrThrow(id, 'نسخة المستند')))
+        )
+      : undefined;
+
+  if (isRestoreModeEnabled()) {
+    throw new DocumentValidationError(
+      'لا يمكن تعديل تثبيتات النسخ الاحتياطي أثناء تفعيل وضع الاستعادة (RESTORE_MODE).'
+    );
+  }
+
   const db = getDb(options);
   const now = options?.now ?? new Date();
 
-  let targetIds: string[];
-  if (params.documentVersionIds !== undefined) {
-    targetIds = Array.from(
-      new Set(params.documentVersionIds.map((id) => assertUuidOrThrow(id, 'نسخة المستند')))
-    );
-    if (targetIds.length > 0) {
-      const found = await db.documentVersion.findMany({
-        where: { id: { in: targetIds } },
+  const targetIds = await db.$transaction(async (tx) => {
+    const versionClient =
+      (tx as unknown as { documentVersion?: PrismaClient['documentVersion'] }).documentVersion ??
+      db.documentVersion;
+
+    let resolvedIds: string[];
+    if (requestedIds !== undefined) {
+      if (requestedIds.length > 0) {
+        const found = await versionClient.findMany({
+          where: { id: { in: requestedIds } },
+          select: { id: true },
+        });
+        if (found.length !== requestedIds.length) {
+          throw new DocumentNotFoundError(
+            'إحدى نسخ المستندات المطلوب تثبيتها للنسخة الاحتياطية غير موجودة.'
+          );
+        }
+      }
+      resolvedIds = requestedIds;
+    } else {
+      const activeVersions = await versionClient.findMany({
+        where: {
+          OR: [{ uploadStatus: 'READY' }, { currentForDocument: { isNot: null } }],
+        },
         select: { id: true },
       });
-      if (found.length !== targetIds.length) {
-        throw new DocumentNotFoundError(
-          'إحدى نسخ المستندات المطلوب تثبيتها للنسخة الاحتياطية غير موجودة.'
-        );
-      }
+      resolvedIds = activeVersions.map((v) => v.id);
     }
-  } else {
-    const activeVersions = await db.documentVersion.findMany({
-      where: {
-        OR: [{ uploadStatus: 'READY' }, { currentForDocument: { isNot: null } }],
-      },
-      select: { id: true },
-    });
-    targetIds = activeVersions.map((v) => v.id);
-  }
 
-  if (targetIds.length > 0) {
-    await db.$transaction(async (tx) => {
+    if (resolvedIds.length > 0) {
       await tx.backupFilePin.createMany({
-        data: targetIds.map((documentVersionId) => ({
+        data: resolvedIds.map((documentVersionId) => ({
           backupId,
           documentVersionId,
           pinnedAt: now,
@@ -2241,7 +2468,7 @@ export async function pinDocumentVersionsForBackup(
       await tx.backupFilePin.updateMany({
         where: {
           backupId,
-          documentVersionId: { in: targetIds },
+          documentVersionId: { in: resolvedIds },
           releasedAt: { not: null },
         },
         data: {
@@ -2249,21 +2476,23 @@ export async function pinDocumentVersionsForBackup(
           releasedAt: null,
         },
       });
+    }
 
-      if (params.actor) {
-        await recordAuditEvent(tx, {
-          userId: params.actor.id,
-          action: 'PIN_DOCUMENT_VERSIONS_FOR_BACKUP',
-          entityType: 'BackupFilePin',
-          entityId: backupId,
-          changedFields: {
-            backupId,
-            pinnedCount: targetIds.length,
-          },
-        });
-      }
-    });
-  }
+    if (params.actor) {
+      await recordAuditEvent(tx, {
+        userId: params.actor.id,
+        action: 'PIN_DOCUMENT_VERSIONS_FOR_BACKUP',
+        entityType: 'BackupFilePin',
+        entityId: backupId,
+        changedFields: {
+          backupId,
+          pinnedCount: resolvedIds.length,
+        },
+      });
+    }
+
+    return resolvedIds;
+  });
 
   return {
     backupId,
@@ -2280,6 +2509,11 @@ export async function releaseBackupFilePins(
     assertActorAuthorized(params.actor, 'MANAGE_OPERATIONS');
   }
   const backupId = assertValidBackupId(params.backupId);
+  if (isRestoreModeEnabled()) {
+    throw new DocumentValidationError(
+      'لا يمكن تحرير تثبيتات النسخ الاحتياطي أثناء تفعيل وضع الاستعادة (RESTORE_MODE).'
+    );
+  }
   const db = getDb(options);
   const releasedAt = params.releasedAt ?? options?.now ?? new Date();
 
@@ -2292,7 +2526,7 @@ export async function releaseBackupFilePins(
       data: { releasedAt },
     });
 
-    if (params.actor && updated.count > 0) {
+    if (params.actor) {
       await recordAuditEvent(tx, {
         userId: params.actor.id,
         action: 'RELEASE_BACKUP_FILE_PINS',
@@ -2315,18 +2549,38 @@ export async function releaseBackupFilePins(
   };
 }
 
-/** Open + REJECTED, plus EXPIRED (leftover quarantine files); VALIDATING uses a separate stale window on updatedAt. */
-const EXPIRABLE_NON_VALIDATING_STATUSES: UploadAttemptStatus[] = [
-  ...OPEN_UPLOAD_STATUSES,
-  'EXPIRED',
-];
-
-const NON_VALIDATING_CLEANUP_STATUSES: UploadAttemptStatus[] = [
-  ...EXPIRABLE_NON_VALIDATING_STATUSES,
-  'REJECTED',
-];
-
+/** Open statuses + VALIDATING stale window that transition to EXPIRED during cleanup. */
 const STALE_VALIDATING_MIN_WINDOW_MS = 5 * 60_000;
+const DEFAULT_RECONCILE_GRACE_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
+const CLEANUP_BATCH_SIZE = 200;
+const MAX_CLEANUP_BATCHES = 500;
+
+/**
+ * Protect ALL current & prior READY DocumentVersions, ANY DocumentVersion with an active BackupFilePin
+ * (even orphan or non-READY), and any DocumentVersion belonging to a linked reference document.
+ */
+const protectedVersionWhere: Prisma.DocumentVersionWhereInput = {
+  OR: [
+    { uploadStatus: 'READY' },
+    { currentForDocument: { isNot: null } },
+    { backupPins: { some: { releasedAt: null } } },
+    {
+      document: {
+        OR: [
+          { powersOfAttorney: { some: {} } },
+          { hearingResultDecisions: { some: {} } },
+          { deadlineSources: { some: {} } },
+        ],
+      },
+    },
+  ],
+};
+
+const protectedAttemptWhere: Prisma.UploadAttemptWhereInput = {
+  targetDocumentVersion: {
+    is: protectedVersionWhere,
+  },
+};
 
 async function runExpiredUploadAttemptCleanup(
   storage: DocumentStorageAdapter,
@@ -2334,11 +2588,10 @@ async function runExpiredUploadAttemptCleanup(
     | Date
     | { now?: Date; gracePeriodMs?: number; prismaOverride?: PrismaClient }
 ): Promise<CleanupExpiredUploadsResult & { deletedKeys: string[] }> {
-  if (isWorkerDispatchDisabled()) {
-    const restoreMode = isWorkerDispatchDisabled({ RESTORE_MODE: process.env.RESTORE_MODE });
+  if (isRestoreModeEnabled()) {
     return {
       skipped: true,
-      reason: restoreMode ? 'RESTORE_MODE' : 'REMINDER_DISPATCH_DISABLED',
+      reason: 'RESTORE_MODE',
       expiredAttemptCount: 0,
       deletedQuarantineCount: 0,
       skippedProtectedCount: 0,
@@ -2359,90 +2612,143 @@ async function runExpiredUploadAttemptCleanup(
 
   const cutoff = new Date(now.getTime() - Math.max(0, gracePeriodMs));
   const staleValidatingCutoff = new Date(
-    now.getTime() - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS)
+    now.getTime() - Math.max(Math.max(0, gracePeriodMs), STALE_VALIDATING_MIN_WINDOW_MS)
   );
   const expirableCleanupWhere: Prisma.UploadAttemptWhereInput = {
     expiresAt: { lte: cutoff },
     OR: [
-      { status: { in: EXPIRABLE_NON_VALIDATING_STATUSES } },
+      { status: { in: OPEN_UPLOAD_STATUSES } },
       { status: 'VALIDATING', updatedAt: { lte: staleValidatingCutoff } },
     ],
   };
   const cleanupEligibilityWhere: Prisma.UploadAttemptWhereInput = {
     expiresAt: { lte: cutoff },
     OR: [
-      { status: { in: NON_VALIDATING_CLEANUP_STATUSES } },
+      { status: { in: [...OPEN_UPLOAD_STATUSES, 'EXPIRED', 'REJECTED'] } },
       { status: 'VALIDATING', updatedAt: { lte: staleValidatingCutoff } },
     ],
   };
 
-  const protectedFilter: Prisma.UploadAttemptWhereInput = {
-    targetDocumentVersion: {
-      is: {
-        OR: [
-          { uploadStatus: 'READY' },
-          { currentForDocument: { isNot: null } },
-          { backupPins: { some: { releasedAt: null } } },
-        ],
-      },
-    },
-  };
-
   let skippedProtectedCount = await db.uploadAttempt.count({
     where: {
-      AND: [cleanupEligibilityWhere, protectedFilter],
+      AND: [cleanupEligibilityWhere, protectedAttemptWhere],
     },
   });
-
-  const candidates = await db.uploadAttempt.findMany({
-    where: {
-      AND: [cleanupEligibilityWhere, { NOT: protectedFilter }],
-    },
-    // updatedAt: the claim below touches EXPIRED/REJECTED rows too, so already-clean ones rotate to the back.
-    orderBy: { updatedAt: 'asc' },
-    take: 200,
-  });
-
-  const candidateKeys = Array.from(new Set(candidates.map((a) => a.quarantineKey)));
-  const protectedVersions =
-    candidateKeys.length > 0
-      ? await db.documentVersion.findMany({
-          where: {
-            objectKey: { in: candidateKeys },
-            OR: [
-              { uploadStatus: 'READY' },
-              { currentForDocument: { isNot: null } },
-              { backupPins: { some: { releasedAt: null } } },
-            ],
-          },
-          select: { objectKey: true },
-        })
-      : [];
-  const protectedKeySet = new Set(protectedVersions.map((v) => v.objectKey));
 
   let expiredAttemptCount = 0;
   let deletedQuarantineCount = 0;
   const deletedKeys: string[] = [];
 
-  for (const attempt of candidates) {
-    // Defense-in-depth: ensure no READY, current, or active-pinned DocumentVersion matches quarantineKey
-    if (protectedKeySet.has(attempt.quarantineKey)) {
-      skippedProtectedCount++;
-      continue;
-    }
+  async function findProtectedQuarantineKeySet(keys: string[]): Promise<Set<string>> {
+    if (keys.length === 0) return new Set();
+    const rows = await db.documentVersion.findMany({
+      where: {
+        AND: [{ objectKey: { in: keys } }, protectedVersionWhere],
+      },
+      select: { objectKey: true },
+    });
+    return new Set(rows.map((v) => v.objectKey));
+  }
 
-    if (attempt.status === 'REJECTED') {
-      // Unlink any leftover quarantine bytes while preserving REJECTED status/failureReason and rotating updatedAt
-      const claimedRejected = await db.uploadAttempt.updateMany({
+  // Phase 1A: Drain all eligible open and stale-VALIDATING expired attempts in bounded cursor batches
+  // so >200 rows are never stranded non-EXPIRED before Phase 2 reconciliation runs.
+  let cursorId: string | undefined;
+  for (let batchIdx = 0; batchIdx < MAX_CLEANUP_BATCHES; batchIdx++) {
+    const candidates = await db.uploadAttempt.findMany({
+      where: {
+        AND: [
+          expirableCleanupWhere,
+          { NOT: protectedAttemptWhere },
+          ...(cursorId ? [{ id: { gt: cursorId } }] : []),
+        ],
+      },
+      orderBy: { id: 'asc' },
+      take: CLEANUP_BATCH_SIZE,
+    });
+    if (candidates.length === 0) break;
+    cursorId = candidates[candidates.length - 1].id;
+
+    const protectedKeySet = await findProtectedQuarantineKeySet(
+      Array.from(new Set(candidates.map((a) => a.quarantineKey)))
+    );
+
+    for (const attempt of candidates) {
+      if (protectedKeySet.has(attempt.quarantineKey)) {
+        skippedProtectedCount++;
+        continue;
+      }
+
+      const claimed = await db.uploadAttempt.updateMany({
         where: {
           id: attempt.id,
-          status: 'REJECTED',
+          quarantineKey: attempt.quarantineKey,
+          ...expirableCleanupWhere,
+        },
+        data: {
+          status: 'EXPIRED',
+          failureReason: attempt.failureReason ?? 'انتهت مهلة محاولة الرفع وتم تنظيف الملف المؤقت.',
+        },
+      });
+      if (claimed.count === 0) {
+        continue;
+      }
+
+      expiredAttemptCount++;
+      const deleted = await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+      if (deleted) {
+        deletedQuarantineCount++;
+        deletedKeys.push(attempt.quarantineKey);
+      }
+    }
+
+    if (candidates.length < CLEANUP_BATCH_SIZE) break;
+  }
+
+  // Phase 1B: Unlink leftover quarantine bytes for already-EXPIRED / REJECTED rows ONLY when the key
+  // still exists on disk, avoiding repeatedly touching already-cleaned terminal rows.
+  const qFilesOnDisk = storage.listKeys
+    ? await storage.listKeys('quarantine')
+    : await listZoneFilesFallback(storage.quarantineDir);
+  const candidateDiskKeys = Array.from(
+    new Set(qFilesOnDisk.filter((f) => !f.key.includes('.part-')).map((f) => f.key))
+  );
+
+  for (let offset = 0; offset < candidateDiskKeys.length; offset += CLEANUP_BATCH_SIZE) {
+    const keyChunk = candidateDiskKeys.slice(offset, offset + CLEANUP_BATCH_SIZE);
+    const terminalAttempts = await db.uploadAttempt.findMany({
+      where: {
+        AND: [
+          {
+            status: { in: ['EXPIRED', 'REJECTED'] },
+            expiresAt: { lte: cutoff },
+            quarantineKey: { in: keyChunk },
+          },
+          { NOT: protectedAttemptWhere },
+        ],
+      },
+    });
+    if (terminalAttempts.length === 0) continue;
+
+    const protectedKeySet = await findProtectedQuarantineKeySet(
+      Array.from(new Set(terminalAttempts.map((a) => a.quarantineKey)))
+    );
+
+    for (const attempt of terminalAttempts) {
+      if (protectedKeySet.has(attempt.quarantineKey)) {
+        skippedProtectedCount++;
+        continue;
+      }
+
+      const claimed = await db.uploadAttempt.updateMany({
+        where: {
+          id: attempt.id,
+          status: attempt.status,
           quarantineKey: attempt.quarantineKey,
           expiresAt: { lte: cutoff },
         },
-        data: { status: 'REJECTED' },
+        data: { status: attempt.status },
       });
-      if (claimedRejected.count === 0) {
+      if (claimed.count === 0) {
         continue;
       }
 
@@ -2451,32 +2757,6 @@ async function runExpiredUploadAttemptCleanup(
         deletedQuarantineCount++;
         deletedKeys.push(attempt.quarantineKey);
       }
-      continue;
-    }
-
-    // Atomically transition to EXPIRED before deleting quarantine bytes so finalized/active VALIDATING/REJECTED attempts cannot race
-    const claimed = await db.uploadAttempt.updateMany({
-      where: {
-        id: attempt.id,
-        quarantineKey: attempt.quarantineKey,
-        ...expirableCleanupWhere,
-      },
-      data: {
-        status: 'EXPIRED',
-        failureReason: attempt.failureReason ?? 'انتهت مهلة محاولة الرفع وتم تنظيف الملف المؤقت.',
-      },
-    });
-    if (claimed.count === 0) {
-      continue;
-    }
-
-    const deleted = await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
-    if (deleted) {
-      deletedQuarantineCount++;
-      deletedKeys.push(attempt.quarantineKey);
-    }
-    if (attempt.status !== 'EXPIRED') {
-      expiredAttemptCount++;
     }
   }
 
@@ -2520,7 +2800,14 @@ async function listZoneFilesFallback(baseDir: string): Promise<StoredZoneFile[]>
       if (entry.isDirectory()) {
         await walk(fullPath, relKey);
       } else if (entry.isFile()) {
-        const st = await fs.promises.lstat(fullPath);
+        let st: fs.Stats;
+        try {
+          st = await fs.promises.lstat(fullPath);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+          throw err;
+        }
         if (st.isFile()) {
           results.push({ key: relKey, sizeBytes: st.size, mtimeMs: st.mtimeMs });
         }
@@ -2559,9 +2846,25 @@ export async function reconcileAndCleanupDocumentStorage(
     assertActorAuthorized(options.actor, 'MANAGE_OPERATIONS');
   }
 
+  if (isRestoreModeEnabled()) {
+    return {
+      skipped: true,
+      reason: 'RESTORE_MODE',
+      deletedKeys: [],
+      protectedKeys: [],
+      expiredAttemptCount: 0,
+      deletedQuarantineCount: 0,
+      skippedProtectedCount: 0,
+      checksums: {},
+    };
+  }
+
+  const now = options?.now ?? new Date();
+  const gracePeriodMs = options?.gracePeriodMs ?? DEFAULT_RECONCILE_GRACE_PERIOD_MS;
+
   const cleanupRes = await runExpiredUploadAttemptCleanup(storage, {
-    now: options?.now,
-    gracePeriodMs: options?.gracePeriodMs,
+    now,
+    gracePeriodMs,
     prismaOverride: options?.prismaOverride,
   });
   if (cleanupRes.skipped) {
@@ -2577,12 +2880,10 @@ export async function reconcileAndCleanupDocumentStorage(
     };
   }
 
-  const now = options?.now ?? new Date();
-  const gracePeriodMs = options?.gracePeriodMs ?? 0;
   const db = getDb({ prismaOverride: options?.prismaOverride });
   const cutoff = new Date(now.getTime() - Math.max(0, gracePeriodMs));
   const staleValidatingCutoff = new Date(
-    now.getTime() - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS)
+    now.getTime() - Math.max(Math.max(0, gracePeriodMs), STALE_VALIDATING_MIN_WINDOW_MS)
   );
 
   // List disk keys BEFORE querying DB so concurrent finalizeUpload writes/commits cannot fall
@@ -2594,28 +2895,10 @@ export async function reconcileAndCleanupDocumentStorage(
     ? await storage.listKeys('ready')
     : await listZoneFilesFallback(storage.readyDir);
 
-  // Protect ALL current & prior READY DocumentVersions, ANY DocumentVersion with an active BackupFilePin
-  // (even orphan or non-READY), and any DocumentVersion belonging to a linked reference document.
-  const protectedVersionWhere: Prisma.DocumentVersionWhereInput = {
-    OR: [
-      { uploadStatus: 'READY' },
-      { currentForDocument: { isNot: null } },
-      { backupPins: { some: { releasedAt: null } } },
-      {
-        document: {
-          OR: [
-            { powersOfAttorney: { some: {} } },
-            { hearingResultDecisions: { some: {} } },
-            { deadlineSources: { some: {} } },
-          ],
-        },
-      },
-    ],
-  };
-
-  // Protect active un-expired UploadAttempt quarantine files and non-stale VALIDATING attempts
+  // Protect Phase-1 protected attempts, active un-expired UploadAttempts, and non-stale VALIDATING attempts.
   const activeAttemptWhere: Prisma.UploadAttemptWhereInput = {
     OR: [
+      protectedAttemptWhere,
       {
         status: { in: OPEN_UPLOAD_STATUSES },
         expiresAt: { gt: cutoff },
@@ -2644,35 +2927,31 @@ export async function reconcileAndCleanupDocumentStorage(
   const activeQuarantineKeySet = new Set(activeAttemptRows.map((a) => a.quarantineKey));
 
   const deletedKeys = [...cleanupRes.deletedKeys];
+  let deletedQuarantineCount = cleanupRes.deletedQuarantineCount;
   const protectedKeySet = new Set<string>();
   const checksums: Record<string, string> = {};
-  const wallClockNowMs = Date.now();
-  const activePartThresholdMs = wallClockNowMs - STALE_VALIDATING_MIN_WINDOW_MS;
-  const unreferencedGraceThresholdMs =
-    wallClockNowMs - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS);
+  const refNowMs = now.getTime();
+  const graceWindowMs = Math.max(Math.max(0, gracePeriodMs), STALE_VALIDATING_MIN_WINDOW_MS);
+  const activePartThresholdMs = refNowMs - graceWindowMs;
+  const unreferencedGraceThresholdMs = refNowMs - graceWindowMs;
 
   async function isKeyReferencedInDb(zone: 'quarantine' | 'ready', key: string): Promise<boolean> {
-    const versionMatch = await db.documentVersion.findFirst({
-      where: {
-        AND: [{ objectKey: key }, protectedVersionWhere],
-      },
-      select: { id: true },
-    });
-    if (versionMatch) {
-      return true;
-    }
-    if (zone === 'quarantine') {
-      const attemptMatch = await db.uploadAttempt.findFirst({
+    if (zone === 'ready') {
+      const versionMatch = await db.documentVersion.findFirst({
         where: {
-          AND: [{ quarantineKey: key }, activeAttemptWhere],
+          AND: [{ objectKey: key }, protectedVersionWhere],
         },
         select: { id: true },
       });
-      if (attemptMatch) {
-        return true;
-      }
+      return Boolean(versionMatch);
     }
-    return false;
+    const attemptMatch = await db.uploadAttempt.findFirst({
+      where: {
+        AND: [{ quarantineKey: key }, activeAttemptWhere],
+      },
+      select: { id: true },
+    });
+    return Boolean(attemptMatch);
   }
 
   async function recordProtectedFile(zone: 'quarantine' | 'ready', key: string): Promise<void> {
@@ -2690,6 +2969,9 @@ export async function reconcileAndCleanupDocumentStorage(
         : await storage.deleteQuarantine(key).catch(() => false);
     if (deleted) {
       deletedKeys.push(key);
+      if (zone === 'quarantine') {
+        deletedQuarantineCount++;
+      }
     }
   }
 
@@ -2707,7 +2989,7 @@ export async function reconcileAndCleanupDocumentStorage(
       }
 
       const isInitiallyProtected =
-        protectedVersionKeySet.has(file.key) ||
+        (zone === 'ready' && protectedVersionKeySet.has(file.key)) ||
         (zone === 'quarantine' && activeQuarantineKeySet.has(file.key));
       if (isInitiallyProtected) {
         await recordProtectedFile(zone, file.key);
@@ -2732,12 +3014,31 @@ export async function reconcileAndCleanupDocumentStorage(
   await reconcileZoneFiles('quarantine', quarantineFiles);
   await reconcileZoneFiles('ready', readyFiles);
 
+  const uniqueDeletedKeys = Array.from(new Set(deletedKeys)).sort();
+  const sortedProtectedKeys = Array.from(protectedKeySet).sort();
+
+  if (options?.actor) {
+    await recordAuditEvent(db, {
+      userId: options.actor.id,
+      action: 'RECONCILE_DOCUMENT_STORAGE',
+      entityType: 'DocumentStorage',
+      entityId: 'document-storage',
+      changedFields: {
+        deletedCount: uniqueDeletedKeys.length,
+        protectedCount: sortedProtectedKeys.length,
+        expiredAttemptCount: cleanupRes.expiredAttemptCount,
+        deletedQuarantineCount,
+        skippedProtectedCount: cleanupRes.skippedProtectedCount,
+      },
+    });
+  }
+
   return {
     skipped: false,
-    deletedKeys: Array.from(new Set(deletedKeys)).sort(),
-    protectedKeys: Array.from(protectedKeySet).sort(),
+    deletedKeys: uniqueDeletedKeys,
+    protectedKeys: sortedProtectedKeys,
     expiredAttemptCount: cleanupRes.expiredAttemptCount,
-    deletedQuarantineCount: cleanupRes.deletedQuarantineCount,
+    deletedQuarantineCount,
     skippedProtectedCount: cleanupRes.skippedProtectedCount,
     checksums,
   };

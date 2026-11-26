@@ -54,6 +54,7 @@ import {
 
 export interface DocumentDetailViewProps {
   document: DocumentDetailDTO;
+  canWriteDocuments?: boolean;
 }
 
 interface VersionCandidateState {
@@ -150,7 +151,10 @@ function formatShortSha256(sha256: string | null): string {
   return sha256.length > 16 ? `${sha256.slice(0, 16)}…` : sha256;
 }
 
-export function DocumentDetailView({ document: initialDocument }: DocumentDetailViewProps) {
+export function DocumentDetailView({
+  document: initialDocument,
+  canWriteDocuments = true,
+}: DocumentDetailViewProps) {
   const router = useRouter();
   const propStamp = `${initialDocument.version}:${initialDocument.updatedAt}`;
   const [prevPropStamp, setPrevPropStamp] = useState(propStamp);
@@ -168,6 +172,8 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const versionInputRef = useRef<HTMLInputElement>(null);
   const candidateRef = useRef<VersionCandidateState | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const refreshSeqRef = useRef(0);
 
   // Paper original & metadata editor state
   const [draft, setDraft] = useState<MetadataSnapshot>(() => snapshotFromDocument(initialDocument));
@@ -188,8 +194,12 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const docStateRef = useRef<DocumentDetailDTO>(initialDocument);
   const draftRef = useRef<MetadataSnapshot>(draft);
   const metadataTitleInputRef = useRef<HTMLInputElement>(null);
+  const metadataTypeSelectRef = useRef<HTMLSelectElement>(null);
   const metadataDateInputRef = useRef<HTMLInputElement>(null);
+  const metadataSensitivitySelectRef = useRef<HTMLSelectElement>(null);
+  const metadataOriginalPresentSelectRef = useRef<HTMLSelectElement>(null);
   const metadataOriginalLocationInputRef = useRef<HTMLInputElement>(null);
+  const metadataDescriptionInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     docStateRef.current = docState;
@@ -202,19 +212,27 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   // Reconcile local state when Next.js router.refresh() delivers updated server props.
   if (propStamp !== prevPropStamp) {
     setPrevPropStamp(propStamp);
-    setDocState(initialDocument);
     if (
-      !selectedVersionId ||
-      selectedVersionId === docState.currentVersionId ||
-      !initialDocument.versions.some((v) => v.id === selectedVersionId)
+      initialDocument.version > docState.version ||
+      (initialDocument.version === docState.version &&
+        initialDocument.updatedAt >= docState.updatedAt)
     ) {
-      setSelectedVersionId(initialDocument.currentVersionId);
-    }
-    if (isSameMetadata(draft, docState)) {
-      setDraft(snapshotFromDocument(initialDocument));
+      setDocState(initialDocument);
+      if (
+        !selectedVersionId ||
+        selectedVersionId === docState.currentVersionId ||
+        !initialDocument.versions.some((v) => v.id === selectedVersionId)
+      ) {
+        setSelectedVersionId(initialDocument.currentVersionId);
+      }
+      if (isSameMetadata(draft, docState)) {
+        setDraft(snapshotFromDocument(initialDocument));
+      }
     }
   }
 
+  const isArchived = Boolean(docState.archivedAt);
+  const isReadOnly = isArchived || !canWriteDocuments;
   const isMetadataDirty = !isSameMetadata(draft, docState);
 
   const hasUnsavedVersionCandidate = Boolean(
@@ -226,7 +244,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const hasDirtyState = isMetadataDirty || hasUnsavedVersionCandidate || Boolean(frozenMetadataRequest);
   const inFlightPending = isUploadingVersion || isSavingMetadata;
 
-  useLeaveGuard(hasDirtyState, inFlightPending);
+  useLeaveGuard(!isReadOnly && hasDirtyState, !isReadOnly && inFlightPending);
 
   const syncCandidate = (
     updater:
@@ -246,6 +264,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     return () => {
       isMountedRef.current = false;
       uploadAbortRef.current?.abort();
+      refreshAbortRef.current?.abort();
       if (candidateRef.current?.localPreviewUrl) {
         URL.revokeObjectURL(candidateRef.current.localPreviewUrl);
       }
@@ -269,7 +288,6 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const previewVersion =
     versions.find((v) => v.id === selectedVersionId) ?? currentVersion;
 
-  const isArchived = Boolean(docState.archivedAt);
   const isImage =
     previewVersion?.detectedMime === 'image/jpeg' || previewVersion?.detectedMime === 'image/png';
   const isPdf = previewVersion?.detectedMime === 'application/pdf';
@@ -290,6 +308,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
   const applyLatestDetail = (nextDoc: DocumentDetailDTO, options?: { syncDraft?: boolean }) => {
     const prevDoc = docStateRef.current;
+    if (nextDoc.version < prevDoc.version) return;
     const currentDraft = draftRef.current;
     const prevCurrentId = prevDoc.currentVersionId;
     docStateRef.current = nextDoc;
@@ -314,10 +333,19 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     resetVersionConflict?: boolean;
     syncDraft?: boolean;
   }) => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    const seq = ++refreshSeqRef.current;
+
     setIsRefreshingDetail(true);
     setRefreshError(null);
     try {
-      const res = await fetch(`/api/documents/${docStateRef.current.id}`, { cache: 'no-store' });
+      const res = await fetch(`/api/documents/${docStateRef.current.id}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || seq !== refreshSeqRef.current) return;
       if (res.status === 401) {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('lawoffice:recheck-session'));
@@ -330,7 +358,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       const body = (await res.json().catch(() => null)) as
         | DocumentActionResult<DocumentDetailDTO>
         | null;
-      if (!isMountedRef.current) return;
+      if (controller.signal.aborted || !isMountedRef.current || seq !== refreshSeqRef.current) return;
       if (!res.ok || !body || !body.success) {
         const failureBody = body && !body.success ? body : null;
         setRefreshError(
@@ -351,18 +379,22 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             : null
         );
       }
-      setMetadataConflict(false);
-      setFrozenMetadataRequest(null);
-      setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
-      setMetadataError(null);
-      setMetadataFieldErrors({});
+      if (options?.syncDraft) {
+        setMetadataConflict(false);
+        setFrozenMetadataRequest(null);
+        setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
+        setMetadataError(null);
+        setMetadataFieldErrors({});
+      }
       router.refresh();
     } catch {
-      if (isMountedRef.current) {
-        setRefreshError(NETWORK_ERROR_MESSAGE);
-      }
+      if (controller.signal.aborted || !isMountedRef.current || seq !== refreshSeqRef.current) return;
+      setRefreshError(NETWORK_ERROR_MESSAGE);
     } finally {
-      if (isMountedRef.current) {
+      if (refreshAbortRef.current === controller) {
+        refreshAbortRef.current = null;
+      }
+      if (isMountedRef.current && seq === refreshSeqRef.current) {
         setIsRefreshingDetail(false);
       }
     }
@@ -402,7 +434,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const handleVersionFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || isUploadingVersion) return;
+    if (!file || isUploadingVersion || isReadOnly) return;
 
     if (candidateRef.current?.localPreviewUrl) {
       URL.revokeObjectURL(candidateRef.current.localPreviewUrl);
@@ -547,7 +579,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
   const executeVersionUpload = async (isRetry = false) => {
     const current = candidateRef.current;
-    if (!current || isUploadingVersion || isArchived) return;
+    if (!current || isUploadingVersion || isReadOnly) return;
 
     const clientRejection = validateClientFile(current.file);
     if (clientRejection) {
@@ -744,7 +776,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
   const handleConfirmVersionDuplicate = async () => {
     const current = candidateRef.current;
-    if (!current?.attemptId || isUploadingVersion) return;
+    if (!current?.attemptId || isUploadingVersion || isReadOnly) return;
     setIsUploadingVersion(true);
     try {
       await runVersionFinalize(
@@ -784,7 +816,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   };
 
   const handleResetMetadataDraft = () => {
-    if (isSavingMetadata) return;
+    if (isSavingMetadata || isReadOnly) return;
     setDraft(snapshotFromDocument(docState));
     setMetadataError(null);
     setMetadataFieldErrors({});
@@ -796,7 +828,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
   const handleSaveMetadata = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (isSavingMetadata || isArchived) return;
+    if (isSavingMetadata || isReadOnly) return;
 
     const trimmedTitle = draft.title.trim();
     if (!trimmedTitle) {
@@ -883,10 +915,18 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
           setMetadataFieldErrors(failureBody.fieldErrors);
           if (failureBody.fieldErrors.title) {
             metadataTitleInputRef.current?.focus();
+          } else if (failureBody.fieldErrors.documentType) {
+            metadataTypeSelectRef.current?.focus();
           } else if (failureBody.fieldErrors.documentDate) {
             metadataDateInputRef.current?.focus();
+          } else if (failureBody.fieldErrors.sensitivity) {
+            metadataSensitivitySelectRef.current?.focus();
+          } else if (failureBody.fieldErrors.originalPresent) {
+            metadataOriginalPresentSelectRef.current?.focus();
           } else if (failureBody.fieldErrors.originalLocation) {
             metadataOriginalLocationInputRef.current?.focus();
+          } else if (failureBody.fieldErrors.description) {
+            metadataDescriptionInputRef.current?.focus();
           }
         }
         setMetadataError(failureBody?.error ?? 'تعذر حفظ تعديلات بيانات المستند.');
@@ -911,6 +951,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
   const candidateStatusMeta = candidate ? QUEUE_STATUS_META[candidate.status] : null;
   const candidateClientRejection = candidate ? validateClientFile(candidate.file) : null;
+  const metadataInputsDisabled = isSavingMetadata || isReadOnly || Boolean(frozenMetadataRequest);
 
   return (
     <div className="space-y-6 min-w-0 max-w-full" data-testid="document-detail-view">
@@ -1012,6 +1053,16 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             className="rounded-[6px] bg-stone-100 border border-stone-300 p-3 text-sm text-stone-800"
           >
             هذا المستند مؤرشف حالياً. يمكنك معاينة وتحميل الإصدارات المعتمدة، ولا يمكن إضافة إصدارات أو تعديل البيانات.
+          </div>
+        )}
+
+        {!isArchived && !canWriteDocuments && (
+          <div
+            role="status"
+            data-testid="detail-readonly-banner"
+            className="rounded-[6px] bg-stone-100 border border-stone-300 p-3 text-sm text-stone-800"
+          >
+            وضع القراءة فقط: لا تمتلك صلاحية تعديل بيانات المستند أو إضافة إصدارات جديدة.
           </div>
         )}
 
@@ -1124,10 +1175,10 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
 
               <div className="min-w-0 p-3 rounded-[6px] bg-[#F8FAFB] border border-[#E5ECEE] space-y-1">
                 <dt className="text-xs font-semibold text-[#4D606A]">سياسة التحقق والفحص</dt>
-                <dd className="font-medium text-[#172A35]">
+                <dd className="font-medium text-[#172A35] min-w-0">
                   <span>{currentScanLabel}</span>
                   {currentVersion.scanPolicyCode && (
-                    <span className="block text-xs text-[#4D606A] mt-1">
+                    <span className="block max-w-full break-all [overflow-wrap:anywhere] text-xs text-[#4D606A] mt-1">
                       <bdi dir="ltr">
                         {currentVersion.scanPolicyCode} ({currentVersion.scanPolicyVersion ?? '—'})
                       </bdi>
@@ -1166,13 +1217,13 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1 min-w-0">
-            <h2 id="document-preview-heading" className="text-lg font-bold text-[#172A35]">
+            <h2 id="document-preview-heading" className="text-lg font-bold text-[#172A35] scroll-mt-24">
               المعاينة والتحميل المصرح به
             </h2>
             {previewVersion && (
               <p
                 data-testid="preview-active-version-label"
-                className="text-xs text-[#4D606A] break-words"
+                className="text-xs text-[#4D606A] break-words [overflow-wrap:anywhere]"
               >
                 يتم عرض الإصدار رقم{' '}
                 <strong className="text-[#172A35]">{previewVersion.versionNumber}</strong>{' '}
@@ -1215,7 +1266,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
               >
                 <IconDownload className="w-4 h-4" />
-                <span>تحميل النسخة الأصلية</span>
+                <span>تحميل النسخة الرقمية</span>
               </a>
             </div>
           )}
@@ -1263,7 +1314,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                     className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-xs font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   >
                     <IconDownload className="w-4 h-4 text-[#14566B]" />
-                    <span>تحميل النسخة الأصلية</span>
+                    <span>تحميل النسخة الرقمية</span>
                   </a>
                 )}
               </div>
@@ -1293,12 +1344,12 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
               className="w-full h-[360px] sm:h-[540px] max-h-[70vh] border border-[#D5DFE3] rounded-[6px] bg-white"
             />
             <p className="text-xs text-[#4D606A]">
-              إذا تعذّر عرض ملف <bdi dir="ltr">PDF</bdi> داخل المتصفح، يمكنك فتح المعاينة في تبويب جديد أو استخدام زر «تحميل النسخة الأصلية» أعلاه بعد التحقق من الجلسة.
+              إذا تعذّر عرض ملف <bdi dir="ltr">PDF</bdi> داخل المتصفح، يمكنك فتح المعاينة في تبويب جديد أو استخدام زر «تحميل النسخة الرقمية» أعلاه بعد التحقق من الجلسة.
             </p>
           </div>
         ) : (
           <p className="text-sm text-[#4D606A]">
-            المعاينة المباشرة غير متاحة لهذه الصيغة، ويمكنك تنزيل النسخة الأصلية عبر الزر أعلاه.
+            المعاينة المباشرة غير متاحة لهذه الصيغة، ويمكنك تنزيل النسخة الرقمية عبر الزر أعلاه.
           </p>
         )}
       </section>
@@ -1378,8 +1429,10 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                           <span>{ver.scanStatusLabel}</span>
                         </span>
                         {ver.scanPolicyCode && (
-                          <span className="text-[11px] text-[#4D606A] bg-[#F4F6F7] px-2 py-0.5 rounded border border-[#E5ECEE]">
-                            <bdi dir="ltr">{ver.scanPolicyCode}</bdi>
+                          <span className="max-w-full break-all [overflow-wrap:anywhere] text-[11px] text-[#4D606A] bg-[#F4F6F7] px-2 py-0.5 rounded border border-[#E5ECEE]">
+                            <bdi dir="ltr">
+                              {ver.scanPolicyCode} ({ver.scanPolicyVersion ?? '—'})
+                            </bdi>
                           </span>
                         )}
                       </div>
@@ -1453,27 +1506,28 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       </section>
 
       {/* Add New Version ("إضافة إصدار جديد") */}
-      <section
-        aria-labelledby="add-version-heading"
-        data-testid="add-version-section"
-        className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 sm:p-6 shadow-xs space-y-4 min-w-0 max-w-full"
-      >
-        <div className="space-y-1 pb-3 border-b border-[#E5ECEE]">
-          <h2 id="add-version-heading" className="text-lg font-bold text-[#172A35]">
-            إضافة إصدار جديد
-          </h2>
-          <p className="text-xs sm:text-sm text-[#4D606A]">
-            الصيغ المسموحة: <bdi dir="ltr" className="font-mono text-[#172A35]">PDF / JPEG / PNG</bdi> بحد أقصى 25 ميجابايت. فشل التحقق لا يمس الإصدار الحالي المعتمد.
-          </p>
-        </div>
+      {canWriteDocuments && (
+        <section
+          aria-labelledby="add-version-heading"
+          data-testid="add-version-section"
+          className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 sm:p-6 shadow-xs space-y-4 min-w-0 max-w-full"
+        >
+          <div className="space-y-1 pb-3 border-b border-[#E5ECEE]">
+            <h2 id="add-version-heading" className="text-lg font-bold text-[#172A35]">
+              إضافة إصدار جديد
+            </h2>
+            <p className="text-xs sm:text-sm text-[#4D606A]">
+              الصيغ المسموحة: <bdi dir="ltr" className="font-mono text-[#172A35]">PDF / JPEG / PNG</bdi> بحد أقصى 25 ميجابايت. فشل التحقق لا يمس الإصدار الحالي المعتمد.
+            </p>
+          </div>
 
-        {versionSuccessMessage && (
-          <div
-            role="status"
-            aria-live="polite"
-            data-testid="version-upload-success"
-            className="p-3 rounded-[6px] bg-emerald-50 border border-emerald-200 text-sm text-[#176449] flex items-center justify-between gap-2"
-          >
+          {versionSuccessMessage && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="version-upload-success"
+              className="p-3 rounded-[6px] bg-emerald-50 border border-emerald-200 text-sm text-[#176449] flex flex-wrap items-center justify-between gap-2"
+            >
             <div className="flex items-center gap-2 min-w-0">
               <IconCheck className="w-4 h-4 shrink-0" />
               <span className={MESSAGE_CLASS}>{versionSuccessMessage}</span>
@@ -1688,7 +1742,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 <button
                   type="button"
                   data-testid="version-upload-submit"
-                  disabled={isUploadingVersion || isArchived}
+                  disabled={isUploadingVersion || isReadOnly}
                   aria-busy={isUploadingVersion}
                   onClick={() => void executeVersionUpload(false)}
                   className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-sm font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
@@ -1700,7 +1754,8 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             )}
           </div>
         )}
-      </section>
+        </section>
+      )}
 
       {/* Paper Original & Metadata Editor ("الأصل الورقي وبيانات المستند") */}
       <section
@@ -1770,7 +1825,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 type="text"
                 maxLength={MAX_DOCUMENT_TITLE_LENGTH}
                 value={draft.title}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
                 aria-invalid={Boolean(metadataFieldErrors.title)}
                 aria-describedby={metadataFieldErrors.title ? 'metadata-title-error' : undefined}
                 onChange={(e) => updateDraftField('title', e.target.value)}
@@ -1791,10 +1846,15 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 نوع المستند *
               </label>
               <select
+                ref={metadataTypeSelectRef}
                 id="metadata-type-select"
                 data-testid="metadata-type-select"
                 value={draft.documentType}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
+                aria-invalid={Boolean(metadataFieldErrors.documentType)}
+                aria-describedby={
+                  metadataFieldErrors.documentType ? 'metadata-type-error' : undefined
+                }
                 onChange={(e) => updateDraftField('documentType', e.target.value as DocumentType)}
                 className={INPUT_CLASS}
               >
@@ -1804,6 +1864,11 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                   </option>
                 ))}
               </select>
+              {metadataFieldErrors.documentType && (
+                <p id="metadata-type-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.documentType}
+                </p>
+              )}
             </div>
 
             <div className="min-w-0">
@@ -1820,7 +1885,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 type="date"
                 dir="ltr"
                 value={draft.documentDate}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
                 aria-invalid={Boolean(metadataFieldErrors.documentDate)}
                 aria-describedby={
                   metadataFieldErrors.documentDate ? 'metadata-date-error' : undefined
@@ -1843,10 +1908,15 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 درجة السرية *
               </label>
               <select
+                ref={metadataSensitivitySelectRef}
                 id="metadata-sensitivity-select"
                 data-testid="metadata-sensitivity-select"
                 value={draft.sensitivity}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
+                aria-invalid={Boolean(metadataFieldErrors.sensitivity)}
+                aria-describedby={
+                  metadataFieldErrors.sensitivity ? 'metadata-sensitivity-error' : undefined
+                }
                 onChange={(e) =>
                   updateDraftField('sensitivity', e.target.value as DocumentSensitivity)
                 }
@@ -1858,6 +1928,11 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                   </option>
                 ))}
               </select>
+              {metadataFieldErrors.sensitivity && (
+                <p id="metadata-sensitivity-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.sensitivity}
+                </p>
+              )}
             </div>
 
             <div className="min-w-0">
@@ -1868,10 +1943,17 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 حالة الأصل الورقي
               </label>
               <select
+                ref={metadataOriginalPresentSelectRef}
                 id="metadata-original-present-select"
                 data-testid="metadata-original-present-select"
                 value={draft.originalPresent}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
+                aria-invalid={Boolean(metadataFieldErrors.originalPresent)}
+                aria-describedby={
+                  metadataFieldErrors.originalPresent
+                    ? 'metadata-original-present-error'
+                    : undefined
+                }
                 onChange={(e) =>
                   updateDraftField('originalPresent', e.target.value as DocumentOriginalPresence)
                 }
@@ -1883,6 +1965,11 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                   </option>
                 ))}
               </select>
+              {metadataFieldErrors.originalPresent && (
+                <p id="metadata-original-present-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.originalPresent}
+                </p>
+              )}
             </div>
 
             <div className="min-w-0">
@@ -1899,7 +1986,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 type="text"
                 maxLength={300}
                 value={draft.originalLocation}
-                disabled={isSavingMetadata || isArchived}
+                disabled={metadataInputsDisabled}
                 aria-invalid={Boolean(metadataFieldErrors.originalLocation)}
                 aria-describedby={
                   metadataFieldErrors.originalLocation
@@ -1918,7 +2005,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             </div>
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label
               htmlFor="metadata-description-input"
               className="block text-sm font-semibold text-[#172A35] mb-1.5"
@@ -1926,43 +2013,55 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
               وصف وملاحظات المستند (اختياري)
             </label>
             <textarea
+              ref={metadataDescriptionInputRef}
               id="metadata-description-input"
               data-testid="metadata-description-input"
               rows={2}
               maxLength={2000}
               value={draft.description}
-              disabled={isSavingMetadata || isArchived}
+              disabled={metadataInputsDisabled}
+              aria-invalid={Boolean(metadataFieldErrors.description)}
+              aria-describedby={
+                metadataFieldErrors.description ? 'metadata-description-error' : undefined
+              }
               onChange={(e) => updateDraftField('description', e.target.value)}
-              className="w-full px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
+              className={INPUT_CLASS}
             />
+            {metadataFieldErrors.description && (
+              <p id="metadata-description-error" className={FIELD_ERROR_CLASS}>
+                {metadataFieldErrors.description}
+              </p>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-[#E5ECEE]">
-            {isMetadataDirty && (
+          {canWriteDocuments && (
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-[#E5ECEE]">
+              {(isMetadataDirty || Boolean(frozenMetadataRequest)) && !isReadOnly && (
+                <button
+                  type="button"
+                  data-testid="metadata-reset-button"
+                  disabled={isSavingMetadata}
+                  onClick={handleResetMetadataDraft}
+                  className="inline-flex items-center justify-center px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-sm font-medium rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                >
+                  تراجع عن التعديلات
+                </button>
+              )}
               <button
-                type="button"
-                data-testid="metadata-reset-button"
-                disabled={isSavingMetadata}
-                onClick={handleResetMetadataDraft}
-                className="inline-flex items-center justify-center px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] border border-[#D5DFE3] text-sm font-medium rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                type="submit"
+                data-testid="metadata-save-button"
+                disabled={isSavingMetadata || isReadOnly || (!isMetadataDirty && !frozenMetadataRequest)}
+                aria-busy={isSavingMetadata}
+                className="inline-flex items-center justify-center px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
               >
-                تراجع عن التعديلات
+                {isSavingMetadata
+                  ? 'جارٍ الحفظ...'
+                  : frozenMetadataRequest
+                    ? 'إعادة محاولة الحفظ'
+                    : 'حفظ التعديلات'}
               </button>
-            )}
-            <button
-              type="submit"
-              data-testid="metadata-save-button"
-              disabled={isSavingMetadata || isArchived || (!isMetadataDirty && !frozenMetadataRequest)}
-              aria-busy={isSavingMetadata}
-              className="inline-flex items-center justify-center px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
-            >
-              {isSavingMetadata
-                ? 'جارٍ الحفظ...'
-                : frozenMetadataRequest
-                  ? 'إعادة محاولة الحفظ'
-                  : 'حفظ التعديلات'}
-            </button>
-          </div>
+            </div>
+          )}
         </form>
       </section>
     </div>

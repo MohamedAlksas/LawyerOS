@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import type { DocumentType } from '@prisma/client';
 import { test, expect } from '@playwright/test';
@@ -34,80 +34,20 @@ import {
   snapshotCookies,
   snapshotStorage,
 } from '../helpers/t04-storage';
+import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
 
 const prisma = getPrismaClient();
 
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
 function buildValidSyntheticPng(r: number, g: number, b: number, width = 100, height = 70): Buffer {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-
-  const rowStride = 1 + width * 3;
-  const rawPixels = Buffer.alloc(rowStride * height);
-  for (let y = 0; y < height; y++) {
-    const rowStart = y * rowStride;
-    rawPixels[rowStart] = 0x00;
-    for (let x = 0; x < width; x++) {
-      const pxOffset = rowStart + 1 + x * 3;
-      rawPixels[pxOffset] = r & 0xff;
-      rawPixels[pxOffset + 1] = g & 0xff;
-      rawPixels[pxOffset + 2] = b & 0xff;
-    }
-  }
-  return Buffer.concat([
-    signature,
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', zlib.deflateSync(rawPixels)),
-    makePngChunk('IEND', Buffer.alloc(0)),
-  ]);
+  return buildSyntheticPng({ r, g, b, width, height });
 }
 
-function buildSyntheticPdf(marker: string): Buffer {
-  return Buffer.from(
-    [
-      '%PDF-1.4',
-      '1 0 obj',
-      `<< /Type /Catalog /Marker (${marker}) >>`,
-      'endobj',
-      'trailer',
-      '<< /Root 1 0 R >>',
-      'startxref',
-      '9',
-      '%%EOF',
-      '',
-    ].join('\n'),
-    'ascii'
-  );
+function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
+  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function resolveE2EStorageRoot(): string {
-  return process.env.DOCUMENTS_STORAGE_ROOT || path.resolve(process.cwd(), 'storage/t12-e2e');
+  return process.env.DOCUMENTS_STORAGE_ROOT || path.join(os.tmpdir(), 'lawoffice-t12-e2e');
 }
 
 function sha256Hex(buffer: Buffer): string {
@@ -360,16 +300,17 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
     }
   });
 
-  test('T12-TC-01 & T12-TC-03: Add v2, download v1 from history, and toggle originalPresent YES/location -> NO with intact scan @t12 @documents', async ({
+  test('T12-TC-01 & T12-TC-03: Add v2, download v1 from history, preserve dirty metadata, retry duplicate confirm, and toggle originalPresent @t12 @documents', async ({
     page,
   }) => {
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
+    const currentYear = String(new Date().getUTCFullYear());
 
     try {
       const matter = await prisma.matter.create({
         data: {
-          fileCode: `LO-2027-T12-${runId}-01`,
+          fileCode: `LO-${currentYear}-T12-${runId}-01`,
           title: `ملف إصدارات المستندات ${runId}`,
           kind: 'LITIGATION',
           status: 'ACTIVE',
@@ -404,6 +345,10 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expect(page.getByTestId('detail-original-presence')).toContainText('غير معروف');
       await expect(page.getByTestId('version-scan-badge-1')).toContainText(UNSCANNED_POLICY_NOTICE_AR);
 
+      // Make dirty unsaved metadata edit before v2 upload completes to verify dirty state is preserved
+      const unsavedDraftNote = `مسودة وصف غير محفوظة ${runId}`;
+      await page.getByTestId('metadata-description-input').fill(unsavedDraftNote);
+
       // T12-TC-01: Add version 2 via UI
       await page.getByTestId('version-file-input').setInputFiles({
         name: `contract_v2_${runId}.png`,
@@ -419,6 +364,9 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expect(page.getByTestId('version-current-badge-2')).toHaveText('الحالي');
       await expect(page.getByTestId('version-scan-badge-2')).toContainText(UNSCANNED_POLICY_NOTICE_AR);
       await expect(page.getByTestId('version-scan-badge-1')).toContainText(UNSCANNED_POLICY_NOTICE_AR);
+      await expect(page.getByTestId('metadata-description-input')).toHaveValue(unsavedDraftNote);
+      await page.getByTestId('metadata-reset-button').click();
+      await expect(page.getByTestId('metadata-description-input')).toHaveValue('');
 
       // Preview & download v1 explicitly from history
       await page.getByTestId('version-preview-btn-1').click();
@@ -462,6 +410,45 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const v2DownloadRes = await page.request.get(v2Href!);
       expect(v2DownloadRes.status()).toBe(200);
       expect(sha256Hex(Buffer.from(await v2DownloadRes.body()))).toBe(v2Hash);
+
+      // Duplicate-confirm retry after INCOMPLETE failure preserves confirmDuplicate: true & same idempotencyKey
+      await page.getByTestId('version-file-input').setInputFiles({
+        name: `contract_v3_dup_${runId}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: v1Bytes,
+      });
+      await page.getByTestId('version-upload-submit').click();
+      await expect(page.getByTestId('version-duplicate-warning')).toBeVisible();
+
+      const confirmPayloads: Array<{ confirmDuplicate?: boolean; idempotencyKey?: string }> = [];
+      let failDuplicateOnce = true;
+      await page.route('**/api/documents/uploads/*/finalize', async (route) => {
+        if (route.request().method() === 'POST') {
+          const parsed = route.request().postDataJSON() as {
+            confirmDuplicate?: boolean;
+            idempotencyKey?: string;
+          };
+          confirmPayloads.push(parsed);
+          if (failDuplicateOnce) {
+            failDuplicateOnce = false;
+            await route.abort('failed');
+            return;
+          }
+        }
+        await route.continue();
+      });
+
+      await page.getByTestId('version-confirm-duplicate').click();
+      await expect(page.getByTestId('version-candidate-status')).toHaveText('الرفع غير مكتمل');
+      await page.getByTestId('version-upload-retry').click();
+      await expect(page.getByTestId('version-upload-success')).toContainText('الإصدار رقم 3');
+      await expect(page.getByTestId('detail-current-version-badge')).toContainText('الإصدار الحالي: 3');
+      await page.unroute('**/api/documents/uploads/*/finalize');
+
+      expect(confirmPayloads).toHaveLength(2);
+      expect(confirmPayloads[0].confirmDuplicate).toBe(true);
+      expect(confirmPayloads[1].confirmDuplicate).toBe(true);
+      expect(confirmPayloads[1].idempotencyKey).toBe(confirmPayloads[0].idempotencyKey);
     } finally {
       await cleanupScopedT12Data({
         ownerIds: [owner.id],
@@ -479,11 +466,12 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
     const maintainerId = randomUUID();
+    const currentYear = String(new Date().getUTCFullYear());
 
     try {
       const matter = await prisma.matter.create({
         data: {
-          fileCode: `LO-2027-T12-${runId}-05`,
+          fileCode: `LO-${currentYear}-T12-${runId}-05`,
           title: `ملف البحث الموحد للمستندات ${runId}`,
           kind: 'LITIGATION',
           status: 'ACTIVE',
@@ -636,12 +624,15 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
     }
   });
 
-  test('T12-TC-04 UI: Link READY documents from POA, Hearing Result, and Deadline forms without auto-approval @t12 @documents', async ({
+  test('T12-TC-04 UI: Link READY documents from POA, Hearing Result, and Deadline forms, preserve archived links, and support updateAndConfirm @t12 @documents', async ({
     page,
   }) => {
     const localMatterIds: string[] = [];
     const localPartyIds: string[] = [];
     const localDocIds: string[] = [];
+    const currentYear = String(new Date().getUTCFullYear());
+    const futureHearingYmd = formatOffsetYmd(30);
+    const futureDueDateYmd = formatOffsetYmd(45);
 
     try {
       const party = await prisma.party.create({
@@ -657,7 +648,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
 
       const matter = await prisma.matter.create({
         data: {
-          fileCode: `LO-2027-T12-${runId}-04`,
+          fileCode: `LO-${currentYear}-T12-${runId}-04`,
           title: `قضية ربط المستندات ${runId}`,
           kind: 'LITIGATION',
           status: 'ACTIVE',
@@ -682,8 +673,23 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
           courtId: testCourtId,
           instance: 'FIRST_INSTANCE',
           numberText: `5501-${runId}`,
-          yearLabel: '2027',
+          yearLabel: currentYear,
           registerType: 'مدني كلي',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+
+      const proceeding2 = await prisma.proceeding.create({
+        data: {
+          matterId: matter.id,
+          courtId: testCourtId,
+          instance: 'APPEAL',
+          parentProceedingId: proceeding.id,
+          numberText: `5502-${runId}`,
+          yearLabel: currentYear,
+          registerType: 'استئناف مدني',
           status: 'ACTIVE',
           createdById: owner.id,
           updatedById: owner.id,
@@ -693,7 +699,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const hearing = await prisma.hearing.create({
         data: {
           proceedingId: proceeding.id,
-          hearingDate: new Date('2027-09-10T00:00:00.000Z'),
+          hearingDate: new Date(`${futureHearingYmd}T00:00:00.000Z`),
           status: 'SCHEDULED',
           createdById: owner.id,
           updatedById: owner.id,
@@ -730,6 +736,22 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         ],
       });
       localDocIds.push(decisionDoc.documentId);
+
+      const decisionDoc2 = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        matterId: matter.id,
+        proceedingId: proceeding2.id,
+        title: `صورة مستند قيد الاستئناف ${runId}`,
+        documentType: 'PLEADING',
+        versions: [
+          {
+            filename: `appeal_doc_${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes: buildSyntheticPdf(`T12-PROC2-DOC-${runId}`),
+          },
+        ],
+      });
+      localDocIds.push(decisionDoc2.documentId);
 
       // Seed ineligible documents (archived, quarantined, wrong-matter, wrong-party)
       const archivedDoc = await seedReadyDocumentInDb({
@@ -813,7 +835,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
 
       const otherMatter = await prisma.matter.create({
         data: {
-          fileCode: `LO-2027-T12-${runId}-04B`,
+          fileCode: `LO-${currentYear}-T12-${runId}-04B`,
           title: `قضية أخرى مستبعدة ${runId}`,
           kind: 'LITIGATION',
           status: 'ACTIVE',
@@ -851,7 +873,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expect(poaDocSelect.locator(`option[value="${otherMatterDoc.documentId}"]`)).toHaveCount(0);
 
       await page.getByTestId('poa-number-input').fill(`0909-${runId}`);
-      await page.getByTestId('poa-year-input').fill('2027');
+      await page.getByTestId('poa-year-input').fill(currentYear);
       await page.getByTestId('poa-office-input').fill('مكتب توثيق مصر الجديدة');
       await page.getByTestId('poa-type-select').selectOption('GENERAL');
       await poaDocSelect.selectOption(poaDoc.documentId);
@@ -872,6 +894,24 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expect(page.getByTestId('poa-item').first().getByTestId('poa-review-status-badge')).toHaveText(
         'قيد المراجعة'
       );
+      await expect(page.getByTestId(`poa-linked-document-${savedPoa.id}`)).toHaveAttribute(
+        'href',
+        `/documents/${poaDoc.documentId}`
+      );
+
+      // Archive linked POA doc -> editing POA preserves "(مؤرشف)" option and allows saving unrelated notes
+      await prisma.document.update({
+        where: { id: poaDoc.documentId },
+        data: { archivedAt: new Date() },
+      });
+      await page.reload();
+      await expectShellReady(page);
+      await page.getByRole('button', { name: 'تعديل التوكيل' }).first().click();
+      await expect(
+        page.getByTestId('poa-document-select').locator(`option[value="${poaDoc.documentId}"]`)
+      ).toContainText('(مؤرشف)');
+      await page.getByTestId('poa-notes-input').fill(`ملاحظة مع بقاء المستند المؤرشف ${runId}`);
+      await page.getByTestId('save-poa-button').click();
       await expect(page.getByTestId(`poa-linked-document-${savedPoa.id}`)).toHaveAttribute(
         'href',
         `/documents/${poaDoc.documentId}`
@@ -925,6 +965,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       expect(docsApiText).not.toContain('quarantineKey');
       expect(docsApiText).not.toContain('t12-e2e');
 
+      await page.getByTestId('deadline-proceeding-select').selectOption(proceeding.id);
       const docSelect = page.getByTestId('deadline-source-document-select');
       await expect(docSelect.locator(`option[value="${decisionDoc.documentId}"]`)).toHaveCount(1);
       await expect(docSelect.locator(`option[value="${archivedDoc.documentId}"]`)).toHaveCount(0);
@@ -951,6 +992,49 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expect(
         page.getByTestId(`deadline-source-document-link-${savedDeadline.id}`)
       ).toHaveAttribute('href', `/documents/${decisionDoc.documentId}`);
+
+      // Archive linked deadline doc -> opening draft preserves "(مؤرشف)" option; clearing via updateDraft removes link;
+      // then updateAndConfirm reassigns proceedingId & attaches new doc cleanly.
+      await prisma.document.update({
+        where: { id: decisionDoc.documentId },
+        data: { archivedAt: new Date() },
+      });
+      await page.reload();
+      await expectShellReady(page);
+      await page.getByTestId(`open-deadline-button-${savedDeadline.id}`).click();
+      await expect(
+        page
+          .getByTestId('deadline-source-document-select')
+          .locator(`option[value="${decisionDoc.documentId}"]`)
+      ).toContainText('(مؤرشف)');
+      await page.getByTestId('deadline-source-document-select').selectOption('');
+      await page.getByTestId('save-deadline-draft-button').click();
+      await expect(page.getByTestId(`deadline-source-document-link-${savedDeadline.id}`)).toHaveCount(0);
+
+      await page.getByTestId(`open-deadline-button-${savedDeadline.id}`).click();
+      await page.getByTestId('deadline-proceeding-select').selectOption(proceeding2.id);
+      await expect(
+        page
+          .getByTestId('deadline-source-document-select')
+          .locator(`option[value="${decisionDoc2.documentId}"]`)
+      ).toHaveCount(1);
+      await page.getByTestId('deadline-source-document-select').selectOption(decisionDoc2.documentId);
+      await page.getByTestId('deadline-date-input').fill(futureDueDateYmd);
+      await page.getByTestId('deadline-source-input').fill('إعلان رسمي محدث');
+      await page.getByTestId('deadline-basis-input').fill('احتساب الميعاد بعد تحديث القيد والمستند');
+      await page.getByTestId('deadline-review-checkbox').check();
+      await page.getByTestId('confirm-deadline-button').click();
+
+      await expect(page.getByTestId(`deadline-status-badge-${savedDeadline.id}`)).toHaveText('مؤكد');
+      await expect(
+        page.getByTestId(`deadline-source-document-link-${savedDeadline.id}`)
+      ).toHaveAttribute('href', `/documents/${decisionDoc2.documentId}`);
+      await page.reload();
+      await expectShellReady(page);
+      await expect(page.getByTestId(`deadline-status-badge-${savedDeadline.id}`)).toHaveText('مؤكد');
+      await expect(
+        page.getByTestId(`deadline-source-document-link-${savedDeadline.id}`)
+      ).toHaveAttribute('href', `/documents/${decisionDoc2.documentId}`);
     } finally {
       await cleanupScopedT12Data({
         ownerIds: [owner.id],
@@ -966,8 +1050,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
   }, testInfo) => {
     const width = testInfo.project.use.viewport?.width ?? 1440;
     const tag = `${runId}-w${width}`;
-    const screenshotDir = path.resolve(process.cwd(), 'test-results/t12');
-    fs.mkdirSync(screenshotDir, { recursive: true });
+    const currentYear = String(new Date().getUTCFullYear());
 
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
@@ -976,7 +1059,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const matterTitle = `ملف صلاحية الإتاحة T12 ${tag}`;
       const matter = await prisma.matter.create({
         data: {
-          fileCode: `LO-2027-${tag}`,
+          fileCode: `LO-${currentYear}-${tag}`,
           title: matterTitle,
           kind: 'LITIGATION',
           status: 'ACTIVE',
@@ -985,6 +1068,18 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         },
       });
       localMatterIds.push(matter.id);
+
+      const matter2 = await prisma.matter.create({
+        data: {
+          fileCode: `LO-${currentYear}-${tag}-2`,
+          title: `ملف ثانٍ لاختبار انقطاع الشبكة ${tag}`,
+          kind: 'LITIGATION',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localMatterIds.push(matter2.id);
 
       const v1Bytes = buildSyntheticPdf(`T12-TC07-V1-${tag}`);
       const v2Bytes = buildValidSyntheticPng(15, 95, 115);
@@ -1002,6 +1097,16 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       });
       localDocIds.push(seeded.documentId);
 
+      const seeded2 = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        matterId: matter2.id,
+        title: `مستند الملف الثاني ${tag}`,
+        versions: [
+          { filename: `m2_${tag}.pdf`, mime: 'application/pdf', bytes: buildSyntheticPdf(`M2-${tag}`) },
+        ],
+      });
+      localDocIds.push(seeded2.documentId);
+
       await signInWithTotp(page, owner);
       await page.goto(`/documents/${seeded.documentId}`);
       await expectShellReady(page);
@@ -1014,6 +1119,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const versionFileLabel = page.locator('label[for="document-new-version-input"]');
       const originalLocationInput = page.getByTestId('metadata-original-location-input');
       const saveMetaBtn = page.getByTestId('metadata-save-button');
+      const previewHeading = page.locator('#document-preview-heading');
 
       await expectTouchTarget(backLink, 44);
       await expectTouchTarget(previewV1Btn, 44);
@@ -1047,6 +1153,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         (el) => getComputedStyle(el).boxShadow
       );
       expect(labelFocusShadow).not.toBe('none');
+      expect(labelFocusShadow).toMatch(/(?:^|[,\s])(?:[2-9]|\d{2,})(?:\.\d+)?px/);
 
       expect(await tabToTestId(page, 'metadata-original-location-input', 12)).toBe(true);
       await expectVisibleFocus(page, originalLocationInput);
@@ -1058,6 +1165,11 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expectNotCovered(page, saveMetaBtn);
       await page.keyboard.press('Enter');
       await expect(page.getByTestId('metadata-save-success')).toBeVisible();
+
+      // Verify preview scroll (scroll-padding-top) keeps #document-preview-heading uncovered by sticky header
+      await previewV1Btn.click();
+      await nextPaint(page);
+      await expectNotCovered(page, previewHeading);
 
       // Failed version candidate INCOMPLETE -> retry recovery to v3 READY
       let abortBeginOnce = true;
@@ -1115,7 +1227,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
       await page.screenshot({
-        path: path.join(screenshotDir, `t12-document-detail-${width}.png`),
+        path: testInfo.outputPath(`t12-document-detail-${width}.png`),
         fullPage: true,
       });
 
@@ -1136,20 +1248,25 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expectNotCovered(page, previewV1Btn);
       await expectNotCovered(page, saveMetaBtn);
       await page.screenshot({
-        path: path.join(screenshotDir, `t12-document-detail-zoom200-${width}.png`),
+        path: testInfo.outputPath(`t12-document-detail-zoom200-${width}.png`),
         fullPage: true,
       });
 
-      // DeadlinesView doc-load failure + retry UI flow
-      let failDocsOnce = true;
+      // DeadlinesView doc-load 503 failure + retry disappears error, plus network error branch
+      let failDocsMode: '503' | 'abort' | 'none' = '503';
       await page.route('**/api/documents?*', async (route) => {
-        if (failDocsOnce && route.request().method() === 'GET') {
-          failDocsOnce = false;
+        if (route.request().method() === 'GET' && failDocsMode === '503') {
+          failDocsMode = 'none';
           await route.fulfill({
             status: 503,
             contentType: 'application/json',
             body: JSON.stringify({ success: false, error: 'تعذر تحميل مستندات القضية مؤقتاً.' }),
           });
+          return;
+        }
+        if (route.request().method() === 'GET' && failDocsMode === 'abort') {
+          failDocsMode = 'none';
+          await route.abort('failed');
           return;
         }
         await route.continue();
@@ -1163,8 +1280,19 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const docsRetryBtn = page.getByTestId('deadline-source-docs-retry');
       await expectTouchTarget(docsRetryBtn, 44);
       await docsRetryBtn.click();
+      await expect(page.getByTestId('deadline-source-docs-error')).toHaveCount(0);
       await expect(
         page.getByTestId('deadline-source-document-select').locator(`option[value="${seeded.documentId}"]`)
+      ).toHaveCount(1);
+
+      // Network abort branch -> retry clears error and loads matter2 docs
+      failDocsMode = 'abort';
+      await page.getByTestId('deadline-matter-select').selectOption(matter2.id);
+      await expect(page.getByTestId('deadline-source-docs-error')).toBeVisible();
+      await page.getByTestId('deadline-source-docs-retry').click();
+      await expect(page.getByTestId('deadline-source-docs-error')).toHaveCount(0);
+      await expect(
+        page.getByTestId('deadline-source-document-select').locator(`option[value="${seeded2.documentId}"]`)
       ).toHaveCount(1);
       await expectNoPageOverflow(page);
       await page.unroute('**/api/documents?*');

@@ -30,7 +30,7 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض ملف هذا الطرف.</p>
         </div>
@@ -65,8 +65,10 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
     throw error;
   }
 
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   let availablePoaDocuments: LinkableDocumentSummary[] = [];
-  if (!party.archivedAt && authorize(actor, 'READ_DOCUMENTS')) {
+  let poaDocumentsError: string | undefined;
+  if (!party.archivedAt && canReadDocuments) {
     try {
       const prisma = getPrismaClient();
       const [partyDocsRes, clientMatters] = await Promise.all([
@@ -81,15 +83,18 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
           take: 50,
         }),
       ]);
-      const matterDocsResults = await Promise.all(
-        clientMatters.map((m) =>
-          listDocuments(actor, { matterId: m.matterId, limit: 100 }).catch(() => null)
-        )
+      const matterDocsSettled = await Promise.allSettled(
+        clientMatters.map((m) => listDocuments(actor, { matterId: m.matterId, limit: 100 }))
       );
+      if (matterDocsSettled.some((res) => res.status === 'rejected')) {
+        poaDocumentsError = 'تعذر تحميل بعض مستندات القضايا المرتبطة بالطرف من الخادم.';
+      }
       const seen = new Set<string>();
       const allDocs = [
         ...partyDocsRes.documents,
-        ...matterDocsResults.flatMap((res) => res?.documents ?? []),
+        ...matterDocsSettled.flatMap((res) =>
+          res.status === 'fulfilled' ? res.value.documents : []
+        ),
       ];
       for (const doc of allDocs) {
         if (seen.has(doc.id)) continue;
@@ -101,10 +106,13 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
           documentType: doc.documentType,
           currentVersionId: doc.currentVersionId,
           scanStatusLabel: doc.currentVersion.scanStatusLabel,
+          proceedingId: doc.proceedingId,
+          hearingId: doc.hearingId,
         });
       }
     } catch {
       availablePoaDocuments = [];
+      poaDocumentsError = 'تعذر تحميل المستندات المتاحة للربط بالتوكيل من الخادم.';
     }
   }
 
@@ -114,7 +122,9 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
         key={`${actor.id}:${party.id}`}
         party={party}
         ownerId={actor.id}
+        canReadDocuments={canReadDocuments}
         availablePoaDocuments={availablePoaDocuments}
+        poaDocumentsError={poaDocumentsError}
       />
     </div>
   );

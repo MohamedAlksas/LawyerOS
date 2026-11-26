@@ -52,6 +52,8 @@ interface MatterDetailClientProps {
   initialTasks?: TaskItemDTO[];
   initialDeadlines?: DeadlineDTO[];
   initialDocuments?: LinkableDocumentSummary[];
+  canReadDocuments?: boolean;
+  documentsError?: string;
   tasksError?: string;
   deadlinesError?: string;
 }
@@ -61,7 +63,9 @@ export function MatterDetailClient({
   initialMatter,
   initialTasks = [],
   initialDeadlines = [],
-  initialDocuments = [],
+  initialDocuments,
+  canReadDocuments = true,
+  documentsError,
   tasksError,
   deadlinesError,
 }: MatterDetailClientProps) {
@@ -2508,7 +2512,9 @@ export function MatterDetailClient({
           <DeadlinesView
             actorId={ownerId}
             initialDeadlines={initialDeadlines}
+            canReadDocuments={canReadDocuments}
             matterDocuments={initialDocuments}
+            documentsLoadError={documentsError}
             initialError={deadlinesError}
             selectableMatters={[]}
             lockedMatterId={matter.id}

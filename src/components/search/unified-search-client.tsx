@@ -58,6 +58,34 @@ const ENTITY_TYPE_CONFIG: Record<
   },
 };
 
+function renderSearchSubtitle(item: UnifiedSearchResultItem): React.ReactNode {
+  if (!item.subtitle) return null;
+  let text = item.subtitle;
+  if (item.code) {
+    if (text === item.code) return null;
+    if (text.startsWith(`${item.code} • `)) {
+      text = text.slice(item.code.length + 3);
+    }
+  }
+  const sepIdx = text.indexOf(' • ');
+  if (sepIdx > 0) {
+    const first = text.slice(0, sepIdx);
+    const rest = text.slice(sepIdx + 3);
+    if (/^[A-Za-z0-9/_-]+$/.test(first)) {
+      return (
+        <>
+          <bdi dir="ltr" className="font-mono">
+            {first}
+          </bdi>
+          {' • '}
+          {rest}
+        </>
+      );
+    }
+  }
+  return text;
+}
+
 export function UnifiedSearchClient({
   initialResult,
   initialType = 'ALL',
@@ -264,7 +292,7 @@ export function UnifiedSearchClient({
               aria-pressed={searchType === 'ALL'}
               data-testid="tab-all"
               onClick={() => handleTypeChange('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] ${
                 searchType === 'ALL'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -285,7 +313,7 @@ export function UnifiedSearchClient({
               aria-pressed={searchType === 'MATTER'}
               data-testid="tab-matter"
               onClick={() => handleTypeChange('MATTER')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] ${
                 searchType === 'MATTER'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -306,7 +334,7 @@ export function UnifiedSearchClient({
               aria-pressed={searchType === 'PROCEEDING'}
               data-testid="tab-proceeding"
               onClick={() => handleTypeChange('PROCEEDING')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] ${
                 searchType === 'PROCEEDING'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -327,7 +355,7 @@ export function UnifiedSearchClient({
               aria-pressed={searchType === 'PARTY'}
               data-testid="tab-party"
               onClick={() => handleTypeChange('PARTY')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] ${
                 searchType === 'PARTY'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -348,7 +376,7 @@ export function UnifiedSearchClient({
               aria-pressed={searchType === 'DOCUMENT'}
               data-testid="tab-document"
               onClick={() => handleTypeChange('DOCUMENT')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] ${
                 searchType === 'DOCUMENT'
                   ? 'bg-[#14566B] text-white shadow-xs'
                   : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
@@ -382,7 +410,11 @@ export function UnifiedSearchClient({
       </div>
 
       {/* 3. Search Feedback / Results Count */}
-      <div className="flex items-center justify-between text-xs text-[#4D606A] px-1">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#4D606A] px-1"
+      >
         <span>
           نتائج البحث: <span className="font-bold text-[#172A35]">{totalCount}</span> نتيجة
         </span>
@@ -413,7 +445,7 @@ export function UnifiedSearchClient({
               <button
                 type="button"
                 onClick={handleClear}
-                className="px-4 py-2 bg-[#14566B] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
+                className="px-4 py-2 bg-[#14566B] text-white text-xs font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
               >
                 مسح الفلاتر وإعادة البحث
               </button>
@@ -442,6 +474,7 @@ export function UnifiedSearchClient({
                 icon: '',
                 badgeClass: 'bg-gray-100 text-gray-800 border-gray-300',
               };
+              const renderedSubtitle = renderSearchSubtitle(item);
 
               return (
                 <article
@@ -471,7 +504,7 @@ export function UnifiedSearchClient({
                         )}
 
                         {/* Optional Badge */}
-                        {item.badge && (
+                        {item.badge && (!item.isArchived || item.badge !== 'مؤرشف') && (
                           <span className="text-[11px] text-[#4D606A] bg-[#F4F6F7] px-2 py-0.5 rounded border border-[#E8EEF1]">
                             {item.badge}
                           </span>
@@ -492,16 +525,16 @@ export function UnifiedSearchClient({
                       <h2 className="text-base font-bold text-[#172A35] leading-snug break-words [overflow-wrap:anywhere]">
                         <Link
                           href={item.href}
-                          className="inline-flex items-center min-h-[44px] hover:text-[#14566B] hover:underline focus:outline-none focus:ring-2 focus:ring-[#14566B] rounded"
+                          className="inline-flex items-center max-w-full min-w-0 min-h-[44px] hover:text-[#14566B] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] rounded"
                         >
                           {item.title}
                         </Link>
                       </h2>
 
                       {/* Subtitle / Details */}
-                      {item.subtitle && (
+                      {renderedSubtitle && (
                         <p className="text-xs text-[#4D606A] leading-relaxed break-words [overflow-wrap:anywhere]">
-                          {item.subtitle}
+                          {renderedSubtitle}
                         </p>
                       )}
                     </div>
@@ -509,7 +542,7 @@ export function UnifiedSearchClient({
                     <div className="shrink-0 pt-1 sm:pt-0">
                       <Link
                         href={item.href}
-                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px]"
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                       >
                         <span>عرض التفاصيل</span>
                         <span aria-hidden="true">&larr;</span>
@@ -536,7 +569,7 @@ export function UnifiedSearchClient({
                 data-testid="prev-page-button"
                 onClick={() => handlePageChange(page - 1)}
                 disabled={page <= 1}
-                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 السابق
               </button>
@@ -551,7 +584,7 @@ export function UnifiedSearchClient({
                 data-testid="next-page-button"
                 onClick={() => handlePageChange(page + 1)}
                 disabled={page >= totalPages}
-                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+                className="px-3 py-1.5 text-xs font-medium rounded-[6px] border border-[#D5DFE3] text-[#172A35] hover:bg-[#E8EEF1] disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 التالي
               </button>

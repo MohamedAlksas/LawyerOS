@@ -19,7 +19,7 @@ export default async function NewPartyPage() {
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-3xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-3xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لإضافة أطراف جديدة.</p>
         </div>

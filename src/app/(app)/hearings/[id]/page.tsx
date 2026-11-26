@@ -12,9 +12,15 @@ import {
 } from '@/components/hearings/hearing-ui-types';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { mapLinkableDocumentSummary } from '@/modules/scheduling/hearing-types';
-import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
+import {
+  DOCUMENT_TYPE_LABELS_AR,
+  LINKABLE_DOCUMENT_SELECT,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
 import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
+
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
 interface HearingDetailPageProps {
   params: Promise<{
@@ -36,7 +42,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض تفاصيل هذه الجلسة.</p>
         </div>
@@ -45,6 +51,11 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
     throw error;
   }
 
+  if (!UUID_REGEX.test(id)) {
+    notFound();
+  }
+
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const prisma = getPrismaClient();
   const hearing = await prisma.hearing.findUnique({
     where: { id },
@@ -57,17 +68,15 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
       },
       results: {
         orderBy: { revision: 'desc' },
-        include: {
-          decisionDocument: {
-            select: {
-              id: true,
-              title: true,
-              documentType: true,
-              currentVersionId: true,
-              currentVersion: { select: { scanStatus: true } },
-            },
-          },
-        },
+        ...(canReadDocuments
+          ? {
+              include: {
+                decisionDocument: {
+                  select: LINKABLE_DOCUMENT_SELECT,
+                },
+              },
+            }
+          : {}),
       },
     },
   });
@@ -88,8 +97,11 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
   const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());
   const latestResult = hearing.results[0] || null;
-  const latestDecisionDoc = latestResult ? mapLinkableDocumentSummary(latestResult.decisionDocument) : null;
-  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  const rawDecisionDoc =
+    canReadDocuments && latestResult && 'decisionDocument' in latestResult
+      ? (latestResult.decisionDocument as LinkableDocumentRow | null | undefined)
+      : null;
+  const latestDecisionDoc = canReadDocuments ? mapLinkableDocumentSummary(rawDecisionDoc) : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">

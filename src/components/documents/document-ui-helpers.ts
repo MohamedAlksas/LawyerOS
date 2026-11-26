@@ -172,12 +172,31 @@ export const SCAN_STATUS_BADGE_CLASSES: Record<DocumentScanStatus, string> = {
   STALE_DEFINITIONS: 'bg-red-50 text-[#A4262C] border-red-300',
 };
 
+const ERROR_SCAN_STATUS_LABELS = new Set([
+  'مرفوض أمنياً',
+  'فشل الفحص',
+  'انتهت مهلة الفحص',
+  'تعريفات الفحص قديمة',
+  'غير جاهز',
+]);
+
 export function getScanStatusBadgeClassFromLabel(label: string): string {
-  if (label.includes('سليم') || label.includes('نظيف')) {
+  if (label.includes('مفحوص وسليم') || label.includes('سليم') || label.includes('نظيف')) {
     return SCAN_STATUS_BADGE_CLASSES.CLEAN;
   }
-  if (label.includes('قيد الفحص')) {
+  if (label.includes('بانتظار الفحص') || label.includes('قيد الفحص')) {
     return SCAN_STATUS_BADGE_CLASSES.PENDING;
+  }
+  if (
+    ERROR_SCAN_STATUS_LABELS.has(label) ||
+    label.includes('مرفوض') ||
+    label.includes('فشل') ||
+    label.includes('انتهت مهلة')
+  ) {
+    return SCAN_STATUS_BADGE_CLASSES.INFECTED;
+  }
+  if (label === UNSCANNED_POLICY_NOTICE_AR || label.includes('لم يُفحص')) {
+    return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
   }
   return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
 }

@@ -184,7 +184,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
   });
 
   describe('correctHearingResultSchema', () => {
-    it('requires a non-empty reason for corrections', () => {
+    it('requires a non-empty reason for corrections and validates optional decisionDocumentId', () => {
       const hearingId = crypto.randomUUID();
       const input = {
         hearingId,
@@ -194,6 +194,15 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         idempotencyKey: 'correction-request',
       };
       expect(correctHearingResultSchema.safeParse(input).success).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success
+      ).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: null }).success
+      ).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: 'not-a-uuid' }).success
+      ).toBe(false);
       expect(correctHearingResultSchema.safeParse({ ...input, reason: ' ' }).success).toBe(false);
       expect(correctHearingResultSchema.safeParse({ ...input, expectedVersion: undefined }).success).toBe(false);
     });

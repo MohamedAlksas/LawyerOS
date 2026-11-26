@@ -4021,8 +4021,10 @@ const DOCUMENT_UNIFIED_SELECT = {
   partyId: true,
   archivedAt: true,
   updatedAt: true,
-  matter: { select: { id: true, fileCode: true, title: true, archivedAt: true } },
+  matter: { select: { id: true, fileCode: true, title: true, status: true, archivedAt: true } },
   party: { select: { id: true, name: true, archivedAt: true } },
+  proceeding: { select: { archivedAt: true } },
+  hearing: { select: { proceeding: { select: { archivedAt: true } } } },
 } satisfies Prisma.DocumentSelect;
 
 function mapDocumentToUnifiedItem(d: {
@@ -4033,10 +4035,18 @@ function mapDocumentToUnifiedItem(d: {
   partyId: string | null;
   archivedAt: Date | null;
   updatedAt: Date;
-  matter: { id: string; fileCode: string; title: string; archivedAt: Date | null } | null;
+  matter: { id: string; fileCode: string; title: string; status: string; archivedAt: Date | null } | null;
   party: { id: string; name: string; archivedAt: Date | null } | null;
+  proceeding: { archivedAt: Date | null } | null;
+  hearing: { proceeding: { archivedAt: Date | null } } | null;
 }): UnifiedSearchResultItem {
-  const isArchived = Boolean(d.archivedAt) || Boolean(d.matter?.archivedAt) || Boolean(d.party?.archivedAt);
+  const isArchived =
+    Boolean(d.archivedAt) ||
+    Boolean(d.matter?.archivedAt) ||
+    d.matter?.status === 'ARCHIVED' ||
+    Boolean(d.party?.archivedAt) ||
+    Boolean(d.proceeding?.archivedAt) ||
+    Boolean(d.hearing?.proceeding?.archivedAt);
   const subtitle = d.matter
     ? `${d.matter.fileCode} • ${d.matter.title}`
     : d.party?.name;
@@ -4046,7 +4056,7 @@ function mapDocumentToUnifiedItem(d: {
     title: d.title,
     ...(subtitle ? { subtitle } : {}),
     ...(d.matter?.fileCode ? { code: d.matter.fileCode } : {}),
-    badge: isArchived ? 'مؤرشف' : (DOCUMENT_TYPE_LABELS_AR[d.documentType] ?? d.documentType),
+    badge: DOCUMENT_TYPE_LABELS_AR[d.documentType] ?? d.documentType,
     href: `/documents/${d.id}`,
     isArchived,
     updatedAt: d.updatedAt.toISOString(),
@@ -4182,6 +4192,8 @@ export async function unifiedSearch(
     docWhere.AND = [
       { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
       { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+      { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+      { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
     ];
   }
   if (query) {

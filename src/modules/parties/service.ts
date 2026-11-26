@@ -79,7 +79,7 @@ type PowerOfAttorneyRow = Prisma.PowerOfAttorneyGetPayload<object> & {
   document?: LinkableDocumentRow | null;
 };
 
-function mapPoaToDTO(poa: PowerOfAttorneyRow, canReadDocuments = true): PoASummaryDTO {
+function mapPoaToDTO(poa: PowerOfAttorneyRow, canReadDocuments: boolean): PoASummaryDTO {
   return {
     id: poa.id,
     partyId: poa.partyId,
@@ -260,7 +260,7 @@ async function buildReplayCommunicationNoteResult(
 async function buildReplayPowerOfAttorneyResult(
   txOrPrisma: PrismaClient | Prisma.TransactionClient,
   claim: { resultId: string | null; resultPayload: unknown },
-  canReadDocuments = true
+  canReadDocuments: boolean
 ): Promise<PoASummaryDTO> {
   const payload = (claim.resultPayload as Record<string, unknown>) || {};
   const poaId = claim.resultId || (payload.poaId as string);
@@ -873,11 +873,14 @@ export async function savePowerOfAttorney(
           return await buildReplayPowerOfAttorneyResult(tx, claim, canReadDocuments);
         }
 
-        const party = await tx.party.findUnique({
-          where: { id: input.partyId, archivedAt: null },
-        });
+        const [party] = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+          SELECT "id", "archivedAt"
+          FROM "party"
+          WHERE "id" = ${input.partyId}
+          FOR UPDATE
+        `;
 
-        if (!party) {
+        if (!party || party.archivedAt !== null) {
           throw new NotFoundError('الطرف المحدد لإصدار التوكيل غير موجود.');
         }
 
@@ -896,11 +899,24 @@ export async function savePowerOfAttorney(
             throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
           }
 
+          if (
+            existing.documentId !== null &&
+            input.documentId !== undefined &&
+            input.documentId !== existing.documentId
+          ) {
+            assertAuthorized(actor, 'READ_DOCUMENTS');
+          }
+
           if (input.documentId) {
-            await assertLinkableDocument(tx, input.documentId, {
-              kind: 'PARTY_POA',
-              partyId: input.partyId,
-            });
+            await assertLinkableDocument(
+              tx,
+              input.documentId,
+              {
+                kind: 'PARTY_POA',
+                partyId: input.partyId,
+              },
+              { allowExistingArchived: input.documentId === existing.documentId }
+            );
           }
 
           const isStatusChanged =

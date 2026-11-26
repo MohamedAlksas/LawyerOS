@@ -44,6 +44,8 @@ export interface LinkableDocumentSummary {
   id: string;
   title: string;
   documentType: DocumentType;
+  proceedingId: string | null;
+  hearingId: string | null;
   currentVersionId: string | null;
   scanStatusLabel: string;
 }
@@ -52,6 +54,8 @@ export interface LinkableDocumentRow {
   id: string;
   title: string;
   documentType: DocumentType;
+  proceedingId?: string | null;
+  hearingId?: string | null;
   currentVersionId: string | null;
   currentVersion?: { scanStatus: DocumentScanStatus } | null;
 }
@@ -60,6 +64,8 @@ export const LINKABLE_DOCUMENT_SELECT = {
   id: true,
   title: true,
   documentType: true,
+  proceedingId: true,
+  hearingId: true,
   currentVersionId: true,
   currentVersion: {
     select: {
@@ -96,6 +102,8 @@ export function mapLinkableDocumentSummary(
     id: doc.id,
     title: doc.title,
     documentType: doc.documentType,
+    proceedingId: doc.proceedingId ?? null,
+    hearingId: doc.hearingId ?? null,
     currentVersionId: doc.currentVersionId,
     scanStatusLabel: doc.currentVersion
       ? getScanStatusLabel(doc.currentVersion.scanStatus)
@@ -293,6 +301,7 @@ export interface UploadAttemptDTO {
   id: string;
   documentId: string | null;
   targetDocumentVersionId: string | null;
+  expectedDocumentVersion: number | null;
   matterId: string | null;
   partyId: string | null;
   proceedingId: string | null;
@@ -573,4 +582,19 @@ export const updateDocumentMetadataSchema = z
       .nativeEnum(DocumentSensitivity, { message: 'درجة حساسية المستند غير صالحة.' })
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (data) =>
+      data.title !== undefined ||
+      data.documentType !== undefined ||
+      data.documentDate !== undefined ||
+      data.description !== undefined ||
+      data.tags !== undefined ||
+      data.originalLocation !== undefined ||
+      data.originalPresent !== undefined ||
+      data.sensitivity !== undefined,
+    {
+      message: 'يجب تحديد حقل واحد على الأقل لتحديث بيانات المستند.',
+      path: ['input'],
+    }
+  );
