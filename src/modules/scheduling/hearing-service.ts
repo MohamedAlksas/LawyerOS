@@ -1,12 +1,17 @@
 import { getPrismaClient } from '@/lib/auth';
 import type { Prisma } from '@prisma/client';
 import type { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import { validateOptionalCalendarTime } from '@/lib/cairo-date';
 import { claimIdempotencyKey, completeIdempotencyKey, resolveConcurrentIdempotency, runWithIdempotencyRetry } from '@/lib/idempotency';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import { assertLinkableDocument } from '@/modules/documents/document-service';
+import {
+  LINKABLE_DOCUMENT_SELECT,
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
 import {
   HearingDTO,
   HearingResultDTO,
@@ -16,8 +21,6 @@ import {
   TaskPriority,
   TaskStatus,
   TaskDTO,
-  LinkableDocumentRow,
-  mapLinkableDocumentSummary,
   ScheduleHearingInput,
   RecordHearingResultInput,
   RecordHearingResultResult,
@@ -115,17 +118,7 @@ interface HearingResultRecord {
 }
 
 const DECISION_DOCUMENT_INCLUDE = {
-  select: {
-    id: true,
-    title: true,
-    documentType: true,
-    currentVersionId: true,
-    currentVersion: {
-      select: {
-        scanStatus: true,
-      },
-    },
-  },
+  select: LINKABLE_DOCUMENT_SELECT,
 } as const;
 
 interface TaskRecord {
@@ -145,7 +138,8 @@ interface TaskRecord {
 
 function mapHearingToDTO(
   raw: HearingRecord,
-  duplicateWarning = false
+  duplicateWarning = false,
+  canReadDocuments = true
 ): HearingDTO {
   const latestResultRaw = raw.results && raw.results.length > 0 ? raw.results[0] : null;
   const latestResult: HearingResultSummaryDTO | null = latestResultRaw
@@ -158,8 +152,10 @@ function mapHearingToDTO(
         notes: latestResultRaw.notes ?? null,
         correctionReason: latestResultRaw.correctionReason ?? null,
         nextDateDisposition: latestResultRaw.nextDateDisposition,
-        decisionDocumentId: latestResultRaw.decisionDocumentId ?? null,
-        decisionDocument: mapLinkableDocumentSummary(latestResultRaw.decisionDocument),
+        decisionDocumentId: canReadDocuments ? (latestResultRaw.decisionDocumentId ?? null) : null,
+        decisionDocument: canReadDocuments
+          ? mapLinkableDocumentSummary(latestResultRaw.decisionDocument)
+          : null,
         recordedAt: latestResultRaw.recordedAt.toISOString(),
         revision: latestResultRaw.revision,
       }
@@ -189,7 +185,7 @@ function mapHearingToDTO(
   };
 }
 
-function mapHearingResultToDTO(raw: HearingResultRecord): HearingResultDTO {
+function mapHearingResultToDTO(raw: HearingResultRecord, canReadDocuments = true): HearingResultDTO {
   return {
     id: raw.id,
     hearingId: raw.hearingId,
@@ -201,8 +197,8 @@ function mapHearingResultToDTO(raw: HearingResultRecord): HearingResultDTO {
     notes: raw.notes ?? null,
     correctionReason: raw.correctionReason ?? null,
     nextDateDisposition: raw.nextDateDisposition,
-    decisionDocumentId: raw.decisionDocumentId ?? null,
-    decisionDocument: mapLinkableDocumentSummary(raw.decisionDocument),
+    decisionDocumentId: canReadDocuments ? (raw.decisionDocumentId ?? null) : null,
+    decisionDocument: canReadDocuments ? mapLinkableDocumentSummary(raw.decisionDocument) : null,
     recordedAt: raw.recordedAt.toISOString(),
     revision: raw.revision,
     supersedesResultId: raw.supersedesResultId ?? null,
@@ -262,22 +258,31 @@ function hearingAcknowledgment(hearing: HearingDTO) {
 
 type HearingAcknowledgment = ReturnType<typeof hearingAcknowledgment>;
 
-async function replayHearing(tx: Prisma.TransactionClient, ack: HearingAcknowledgment, resultId?: string) {
+async function replayHearing(
+  tx: Prisma.TransactionClient,
+  ack: HearingAcknowledgment,
+  resultId?: string,
+  canReadDocuments = true
+) {
   const record = await tx.hearing.findUniqueOrThrow({
     where: { id: ack.id },
     include: {
       proceeding: { include: { court: true } },
       results: {
         where: { id: resultId ?? '' },
-        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+        ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
       },
     },
   });
-  return mapHearingToDTO({
-    ...record, version: ack.version, status: ack.status, updatedAt: new Date(ack.updatedAt),
-    rescheduleReason: ack.status === 'RESCHEDULED' ? record.rescheduleReason : null,
-    cancellationReason: ack.status === 'CANCELLED' ? record.cancellationReason : null,
-  }, ack.duplicateDateWarning);
+  return mapHearingToDTO(
+    {
+      ...record, version: ack.version, status: ack.status, updatedAt: new Date(ack.updatedAt),
+      rescheduleReason: ack.status === 'RESCHEDULED' ? record.rescheduleReason : null,
+      cancellationReason: ack.status === 'CANCELLED' ? record.cancellationReason : null,
+    },
+    ack.duplicateDateWarning,
+    canReadDocuments
+  );
 }
 
 function resultAcknowledgment(value: RecordHearingResultResult) {
@@ -297,16 +302,21 @@ function resultAcknowledgment(value: RecordHearingResultResult) {
   };
 }
 
-async function replayResult(tx: Prisma.TransactionClient, raw: unknown): Promise<RecordHearingResultResult> {
+async function replayResult(
+  tx: Prisma.TransactionClient,
+  raw: unknown,
+  canReadDocuments = true
+): Promise<RecordHearingResultResult> {
   const ack = raw as ReturnType<typeof resultAcknowledgment>;
   const result = mapHearingResultToDTO(
     await tx.hearingResult.findUniqueOrThrow({
       where: { id: ack.resultId },
-      include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
-    })
+      ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
+    }),
+    canReadDocuments
   );
-  const hearing = await replayHearing(tx, ack.hearing, ack.resultId);
-  const nextHearing = ack.next ? await replayHearing(tx, ack.next) : null;
+  const hearing = await replayHearing(tx, ack.hearing, ack.resultId, canReadDocuments);
+  const nextHearing = ack.next ? await replayHearing(tx, ack.next, undefined, canReadDocuments) : null;
   const tasks = await Promise.all(ack.tasks.map(async (snapshot) => ({
     ...mapTaskToDTO(await tx.task.findUniqueOrThrow({ where: { id: snapshot.id } })), ...snapshot,
   })));
@@ -496,6 +506,11 @@ export async function recordHearingResult(
     tasks,
   };
 
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  if (input.decisionDocumentId) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+
   return hearingCommand(actor, 'recordHearingResult', input.idempotencyKey, intent, async (tx) => {
     await lockHearing(tx, input.hearingId);
 
@@ -567,9 +582,13 @@ export async function recordHearingResult(
         createdById: actor.id,
         updatedById: actor.id,
       },
-      include: {
-        decisionDocument: DECISION_DOCUMENT_INCLUDE,
-      },
+      ...(canReadDocuments
+        ? {
+            include: {
+              decisionDocument: DECISION_DOCUMENT_INCLUDE,
+            },
+          }
+        : {}),
     });
 
     // 4. Invalidate obsolete reminder work for the completed hearing
@@ -692,12 +711,16 @@ export async function recordHearingResult(
       },
     });
 
-    const resultDTO = mapHearingResultToDTO(hearingResult);
-    const completedHearingDTO = mapHearingToDTO({
-      ...hearing,
-      ...completed,
-      results: [hearingResult],
-    });
+    const resultDTO = mapHearingResultToDTO(hearingResult, canReadDocuments);
+    const completedHearingDTO = mapHearingToDTO(
+      {
+        ...hearing,
+        ...completed,
+        results: [hearingResult],
+      },
+      false,
+      canReadDocuments
+    );
 
     const finalResult: RecordHearingResultResult = {
       resultId: resultDTO.id,
@@ -709,7 +732,7 @@ export async function recordHearingResult(
     };
 
     return { value: finalResult, resultId: resultDTO.id, acknowledgment: resultAcknowledgment(finalResult) };
-  }, replayResult);
+  }, (tx, raw) => replayResult(tx, raw, canReadDocuments));
 }
 
 export async function correctHearingResult(
@@ -747,6 +770,10 @@ export async function correctHearingResult(
     decisionDocumentId: input.decisionDocumentId,
     nextDateDisposition: input.nextDateDisposition, nextHearingDate: input.nextHearingDate ?? null, nextHearingTime,
   };
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  if (input.decisionDocumentId) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
   return hearingCommand(actor, 'correctHearingResult', input.idempotencyKey, intent, async (tx) => {
     const { matterId, proceedingId } = await lockHearing(tx, input.hearingId);
     // 1. Find latest result for hearing
@@ -814,9 +841,13 @@ export async function correctHearingResult(
         createdById: actor.id,
         updatedById: actor.id,
       },
-      include: {
-        decisionDocument: DECISION_DOCUMENT_INCLUDE,
-      },
+      ...(canReadDocuments
+        ? {
+            include: {
+              decisionDocument: DECISION_DOCUMENT_INCLUDE,
+            },
+          }
+        : {}),
     });
 
     // 4. Audit Event
@@ -836,13 +867,13 @@ export async function correctHearingResult(
       },
     });
 
-    const dto = mapHearingResultToDTO(newResult);
+    const dto = mapHearingResultToDTO(newResult, canReadDocuments);
 
     return { value: dto, resultId: dto.id, acknowledgment: null };
   }, async (tx, _ack, id) => mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({
     where: { id },
-    include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
-  })));
+    ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
+  }), canReadDocuments));
 }
 
 export async function rescheduleHearing(
@@ -1163,6 +1194,7 @@ export async function getHearing(
   hearingId: string
 ): Promise<HearingDTO> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const hearing = await prisma.hearing.findUnique({
     where: { id: hearingId },
@@ -1175,7 +1207,7 @@ export async function getHearing(
       },
       results: {
         orderBy: { revision: 'desc' },
-        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+        ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
       },
     },
   });
@@ -1184,7 +1216,7 @@ export async function getHearing(
     throw new NotFoundError('الجلسة المطلوبة غير موجودة.');
   }
 
-  return mapHearingToDTO(hearing);
+  return mapHearingToDTO(hearing, false, canReadDocuments);
 }
 
 export async function listHearingsForProceeding(
@@ -1192,6 +1224,7 @@ export async function listHearingsForProceeding(
   proceedingId: string
 ): Promise<HearingDTO[]> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const hearings = await prisma.hearing.findMany({
     where: { proceedingId },
@@ -1202,7 +1235,7 @@ export async function listHearingsForProceeding(
       results: {
         orderBy: { revision: 'desc' },
         take: 1,
-        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+        ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
       },
       tasks: { where: { status: { in: ['OPEN', 'IN_PROGRESS'] } }, orderBy: { createdAt: 'asc' }, take: 200 },
       linksTo: {
@@ -1264,7 +1297,7 @@ export async function listHearingsForProceeding(
   };
 
   return hearings.map((hearing) => ({
-    ...mapHearingToDTO(hearing),
+    ...mapHearingToDTO(hearing, false, canReadDocuments),
     followUpTasks: collectAncestorTasks(hearing.id),
   }));
 }

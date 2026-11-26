@@ -53,8 +53,8 @@ const ENTITY_TYPE_CONFIG: Record<
   },
   DOCUMENT: {
     label: 'مستند',
-    icon: '📄',
-    badgeClass: 'bg-amber-50 text-[#7A4A00] border-[#E0B46A]',
+    icon: '',
+    badgeClass: 'bg-[#FFF7E6] text-[#7A4A00] border-[#E0B46A]',
   },
 };
 
@@ -424,7 +424,7 @@ export function UnifiedSearchClient({
             testId="empty-state-container"
             icon=""
             title="ابدأ بالبحث في النظام"
-            description="اكتب كود الملف (مثال: 2026/0001)، أو اسم الموكل أو الخصم، أو رقم الدعوى بالمحكمة للوصول المباشر."
+            description="اكتب كود الملف (مثال: 2026/0001)، أو اسم الموكل أو الخصم، أو رقم الدعوى بالمحكمة، أو عنوان المستند للوصول المباشر."
           />
         )
       ) : (
@@ -456,7 +456,7 @@ export function UnifiedSearchClient({
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-bold border ${config.badgeClass}`}
                         >
-                          <span aria-hidden="true">{config.icon}</span>
+                          {config.icon && <span aria-hidden="true">{config.icon}</span>}
                           <span>{config.label}</span>
                         </span>
 

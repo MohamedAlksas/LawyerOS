@@ -1,4 +1,6 @@
-import type { DocumentType } from '@prisma/client';
+import type { LinkableDocumentSummary } from '@/modules/documents/document-types';
+
+export type { LinkableDocumentSummary };
 
 export type PartyKind = 'PERSON' | 'ORGANIZATION';
 
@@ -120,14 +122,6 @@ export interface AddCommunicationNoteInput {
   followUpRequired?: boolean;
   followUpDate?: string | null;
   idempotencyKey: string;
-}
-
-export interface LinkableDocumentSummary {
-  id: string;
-  title: string;
-  documentType: DocumentType;
-  currentVersionId: string | null;
-  scanStatusLabel: string;
 }
 
 export interface PoASummaryDTO {

@@ -1,12 +1,16 @@
-import { PrismaClient, Prisma, type DocumentType, type DocumentScanStatus } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { Actor } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
 import { normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import { assertLinkableDocument } from '@/modules/documents/document-service';
-import { UNSCANNED_POLICY_NOTICE_AR } from '@/modules/documents/document-types';
+import {
+  LINKABLE_DOCUMENT_SELECT,
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
 import {
   encryptPartyIdentity,
   decryptPartyIdentity,
@@ -30,7 +34,6 @@ import {
   CommunicationNoteSummaryDTO,
   SavePowerOfAttorneyInput,
   PoASummaryDTO,
-  LinkableDocumentSummary,
   PartySummaryDTO,
   DuplicateWarningDTO,
 } from './types';
@@ -68,72 +71,20 @@ const PARTY_IDENTITY_INCLUDE = {
 
 const POA_DOCUMENT_INCLUDE = {
   document: {
-    select: {
-      id: true,
-      title: true,
-      documentType: true,
-      currentVersionId: true,
-      currentVersion: {
-        select: {
-          scanStatus: true,
-        },
-      },
-    },
+    select: LINKABLE_DOCUMENT_SELECT,
   },
 } satisfies Prisma.PowerOfAttorneyInclude;
 
-function formatPoaScanStatusLabel(scanStatus: DocumentScanStatus | null | undefined): string {
-  switch (scanStatus) {
-    case 'CLEAN':
-      return 'تم الفحص — سليم';
-    case 'PENDING':
-      return 'بانتظار الفحص';
-    case 'INFECTED':
-      return 'مرفوض أمنياً';
-    case 'FAILED':
-      return 'فشل الفحص';
-    case 'TIMEOUT':
-      return 'انتهت مهلة الفحص';
-    case 'STALE_DEFINITIONS':
-      return 'تعريفات الفحص قديمة';
-    case 'NOT_SCANNED_POLICY':
-    default:
-      return UNSCANNED_POLICY_NOTICE_AR;
-  }
-}
+type PowerOfAttorneyRow = Prisma.PowerOfAttorneyGetPayload<object> & {
+  document?: LinkableDocumentRow | null;
+};
 
-function mapPoaLinkedDocument(
-  doc:
-    | {
-        id: string;
-        title: string;
-        documentType: DocumentType;
-        currentVersionId: string | null;
-        currentVersion?: { scanStatus: DocumentScanStatus } | null;
-      }
-    | null
-    | undefined
-): LinkableDocumentSummary | null {
-  if (!doc) return null;
-  return {
-    id: doc.id,
-    title: doc.title,
-    documentType: doc.documentType,
-    currentVersionId: doc.currentVersionId,
-    scanStatusLabel: doc.currentVersion
-      ? formatPoaScanStatusLabel(doc.currentVersion.scanStatus)
-      : 'غير جاهز',
-  };
-}
-
-function mapPoaToDTO(
-  poa: Prisma.PowerOfAttorneyGetPayload<{ include: typeof POA_DOCUMENT_INCLUDE }>
-): PoASummaryDTO {
+function mapPoaToDTO(poa: PowerOfAttorneyRow, canReadDocuments = true): PoASummaryDTO {
   return {
     id: poa.id,
     partyId: poa.partyId,
-    documentId: poa.documentId ?? null,
-    linkedDocument: mapPoaLinkedDocument(poa.document),
+    documentId: canReadDocuments ? (poa.documentId ?? null) : null,
+    linkedDocument: canReadDocuments ? mapLinkableDocumentSummary(poa.document) : null,
     poaNumberText: poa.poaNumberText,
     poaYearLabel: poa.poaYearLabel,
     notarizationOffice: poa.notarizationOffice,
@@ -308,7 +259,8 @@ async function buildReplayCommunicationNoteResult(
 
 async function buildReplayPowerOfAttorneyResult(
   txOrPrisma: PrismaClient | Prisma.TransactionClient,
-  claim: { resultId: string | null; resultPayload: unknown }
+  claim: { resultId: string | null; resultPayload: unknown },
+  canReadDocuments = true
 ): Promise<PoASummaryDTO> {
   const payload = (claim.resultPayload as Record<string, unknown>) || {};
   const poaId = claim.resultId || (payload.poaId as string);
@@ -317,7 +269,7 @@ async function buildReplayPowerOfAttorneyResult(
   }
   const poa = await txOrPrisma.powerOfAttorney.findUnique({
     where: { id: poaId },
-    include: POA_DOCUMENT_INCLUDE,
+    ...(canReadDocuments ? { include: POA_DOCUMENT_INCLUDE } : {}),
   });
   if (!poa) {
     throw new NotFoundError('التوكيل المطلوب غير موجود.');
@@ -331,7 +283,7 @@ async function buildReplayPowerOfAttorneyResult(
       : poa.version;
 
   return {
-    ...mapPoaToDTO(poa),
+    ...mapPoaToDTO(poa, canReadDocuments),
     isReplay: true,
     operationVersion,
     currentVersion: poa.version,
@@ -712,6 +664,7 @@ export async function getClientProfile(
   options: ServiceExecutionOptions = {}
 ): Promise<ClientProfileDTO> {
   assertAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const party = await prisma.party.findUnique({
@@ -725,7 +678,7 @@ export async function getClientProfile(
       powersOfAttorney: {
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         take: 200,
-        include: POA_DOCUMENT_INCLUDE,
+        ...(canReadDocuments ? { include: POA_DOCUMENT_INCLUDE } : {}),
       },
     },
   });
@@ -767,7 +720,7 @@ export async function getClientProfile(
       createdAt: note.createdAt.toISOString(),
       createdById: note.createdById,
     })),
-    powersOfAttorney: party.powersOfAttorney.map(mapPoaToDTO),
+    powersOfAttorney: party.powersOfAttorney.map((poa) => mapPoaToDTO(poa, canReadDocuments)),
   };
 }
 
@@ -894,6 +847,10 @@ export async function savePowerOfAttorney(
 ): Promise<PoASummaryDTO> {
   assertAuthorized(actor, 'WRITE_CLIENT_DATA');
   const input = validateInput(savePowerOfAttorneySchema, rawInput);
+  if (input.documentId) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   let attempts = 0;
@@ -913,7 +870,7 @@ export async function savePowerOfAttorney(
         });
 
         if (claim.isReplay) {
-          return await buildReplayPowerOfAttorneyResult(tx, claim);
+          return await buildReplayPowerOfAttorneyResult(tx, claim, canReadDocuments);
         }
 
         const party = await tx.party.findUnique({
@@ -989,7 +946,7 @@ export async function savePowerOfAttorney(
 
           poaRecord = await tx.powerOfAttorney.findUniqueOrThrow({
             where: { id: input.id },
-            include: POA_DOCUMENT_INCLUDE,
+            ...(canReadDocuments ? { include: POA_DOCUMENT_INCLUDE } : {}),
           });
 
           await recordAuditEvent(
@@ -1036,7 +993,7 @@ export async function savePowerOfAttorney(
               createdById: actor.id,
               updatedById: actor.id,
             },
-            include: POA_DOCUMENT_INCLUDE,
+            ...(canReadDocuments ? { include: POA_DOCUMENT_INCLUDE } : {}),
           });
 
           await recordAuditEvent(
@@ -1058,7 +1015,7 @@ export async function savePowerOfAttorney(
           );
         }
 
-        const result: PoASummaryDTO = mapPoaToDTO(poaRecord);
+        const result: PoASummaryDTO = mapPoaToDTO(poaRecord, canReadDocuments);
 
         await completeIdempotencyKey(tx, {
           actorId: actor.id,
@@ -1091,7 +1048,7 @@ export async function savePowerOfAttorney(
         if (!concurrent) {
           continue;
         }
-        return await buildReplayPowerOfAttorneyResult(prisma, concurrent);
+        return await buildReplayPowerOfAttorneyResult(prisma, concurrent, canReadDocuments);
       }
       throw error;
     }

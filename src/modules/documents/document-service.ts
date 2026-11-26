@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
-import { Prisma, type DocumentType, type PrismaClient, type UploadAttemptStatus } from '@prisma/client';
+import { Prisma, type PrismaClient, type UploadAttemptStatus } from '@prisma/client';
 import { z } from 'zod';
 import { getPrismaClient } from '@/lib/auth';
 import { recordAuditEvent, sanitizeAuditPayload } from '@/lib/audit';
@@ -39,17 +39,16 @@ import {
   DocumentNotFoundError,
   DocumentNotReadyError,
   DocumentScanPolicyUnavailableError,
-  DocumentScanStatus,
   DocumentStoragePathError,
   DocumentValidationError,
   DuplicateChecksumWarningError,
   MAX_DOCUMENT_BYTES,
-  UNSCANNED_POLICY_NOTICE_AR,
   UPLOAD_ATTEMPT_EXPIRY_MS,
   UnauthorizedError,
   beginUploadSchema,
   beginVersionUploadSchema,
   finalizeUploadSchema,
+  getScanStatusLabel,
   listDocumentsSchema,
   updateDocumentMetadataSchema,
   type BeginUploadInput,
@@ -60,6 +59,7 @@ import {
   type DocumentVersionDTO,
   type DuplicateChecksumMatchDTO,
   type FinalizeUploadInput,
+  type LinkableDocumentSummary,
   type ListDocumentsParams,
   type ListDocumentsResult,
   type PinDocumentVersionsResult,
@@ -70,13 +70,7 @@ import {
 } from './document-types';
 import { evaluateDocumentScanPolicy, type ScanPolicyMode } from './scan-policy';
 
-export interface LinkableDocumentSummary {
-  id: string;
-  title: string;
-  documentType: DocumentType;
-  currentVersionId: string | null;
-  scanStatusLabel: string;
-}
+export type { LinkableDocumentSummary };
 
 export type DocumentLinkScope =
   | { kind: 'MATTER'; matterId: string; proceedingId?: string | null; hearingId?: string | null }
@@ -176,27 +170,6 @@ function assertUuidOrThrow(value: string, label: string): string {
     throw new DocumentValidationError(`معرف ${label} غير صالح.`);
   }
   return parsed.data;
-}
-
-function getScanStatusLabel(scanStatus: DocumentScanStatus): string {
-  switch (scanStatus) {
-    case 'NOT_SCANNED_POLICY':
-      return UNSCANNED_POLICY_NOTICE_AR;
-    case 'CLEAN':
-      return 'تم الفحص — سليم';
-    case 'PENDING':
-      return 'بانتظار الفحص';
-    case 'INFECTED':
-      return 'مرفوض أمنياً';
-    case 'FAILED':
-      return 'فشل الفحص';
-    case 'TIMEOUT':
-      return 'انتهت مهلة الفحص';
-    case 'STALE_DEFINITIONS':
-      return 'تعريفات الفحص قديمة';
-    default:
-      return UNSCANNED_POLICY_NOTICE_AR;
-  }
 }
 
 function buildProceedingLabel(
@@ -749,7 +722,12 @@ export async function beginUpload(
 
 async function assertActiveDocumentParentForVersion(
   tx: Prisma.TransactionClient,
-  doc: { matterId: string | null; partyId: string | null }
+  doc: {
+    matterId: string | null;
+    partyId: string | null;
+    proceedingId?: string | null;
+    hearingId?: string | null;
+  }
 ): Promise<void> {
   if (doc.matterId) {
     const [matter] = await tx.$queryRaw<
@@ -765,6 +743,35 @@ async function assertActiveDocumentParentForVersion(
     }
     if (matter.archivedAt !== null || matter.status === 'ARCHIVED') {
       throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في ملف قضية مؤرشف.');
+    }
+
+    let proceedingIdToCheck = doc.proceedingId ?? null;
+    if (!proceedingIdToCheck && doc.hearingId) {
+      const hearing = await tx.hearing.findUnique({
+        where: { id: doc.hearingId },
+        select: { proceedingId: true },
+      });
+      if (!hearing) {
+        throw new DocumentNotFoundError('الجلسة المرتبطة بالمستند غير موجودة.');
+      }
+      proceedingIdToCheck = hearing.proceedingId;
+    }
+
+    if (proceedingIdToCheck) {
+      const [proceeding] = await tx.$queryRaw<
+        Array<{ id: string; archivedAt: Date | null }>
+      >`
+        SELECT "id", "archivedAt"
+        FROM "proceeding"
+        WHERE "id" = ${proceedingIdToCheck}
+        FOR UPDATE
+      `;
+      if (!proceeding) {
+        throw new DocumentNotFoundError('القيد القضائي المرتبط بالمستند غير موجود.');
+      }
+      if (proceeding.archivedAt !== null) {
+        throw new DocumentValidationError('لا يمكن إضافة نسخة جديدة لمستند في قيد قضائي مؤرشف.');
+      }
     }
   } else if (doc.partyId) {
     const [party] = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
@@ -2055,6 +2062,8 @@ export async function assertLinkableDocument(
     include: {
       currentVersion: true,
       matter: { select: { id: true, status: true, archivedAt: true } },
+      party: { select: { id: true, archivedAt: true } },
+      hearing: { select: { id: true, proceedingId: true } },
     },
   });
 
@@ -2066,6 +2075,9 @@ export async function assertLinkableDocument(
   }
   if (doc.matter && (doc.matter.archivedAt !== null || doc.matter.status === 'ARCHIVED')) {
     throw new DocumentValidationError('لا يمكن ربط مستند تابع لملف قضية مؤرشف.');
+  }
+  if (doc.party && doc.party.archivedAt !== null) {
+    throw new DocumentValidationError('لا يمكن ربط مستند تابع لطرف مؤرشف.');
   }
 
   const ver = doc.currentVersion;
@@ -2085,7 +2097,16 @@ export async function assertLinkableDocument(
         'لا يمكن ربط مستند لا يتبع ملف القضية المحدد.'
       );
     }
-    if (doc.proceedingId && scope.proceedingId && doc.proceedingId !== scope.proceedingId) {
+    let scopeProceedingId = scope.proceedingId ?? null;
+    if (!scopeProceedingId && scope.hearingId) {
+      const scopeHearing = await tx.hearing.findUnique({
+        where: { id: scope.hearingId },
+        select: { proceedingId: true },
+      });
+      scopeProceedingId = scopeHearing?.proceedingId ?? null;
+    }
+    const docProceedingId = doc.proceedingId ?? doc.hearing?.proceedingId ?? null;
+    if (docProceedingId && scopeProceedingId && docProceedingId !== scopeProceedingId) {
       throw new CrossMatterLinkForbiddenError(
         'لا يمكن ربط مستند مرتبط بقيد قضائي مختلف.'
       );
@@ -2311,7 +2332,7 @@ async function runExpiredUploadAttemptCleanup(
   storage: DocumentStorageAdapter,
   nowOrOptions?:
     | Date
-    | { now?: Date; gracePeriodMs?: number; prismaOverride?: PrismaClient; actor?: Actor }
+    | { now?: Date; gracePeriodMs?: number; prismaOverride?: PrismaClient }
 ): Promise<CleanupExpiredUploadsResult & { deletedKeys: string[] }> {
   if (isWorkerDispatchDisabled()) {
     const restoreMode = isWorkerDispatchDisabled({ RESTORE_MODE: process.env.RESTORE_MODE });
@@ -2538,7 +2559,11 @@ export async function reconcileAndCleanupDocumentStorage(
     assertActorAuthorized(options.actor, 'MANAGE_OPERATIONS');
   }
 
-  const cleanupRes = await runExpiredUploadAttemptCleanup(storage, options);
+  const cleanupRes = await runExpiredUploadAttemptCleanup(storage, {
+    now: options?.now,
+    gracePeriodMs: options?.gracePeriodMs,
+    prismaOverride: options?.prismaOverride,
+  });
   if (cleanupRes.skipped) {
     return {
       skipped: true,
@@ -2560,50 +2585,8 @@ export async function reconcileAndCleanupDocumentStorage(
     now.getTime() - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS)
   );
 
-  // Protect ALL current & prior READY DocumentVersions, ANY DocumentVersion with an active BackupFilePin
-  // (even orphan or non-READY), and any DocumentVersion belonging to a linked reference document.
-  const protectedVersionRows = await db.documentVersion.findMany({
-    where: {
-      OR: [
-        { uploadStatus: 'READY' },
-        { currentForDocument: { isNot: null } },
-        { backupPins: { some: { releasedAt: null } } },
-        {
-          document: {
-            OR: [
-              { powersOfAttorney: { some: {} } },
-              { hearingResultDecisions: { some: {} } },
-              { deadlineSources: { some: {} } },
-            ],
-          },
-        },
-      ],
-    },
-    select: { objectKey: true },
-  });
-  const protectedVersionKeySet = new Set(protectedVersionRows.map((v) => v.objectKey));
-
-  // Protect active un-expired UploadAttempt quarantine files and in-flight VALIDATING attempts
-  const activeAttemptRows = await db.uploadAttempt.findMany({
-    where: {
-      OR: [
-        {
-          status: { in: OPEN_UPLOAD_STATUSES },
-          expiresAt: { gt: cutoff },
-        },
-        {
-          status: 'VALIDATING',
-          OR: [
-            { expiresAt: { gt: cutoff } },
-            { updatedAt: { gt: staleValidatingCutoff } },
-          ],
-        },
-      ],
-    },
-    select: { quarantineKey: true },
-  });
-  const activeQuarantineKeySet = new Set(activeAttemptRows.map((a) => a.quarantineKey));
-
+  // List disk keys BEFORE querying DB so concurrent finalizeUpload writes/commits cannot fall
+  // between an earlier DB snapshot and a later disk scan.
   const quarantineFiles = storage.listKeys
     ? await storage.listKeys('quarantine')
     : await listZoneFilesFallback(storage.quarantineDir);
@@ -2611,46 +2594,143 @@ export async function reconcileAndCleanupDocumentStorage(
     ? await storage.listKeys('ready')
     : await listZoneFilesFallback(storage.readyDir);
 
+  // Protect ALL current & prior READY DocumentVersions, ANY DocumentVersion with an active BackupFilePin
+  // (even orphan or non-READY), and any DocumentVersion belonging to a linked reference document.
+  const protectedVersionWhere: Prisma.DocumentVersionWhereInput = {
+    OR: [
+      { uploadStatus: 'READY' },
+      { currentForDocument: { isNot: null } },
+      { backupPins: { some: { releasedAt: null } } },
+      {
+        document: {
+          OR: [
+            { powersOfAttorney: { some: {} } },
+            { hearingResultDecisions: { some: {} } },
+            { deadlineSources: { some: {} } },
+          ],
+        },
+      },
+    ],
+  };
+
+  // Protect active un-expired UploadAttempt quarantine files and non-stale VALIDATING attempts
+  const activeAttemptWhere: Prisma.UploadAttemptWhereInput = {
+    OR: [
+      {
+        status: { in: OPEN_UPLOAD_STATUSES },
+        expiresAt: { gt: cutoff },
+      },
+      {
+        status: 'VALIDATING',
+        OR: [
+          { expiresAt: { gt: cutoff } },
+          { updatedAt: { gt: staleValidatingCutoff } },
+        ],
+      },
+    ],
+  };
+
+  const [protectedVersionRows, activeAttemptRows] = await Promise.all([
+    db.documentVersion.findMany({
+      where: protectedVersionWhere,
+      select: { objectKey: true },
+    }),
+    db.uploadAttempt.findMany({
+      where: activeAttemptWhere,
+      select: { quarantineKey: true },
+    }),
+  ]);
+  const protectedVersionKeySet = new Set(protectedVersionRows.map((v) => v.objectKey));
+  const activeQuarantineKeySet = new Set(activeAttemptRows.map((a) => a.quarantineKey));
+
   const deletedKeys = [...cleanupRes.deletedKeys];
   const protectedKeySet = new Set<string>();
   const checksums: Record<string, string> = {};
-  const activePartThresholdMs = Date.now() - STALE_VALIDATING_MIN_WINDOW_MS;
+  const wallClockNowMs = Date.now();
+  const activePartThresholdMs = wallClockNowMs - STALE_VALIDATING_MIN_WINDOW_MS;
+  const unreferencedGraceThresholdMs =
+    wallClockNowMs - Math.max(gracePeriodMs, STALE_VALIDATING_MIN_WINDOW_MS);
 
-  for (const file of quarantineFiles) {
-    if (file.key.includes('.part-') && file.mtimeMs > activePartThresholdMs) {
-      continue;
+  async function isKeyReferencedInDb(zone: 'quarantine' | 'ready', key: string): Promise<boolean> {
+    const versionMatch = await db.documentVersion.findFirst({
+      where: {
+        AND: [{ objectKey: key }, protectedVersionWhere],
+      },
+      select: { id: true },
+    });
+    if (versionMatch) {
+      return true;
     }
-    if (activeQuarantineKeySet.has(file.key) || protectedVersionKeySet.has(file.key)) {
-      protectedKeySet.add(file.key);
-      const sha = await computeZoneSha256(storage, 'quarantine', file.key);
-      if (sha) {
-        checksums[file.key] = sha;
+    if (zone === 'quarantine') {
+      const attemptMatch = await db.uploadAttempt.findFirst({
+        where: {
+          AND: [{ quarantineKey: key }, activeAttemptWhere],
+        },
+        select: { id: true },
+      });
+      if (attemptMatch) {
+        return true;
       }
-      continue;
     }
-    const deleted = await storage.deleteQuarantine(file.key).catch(() => false);
-    if (deleted) {
-      deletedKeys.push(file.key);
+    return false;
+  }
+
+  async function recordProtectedFile(zone: 'quarantine' | 'ready', key: string): Promise<void> {
+    protectedKeySet.add(key);
+    const sha = await computeZoneSha256(storage, zone, key);
+    if (sha) {
+      checksums[key] = sha;
     }
   }
 
-  for (const file of readyFiles) {
-    if (file.key.includes('.part-') && file.mtimeMs > activePartThresholdMs) {
-      continue;
-    }
-    if (protectedVersionKeySet.has(file.key)) {
-      protectedKeySet.add(file.key);
-      const sha = await computeZoneSha256(storage, 'ready', file.key);
-      if (sha) {
-        checksums[file.key] = sha;
-      }
-      continue;
-    }
-    const deleted = await storage.deleteReady(file.key).catch(() => false);
+  async function unlinkZoneFile(zone: 'quarantine' | 'ready', key: string): Promise<void> {
+    const deleted =
+      zone === 'ready'
+        ? await storage.deleteReady(key).catch(() => false)
+        : await storage.deleteQuarantine(key).catch(() => false);
     if (deleted) {
-      deletedKeys.push(file.key);
+      deletedKeys.push(key);
     }
   }
+
+  async function reconcileZoneFiles(
+    zone: 'quarantine' | 'ready',
+    files: StoredZoneFile[]
+  ): Promise<void> {
+    for (const file of files) {
+      if (file.key.includes('.part-')) {
+        if (file.mtimeMs > activePartThresholdMs) {
+          continue;
+        }
+        await unlinkZoneFile(zone, file.key);
+        continue;
+      }
+
+      const isInitiallyProtected =
+        protectedVersionKeySet.has(file.key) ||
+        (zone === 'quarantine' && activeQuarantineKeySet.has(file.key));
+      if (isInitiallyProtected) {
+        await recordProtectedFile(zone, file.key);
+        continue;
+      }
+
+      // Skip unreferenced files newer than the conservative mtime grace window so concurrent
+      // finalizeUpload writes/moves cannot be deleted before their DB commit becomes visible.
+      if (file.mtimeMs > unreferencedGraceThresholdMs) {
+        continue;
+      }
+
+      if (await isKeyReferencedInDb(zone, file.key)) {
+        await recordProtectedFile(zone, file.key);
+        continue;
+      }
+
+      await unlinkZoneFile(zone, file.key);
+    }
+  }
+
+  await reconcileZoneFiles('quarantine', quarantineFiles);
+  await reconcileZoneFiles('ready', readyFiles);
 
   return {
     skipped: false,

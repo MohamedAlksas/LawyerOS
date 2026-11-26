@@ -4170,7 +4170,12 @@ export async function unifiedSearch(
   // 4. Document metadata where clause (only when actor has READ_DOCUMENTS)
   const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const docWhere: Prisma.DocumentWhereInput = {
-    currentVersion: { is: { uploadStatus: 'READY' } },
+    currentVersion: {
+      is: {
+        uploadStatus: 'READY',
+        scanStatus: { in: ['NOT_SCANNED_POLICY', 'CLEAN'] },
+      },
+    },
   };
   if (!includeArchived) {
     docWhere.archivedAt = null;

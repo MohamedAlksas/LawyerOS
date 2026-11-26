@@ -19,25 +19,29 @@ interface DocumentDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
+function renderForbidden() {
+  return (
+    <div
+      data-testid="document-detail-forbidden"
+      className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
+    >
+      <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
+      <p>لا تمتلك الصلاحيات الكافية لاستعراض هذا المستند.</p>
+    </div>
+  );
+}
+
 export default async function DocumentDetailPage({ params }: DocumentDetailPageProps) {
   const { id } = await params;
   let actor;
   try {
-    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'READ_DOCUMENTS' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       await redirectOnAuthError(error, `/documents/${id}`);
     }
     if (error instanceof AuthorizationError) {
-      return (
-        <div
-          data-testid="document-detail-forbidden"
-          className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
-        >
-          <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
-          <p>لا تمتلك الصلاحيات الكافية لاستعراض هذا المستند.</p>
-        </div>
-      );
+      return renderForbidden();
     }
     throw error;
   }
@@ -46,6 +50,9 @@ export default async function DocumentDetailPage({ params }: DocumentDetailPageP
   try {
     document = await getDocument(actor, id);
   } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return renderForbidden();
+    }
     if (error instanceof DocumentNotFoundError || error instanceof DocumentValidationError) {
       return (
         <div className="max-w-3xl mx-auto py-8">

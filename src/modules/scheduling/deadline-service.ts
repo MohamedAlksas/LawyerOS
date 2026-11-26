@@ -1,7 +1,7 @@
 ﻿import type { Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import type { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import { assertLinkableDocument } from '@/modules/documents/document-service';
@@ -19,7 +19,11 @@ import {
   parseCalendarDateToUtcDate,
   validateOptionalCalendarTime,
 } from '@/lib/cairo-date';
-import { mapLinkableDocumentSummary } from './hearing-types';
+import {
+  LINKABLE_DOCUMENT_SELECT,
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
 import {
   DeadlineDTO,
   DeadlineStatus,
@@ -30,7 +34,6 @@ import {
   CompleteDeadlineInput,
   CancelDeadlineInput,
   ListDeadlinesParams,
-  LinkableDocumentRow,
   createDeadlineSchema,
   updateDeadlineDraftSchema,
   confirmDeadlineSchema,
@@ -156,7 +159,7 @@ interface DeadlineWithRelations {
   } | null;
 }
 
-const DEADLINE_RELATIONS_INCLUDE = {
+const DEADLINE_BASE_INCLUDE = {
   matter: { select: { fileCode: true, title: true } },
   proceeding: {
     select: {
@@ -167,25 +170,24 @@ const DEADLINE_RELATIONS_INCLUDE = {
       court: { select: { id: true, name: true } },
     },
   },
+} satisfies Prisma.DeadlineInclude;
+
+const DEADLINE_RELATIONS_INCLUDE = {
+  ...DEADLINE_BASE_INCLUDE,
   sourceDocument: {
-    select: {
-      id: true,
-      title: true,
-      documentType: true,
-      currentVersionId: true,
-      currentVersion: {
-        select: {
-          scanStatus: true,
-        },
-      },
-    },
+    select: LINKABLE_DOCUMENT_SELECT,
   },
 } satisfies Prisma.DeadlineInclude;
+
+function getDeadlineRelationsInclude(canReadDocuments: boolean): Prisma.DeadlineInclude {
+  return canReadDocuments ? DEADLINE_RELATIONS_INCLUDE : DEADLINE_BASE_INCLUDE;
+}
 
 function mapDeadlineToDTO(
   row: DeadlineWithRelations,
   pendingReminderCount: number,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments = true
 ): DeadlineDTO {
   const dueDate = formatUtcDateToIsoDate(row.dueDate);
   const completedDate = formatUtcDateToIsoDate(row.completedDate);
@@ -206,8 +208,8 @@ function mapDeadlineToDTO(
     timeLabel: formatTimeOrUnspecified(row.dueTime),
     source: row.source ?? null,
     basisNotes: row.basisNotes ?? null,
-    sourceDocumentId: row.sourceDocumentId ?? null,
-    sourceDocument: mapLinkableDocumentSummary(row.sourceDocument),
+    sourceDocumentId: canReadDocuments ? (row.sourceDocumentId ?? null) : null,
+    sourceDocument: canReadDocuments ? mapLinkableDocumentSummary(row.sourceDocument) : null,
     status: row.status,
     isOverdue,
     needsReview: row.status === 'DRAFT',
@@ -262,16 +264,17 @@ function buildDeadlineAck(dto: DeadlineDTO): DeadlineAcknowledgment {
 async function replayDeadline(
   tx: Prisma.TransactionClient,
   ack: DeadlineAcknowledgment,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments = true
 ): Promise<DeadlineDTO> {
-  const row = await tx.deadline.findUniqueOrThrow({
+  const row = (await tx.deadline.findUniqueOrThrow({
     where: { id: ack.id },
-    include: DEADLINE_RELATIONS_INCLUDE,
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations;
   const pendingReminderCount = await tx.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: row.id, status: 'PENDING' },
   });
-  const baseDto = mapDeadlineToDTO(row, pendingReminderCount, cairoToday);
+  const baseDto = mapDeadlineToDTO(row, pendingReminderCount, cairoToday, canReadDocuments);
   const isOverdue = ack.status === 'CONFIRMED' && isCairoDateOverdue(ack.dueDate, cairoToday);
   return {
     ...baseDto,
@@ -429,16 +432,17 @@ async function deadlineCommand<T>(
 async function loadDeadlineDTO(
   tx: Prisma.TransactionClient,
   id: string,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments = true
 ): Promise<DeadlineDTO> {
-  const row = await tx.deadline.findUniqueOrThrow({
+  const row = (await tx.deadline.findUniqueOrThrow({
     where: { id },
-    include: DEADLINE_RELATIONS_INCLUDE,
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations;
   const pendingReminderCount = await tx.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: id, status: 'PENDING' },
   });
-  return mapDeadlineToDTO(row, pendingReminderCount, cairoToday);
+  return mapDeadlineToDTO(row, pendingReminderCount, cairoToday, canReadDocuments);
 }
 
 function shouldInjectFault(opts: DeadlineServiceOptions | undefined, target: 'audit' | 'outbox'): boolean {
@@ -461,6 +465,10 @@ export async function createDeadline(
   const basisNotes = input.basisNotes?.trim() || null;
   const proceedingId = input.proceedingId ?? null;
   const sourceDocumentId = input.sourceDocumentId ?? null;
+  if (sourceDocumentId) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const cairoToday = getCairoTodayDateString(opts?.now);
 
   const intent = {
@@ -526,10 +534,10 @@ export async function createDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, created.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, created.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -541,6 +549,10 @@ export async function updateDeadlineDraft(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(updateDeadlineDraftSchema, rawInput, 'بيانات تحديث مسودة الموعد غير صالحة.');
+  if (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const cairoToday = getCairoTodayDateString(opts?.now);
   const intent = {
@@ -636,10 +648,10 @@ export async function updateDeadlineDraft(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -651,6 +663,10 @@ export async function confirmDeadline(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(confirmDeadlineSchema, rawInput, 'بيانات اعتماد الموعد القانوني غير مكتملة.');
+  if (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const dueDateUtc = parseCalendarDateToUtcDate(input.dueDate);
   if (!dueDateUtc) {
@@ -761,10 +777,10 @@ export async function confirmDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -776,6 +792,7 @@ export async function changeDeadlineDate(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(changeDeadlineDateSchema, rawInput, 'بيانات تعديل تاريخ الموعد غير صالحة.');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const dueDateStr = input.dueDate ?? null;
   const dueDateUtc = parseCalendarDateToUtcDate(dueDateStr);
   const normTime = validateOptionalCalendarTime(dueDateStr, input.dueTime, 'dueTime');
@@ -858,10 +875,10 @@ export async function changeDeadlineDate(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -874,6 +891,7 @@ export async function completeDeadline(
 
   const input = parseOrThrow(completeDeadlineSchema, rawInput, 'بيانات إتمام الموعد القانوني غير مكتملة.');
   rejectDeferredDocumentLink(input.evidenceDocumentId, 'evidenceDocumentId');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const completedDateUtc = parseCalendarDateToUtcDate(input.completionDate);
   if (!completedDateUtc) {
@@ -947,10 +965,10 @@ export async function completeDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -962,6 +980,7 @@ export async function cancelDeadline(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(cancelDeadlineSchema, rawInput, 'بيانات إلغاء الموعد القانوني غير صالحة.');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const now = opts?.now ?? new Date();
   const cairoToday = getCairoTodayDateString(now);
 
@@ -1024,10 +1043,10 @@ export async function cancelDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -1037,11 +1056,12 @@ export async function getDeadline(
   opts?: { now?: Date }
 ): Promise<DeadlineDTO> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
-  const row = await prisma.deadline.findUnique({
+  const row = (await prisma.deadline.findUnique({
     where: { id: deadlineId },
-    include: DEADLINE_RELATIONS_INCLUDE,
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations | null;
   if (!row) {
     throw new NotFoundError('الموعد القانوني المطلوب غير موجود.');
   }
@@ -1049,7 +1069,12 @@ export async function getDeadline(
   const pendingReminderCount = await prisma.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: row.id, status: 'PENDING' },
   });
-  return mapDeadlineToDTO(row, pendingReminderCount, getCairoTodayDateString(opts?.now));
+  return mapDeadlineToDTO(
+    row,
+    pendingReminderCount,
+    getCairoTodayDateString(opts?.now),
+    canReadDocuments
+  );
 }
 
 export async function listDeadlines(
@@ -1058,6 +1083,7 @@ export async function listDeadlines(
   opts?: { now?: Date }
 ): Promise<DeadlineDTO[]> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const params = parseOrThrow(listDeadlinesSchema, rawParams, 'معاملات تصفية المواعيد غير صالحة.');
   const cairoToday = getCairoTodayDateString(opts?.now);
@@ -1088,13 +1114,13 @@ export async function listDeadlines(
   const limit = params.limit ?? 100;
   const page = params.page ?? 1;
 
-  const rows = await prisma.deadline.findMany({
+  const rows = (await prisma.deadline.findMany({
     where,
-    include: DEADLINE_RELATIONS_INCLUDE,
+    include: getDeadlineRelationsInclude(canReadDocuments),
     orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
     skip: (page - 1) * limit,
     take: limit,
-  });
+  })) as unknown as DeadlineWithRelations[];
 
   if (rows.length === 0) return [];
 
@@ -1109,5 +1135,7 @@ export async function listDeadlines(
   });
   const pendingMap = new Map(pendingCounts.map((c) => [c.sourceId, c._count._all]));
 
-  return rows.map((row) => mapDeadlineToDTO(row, pendingMap.get(row.id) ?? 0, cairoToday));
+  return rows.map((row) =>
+    mapDeadlineToDTO(row, pendingMap.get(row.id) ?? 0, cairoToday, canReadDocuments)
+  );
 }

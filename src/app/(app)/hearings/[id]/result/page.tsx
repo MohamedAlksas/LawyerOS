@@ -91,8 +91,9 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
     nextHearing = replacement;
   }
 
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   let availableDocuments: LinkableDocumentSummary[] = [];
-  if (authorize(actor, 'READ_DOCUMENTS')) {
+  if (canReadDocuments) {
     try {
       const docsRes = await listDocuments(actor, {
         matterId: hearing.proceeding.matterId,
@@ -127,6 +128,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       matterId={hearing.proceeding.matterId}
       matterFileCode={hearing.proceeding.matter.fileCode}
       proceedingId={hearing.proceedingId}
+      canReadDocuments={canReadDocuments}
       availableDocuments={availableDocuments}
       history={hearing.results.map(({ revision, decisionText, correctionReason }) => ({ revision, decisionText, correctionReason }))}
       nextHearing={nextHearing && {

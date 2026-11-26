@@ -21,6 +21,7 @@ import type {
   UpdateDeadlineDraftInput,
 } from '@/modules/scheduling/deadline-types';
 import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
+import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic, getCairoTodayDateString } from '@/lib/cairo-date';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -202,6 +203,8 @@ export function DeadlinesView({
       : initialDraftTarget?.sourceDocumentId ?? ''
   );
   const [fetchedDocsByMatter, setFetchedDocsByMatter] = useState<Record<string, LinkableDocumentSummary[]>>({});
+  const [docsLoadErrorByMatter, setDocsLoadErrorByMatter] = useState<Record<string, string>>({});
+  const [docsFetchNonce, setDocsFetchNonce] = useState(0);
   const [lawyerReviewed, setLawyerReviewed] = useState(
     restoredDraftOp?.kind === 'confirm' ||
       restoredDraftOp?.kind === 'createAndConfirm' ||
@@ -423,6 +426,7 @@ export function DeadlinesView({
     if (lockedMatterId && matterDocuments !== undefined) return;
     if (initialDocumentsByMatter && activeMatterId in initialDocumentsByMatter) return;
     if (activeMatterId in fetchedDocsByMatter) return;
+    if (activeMatterId in docsLoadErrorByMatter) return;
 
     const controller = new AbortController();
     fetch(`/api/documents?matterId=${encodeURIComponent(activeMatterId)}&limit=100`, {
@@ -435,35 +439,59 @@ export function DeadlinesView({
         }
         const body = (await res.json().catch(() => null)) as
           | { success: true; data: { documents: DocumentDTO[] } }
-          | { success: false }
+          | { success: false; error?: string }
           | null;
         if (controller.signal.aborted) return;
-        const docs: LinkableDocumentSummary[] =
-          res.ok && body && body.success
-            ? body.data.documents
-                .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
-                .map((d) => ({
-                  id: d.id,
-                  title: d.title,
-                  documentType: d.documentType,
-                  currentVersionId: d.currentVersionId,
-                  scanStatusLabel: d.currentVersion!.scanStatusLabel,
-                }))
-            : [];
+        if (!res.ok || !body || !body.success) {
+          const message =
+            res.status === 401
+              ? 'انتهت الجلسة. يرجى إعادة تسجيل الدخول ثم إعادة تحميل مستندات القضية.'
+              : (body && !body.success && body.error) || 'تعذر تحميل مستندات القضية المرتبطة.';
+          setDocsLoadErrorByMatter((prev) => ({ ...prev, [activeMatterId]: message }));
+          return;
+        }
+        const docs: LinkableDocumentSummary[] = body.data.documents
+          .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+          .map((d) => ({
+            id: d.id,
+            title: d.title,
+            documentType: d.documentType,
+            currentVersionId: d.currentVersionId,
+            scanStatusLabel: d.currentVersion!.scanStatusLabel,
+          }));
+        setDocsLoadErrorByMatter((prev) => {
+          if (!(activeMatterId in prev)) return prev;
+          const next = { ...prev };
+          delete next[activeMatterId];
+          return next;
+        });
         setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: docs }));
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: [] }));
+        setDocsLoadErrorByMatter((prev) => ({
+          ...prev,
+          [activeMatterId]: 'تعذر تحميل مستندات القضية بسبب انقطاع الاتصال.',
+        }));
       });
 
     return () => {
       controller.abort();
     };
-  }, [isDraftModalOpen, lockedMatterId, matterId, matterDocuments, initialDocumentsByMatter, fetchedDocsByMatter]);
+  }, [
+    isDraftModalOpen,
+    lockedMatterId,
+    matterId,
+    matterDocuments,
+    initialDocumentsByMatter,
+    fetchedDocsByMatter,
+    docsLoadErrorByMatter,
+    docsFetchNonce,
+  ]);
 
   const openNewDeadlineModal = () => {
     setStatusNotice(null);
+    setDocsLoadErrorByMatter({});
     const pending = pendingDraftOpRef.current;
     if (pending && (pending.kind === 'createDraft' || pending.kind === 'createAndConfirm')) {
       setIsDraftModalOpen(true);
@@ -491,6 +519,7 @@ export function DeadlinesView({
 
   const openExistingDraftModal = (deadline: DeadlineDTO) => {
     setStatusNotice(null);
+    setDocsLoadErrorByMatter({});
     const pending = pendingDraftOpRef.current;
     const pendingId =
       pending?.kind === 'updateDraft' || pending?.kind === 'confirm'
@@ -530,11 +559,16 @@ export function DeadlinesView({
   const hasPreloadedDocs =
     (Boolean(lockedMatterId) && matterDocuments !== undefined) ||
     Boolean(initialDocumentsByMatter && activeDocsMatterId in initialDocumentsByMatter);
+  const docsLoadError =
+    !hasPreloadedDocs && activeDocsMatterId
+      ? (docsLoadErrorByMatter[activeDocsMatterId] ?? null)
+      : null;
   const isLoadingMatterDocs =
     isDraftModalOpen &&
     Boolean(activeDocsMatterId) &&
     !hasPreloadedDocs &&
-    !(activeDocsMatterId in fetchedDocsByMatter);
+    !(activeDocsMatterId in fetchedDocsByMatter) &&
+    !docsLoadError;
   const rawMatterDocs =
     lockedMatterId && matterDocuments !== undefined
       ? matterDocuments
@@ -1140,7 +1174,7 @@ export function DeadlinesView({
           <Link
             href={`/documents/${d.sourceDocumentId}`}
             data-testid={`deadline-source-document-link-${d.id}`}
-            className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+            className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
           >
             <bdi className="[overflow-wrap:anywhere]">
               {d.sourceDocument?.title ?? 'عرض المستند المصدري'}
@@ -1151,7 +1185,9 @@ export function DeadlinesView({
               </span>
             )}
             {d.sourceDocument?.scanStatusLabel && (
-              <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-xs font-semibold border ${getScanStatusBadgeClassFromLabel(d.sourceDocument.scanStatusLabel)}`}
+              >
                 {d.sourceDocument.scanStatusLabel}
               </span>
             )}
@@ -1686,6 +1722,31 @@ export function DeadlinesView({
                   </select>
                   {isLoadingMatterDocs && (
                     <p className="text-xs text-[#4D606A]">جارٍ تحميل مستندات الملف الجاهزة...</p>
+                  )}
+                  {docsLoadError && (
+                    <div
+                      role="alert"
+                      data-testid="deadline-source-docs-error"
+                      className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                    >
+                      <span>{docsLoadError}</span>
+                      <button
+                        type="button"
+                        data-testid="deadline-source-docs-retry"
+                        onClick={() => {
+                          if (!activeDocsMatterId) return;
+                          setDocsLoadErrorByMatter((prev) => {
+                            const next = { ...prev };
+                            delete next[activeDocsMatterId];
+                            return next;
+                          });
+                          setDocsFetchNonce((n) => n + 1);
+                        }}
+                        className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                      >
+                        إعادة المحاولة
+                      </button>
+                    </div>
                   )}
                 </div>
 

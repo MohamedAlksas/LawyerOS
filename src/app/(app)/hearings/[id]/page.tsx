@@ -13,6 +13,7 @@ import {
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { mapLinkableDocumentSummary } from '@/modules/scheduling/hearing-types';
 import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
+import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
 
 interface HearingDetailPageProps {
@@ -270,7 +271,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               <Link
                 href={`/documents/${latestResult.decisionDocumentId}`}
                 data-testid="hearing-decision-document-link"
-                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 <bdi className="[overflow-wrap:anywhere]">
                   {latestDecisionDoc?.title ?? 'عرض مستند القرار'}
@@ -281,7 +282,9 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
                   </span>
                 )}
                 {latestDecisionDoc?.scanStatusLabel && (
-                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestDecisionDoc.scanStatusLabel)}`}
+                  >
                     {latestDecisionDoc.scanStatusLabel}
                   </span>
                 )}

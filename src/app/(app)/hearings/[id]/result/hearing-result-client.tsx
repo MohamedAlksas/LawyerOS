@@ -6,6 +6,7 @@ import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/n
 import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
 import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, LinkableDocumentSummary, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
 import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
+import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
 import {
   HearingStatus,
   NextDateDisposition,
@@ -37,6 +38,7 @@ interface HearingResultClientProps {
   matterId: string;
   matterFileCode: string;
   proceedingId: string;
+  canReadDocuments?: boolean;
   availableDocuments?: LinkableDocumentSummary[];
   latestResult: {
     id: string;
@@ -74,6 +76,7 @@ export function HearingResultClient({
   matterId,
   matterFileCode,
   proceedingId,
+  canReadDocuments = true,
   availableDocuments = [],
   latestResult: initialLatestResult,
 }: HearingResultClientProps) {
@@ -456,19 +459,21 @@ export function HearingResultClient({
             <span>تم حفظ النتيجة بنجاح!</span>
           </div>
           <p className="font-semibold text-emerald-800">{savedDecision}</p>
-          {latestResult?.decisionDocumentId && (
+          {canReadDocuments && latestResult?.decisionDocumentId && (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="font-semibold text-emerald-900">مستند القرار المرتبط:</span>
               <Link
                 href={`/documents/${latestResult.decisionDocumentId}`}
                 data-testid="hearing-decision-document-link"
-                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-white border border-emerald-300 rounded-[6px] text-[#14566B] font-semibold hover:bg-emerald-100 min-h-[44px]"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-white border border-emerald-300 rounded-[6px] text-[#14566B] font-semibold hover:bg-emerald-100 min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 <bdi className="[overflow-wrap:anywhere]">
                   {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
                 </bdi>
                 {latestResult.decisionDocument?.scanStatusLabel && (
-                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestResult.decisionDocument.scanStatusLabel)}`}
+                  >
                     {latestResult.decisionDocument.scanStatusLabel}
                   </span>
                 )}
@@ -545,13 +550,13 @@ export function HearingResultClient({
             </p>
           </div>
 
-          {latestResult?.decisionDocumentId && (
+          {canReadDocuments && latestResult?.decisionDocumentId && (
             <div className="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] text-xs flex flex-wrap items-center gap-2">
               <span className="font-bold text-[#4D606A]">مستند القرار المرتبط:</span>
               <Link
                 href={`/documents/${latestResult.decisionDocumentId}`}
                 data-testid="hearing-decision-document-link"
-                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 <bdi className="[overflow-wrap:anywhere]">
                   {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
@@ -562,7 +567,9 @@ export function HearingResultClient({
                   </span>
                 )}
                 {latestResult.decisionDocument?.scanStatusLabel && (
-                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestResult.decisionDocument.scanStatusLabel)}`}
+                  >
                     {latestResult.decisionDocument.scanStatusLabel}
                   </span>
                 )}
@@ -630,26 +637,28 @@ export function HearingResultClient({
                 />
               </div>
 
-              <div className="space-y-1 text-xs">
-                <label htmlFor="correction-decision-document-select" className="block font-bold text-[#172A35]">
-                  مستند القرار المرتبط (اختياري)
-                </label>
-                <select
-                  id="correction-decision-document-select"
-                  data-testid="hearing-decision-document-select"
-                  value={correctedDecisionDocumentId}
-                  onChange={(e) => setCorrectedDecisionDocumentId(e.target.value)}
-                  disabled={correctionFieldsDisabled}
-                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
-                >
-                  <option value="">بدون مستند قرار مرتبط (اختياري)</option>
-                  {correctionSelectableDocuments.map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {canReadDocuments && (
+                <div className="space-y-1 text-xs">
+                  <label htmlFor="correction-decision-document-select" className="block font-bold text-[#172A35]">
+                    مستند القرار المرتبط (اختياري)
+                  </label>
+                  <select
+                    id="correction-decision-document-select"
+                    data-testid="hearing-decision-document-select"
+                    value={correctedDecisionDocumentId}
+                    onChange={(e) => setCorrectedDecisionDocumentId(e.target.value)}
+                    disabled={correctionFieldsDisabled}
+                    className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  >
+                    <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+                    {correctionSelectableDocuments.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
@@ -743,26 +752,28 @@ export function HearingResultClient({
             </label>
           </div>
 
-          <div className="space-y-1 text-xs">
-            <label htmlFor="hearing-decision-document-select" className="block font-bold text-[#172A35]">
-              مستند القرار المرتبط (اختياري)
-            </label>
-            <select
-              id="hearing-decision-document-select"
-              data-testid="hearing-decision-document-select"
-              value={decisionDocumentId}
-              onChange={(e) => setDecisionDocumentId(e.target.value)}
-              disabled={resultFieldsDisabled}
-              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
-            >
-              <option value="">بدون مستند قرار مرتبط (اختياري)</option>
-              {availableDocuments.map((doc) => (
-                <option key={doc.id} value={doc.id}>
-                  {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
-                </option>
-              ))}
-            </select>
-          </div>
+          {canReadDocuments && (
+            <div className="space-y-1 text-xs">
+              <label htmlFor="hearing-decision-document-select" className="block font-bold text-[#172A35]">
+                مستند القرار المرتبط (اختياري)
+              </label>
+              <select
+                id="hearing-decision-document-select"
+                data-testid="hearing-decision-document-select"
+                value={decisionDocumentId}
+                onChange={(e) => setDecisionDocumentId(e.target.value)}
+                disabled={resultFieldsDisabled}
+                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              >
+                <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+                {availableDocuments.map((doc) => (
+                  <option key={doc.id} value={doc.id}>
+                    {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* Next Date Radio Group */}
           <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
             <span className="block font-bold text-[#172A35]">

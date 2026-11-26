@@ -1,7 +1,5 @@
 import { z } from 'zod';
 import {
-  DocumentScanStatus,
-  DocumentType,
   HearingStatus,
   NextDateDisposition,
   HearingLinkRelation,
@@ -11,7 +9,11 @@ import {
   JobRunStatus,
   ProceedingStatus,
 } from '@prisma/client';
-import { UNSCANNED_POLICY_NOTICE_AR } from '@/modules/documents/document-types';
+import {
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
+} from '@/modules/documents/document-types';
 import {
   validateStrictCalendarDate,
   parseCalendarDateToUtc,
@@ -109,56 +111,11 @@ export interface HearingDTO {
   updatedAt: string;
 }
 
-export interface LinkableDocumentSummary {
-  id: string;
-  title: string;
-  documentType: DocumentType;
-  currentVersionId: string | null;
-  scanStatusLabel: string;
-}
-
-export interface LinkableDocumentRow {
-  id: string;
-  title: string;
-  documentType: DocumentType;
-  currentVersionId: string | null;
-  currentVersion?: { scanStatus: DocumentScanStatus } | null;
-}
-
-function formatSchedulingScanStatusLabel(scanStatus: DocumentScanStatus | null | undefined): string {
-  switch (scanStatus) {
-    case 'CLEAN':
-      return 'تم الفحص — سليم';
-    case 'PENDING':
-      return 'بانتظار الفحص';
-    case 'INFECTED':
-      return 'مرفوض أمنياً';
-    case 'FAILED':
-      return 'فشل الفحص';
-    case 'TIMEOUT':
-      return 'انتهت مهلة الفحص';
-    case 'STALE_DEFINITIONS':
-      return 'تعريفات الفحص قديمة';
-    case 'NOT_SCANNED_POLICY':
-    default:
-      return UNSCANNED_POLICY_NOTICE_AR;
-  }
-}
-
-export function mapLinkableDocumentSummary(
-  doc: LinkableDocumentRow | null | undefined
-): LinkableDocumentSummary | null {
-  if (!doc) return null;
-  return {
-    id: doc.id,
-    title: doc.title,
-    documentType: doc.documentType,
-    currentVersionId: doc.currentVersionId,
-    scanStatusLabel: doc.currentVersion
-      ? formatSchedulingScanStatusLabel(doc.currentVersion.scanStatus)
-      : 'غير جاهز',
-  };
-}
+export {
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
+};
 
 export interface HearingResultDTO {
   id: string;

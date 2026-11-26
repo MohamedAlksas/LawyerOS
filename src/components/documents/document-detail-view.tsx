@@ -25,18 +25,24 @@ import {
   IconWarning,
 } from '@/components/stitch-icons';
 import {
+  DOCUMENT_FIELD_ERROR_CLASS as FIELD_ERROR_CLASS,
+  DOCUMENT_INPUT_CLASS as INPUT_CLASS,
+  DOCUMENT_MESSAGE_CLASS as MESSAGE_CLASS,
+  DOCUMENT_NETWORK_ERROR_MESSAGE as NETWORK_ERROR_MESSAGE,
+  DOCUMENT_SESSION_EXPIRED_MESSAGE as SESSION_EXPIRED_MESSAGE,
   DOCUMENT_TYPE_LABELS_AR,
   DOCUMENT_TYPE_OPTIONS,
   DOWNLOAD_DEVICE_RETENTION_NOTICE_AR,
   MAX_DOCUMENT_TITLE_LENGTH,
-  PAPER_ORIGINAL_PRESENCE_LABELS,
-  PAPER_ORIGINAL_PRESENCE_OPTIONS,
+  ORIGINAL_PRESENCE_LABELS,
+  ORIGINAL_PRESENCE_OPTIONS,
   QUEUE_STATUS_META,
   SCAN_STATUS_BADGE_CLASSES,
   SENSITIVITY_BADGE_CLASSES,
   SENSITIVITY_LABELS,
   SENSITIVITY_OPTIONS,
   UNSCANNED_POLICY_NOTICE_AR,
+  classifyUploadFailure,
   formatCairoInstantArabic,
   formatFileSizeArabic,
   isPdfFile,
@@ -50,8 +56,6 @@ export interface DocumentDetailViewProps {
   document: DocumentDetailDTO;
 }
 
-type FailureBody = Extract<DocumentActionResult<unknown>, { success: false }>;
-
 interface VersionCandidateState {
   file: File;
   localPreviewUrl: string | null;
@@ -62,6 +66,7 @@ interface VersionCandidateState {
   attemptId?: string;
   sentExpectedVersion?: number;
   contentUploaded: boolean;
+  pendingConfirmDuplicate: boolean;
   duplicateMatches: DuplicateChecksumMatchDTO[];
   beginIdempotencyKey: string;
   finalizeIdempotencyKey: string;
@@ -94,21 +99,8 @@ interface FrozenMetadataRequest {
   };
 }
 
-const INPUT_CLASS =
-  'w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70';
 const INLINE_LINK_CLASS =
   'text-[#14566B] hover:underline rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]';
-const MESSAGE_CLASS = 'min-w-0 break-words [overflow-wrap:anywhere]';
-const FIELD_ERROR_CLASS = `text-xs text-[#A4262C] mt-1 font-medium ${MESSAGE_CLASS}`;
-
-const SESSION_EXPIRED_MESSAGE =
-  'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.';
-const NETWORK_ERROR_MESSAGE = 'الاتصال انقطع، البيانات لسه ما اتحفظتش';
-const SIZE_EXCEEDED_MESSAGE = 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).';
-const RETRYABLE_CONFLICT_CODES = new Set<string>([
-  'CONCURRENCY_CONFLICT',
-  'IDEMPOTENCY_CONCURRENT_CONFLICT',
-]);
 
 function snapshotFromDocument(doc: DocumentDetailDTO): MetadataSnapshot {
   return {
@@ -144,37 +136,13 @@ function makeFreshVersionKeys() {
     attemptId: undefined,
     sentExpectedVersion: undefined,
     contentUploaded: false,
+    pendingConfirmDuplicate: false,
     duplicateMatches: [] as DuplicateChecksumMatchDTO[],
     isConcurrencyConflict: false,
     beginIdempotencyKey: generateClientRequestId('doc-ver-begin'),
     finalizeIdempotencyKey: generateClientRequestId('doc-ver-fin'),
     confirmDuplicateIdempotencyKey: generateClientRequestId('doc-ver-dup'),
   };
-}
-
-function classifyVersionFailure(
-  httpStatus: number,
-  body: FailureBody | null,
-  fallback: string
-): { status: 'INCOMPLETE' | 'REJECTED'; message: string; isConcurrencyConflict: boolean } {
-  const message = body?.error ?? fallback;
-  if (httpStatus === 401) {
-    return { status: 'INCOMPLETE', message: SESSION_EXPIRED_MESSAGE, isConcurrencyConflict: false };
-  }
-  if (httpStatus === 409 && body && RETRYABLE_CONFLICT_CODES.has(body.code)) {
-    return {
-      status: 'INCOMPLETE',
-      message,
-      isConcurrencyConflict: body.code === 'CONCURRENCY_CONFLICT',
-    };
-  }
-  if (httpStatus >= 500 && body?.code !== 'SCAN_POLICY_UNAVAILABLE') {
-    return { status: 'INCOMPLETE', message, isConcurrencyConflict: false };
-  }
-  if (httpStatus === 413) {
-    return { status: 'REJECTED', message: SIZE_EXCEEDED_MESSAGE, isConcurrencyConflict: false };
-  }
-  return { status: 'REJECTED', message, isConcurrencyConflict: false };
 }
 
 function formatShortSha256(sha256: string | null): string {
@@ -214,8 +182,22 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
   const [frozenMetadataRequest, setFrozenMetadataRequest] =
     useState<FrozenMetadataRequest | null>(null);
   const [isRefreshingDetail, setIsRefreshingDetail] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const isMountedRef = useRef(false);
+  const docStateRef = useRef<DocumentDetailDTO>(initialDocument);
+  const draftRef = useRef<MetadataSnapshot>(draft);
+  const metadataTitleInputRef = useRef<HTMLInputElement>(null);
+  const metadataDateInputRef = useRef<HTMLInputElement>(null);
+  const metadataOriginalLocationInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    docStateRef.current = docState;
+  }, [docState]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   // Reconcile local state when Next.js router.refresh() delivers updated server props.
   if (propStamp !== prevPropStamp) {
@@ -307,7 +289,10 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     : null;
 
   const applyLatestDetail = (nextDoc: DocumentDetailDTO, options?: { syncDraft?: boolean }) => {
-    const prevCurrentId = docState.currentVersionId;
+    const prevDoc = docStateRef.current;
+    const currentDraft = draftRef.current;
+    const prevCurrentId = prevDoc.currentVersionId;
+    docStateRef.current = nextDoc;
     setDocState(nextDoc);
     setSelectedVersionId((curr) => {
       if (!curr || curr === prevCurrentId) {
@@ -316,8 +301,10 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       const stillExists = nextDoc.versions?.some((v) => v.id === curr);
       return stillExists ? curr : nextDoc.currentVersionId;
     });
-    if (options?.syncDraft || isSameMetadata(draft, docState)) {
-      setDraft(snapshotFromDocument(nextDoc));
+    if (options?.syncDraft || isSameMetadata(currentDraft, prevDoc)) {
+      const nextSnapshot = snapshotFromDocument(nextDoc);
+      draftRef.current = nextSnapshot;
+      setDraft(nextSnapshot);
     }
     setImageLoadError(false);
     setImageRetryNonce(0);
@@ -328,40 +315,55 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     syncDraft?: boolean;
   }) => {
     setIsRefreshingDetail(true);
+    setRefreshError(null);
     try {
-      const res = await fetch(`/api/documents/${docState.id}`, { cache: 'no-store' });
-      if (res.status === 401 && typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      const res = await fetch(`/api/documents/${docStateRef.current.id}`, { cache: 'no-store' });
+      if (res.status === 401) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
+        if (isMountedRef.current) {
+          setRefreshError(SESSION_EXPIRED_MESSAGE);
+        }
         return;
       }
       const body = (await res.json().catch(() => null)) as
         | DocumentActionResult<DocumentDetailDTO>
         | null;
       if (!isMountedRef.current) return;
-      if (res.ok && body && body.success) {
-        applyLatestDetail(body.data, { syncDraft: options?.syncDraft });
-        if (options?.resetVersionConflict && candidateRef.current) {
-          syncCandidate((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  ...makeFreshVersionKeys(),
-                  status: 'QUEUED',
-                  errorMessage: null,
-                }
-              : null
-          );
-        }
-        setMetadataConflict(false);
-        setFrozenMetadataRequest(null);
-        setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
-        setMetadataError(null);
-        setMetadataFieldErrors({});
+      if (!res.ok || !body || !body.success) {
+        const failureBody = body && !body.success ? body : null;
+        setRefreshError(
+          failureBody?.error ?? 'تعذر تحديث بيانات المستند. يرجى المحاولة مرة أخرى.'
+        );
+        return;
+      }
+      applyLatestDetail(body.data, { syncDraft: options?.syncDraft });
+      if (options?.resetVersionConflict && candidateRef.current) {
+        syncCandidate((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...makeFreshVersionKeys(),
+                status: 'QUEUED',
+                errorMessage: null,
+              }
+            : null
+        );
+      }
+      setMetadataConflict(false);
+      setFrozenMetadataRequest(null);
+      setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
+      setMetadataError(null);
+      setMetadataFieldErrors({});
+      router.refresh();
+    } catch {
+      if (isMountedRef.current) {
+        setRefreshError(NETWORK_ERROR_MESSAGE);
       }
     } finally {
       if (isMountedRef.current) {
         setIsRefreshingDetail(false);
-        router.refresh();
       }
     }
   };
@@ -383,7 +385,14 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     setImageLoadError(false);
     setImageRetryNonce(0);
     const previewHeading = window.document.getElementById('document-preview-heading');
-    previewHeading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    previewHeading?.scrollIntoView({
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
   };
 
   // =========================================================================
@@ -436,6 +445,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             status: 'VALIDATING',
             errorMessage: null,
             isConcurrencyConflict: false,
+            pendingConfirmDuplicate: confirmDuplicate,
           }
         : null
     );
@@ -473,6 +483,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 status: 'DUPLICATE_WARNING',
                 errorMessage: body.error,
                 duplicateMatches: body.existingDocuments ?? [],
+                pendingConfirmDuplicate: false,
               }
             : null
         );
@@ -480,7 +491,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       }
 
       if (!response.ok || !body || !body.success) {
-        const failure = classifyVersionFailure(
+        const failure = classifyUploadFailure(
           response.status,
           body && !body.success ? body : null,
           'تعذر إتمام التحقق من الإصدار الجديد على الخادم.'
@@ -567,8 +578,13 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
       let attemptId = working.attemptId;
       let contentUploaded = working.contentUploaded;
 
+      if (working.pendingConfirmDuplicate && attemptId && contentUploaded) {
+        await runVersionFinalize(attemptId, true, working.confirmDuplicateIdempotencyKey);
+        return;
+      }
+
       if (!attemptId) {
-        const expectedDocumentVersion = working.sentExpectedVersion ?? docState.version;
+        const expectedDocumentVersion = working.sentExpectedVersion ?? docStateRef.current.version;
         syncCandidate((prev) =>
           prev
             ? {
@@ -605,7 +621,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
           if (!isMountedRef.current) return;
 
           if (!beginRes.ok || !beginBody || !beginBody.success) {
-            const failure = classifyVersionFailure(
+            const failure = classifyUploadFailure(
               beginRes.status,
               beginBody && !beginBody.success ? beginBody : null,
               'تعذر بدء محاولة رفع الإصدار الجديد.'
@@ -672,7 +688,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
           if (!isMountedRef.current) return;
 
           if (!putRes.ok || !putBody || !putBody.success) {
-            const failure = classifyVersionFailure(
+            const failure = classifyUploadFailure(
               putRes.status,
               putBody && !putBody.success ? putBody : null,
               'تعذر رفع محتوى الإصدار إلى الحجر الخاص.'
@@ -786,6 +802,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
     if (!trimmedTitle) {
       setMetadataFieldErrors({ title: 'عنوان المستند مطلوب.' });
       setMetadataError('يرجى إدخال عنوان المستند قبل الحفظ.');
+      metadataTitleInputRef.current?.focus();
       return;
     }
 
@@ -864,6 +881,13 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
         setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
         if (failureBody?.fieldErrors) {
           setMetadataFieldErrors(failureBody.fieldErrors);
+          if (failureBody.fieldErrors.title) {
+            metadataTitleInputRef.current?.focus();
+          } else if (failureBody.fieldErrors.documentDate) {
+            metadataDateInputRef.current?.focus();
+          } else if (failureBody.fieldErrors.originalLocation) {
+            metadataOriginalLocationInputRef.current?.focus();
+          }
         }
         setMetadataError(failureBody?.error ?? 'تعذر حفظ تعديلات بيانات المستند.');
         return;
@@ -948,6 +972,38 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             )}
           </div>
         </div>
+
+        {refreshError && (
+          <div
+            role="alert"
+            data-testid="detail-refresh-error"
+            className="rounded-[6px] bg-red-50 border border-red-200 p-3 text-sm text-[#A4262C] flex flex-wrap items-center justify-between gap-2"
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              <IconWarning className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className={MESSAGE_CLASS}>{refreshError}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                data-testid="detail-refresh-retry"
+                disabled={isRefreshingDetail}
+                onClick={() => void refreshDocumentDetail()}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              >
+                <IconRefresh className="w-4 h-4" />
+                <span>{isRefreshingDetail ? 'جارٍ التحديث...' : 'إعادة التحديث'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRefreshError(null)}
+                className="text-xs font-semibold underline min-h-[44px] px-2 rounded-[4px] focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        )}
 
         {isArchived && (
           <div
@@ -1038,7 +1094,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
               data-testid="detail-original-presence"
               className="font-medium text-[#172A35] break-words [overflow-wrap:anywhere]"
             >
-              <span>{PAPER_ORIGINAL_PRESENCE_LABELS[docState.originalPresent]}</span>
+              <span>{ORIGINAL_PRESENCE_LABELS[docState.originalPresent]}</span>
               {docState.originalLocation && (
                 <span
                   data-testid="detail-original-location"
@@ -1355,6 +1411,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                           <button
                             type="button"
                             data-testid={`version-preview-btn-${ver.versionNumber}`}
+                            aria-label={`معاينة الإصدار رقم ${ver.versionNumber}: ${ver.originalFilename}`}
                             aria-pressed={isPreviewing}
                             onClick={() => handleSelectPreviewVersion(ver)}
                             className="inline-flex items-center justify-center px-3.5 py-2 bg-white hover:bg-[#E9F2F5] text-[#14566B] border border-[#14566B] text-xs font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
@@ -1365,6 +1422,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                             href={verInlineUrl}
                             target="_blank"
                             rel="noopener noreferrer"
+                            aria-label={`فتح الإصدار رقم ${ver.versionNumber} في تبويب جديد: ${ver.originalFilename}`}
                             className="inline-flex items-center justify-center px-3 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] border border-[#D5DFE3] text-xs font-medium rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                           >
                             تبويب جديد
@@ -1373,6 +1431,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                             href={verDownloadUrl}
                             download
                             data-testid={`version-download-link-${ver.versionNumber}`}
+                            aria-label={`تحميل الإصدار رقم ${ver.versionNumber}: ${ver.originalFilename}`}
                             className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                           >
                             <IconDownload className="w-4 h-4" />
@@ -1449,10 +1508,17 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
             <IconUpload className="w-4 h-4 shrink-0" />
             <span>{candidate ? 'اختيار ملف آخر' : 'اختيار ملف الإصدار الجديد'}</span>
           </label>
-          <span className="text-xs text-[#4D606A]">
-            {candidate
-              ? `الملف المختار: ${candidate.file.name}`
-              : 'لم يتم اختيار ملف لإصدار جديد بعد'}
+          <span className="text-xs text-[#4D606A] min-w-0 max-w-full break-all">
+            {candidate ? (
+              <>
+                الملف المختار:{' '}
+                <bdi dir="ltr" className="min-w-0 max-w-full break-all">
+                  {candidate.file.name}
+                </bdi>
+              </>
+            ) : (
+              'لم يتم اختيار ملف لإصدار جديد بعد'
+            )}
           </span>
         </div>
 
@@ -1553,16 +1619,22 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                     )}
                     {!candidateClientRejection &&
                       !candidate.isConcurrencyConflict &&
-                      candidate.status === 'INCOMPLETE' && (
+                      (candidate.status === 'INCOMPLETE' || candidate.status === 'REJECTED') && (
                         <button
                           type="button"
                           data-testid="version-upload-retry"
                           disabled={isUploadingVersion}
-                          onClick={() => void executeVersionUpload(true)}
+                          onClick={() =>
+                            void executeVersionUpload(candidate.status === 'INCOMPLETE')
+                          }
                           className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                         >
                           <IconRefresh className="w-4 h-4" />
-                          <span>إعادة المحاولة</span>
+                          <span>
+                            {candidate.status === 'REJECTED'
+                              ? 'إعادة المحاولة برفع جديد'
+                              : 'إعادة المحاولة'}
+                          </span>
                         </button>
                       )}
                   </div>
@@ -1692,6 +1764,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 عنوان المستند *
               </label>
               <input
+                ref={metadataTitleInputRef}
                 id="metadata-title-input"
                 data-testid="metadata-title-input"
                 type="text"
@@ -1699,11 +1772,14 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 value={draft.title}
                 disabled={isSavingMetadata || isArchived}
                 aria-invalid={Boolean(metadataFieldErrors.title)}
+                aria-describedby={metadataFieldErrors.title ? 'metadata-title-error' : undefined}
                 onChange={(e) => updateDraftField('title', e.target.value)}
                 className={INPUT_CLASS}
               />
               {metadataFieldErrors.title && (
-                <p className={FIELD_ERROR_CLASS}>{metadataFieldErrors.title}</p>
+                <p id="metadata-title-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.title}
+                </p>
               )}
             </div>
 
@@ -1738,6 +1814,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 تاريخ المستند (اختياري)
               </label>
               <input
+                ref={metadataDateInputRef}
                 id="metadata-date-input"
                 data-testid="metadata-date-input"
                 type="date"
@@ -1745,11 +1822,16 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 value={draft.documentDate}
                 disabled={isSavingMetadata || isArchived}
                 aria-invalid={Boolean(metadataFieldErrors.documentDate)}
+                aria-describedby={
+                  metadataFieldErrors.documentDate ? 'metadata-date-error' : undefined
+                }
                 onChange={(e) => updateDraftField('documentDate', e.target.value)}
                 className={INPUT_CLASS}
               />
               {metadataFieldErrors.documentDate && (
-                <p className={FIELD_ERROR_CLASS}>{metadataFieldErrors.documentDate}</p>
+                <p id="metadata-date-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.documentDate}
+                </p>
               )}
             </div>
 
@@ -1795,7 +1877,7 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 }
                 className={INPUT_CLASS}
               >
-                {PAPER_ORIGINAL_PRESENCE_OPTIONS.map((opt) => (
+                {ORIGINAL_PRESENCE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -1811,16 +1893,28 @@ export function DocumentDetailView({ document: initialDocument }: DocumentDetail
                 مكان حفظ الأصل الورقي (اختياري)
               </label>
               <input
+                ref={metadataOriginalLocationInputRef}
                 id="metadata-original-location-input"
                 data-testid="metadata-original-location-input"
                 type="text"
                 maxLength={300}
                 value={draft.originalLocation}
                 disabled={isSavingMetadata || isArchived}
+                aria-invalid={Boolean(metadataFieldErrors.originalLocation)}
+                aria-describedby={
+                  metadataFieldErrors.originalLocation
+                    ? 'metadata-original-location-error'
+                    : undefined
+                }
                 placeholder="مثال: دولاب القضايا المدني — رف 3"
                 onChange={(e) => updateDraftField('originalLocation', e.target.value)}
                 className={INPUT_CLASS}
               />
+              {metadataFieldErrors.originalLocation && (
+                <p id="metadata-original-location-error" className={FIELD_ERROR_CLASS}>
+                  {metadataFieldErrors.originalLocation}
+                </p>
+              )}
             </div>
           </div>
 

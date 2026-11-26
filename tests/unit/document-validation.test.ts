@@ -27,6 +27,8 @@ import {
   documentStatusFromErrorCode,
   evaluateDocumentScanPolicy,
   inspectFileContent,
+  pinDocumentVersionsForBackup,
+  releaseBackupFilePins,
   resolveSafeKeyPath,
   resolveSafeStorageRoot,
   sanitizeDisplayFilename,
@@ -800,6 +802,94 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
           sha256: 'cannot-override-bytes',
         }).success
       ).toBe(false);
+    });
+
+    it('validates backup pin & release inputs (backupId bounds, UUID version IDs, and deduplication)', async () => {
+      // Note: document-types.ts does not export Zod schemas for backup pins; validation is enforced
+      // directly in pinDocumentVersionsForBackup / releaseBackupFilePins via assertValidBackupId & assertUuidOrThrow.
+      const ownerActor: Actor = {
+        id: crypto.randomUUID(),
+        name: 'مالك اختبار',
+        email: 'owner.pin@office.eg',
+        role: 'OWNER',
+        sessionId: crypto.randomUUID(),
+        twoFactorVerified: true,
+      };
+
+      await expect(
+        pinDocumentVersionsForBackup({ backupId: '   ', documentVersionIds: [], actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        pinDocumentVersionsForBackup({
+          backupId: 'b'.repeat(129),
+          documentVersionIds: [],
+          actor: ownerActor,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        pinDocumentVersionsForBackup({
+          backupId: 'backup-valid-1',
+          documentVersionIds: ['not-a-uuid'],
+          actor: ownerActor,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        releaseBackupFilePins({ backupId: '', actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        releaseBackupFilePins({ backupId: 'r'.repeat(129), actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      const verA = crypto.randomUUID();
+      const verB = crypto.randomUUID();
+      const mockTx = {
+        backupFilePin: {
+          createMany: async () => ({ count: 2 }),
+          updateMany: async (args: { where?: { releasedAt?: unknown } }) => ({
+            count: args?.where?.releasedAt === null ? 2 : 0,
+          }),
+        },
+        auditEvent: {
+          create: async () => ({ id: crypto.randomUUID() }),
+        },
+      };
+      const mockPrisma = {
+        documentVersion: {
+          findMany: async () => [{ id: verA }, { id: verB }],
+        },
+        backupFilePin: {
+          updateMany: async () => ({ count: 2 }),
+        },
+        $transaction: async <T>(fn: (tx: typeof mockTx & { backupFilePin: typeof mockTx.backupFilePin }) => Promise<T>) =>
+          fn(mockTx),
+      } as unknown as PrismaClient;
+
+      const pinRes = await pinDocumentVersionsForBackup(
+        {
+          backupId: '  backup-2026-11-26  ',
+          documentVersionIds: [verA, verB, verA],
+          actor: ownerActor,
+        },
+        { prismaOverride: mockPrisma, now: new Date('2026-11-26T00:00:00.000Z') }
+      );
+      expect(pinRes.backupId).toBe('backup-2026-11-26');
+      expect(pinRes.pinnedCount).toBe(2);
+      expect(pinRes.documentVersionIds).toEqual([verA, verB]);
+
+      const relRes = await releaseBackupFilePins(
+        {
+          backupId: '  backup-2026-11-26  ',
+          actor: ownerActor,
+        },
+        { prismaOverride: mockPrisma, now: new Date('2026-11-26T01:00:00.000Z') }
+      );
+      expect(relRes.backupId).toBe('backup-2026-11-26');
+      expect(relRes.releasedCount).toBe(2);
+      expect(relRes.releasedAt).toBe('2026-11-26T01:00:00.000Z');
     });
   });
 });

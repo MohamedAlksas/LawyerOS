@@ -40,6 +40,69 @@ export const UNSCANNED_POLICY_DETAIL_AR = 'لم يُفحص ضد الفيروسا
 export const DOWNLOAD_DEVICE_RETENTION_NOTICE_AR =
   'تنبيه: إزالة التطبيق أو تسجيل الخروج لا يحذف الملفات التي تم تنزيلها يدوياً إلى الجهاز.';
 
+export interface LinkableDocumentSummary {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  currentVersionId: string | null;
+  scanStatusLabel: string;
+}
+
+export interface LinkableDocumentRow {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  currentVersionId: string | null;
+  currentVersion?: { scanStatus: DocumentScanStatus } | null;
+}
+
+export const LINKABLE_DOCUMENT_SELECT = {
+  id: true,
+  title: true,
+  documentType: true,
+  currentVersionId: true,
+  currentVersion: {
+    select: {
+      scanStatus: true,
+    },
+  },
+} as const;
+
+export function getScanStatusLabel(scanStatus: DocumentScanStatus | null | undefined): string {
+  switch (scanStatus) {
+    case 'CLEAN':
+      return 'تم الفحص — سليم';
+    case 'PENDING':
+      return 'بانتظار الفحص';
+    case 'INFECTED':
+      return 'مرفوض أمنياً';
+    case 'FAILED':
+      return 'فشل الفحص';
+    case 'TIMEOUT':
+      return 'انتهت مهلة الفحص';
+    case 'STALE_DEFINITIONS':
+      return 'تعريفات الفحص قديمة';
+    case 'NOT_SCANNED_POLICY':
+    default:
+      return UNSCANNED_POLICY_NOTICE_AR;
+  }
+}
+
+export function mapLinkableDocumentSummary(
+  doc: LinkableDocumentRow | null | undefined
+): LinkableDocumentSummary | null {
+  if (!doc) return null;
+  return {
+    id: doc.id,
+    title: doc.title,
+    documentType: doc.documentType,
+    currentVersionId: doc.currentVersionId,
+    scanStatusLabel: doc.currentVersion
+      ? getScanStatusLabel(doc.currentVersion.scanStatus)
+      : 'غير جاهز',
+  };
+}
+
 export const DOCUMENT_TYPE_LABELS_AR: Record<DocumentType, string> = {
   PLEADING: 'صحيفة دعوى / مرافعة',
   MEMORANDUM: 'مذكرة دفاع / قانونية',

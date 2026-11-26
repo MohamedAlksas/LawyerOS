@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { DeadlineStatus } from '@prisma/client';
 import { CrossMatterLinkForbiddenError } from '@/modules/matters/matter-types';
 import {
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
+} from '@/modules/documents/document-types';
+import {
   strictDateSchema,
   SchedulingValidationError,
   ConcurrencyConflictError,
@@ -11,8 +15,6 @@ import {
   ProceedingArchivedError,
   ActiveObligationError,
   UnauthorizedError,
-  type LinkableDocumentRow,
-  type LinkableDocumentSummary,
   type ActionResult,
 } from './hearing-types';
 

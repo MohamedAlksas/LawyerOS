@@ -20,8 +20,12 @@ import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matt
 import {
   expectNoElementOverflow,
   expectNoPageOverflow,
+  expectNotCovered,
   expectShellReady,
+  expectTouchTarget,
+  expectVisibleFocus,
   nextPaint,
+  tabToTestId,
 } from '../helpers/t04-layout';
 import {
   expectNoSensitiveValues,
@@ -419,6 +423,10 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       // Preview & download v1 explicitly from history
       await page.getByTestId('version-preview-btn-1').click();
       await expect(page.getByTestId('preview-active-version-label')).toContainText('الإصدار رقم 1');
+      await expect(page.getByTestId('document-preview-iframe')).toHaveAttribute(
+        'src',
+        new RegExp(`versionId=${v1Id}`)
+      );
       await expect(page.getByTestId('preview-return-current-button')).toBeVisible();
 
       const v1Href = await page.getByTestId('version-download-link-1').getAttribute('href');
@@ -508,8 +516,17 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await page.goto('/search');
       await expectShellReady(page);
 
+      const searchActionResPromise = page.waitForResponse(
+        (res) => res.url().endsWith('/search') && res.request().method() === 'POST'
+      );
       await page.getByTestId('unified-search-input').fill(docTitle);
       await page.getByTestId('search-submit-button').click();
+      const searchActionRes = await searchActionResPromise;
+      expect(searchActionRes.status()).toBe(200);
+      const searchActionBody = await searchActionRes.text();
+      expect(searchActionBody).not.toContain('objectKey');
+      expect(searchActionBody).not.toContain('quarantineKey');
+      expect(searchActionBody).not.toContain('t12-e2e');
 
       await expect(page.getByTestId(`search-result-${seeded.documentId}`)).toBeVisible();
       await page.getByTestId('tab-document').click();
@@ -525,6 +542,27 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await page.getByTestId('search-submit-button').click();
       await expect(page.getByTestId('empty-search-container')).toBeVisible();
       await expect(page.getByTestId(`search-result-${seeded.documentId}`)).toHaveCount(0);
+
+      // 2b) Cross-document ?versionId= fails closed (404) even for authorized Owner
+      const otherDoc = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        matterId: matter.id,
+        title: `مستند آخر لفحص التطابق ${runId}`,
+        documentType: 'CONTRACT',
+        versions: [
+          {
+            filename: `other_v1_${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes: buildSyntheticPdf(`T12-OTHER-DOC-${runId}`),
+          },
+        ],
+      });
+      localDocIds.push(otherDoc.documentId);
+      const crossDocRes = await page.request.get(
+        `/api/documents/${seeded.documentId}/content?versionId=${otherDoc.versionIds[0]}`
+      );
+      expect(crossDocRes.status()).toBe(404);
+      expect(crossDocRes.headers()['cache-control']).toBe('private, no-store');
 
       // 3) Unauthenticated direct historical download fails closed (401)
       const unauthCtx = await browser.newContext({ baseURL });
@@ -573,6 +611,13 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         );
         expect(maintRes.status()).toBe(403);
         expect(maintRes.headers()['cache-control']).toBe('private, no-store');
+
+        // MAINTAINER is also denied on /search
+        await maintPage.goto('/search');
+        await expectShellReady(maintPage);
+        await expect(maintPage.getByText('وصول مرفوض')).toBeVisible();
+        await expect(maintPage.getByText('لا تمتلك الصلاحيات الكافية لاستخدام البحث الموحد.')).toBeVisible();
+        await expect(maintPage.getByTestId(`search-result-${seeded.documentId}`)).toHaveCount(0);
       } finally {
         await maintCtx.close();
       }
@@ -686,17 +731,130 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       });
       localDocIds.push(decisionDoc.documentId);
 
+      // Seed ineligible documents (archived, quarantined, wrong-matter, wrong-party)
+      const archivedDoc = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        matterId: matter.id,
+        proceedingId: proceeding.id,
+        title: `مستند مؤرشف مستبعد ${runId}`,
+        documentType: 'OTHER',
+        versions: [
+          {
+            filename: `archived_${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes: buildSyntheticPdf(`T12-ARCHIVED-${runId}`),
+          },
+        ],
+      });
+      localDocIds.push(archivedDoc.documentId);
+      await prisma.document.update({
+        where: { id: archivedDoc.documentId },
+        data: { archivedAt: new Date() },
+      });
+
+      const quarantinedDocId = randomUUID();
+      const quarantinedVerId = randomUUID();
+      await prisma.document.create({
+        data: {
+          id: quarantinedDocId,
+          matterId: matter.id,
+          proceedingId: proceeding.id,
+          title: `مستند محجور مستبعد ${runId}`,
+          titleNormalized: `مستند محجور مستبعد ${runId}`,
+          documentType: 'OTHER',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localDocIds.push(quarantinedDocId);
+      await prisma.documentVersion.create({
+        data: {
+          id: quarantinedVerId,
+          documentId: quarantinedDocId,
+          versionNumber: 1,
+          objectKey: `q/e2e-quarantined-${quarantinedVerId}.pdf`,
+          originalFilename: 'quarantined.pdf',
+          declaredMime: 'application/pdf',
+          sizeBytes: 120,
+          uploadStatus: 'QUARANTINED',
+          scanStatus: 'PENDING',
+          createdById: owner.id,
+        },
+      });
+      await prisma.document.update({
+        where: { id: quarantinedDocId },
+        data: { currentVersionId: quarantinedVerId },
+      });
+
+      const otherParty = await prisma.party.create({
+        data: {
+          kind: 'PERSON',
+          name: `طرف آخر غير مرتبط T12 ${runId}`,
+          nameNormalized: `طرف اخر غير مرتبط T12 ${runId}`,
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localPartyIds.push(otherParty.id);
+      const otherPartyDoc = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        partyId: otherParty.id,
+        title: `مستند طرف آخر ${runId}`,
+        documentType: 'POA_COPY',
+        versions: [
+          {
+            filename: `other_party_${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes: buildSyntheticPdf(`T12-OTHER-PARTY-${runId}`),
+          },
+        ],
+      });
+      localDocIds.push(otherPartyDoc.documentId);
+
+      const otherMatter = await prisma.matter.create({
+        data: {
+          fileCode: `LO-2027-T12-${runId}-04B`,
+          title: `قضية أخرى مستبعدة ${runId}`,
+          kind: 'LITIGATION',
+          status: 'ACTIVE',
+          createdById: owner.id,
+          updatedById: owner.id,
+        },
+      });
+      localMatterIds.push(otherMatter.id);
+      const otherMatterDoc = await seedReadyDocumentInDb({
+        ownerId: owner.id,
+        matterId: otherMatter.id,
+        title: `مستند قضية أخرى ${runId}`,
+        documentType: 'JUDGMENT',
+        versions: [
+          {
+            filename: `other_matter_${runId}.pdf`,
+            mime: 'application/pdf',
+            bytes: buildSyntheticPdf(`T12-OTHER-MATTER-${runId}`),
+          },
+        ],
+      });
+      localDocIds.push(otherMatterDoc.documentId);
+
       await signInWithTotp(page, owner);
 
-      // 1) Link POA document on /parties/[id] -> remains UNREVIEWED
+      // 1) Link POA document on /parties/[id] -> excludes ineligible docs & remains UNREVIEWED across reload
       await page.goto(`/parties/${party.id}`);
       await expectShellReady(page);
       await page.getByTestId('add-poa-button').click();
+      const poaDocSelect = page.getByTestId('poa-document-select');
+      await expect(poaDocSelect.locator(`option[value="${poaDoc.documentId}"]`)).toHaveCount(1);
+      await expect(poaDocSelect.locator(`option[value="${archivedDoc.documentId}"]`)).toHaveCount(0);
+      await expect(poaDocSelect.locator(`option[value="${quarantinedDocId}"]`)).toHaveCount(0);
+      await expect(poaDocSelect.locator(`option[value="${otherPartyDoc.documentId}"]`)).toHaveCount(0);
+      await expect(poaDocSelect.locator(`option[value="${otherMatterDoc.documentId}"]`)).toHaveCount(0);
+
       await page.getByTestId('poa-number-input').fill(`0909-${runId}`);
       await page.getByTestId('poa-year-input').fill('2027');
       await page.getByTestId('poa-office-input').fill('مكتب توثيق مصر الجديدة');
       await page.getByTestId('poa-type-select').selectOption('GENERAL');
-      await page.getByTestId('poa-document-select').selectOption(poaDoc.documentId);
+      await poaDocSelect.selectOption(poaDoc.documentId);
       await page.getByTestId('save-poa-button').click();
 
       const poaRow = page.getByTestId('poa-item').first();
@@ -709,14 +867,29 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         'href',
         `/documents/${poaDoc.documentId}`
       );
+      await page.reload();
+      await expectShellReady(page);
+      await expect(page.getByTestId('poa-item').first().getByTestId('poa-review-status-badge')).toHaveText(
+        'قيد المراجعة'
+      );
+      await expect(page.getByTestId(`poa-linked-document-${savedPoa.id}`)).toHaveAttribute(
+        'href',
+        `/documents/${poaDoc.documentId}`
+      );
 
-      // 2) Link decision document on /hearings/[id]/result
+      // 2) Link decision document on /hearings/[id]/result -> excludes ineligible docs & persists across reload
       await page.goto(`/hearings/${hearing.id}/result`);
       await expectShellReady(page);
+      const hearingDocSelect = page.getByTestId('hearing-decision-document-select');
+      await expect(hearingDocSelect.locator(`option[value="${decisionDoc.documentId}"]`)).toHaveCount(1);
+      await expect(hearingDocSelect.locator(`option[value="${archivedDoc.documentId}"]`)).toHaveCount(0);
+      await expect(hearingDocSelect.locator(`option[value="${quarantinedDocId}"]`)).toHaveCount(0);
+      await expect(hearingDocSelect.locator(`option[value="${otherMatterDoc.documentId}"]`)).toHaveCount(0);
+
       await page
         .getByTestId('hearing-decision-textarea')
         .fill(`حكم تمهيدي مرفق به صورة القرار ${runId}`);
-      await page.getByTestId('hearing-decision-document-select').selectOption(decisionDoc.documentId);
+      await hearingDocSelect.selectOption(decisionDoc.documentId);
       await page.getByText('لا توجد جلسة أخرى (حكم منهي للخصومة)').click();
       await page.getByTestId('save-hearing-result-btn').click();
 
@@ -725,16 +898,38 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         'href',
         `/documents/${decisionDoc.documentId}`
       );
+      await page.reload();
+      await expectShellReady(page);
+      await expect(page.getByTestId('persisted-decision-text')).toContainText(runId);
+      await expect(page.getByTestId('hearing-decision-document-link').first()).toHaveAttribute(
+        'href',
+        `/documents/${decisionDoc.documentId}`
+      );
 
-      // 3) Link source document on /deadlines as DRAFT -> remains DRAFT
+      // 3) Link source document on /deadlines as DRAFT -> excludes ineligible docs, no storage key leaks in API, & remains DRAFT across reload
       await page.goto('/deadlines');
       await expectShellReady(page);
       await page.getByTestId('new-deadline-button').click();
       const deadlineTitle = `ميعاد طعن مرتبط بمستند ${runId}`;
       await page.getByTestId('deadline-title-input').fill(deadlineTitle);
+      const docsApiResPromise = page.waitForResponse(
+        (res) =>
+          res.url().includes(`/api/documents?matterId=${encodeURIComponent(matter.id)}`) &&
+          res.request().method() === 'GET'
+      );
       await page.getByTestId('deadline-matter-select').selectOption(matter.id);
+      const docsApiRes = await docsApiResPromise;
+      expect(docsApiRes.status()).toBe(200);
+      const docsApiText = await docsApiRes.text();
+      expect(docsApiText).not.toContain('objectKey');
+      expect(docsApiText).not.toContain('quarantineKey');
+      expect(docsApiText).not.toContain('t12-e2e');
+
       const docSelect = page.getByTestId('deadline-source-document-select');
       await expect(docSelect.locator(`option[value="${decisionDoc.documentId}"]`)).toHaveCount(1);
+      await expect(docSelect.locator(`option[value="${archivedDoc.documentId}"]`)).toHaveCount(0);
+      await expect(docSelect.locator(`option[value="${quarantinedDocId}"]`)).toHaveCount(0);
+      await expect(docSelect.locator(`option[value="${otherMatterDoc.documentId}"]`)).toHaveCount(0);
       await docSelect.selectOption(decisionDoc.documentId);
       await page.getByTestId('save-deadline-draft-button').click();
 
@@ -742,6 +937,14 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const savedDeadline = await prisma.deadline.findFirstOrThrow({
         where: { matterId: matter.id, title: deadlineTitle },
       });
+      await expect(page.getByTestId(`deadline-status-badge-${savedDeadline.id}`)).toHaveText(
+        'مسودة تحتاج مراجعة'
+      );
+      await expect(
+        page.getByTestId(`deadline-source-document-link-${savedDeadline.id}`)
+      ).toHaveAttribute('href', `/documents/${decisionDoc.documentId}`);
+      await page.reload();
+      await expectShellReady(page);
       await expect(page.getByTestId(`deadline-status-badge-${savedDeadline.id}`)).toHaveText(
         'مسودة تحتاج مراجعة'
       );
@@ -803,26 +1006,93 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await page.goto(`/documents/${seeded.documentId}`);
       await expectShellReady(page);
 
-      // Keyboard navigation: focus version 1 preview button and press Enter
+      // Touch target checks across key controls at 390/768/1440px
+      const backLink = page.getByTestId('back-to-documents-link');
       const previewV1Btn = page.getByTestId('version-preview-btn-1');
-      await previewV1Btn.focus();
-      await expect(previewV1Btn).toBeFocused();
-      await previewV1Btn.press('Enter');
-      await expect(page.getByTestId('preview-active-version-label')).toContainText('الإصدار رقم 1');
-
-      // Keyboard navigation: focus original location editor and save via Enter on save button
+      const downloadV1Link = page.getByTestId('version-download-link-1');
+      const versionFileInput = page.getByTestId('version-file-input');
+      const versionFileLabel = page.locator('label[for="document-new-version-input"]');
       const originalLocationInput = page.getByTestId('metadata-original-location-input');
-      await originalLocationInput.focus();
-      await expect(originalLocationInput).toBeFocused();
-      await originalLocationInput.fill(`خزينة 2 — ${tag}`);
       const saveMetaBtn = page.getByTestId('metadata-save-button');
-      await saveMetaBtn.focus();
-      await expect(saveMetaBtn).toBeFocused();
-      await saveMetaBtn.press('Enter');
+
+      await expectTouchTarget(backLink, 44);
+      await expectTouchTarget(previewV1Btn, 44);
+      await expectTouchTarget(downloadV1Link, 44);
+      await expectTouchTarget(versionFileLabel, 44);
+      await expectTouchTarget(saveMetaBtn, 44);
+
+      // Real keyboard Tab / Enter navigation across links, version history, hidden file-input label/control, and metadata form
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      expect(await tabToTestId(page, 'back-to-documents-link', 40)).toBe(true);
+      await expectVisibleFocus(page, backLink);
+
+      expect(await tabToTestId(page, 'version-preview-btn-1', 20)).toBe(true);
+      await expectVisibleFocus(page, previewV1Btn);
+      await expectNotCovered(page, previewV1Btn);
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('preview-active-version-label')).toContainText('الإصدار رقم 1');
+      await expect(page.getByTestId('document-preview-iframe')).toHaveAttribute(
+        'src',
+        new RegExp(`versionId=${seeded.versionIds[0]}`)
+      );
+
+      expect(await tabToTestId(page, 'version-download-link-1', 8)).toBe(true);
+      await expectVisibleFocus(page, downloadV1Link);
+
+      expect(await tabToTestId(page, 'version-file-input', 8)).toBe(true);
+      await expect(versionFileInput).toBeFocused();
+      const labelFocusShadow = await versionFileLabel.evaluate(
+        (el) => getComputedStyle(el).boxShadow
+      );
+      expect(labelFocusShadow).not.toBe('none');
+
+      expect(await tabToTestId(page, 'metadata-original-location-input', 12)).toBe(true);
+      await expectVisibleFocus(page, originalLocationInput);
+      await expectNotCovered(page, originalLocationInput);
+      await originalLocationInput.fill(`خزينة 2 — ${tag}`);
+
+      expect(await tabToTestId(page, 'metadata-save-button', 6)).toBe(true);
+      await expectVisibleFocus(page, saveMetaBtn);
+      await expectNotCovered(page, saveMetaBtn);
+      await page.keyboard.press('Enter');
       await expect(page.getByTestId('metadata-save-success')).toBeVisible();
 
-      // Simulate failed version validation (disguised .jpg) -> Arabic error while prior versions remain accessible
-      await page.getByTestId('version-file-input').setInputFiles({
+      // Failed version candidate INCOMPLETE -> retry recovery to v3 READY
+      let abortBeginOnce = true;
+      await page.route(`**/api/documents/${seeded.documentId}/versions`, async (route) => {
+        if (abortBeginOnce && route.request().method() === 'POST') {
+          abortBeginOnce = false;
+          await route.abort('failed');
+          return;
+        }
+        await route.continue();
+      });
+
+      const v3Bytes = buildSyntheticPdf(`T12-TC07-V3-RETRY-${tag}`);
+      await versionFileInput.setInputFiles({
+        name: `retry_v3_${tag}.pdf`,
+        mimeType: 'application/pdf',
+        buffer: v3Bytes,
+      });
+      await page.getByTestId('version-upload-submit').click();
+
+      await expect(page.getByTestId('version-candidate-status')).toHaveText('الرفع غير مكتمل');
+      await expect(page.getByTestId('version-candidate-error')).toContainText(
+        'لم يتم المساس بالإصدار الحالي المعتمد'
+      );
+      const retryVersionBtn = page.getByTestId('version-upload-retry');
+      await expect(retryVersionBtn).toBeVisible();
+      await expectTouchTarget(retryVersionBtn, 44);
+      await retryVersionBtn.click();
+
+      await expect(page.getByTestId('version-upload-success')).toContainText('الإصدار رقم 3');
+      await expect(page.getByTestId('detail-current-version-badge')).toContainText('الإصدار الحالي: 3');
+      await page.unroute(`**/api/documents/${seeded.documentId}/versions`);
+
+      // Simulate failed version validation (disguised .jpg -> REJECTED) while prior versions remain accessible
+      await versionFileInput.setInputFiles({
         name: `disguised_${tag}.jpg`,
         mimeType: 'image/jpeg',
         buffer: Buffer.from(`Plain text disguised as JPEG (${tag})`, 'utf-8'),
@@ -836,9 +1106,10 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       );
 
       // Prior versions stay accessible
-      await expect(page.getByTestId('detail-current-version-badge')).toContainText('الإصدار الحالي: 2');
+      await expect(page.getByTestId('detail-current-version-badge')).toContainText('الإصدار الحالي: 3');
       await expect(page.getByTestId('version-download-link-1')).toBeVisible();
       await expect(page.getByTestId('version-download-link-2')).toBeVisible();
+      await expect(page.getByTestId('version-download-link-3')).toBeVisible();
 
       // Normal scale overflow check + screenshot
       await expectNoPageOverflow(page);
@@ -848,7 +1119,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         fullPage: true,
       });
 
-      // 200% text scaling check with zero overflow
+      // 200% text scaling check with zero overflow, uncovered controls, and screenshot
       const baseFontSize = await page.evaluate(() =>
         Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
       );
@@ -857,10 +1128,46 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       });
       await page.evaluate(async () => {
         await document.fonts.ready;
+        window.scrollTo(0, 0);
       });
       await nextPaint(page);
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
+      await expectNotCovered(page, previewV1Btn);
+      await expectNotCovered(page, saveMetaBtn);
+      await page.screenshot({
+        path: path.join(screenshotDir, `t12-document-detail-zoom200-${width}.png`),
+        fullPage: true,
+      });
+
+      // DeadlinesView doc-load failure + retry UI flow
+      let failDocsOnce = true;
+      await page.route('**/api/documents?*', async (route) => {
+        if (failDocsOnce && route.request().method() === 'GET') {
+          failDocsOnce = false;
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: false, error: 'تعذر تحميل مستندات القضية مؤقتاً.' }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await page.goto('/deadlines');
+      await expectShellReady(page);
+      await page.getByTestId('new-deadline-button').click();
+      await page.getByTestId('deadline-matter-select').selectOption(matter.id);
+      await expect(page.getByTestId('deadline-source-docs-error')).toBeVisible();
+      const docsRetryBtn = page.getByTestId('deadline-source-docs-retry');
+      await expectTouchTarget(docsRetryBtn, 44);
+      await docsRetryBtn.click();
+      await expect(
+        page.getByTestId('deadline-source-document-select').locator(`option[value="${seeded.documentId}"]`)
+      ).toHaveCount(1);
+      await expectNoPageOverflow(page);
+      await page.unroute('**/api/documents?*');
 
       // Privacy & session cookie hardening checks
       const cookies = await snapshotCookies(page);
