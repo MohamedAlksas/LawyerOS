@@ -2,9 +2,11 @@
 
 import React, { useState, useLayoutEffect, useRef } from 'react';
 import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
-import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
 import {
+  LinkableDocumentSummary,
   PoAType,
   PoAReviewStatus,
   PoASummaryDTO,
@@ -20,22 +22,30 @@ interface PoaSectionProps {
   ownerId: string;
   partyId: string;
   initialPoas: PoASummaryDTO[];
+  availableDocuments?: LinkableDocumentSummary[];
   readOnly?: boolean;
 }
 
 interface PoaDraft {
-  editing: Pick<PoASummaryDTO, 'id' | 'version'> | null;
+  editing: Pick<PoASummaryDTO, 'id' | 'version' | 'linkedDocument'> | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;
   poaType: PoAType;
   issueDate: string;
+  documentId: string;
   humanReviewStatus: PoAReviewStatus;
   notes: string;
   pending: SavePowerOfAttorneyInput | null;
 }
 
-export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: PoaSectionProps) {
+export function PoaSection({
+  ownerId,
+  partyId,
+  initialPoas,
+  availableDocuments = [],
+  readOnly = false,
+}: PoaSectionProps) {
   const draft = useFormDraft<PoaDraft>(ownerId, `/parties/${partyId}`);
   const restored = readOnly ? undefined : draft.restored;
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
@@ -49,6 +59,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
   const [notarizationOffice, setNotarizationOffice] = useState(restored?.notarizationOffice ?? '');
   const [poaType, setPoaType] = useState<PoAType>(restored?.poaType ?? 'LITIGATION');
   const [issueDate, setIssueDate] = useState(restored?.issueDate ?? '');
+  const [documentId, setDocumentId] = useState(restored?.documentId ?? '');
   const [humanReviewStatus, setHumanReviewStatus] = useState<PoAReviewStatus>(restored?.humanReviewStatus ?? 'UNREVIEWED');
   const [notes, setNotes] = useState(restored?.notes ?? '');
 
@@ -58,7 +69,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
 
   const idempotencyKeyRef = useRef<string | null>(null);
   const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(restored?.pending ?? null);
-  const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, humanReviewStatus, notes };
+  const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, documentId, humanReviewStatus, notes };
   useLayoutEffect(() => {
     if (readOnly || !draft.isCurrent()) return;
     if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
@@ -77,13 +88,14 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
   };
 
   const openForm = (record: PoASummaryDTO | null) => {
-    setEditing(record ? { id: record.id, version: record.version } : null);
+    setEditing(record ? { id: record.id, version: record.version, linkedDocument: record.linkedDocument } : null);
     setIsDirty(false);
     setPoaNumberText(record?.poaNumberText ?? '');
     setPoaYearLabel(record?.poaYearLabel ?? new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Cairo' }).format());
     setNotarizationOffice(record?.notarizationOffice ?? '');
     setPoaType(record?.poaType ?? 'LITIGATION');
     setIssueDate(record?.issueDate ?? '');
+    setDocumentId(record?.documentId ?? '');
     setHumanReviewStatus(record?.humanReviewStatus ?? 'UNREVIEWED');
     setNotes(record?.notes ?? '');
     setError(null);
@@ -105,6 +117,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     setNotarizationOffice('');
     setPoaType('LITIGATION');
     setIssueDate('');
+    setDocumentId('');
     setHumanReviewStatus('UNREVIEWED');
     setNotes('');
     setError(null);
@@ -141,6 +154,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     const payload: SavePowerOfAttorneyInput = pending ?? {
       partyId,
       ...(editing ? { id: editing.id, expectedVersion: editing.version } : {}),
+      documentId: documentId || null,
       poaNumberText: poaNumberText.trim(),
       poaYearLabel: poaYearLabel.trim(),
       notarizationOffice: notarizationOffice.trim(),
@@ -198,6 +212,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
       setPoaType('LITIGATION');
       setNotes('');
       setIssueDate('');
+      setDocumentId('');
       setHumanReviewStatus('UNREVIEWED');
       setIsFormOpen(false);
       idempotencyKeyRef.current = null;
@@ -208,6 +223,11 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
       setIsSubmitting(false);
     }
   };
+
+  const selectableDocuments =
+    editing?.linkedDocument && !availableDocuments.some((doc) => doc.id === editing.linkedDocument?.id)
+      ? [editing.linkedDocument, ...availableDocuments]
+      : availableDocuments;
 
   return (
     <section
@@ -386,6 +406,29 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
             </div>
           </div>
 
+          <div>
+            <label htmlFor="poaDocumentId" className="block text-xs font-semibold text-[#172A35] mb-1">
+              مستند التوكيل المرفوع (اختياري)
+            </label>
+            <select
+              id="poaDocumentId"
+              data-testid="poa-document-select"
+              value={documentId}
+              onChange={(e) => setDocumentId(e.target.value)}
+              className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+            >
+              <option value="">بدون ربط بمستند مرفوع (اختياري)</option>
+              {selectableDocuments.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[#4D606A] mt-1">
+              يرفق المستند الجاهز كمرجع للتوكيل فقط؛ وتظل حالة الفحص والمراجعة البشرية مستقلة ولا تتغير تلقائياً.
+            </p>
+          </div>
+
           <div className="flex justify-end gap-2 pt-2 border-t border-[#D5DFE3]">
             <button
               type="button"
@@ -475,6 +518,26 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                     )}
                   </div>
                 </div>
+
+                {poa.documentId && (
+                  <div className="pt-1 border-t border-[#E8EEF1] flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-semibold text-[#4D606A]">مستند التوكيل:</span>
+                    <Link
+                      href={`/documents/${poa.documentId}`}
+                      data-testid={`poa-linked-document-${poa.id}`}
+                      className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+                    >
+                      <bdi className="[overflow-wrap:anywhere]">
+                        {poa.linkedDocument?.title ?? 'عرض المستند المرتبط'}
+                      </bdi>
+                      {poa.linkedDocument?.scanStatusLabel && (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                          {poa.linkedDocument.scanStatusLabel}
+                        </span>
+                      )}
+                    </Link>
+                  </div>
+                )}
 
                 {poa.notes && (
                   <p className="text-xs text-[#4D606A] pt-1 border-t border-[#E8EEF1] leading-relaxed">

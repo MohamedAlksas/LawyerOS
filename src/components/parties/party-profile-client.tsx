@@ -5,7 +5,7 @@ import { GuardedLink as Link } from '@/components/navigation-guard';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
 import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
 import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
-import { ClientProfileDTO } from '@/modules/parties/types';
+import { ClientProfileDTO, LinkableDocumentSummary } from '@/modules/parties/types';
 import {
   isAuthRecoveryCode,
   MATTER_PARTY_ROLE_LABELS,
@@ -22,9 +22,14 @@ import { PoaSection } from './poa-section';
 interface PartyProfileClientProps {
   ownerId: string;
   party: ClientProfileDTO;
+  availablePoaDocuments?: LinkableDocumentSummary[];
 }
 
-export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) {
+export function PartyProfileClient({
+  ownerId,
+  party,
+  availablePoaDocuments = [],
+}: PartyProfileClientProps) {
   const isArchived = Boolean(party.archivedAt);
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
@@ -388,7 +393,13 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       <CommunicationNotesSection ownerId={ownerId} partyId={party.id} initialNotes={party.communicationNotes} readOnly={isArchived} />
 
       {/* 4. Powers of Attorney Section */}
-      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} readOnly={isArchived} />
+      <PoaSection
+        ownerId={ownerId}
+        partyId={party.id}
+        initialPoas={party.powersOfAttorney}
+        availableDocuments={availablePoaDocuments}
+        readOnly={isArchived}
+      />
 
       {/* 5. Linked Matters Section */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">

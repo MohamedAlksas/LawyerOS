@@ -3,14 +3,16 @@ import Link from 'next/link';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getMatter } from '@/modules/matters/matter-service';
 import { NotFoundError } from '@/modules/matters/matter-types';
 import { MatterDetailClient } from '@/components/matters/matter-detail-client';
 import { EmptyStateContainer } from '@/components/presentation-state';
+import { listDocuments } from '@/modules/documents/document-service';
 import { listTasks, ProductivityValidationError } from '@/modules/productivity';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
 import { listDeadlines } from '@/modules/scheduling';
-import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
+import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailPageProps {
   params: Promise<{
@@ -66,13 +68,28 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     throw error;
   }
 
-  const [tasksResult, deadlinesResult] = await Promise.allSettled([
+  const [tasksResult, deadlinesResult, docsResult] = await Promise.allSettled([
     listTasks(actor, { matterId: id, includeCompleted: true }),
     listDeadlines(actor, { matterId: id, includeClosed: true }),
+    authorize(actor, 'READ_DOCUMENTS')
+      ? listDocuments(actor, { matterId: id, limit: 100 })
+      : Promise.resolve(null),
   ]);
 
   const initialTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : ([] as TaskItemDTO[]);
   const initialDeadlines = deadlinesResult.status === 'fulfilled' ? deadlinesResult.value : ([] as DeadlineDTO[]);
+  const initialDocuments: LinkableDocumentSummary[] =
+    docsResult.status === 'fulfilled' && docsResult.value
+      ? docsResult.value.documents
+          .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+          .map((d) => ({
+            id: d.id,
+            title: d.title,
+            documentType: d.documentType,
+            currentVersionId: d.currentVersionId,
+            scanStatusLabel: d.currentVersion!.scanStatusLabel,
+          }))
+      : [];
   const tasksError =
     tasksResult.status === 'rejected'
       ? tasksResult.reason instanceof ProductivityValidationError
@@ -92,6 +109,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         initialMatter={matter}
         initialTasks={initialTasks}
         initialDeadlines={initialDeadlines}
+        initialDocuments={initialDocuments}
         tasksError={tasksError}
         deadlinesError={deadlinesError}
       />

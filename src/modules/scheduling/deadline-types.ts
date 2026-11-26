@@ -11,6 +11,8 @@ import {
   ProceedingArchivedError,
   ActiveObligationError,
   UnauthorizedError,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
   type ActionResult,
 } from './hearing-types';
 
@@ -25,6 +27,8 @@ export {
   ProceedingArchivedError,
   ActiveObligationError,
   UnauthorizedError,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
   type ActionResult,
 };
 
@@ -44,6 +48,7 @@ export interface DeadlineDTO {
   source: string | null;
   basisNotes: string | null;
   sourceDocumentId: string | null;
+  sourceDocument?: LinkableDocumentSummary | null;
   status: DeadlineStatus;
   isOverdue: boolean;
   needsReview: boolean;
@@ -147,7 +152,7 @@ export const createDeadlineSchema = z
     dueTime: z.string().nullable().optional(),
     source: z.string().trim().max(200, 'مصدر الموعد لا يتجاوز 200 حرف.').nullable().optional(),
     basisNotes: z.string().trim().max(2000, 'سند الموعد وملاحظاته لا تتجاوز 2000 حرف.').nullable().optional(),
-    sourceDocumentId: z.string().nullable().optional(),
+    sourceDocumentId: z.string().uuid('معرف المستند المصدري غير صالح.').nullable().optional(),
     idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.').max(128),
   })
   .strict();
@@ -162,7 +167,7 @@ export const updateDeadlineDraftSchema = z
     dueTime: z.string().nullable().optional(),
     source: z.string().trim().max(200, 'مصدر الموعد لا يتجاوز 200 حرف.').nullable().optional(),
     basisNotes: z.string().trim().max(2000, 'سند الموعد وملاحظاته لا تتجاوز 2000 حرف.').nullable().optional(),
-    sourceDocumentId: z.string().nullable().optional(),
+    sourceDocumentId: z.string().uuid('معرف المستند المصدري غير صالح.').nullable().optional(),
     idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.').max(128),
   })
   .strict();
@@ -175,7 +180,7 @@ export const confirmDeadlineSchema = z
     dueTime: z.string().nullable().optional(),
     source: z.string().trim().min(1, 'مصدر الموعد القانوني مطلوب للاعتماد.').max(200, 'مصدر الموعد لا يتجاوز 200 حرف.'),
     basisNotes: z.string().trim().min(1, 'سند الاحتساب أو ملاحظات المراجعة مطلوبة للاعتماد.').max(2000, 'سند الموعد لا يتجاوز 2000 حرف.'),
-    sourceDocumentId: z.string().nullable().optional(),
+    sourceDocumentId: z.string().uuid('معرف المستند المصدري غير صالح.').nullable().optional(),
     lawyerReviewed: z.boolean().optional(),
     confirmationAccepted: z.boolean().optional(),
     idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.').max(128),

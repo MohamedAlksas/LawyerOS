@@ -121,14 +121,16 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
   });
 
   describe('recordHearingResultSchema', () => {
-    it('rejects proceeding status changes and document linkage from a hearing result', () => {
+    it('rejects proceeding status changes while validating optional decisionDocumentId', () => {
       const input = {
         hearingId: crypto.randomUUID(), expectedVersion: 1, decision: 'حكم تمهيدي',
         nextDateDisposition: 'NONE', idempotencyKey: crypto.randomUUID(),
       };
       expect(recordHearingResultSchema.safeParse(input).success).toBe(true);
       expect(recordHearingResultSchema.safeParse({ ...input, proceedingStatusUpdate: 'CLOSED' }).success).toBe(false);
-      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success).toBe(false);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: null }).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: 'not-a-uuid' }).success).toBe(false);
     });
 
     it('accepts valid result recording with next date and tasks', () => {

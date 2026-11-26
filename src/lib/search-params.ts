@@ -23,7 +23,7 @@ function boundedNumber(value: string | undefined, fallback: number, max: number)
 export function unifiedSearchFilters(read: ReadParam) {
   const type = read('type');
   return {
-    type: (['ALL', 'PARTY', 'MATTER', 'PROCEEDING'] as const).find((value) => type === value) ?? 'ALL',
+    type: (['ALL', 'PARTY', 'MATTER', 'PROCEEDING', 'DOCUMENT'] as const).find((value) => type === value) ?? 'ALL',
     includeArchived: read('includeArchived') === 'true',
     page: boundedNumber(read('page'), 1, MAX_SEARCH_PAGE),
     limit: boundedNumber(read('limit'), DEFAULT_SEARCH_LIMIT, 50),

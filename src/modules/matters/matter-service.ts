@@ -1,8 +1,9 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
 import { recordAuditEvent } from '@/lib/audit';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import { normalizeArabicDigits, normalizeArabicText, normalizePhone } from '@/lib/normalization';
@@ -75,6 +76,7 @@ import {
   unifiedSearchParamsSchema,
   searchMatterClientsParamsSchema,
   parseCalendarDateToUtc,
+  validateStrictCalendarDate,
   UnauthorizedError,
   MatterValidationError,
   LastClientRequiredError,
@@ -4011,6 +4013,46 @@ function mapProceedingToUnifiedItem(p: {
   };
 }
 
+const DOCUMENT_UNIFIED_SELECT = {
+  id: true,
+  title: true,
+  documentType: true,
+  matterId: true,
+  partyId: true,
+  archivedAt: true,
+  updatedAt: true,
+  matter: { select: { id: true, fileCode: true, title: true, archivedAt: true } },
+  party: { select: { id: true, name: true, archivedAt: true } },
+} satisfies Prisma.DocumentSelect;
+
+function mapDocumentToUnifiedItem(d: {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  matterId: string | null;
+  partyId: string | null;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  matter: { id: string; fileCode: string; title: string; archivedAt: Date | null } | null;
+  party: { id: string; name: string; archivedAt: Date | null } | null;
+}): UnifiedSearchResultItem {
+  const isArchived = Boolean(d.archivedAt) || Boolean(d.matter?.archivedAt) || Boolean(d.party?.archivedAt);
+  const subtitle = d.matter
+    ? `${d.matter.fileCode} • ${d.matter.title}`
+    : d.party?.name;
+  return {
+    id: d.id,
+    entityType: 'DOCUMENT',
+    title: d.title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(d.matter?.fileCode ? { code: d.matter.fileCode } : {}),
+    badge: isArchived ? 'مؤرشف' : (DOCUMENT_TYPE_LABELS_AR[d.documentType] ?? d.documentType),
+    href: `/documents/${d.id}`,
+    isArchived,
+    updatedAt: d.updatedAt.toISOString(),
+  };
+}
+
 export async function unifiedSearch(
   rawParams: UnifiedSearchParams = {},
   actor?: Actor
@@ -4125,25 +4167,78 @@ export async function unifiedSearch(
     procWhere.OR = orClauses;
   }
 
+  // 4. Document metadata where clause (only when actor has READ_DOCUMENTS)
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  const docWhere: Prisma.DocumentWhereInput = {
+    currentVersion: { is: { uploadStatus: 'READY' } },
+  };
+  if (!includeArchived) {
+    docWhere.archivedAt = null;
+    docWhere.AND = [
+      { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
+      { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+    ];
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const normQuery = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
+    const tagCandidates = Array.from(new Set([query, normQuery, ...variants].filter(Boolean)));
+
+    const orClauses: Prisma.DocumentWhereInput[] = [];
+    if (normQuery) {
+      orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+      orClauses.push({ matter: { titleNormalized: { contains: normQuery, mode: 'insensitive' } } });
+      orClauses.push({ party: { nameNormalized: { contains: normQuery, mode: 'insensitive' } } });
+    }
+    for (const v of variants) {
+      orClauses.push({ title: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ matter: { title: { contains: v, mode: 'insensitive' } } });
+      orClauses.push({ matter: { fileCode: { contains: v, mode: 'insensitive' } } });
+      orClauses.push({ party: { name: { contains: v, mode: 'insensitive' } } });
+    }
+    if (tagCandidates.length > 0) {
+      orClauses.push({ tags: { hasSome: tagCandidates } });
+    }
+    if (validateStrictCalendarDate(qDigits)) {
+      const parsedDate = parseCalendarDateToUtc(qDigits);
+      if (parsedDate) {
+        orClauses.push({ documentDate: parsedDate });
+      }
+    }
+    for (const [docType, label] of Object.entries(DOCUMENT_TYPE_LABELS_AR)) {
+      const normLabel = normalizeArabicText(label);
+      if ((normQuery && normLabel.includes(normQuery)) || docType.toLowerCase() === query.toLowerCase()) {
+        orClauses.push({ documentType: docType as DocumentType });
+      }
+    }
+    if (orClauses.length > 0) {
+      docWhere.OR = orClauses;
+    }
+  }
+
   // Always compute accurate counts for all categories regardless of active tab
-  const [partiesCount, mattersCount, proceedingsCount] = await Promise.all([
+  const [partiesCount, mattersCount, proceedingsCount, documentsCount] = await Promise.all([
     prisma.party.count({ where: partyWhere }),
     prisma.matter.count({ where: matterWhere }),
     prisma.proceeding.count({ where: procWhere }),
+    canReadDocuments ? prisma.document.count({ where: docWhere }) : Promise.resolve(0),
   ]);
-  const totalAll = mattersCount + proceedingsCount + partiesCount;
+  const totalAll = mattersCount + proceedingsCount + partiesCount + documentsCount;
 
   const counts = {
     all: totalAll,
     parties: partiesCount,
     matters: mattersCount,
     proceedings: proceedingsCount,
+    documents: documentsCount,
   };
 
   let total: number;
   if (searchType === 'PARTY') total = partiesCount;
   else if (searchType === 'MATTER') total = mattersCount;
   else if (searchType === 'PROCEEDING') total = proceedingsCount;
+  else if (searchType === 'DOCUMENT') total = documentsCount;
   else total = totalAll;
 
   const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
@@ -4220,12 +4315,24 @@ export async function unifiedSearch(
       });
       items = proceedings.map(mapProceedingToUnifiedItem);
     }
+  } else if (searchType === 'DOCUMENT') {
+    if (canReadDocuments && skip < documentsCount) {
+      const documents = await prisma.document.findMany({
+        where: docWhere,
+        select: DOCUMENT_UNIFIED_SELECT,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = documents.map(mapDocumentToUnifiedItem);
+    }
   } else {
     // searchType === 'ALL'
     if (skip < totalAll) {
       const s1 = mattersCount;
       const s2 = proceedingsCount;
       const s3 = partiesCount;
+      const s4 = documentsCount;
 
       let take1 = 0;
       let skip1 = 0;
@@ -4250,7 +4357,15 @@ export async function unifiedSearch(
         take3 = Math.min(rem2, s3 - skip3);
       }
 
-      const [matters, proceedings, parties] = await Promise.all([
+      let take4 = 0;
+      let skip4 = 0;
+      const rem3 = rem2 - take3;
+      if (rem3 > 0 && skip < s1 + s2 + s3 + s4) {
+        skip4 = Math.max(0, skip - (s1 + s2 + s3));
+        take4 = Math.min(rem3, s4 - skip4);
+      }
+
+      const [matters, proceedings, parties, documents] = await Promise.all([
         take1 > 0
           ? prisma.matter.findMany({
               where: matterWhere,
@@ -4313,12 +4428,22 @@ export async function unifiedSearch(
               take: take3,
             })
           : [],
+        canReadDocuments && take4 > 0
+          ? prisma.document.findMany({
+              where: docWhere,
+              select: DOCUMENT_UNIFIED_SELECT,
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip4,
+              take: take4,
+            })
+          : [],
       ]);
 
       items = [
         ...matters.map(mapMatterToUnifiedItem),
         ...proceedings.map(mapProceedingToUnifiedItem),
         ...parties.map(mapPartyToUnifiedItem),
+        ...documents.map(mapDocumentToUnifiedItem),
       ];
     }
   }

@@ -175,6 +175,12 @@ export interface WriteQuarantineResult {
   sha256: string;
 }
 
+export interface StoredZoneFile {
+  key: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}
+
 export interface DocumentStorageAdapter {
   readonly rootDir: string;
   readonly quarantineDir: string;
@@ -195,6 +201,8 @@ export interface DocumentStorageAdapter {
   stat(zone: 'quarantine' | 'ready', key: string): Promise<{ sizeBytes: number } | null>;
   deleteQuarantine(quarantineKey: string): Promise<boolean>;
   deleteReady(readyKey: string): Promise<boolean>;
+  listKeys?(zone: 'quarantine' | 'ready'): Promise<StoredZoneFile[]>;
+  computeSha256?(zone: 'quarantine' | 'ready', key: string): Promise<string | null>;
 }
 
 /** FileHandle.write may write fewer bytes than requested; loop until the whole buffer is written. */
@@ -487,6 +495,61 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
     async deleteReady(readyKey: string): Promise<boolean> {
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
       return await unlinkIfExists(targetPath);
+    },
+
+    async listKeys(zone: 'quarantine' | 'ready'): Promise<StoredZoneFile[]> {
+      const base = resolveRealPathWithSuffix(zoneBase(zone));
+      const results: StoredZoneFile[] = [];
+
+      async function walk(currentDir: string, relPrefix: string): Promise<void> {
+        let entries: fs.Dirent[];
+        try {
+          entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+          throw err;
+        }
+        for (const entry of entries) {
+          if (entry.isSymbolicLink()) continue;
+          const fullPath = path.join(currentDir, entry.name);
+          const relKey = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            await walk(fullPath, relKey);
+          } else if (entry.isFile()) {
+            const st = await fs.promises.lstat(fullPath);
+            if (st.isFile()) {
+              results.push({
+                key: relKey,
+                sizeBytes: st.size,
+                mtimeMs: st.mtimeMs,
+              });
+            }
+          }
+        }
+      }
+
+      await walk(base, '');
+      results.sort((a, b) => a.key.localeCompare(b.key));
+      return results;
+    },
+
+    async computeSha256(zone: 'quarantine' | 'ready', key: string): Promise<string | null> {
+      const targetPath = resolveSafeKeyPath(zoneBase(zone), key);
+      try {
+        const st = await fs.promises.lstat(targetPath);
+        if (!st.isFile()) return null;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw err;
+      }
+
+      return await new Promise<string>((resolve, reject) => {
+        const hash = crypto.createHash('sha256');
+        const stream = fs.createReadStream(targetPath);
+        stream.on('data', (chunk) => hash.update(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => resolve(hash.digest('hex')));
+      });
     },
   };
 }

@@ -47,6 +47,21 @@ export const ORIGINAL_PRESENCE_OPTIONS: Array<{
   { value: 'NO', label: 'لا — نسخة إلكترونية فقط' },
 ];
 
+export const PAPER_ORIGINAL_PRESENCE_LABELS: Record<DocumentOriginalPresence, string> = {
+  YES: 'موجود بالمكتب',
+  NO: 'غير موجود بالمكتب',
+  UNKNOWN: 'غير معروف',
+};
+
+export const PAPER_ORIGINAL_PRESENCE_OPTIONS: Array<{
+  value: DocumentOriginalPresence;
+  label: string;
+}> = [
+  { value: 'UNKNOWN', label: 'غير معروف' },
+  { value: 'YES', label: 'موجود بالمكتب' },
+  { value: 'NO', label: 'غير موجود بالمكتب' },
+];
+
 export const SENSITIVITY_LABELS: Record<DocumentSensitivity, string> = {
   CONFIDENTIAL: 'سري',
   RESTRICTED: 'سري مقيد للغاية',

@@ -6,6 +6,7 @@ import { recordAuditEvent } from '@/lib/audit';
 import { validateOptionalCalendarTime } from '@/lib/cairo-date';
 import { claimIdempotencyKey, completeIdempotencyKey, resolveConcurrentIdempotency, runWithIdempotencyRetry } from '@/lib/idempotency';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
+import { assertLinkableDocument } from '@/modules/documents/document-service';
 import {
   HearingDTO,
   HearingResultDTO,
@@ -15,6 +16,8 @@ import {
   TaskPriority,
   TaskStatus,
   TaskDTO,
+  LinkableDocumentRow,
+  mapLinkableDocumentSummary,
   ScheduleHearingInput,
   RecordHearingResultInput,
   RecordHearingResultResult,
@@ -84,6 +87,8 @@ interface HearingRecord {
     notes?: string | null;
     correctionReason?: string | null;
     nextDateDisposition: NextDateDisposition;
+    decisionDocumentId?: string | null;
+    decisionDocument?: LinkableDocumentRow | null;
     recordedAt: Date;
     revision: number;
   }>;
@@ -100,12 +105,28 @@ interface HearingResultRecord {
   notes?: string | null;
   correctionReason?: string | null;
   nextDateDisposition: NextDateDisposition;
+  decisionDocumentId?: string | null;
+  decisionDocument?: LinkableDocumentRow | null;
   recordedAt: Date;
   revision: number;
   supersedesResultId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const DECISION_DOCUMENT_INCLUDE = {
+  select: {
+    id: true,
+    title: true,
+    documentType: true,
+    currentVersionId: true,
+    currentVersion: {
+      select: {
+        scanStatus: true,
+      },
+    },
+  },
+} as const;
 
 interface TaskRecord {
   id: string;
@@ -137,6 +158,8 @@ function mapHearingToDTO(
         notes: latestResultRaw.notes ?? null,
         correctionReason: latestResultRaw.correctionReason ?? null,
         nextDateDisposition: latestResultRaw.nextDateDisposition,
+        decisionDocumentId: latestResultRaw.decisionDocumentId ?? null,
+        decisionDocument: mapLinkableDocumentSummary(latestResultRaw.decisionDocument),
         recordedAt: latestResultRaw.recordedAt.toISOString(),
         revision: latestResultRaw.revision,
       }
@@ -178,6 +201,8 @@ function mapHearingResultToDTO(raw: HearingResultRecord): HearingResultDTO {
     notes: raw.notes ?? null,
     correctionReason: raw.correctionReason ?? null,
     nextDateDisposition: raw.nextDateDisposition,
+    decisionDocumentId: raw.decisionDocumentId ?? null,
+    decisionDocument: mapLinkableDocumentSummary(raw.decisionDocument),
     recordedAt: raw.recordedAt.toISOString(),
     revision: raw.revision,
     supersedesResultId: raw.supersedesResultId ?? null,
@@ -203,7 +228,10 @@ function mapTaskToDTO(raw: TaskRecord): TaskDTO {
   };
 }
 
-async function lockHearingParents(tx: Prisma.TransactionClient, proceedingId: string) {
+async function lockHearingParents(
+  tx: Prisma.TransactionClient,
+  proceedingId: string
+): Promise<{ matterId: string; proceedingId: string }> {
   const proceeding = await tx.proceeding.findUnique({ where: { id: proceedingId }, select: { matterId: true } });
   if (!proceeding) throw new NotFoundError('القيد القضائي المطلوب غير موجود.');
   const [matter] = await tx.$queryRaw<{ status: string; archivedAt: Date | null }[]>`
@@ -215,12 +243,16 @@ async function lockHearingParents(tx: Prisma.TransactionClient, proceedingId: st
   if (!matter || !parent) throw new NotFoundError('القيد القضائي المطلوب غير موجود.');
   if (matter.archivedAt || matter.status === 'ARCHIVED') throw new MatterArchivedError('ملف القضية مؤرشف.');
   if (parent.archivedAt) throw new ProceedingArchivedError('القيد القضائي مؤرشف.');
+  return { matterId: proceeding.matterId, proceedingId };
 }
 
-async function lockHearing(tx: Prisma.TransactionClient, id: string) {
+async function lockHearing(
+  tx: Prisma.TransactionClient,
+  id: string
+): Promise<{ matterId: string; proceedingId: string }> {
   const hearing = await tx.hearing.findUnique({ where: { id }, select: { proceedingId: true } });
   if (!hearing) throw new NotFoundError('الجلسة المطلوبة غير موجودة.');
-  await lockHearingParents(tx, hearing.proceedingId);
+  return lockHearingParents(tx, hearing.proceedingId);
 }
 
 function hearingAcknowledgment(hearing: HearingDTO) {
@@ -233,7 +265,13 @@ type HearingAcknowledgment = ReturnType<typeof hearingAcknowledgment>;
 async function replayHearing(tx: Prisma.TransactionClient, ack: HearingAcknowledgment, resultId?: string) {
   const record = await tx.hearing.findUniqueOrThrow({
     where: { id: ack.id },
-    include: { proceeding: { include: { court: true } }, results: { where: { id: resultId ?? '' } } },
+    include: {
+      proceeding: { include: { court: true } },
+      results: {
+        where: { id: resultId ?? '' },
+        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+      },
+    },
   });
   return mapHearingToDTO({
     ...record, version: ack.version, status: ack.status, updatedAt: new Date(ack.updatedAt),
@@ -261,7 +299,12 @@ function resultAcknowledgment(value: RecordHearingResultResult) {
 
 async function replayResult(tx: Prisma.TransactionClient, raw: unknown): Promise<RecordHearingResultResult> {
   const ack = raw as ReturnType<typeof resultAcknowledgment>;
-  const result = mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({ where: { id: ack.resultId } }));
+  const result = mapHearingResultToDTO(
+    await tx.hearingResult.findUniqueOrThrow({
+      where: { id: ack.resultId },
+      include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+    })
+  );
   const hearing = await replayHearing(tx, ack.hearing, ack.resultId);
   const nextHearing = ack.next ? await replayHearing(tx, ack.next) : null;
   const tasks = await Promise.all(ack.tasks.map(async (snapshot) => ({
@@ -445,6 +488,7 @@ export async function recordHearingResult(
   const intent = {
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, decision,
     summary: input.summary || null, attendance: input.attendance || null, notes: input.notes || null,
+    decisionDocumentId: input.decisionDocumentId ?? null,
     nextDateDisposition: input.nextDateDisposition,
     nextHearing: nextDateStr ? {
       date: nextDateStr, time: normNextTime, courtHall: nextCourtHall, purpose: nextPurpose, rollNumber: nextRoll,
@@ -484,6 +528,15 @@ export async function recordHearingResult(
       throw new UnsupportedTransitionError(`لا يمكن تسجيل نتيجة لجلسة غير مجدولة (الحالة الحالية: ${hearing.status}).`);
     }
 
+    if (input.decisionDocumentId) {
+      await assertLinkableDocument(tx, input.decisionDocumentId, {
+        kind: 'MATTER',
+        matterId: hearing.proceeding.matterId,
+        proceedingId: hearing.proceedingId,
+        hearingId: hearing.id,
+      });
+    }
+
     // 2. Mark hearing COMPLETED
     const nextHearingVersion = hearing.version + 1;
     if (nextDateStr && nextDateStr < toDateString(hearing.hearingDate)) {
@@ -503,6 +556,7 @@ export async function recordHearingResult(
     const hearingResult = await tx.hearingResult.create({
       data: {
         hearingId: hearing.id,
+        decisionDocumentId: input.decisionDocumentId ?? null,
         decisionText: decision,
         summary: intent.summary,
         attendance: intent.attendance,
@@ -512,6 +566,9 @@ export async function recordHearingResult(
         revision: 1,
         createdById: actor.id,
         updatedById: actor.id,
+      },
+      include: {
+        decisionDocument: DECISION_DOCUMENT_INCLUDE,
       },
     });
 
@@ -628,6 +685,7 @@ export async function recordHearingResult(
       entityId: hearing.id,
       changedFields: {
         resultId: hearingResult.id,
+        decisionDocumentId: hearingResult.decisionDocumentId,
         nextDateDisposition: input.nextDateDisposition,
         nextHearingId: nextHearingDTO?.id ?? null,
         createdTaskIds: taskIds,
@@ -686,10 +744,11 @@ export async function correctHearingResult(
     hearingId: input.hearingId, expectedVersion: input.expectedVersion, currentResultId: input.currentResultId,
     reason, decision, summary: input.summary === '' ? null : input.summary,
     attendance: input.attendance === '' ? null : input.attendance, notes: input.notes === '' ? null : input.notes,
+    decisionDocumentId: input.decisionDocumentId,
     nextDateDisposition: input.nextDateDisposition, nextHearingDate: input.nextHearingDate ?? null, nextHearingTime,
   };
   return hearingCommand(actor, 'correctHearingResult', input.idempotencyKey, intent, async (tx) => {
-    await lockHearing(tx, input.hearingId);
+    const { matterId, proceedingId } = await lockHearing(tx, input.hearingId);
     // 1. Find latest result for hearing
     const latestResult = await tx.hearingResult.findFirst({
       where: { hearingId: input.hearingId },
@@ -725,11 +784,24 @@ export async function correctHearingResult(
       }
     }
 
+    if (input.decisionDocumentId) {
+      await assertLinkableDocument(tx, input.decisionDocumentId, {
+        kind: 'MATTER',
+        matterId,
+        proceedingId,
+        hearingId: input.hearingId,
+      });
+    }
+
+    const nextDecisionDocumentId =
+      input.decisionDocumentId === undefined ? latestResult.decisionDocumentId : input.decisionDocumentId;
+
     // 3. Create new Revision of HearingResult preserving history
     const nextRevision = latestResult.revision + 1;
     const newResult = await tx.hearingResult.create({
       data: {
         hearingId: input.hearingId,
+        decisionDocumentId: nextDecisionDocumentId,
         decisionText: decision,
         summary: intent.summary === undefined ? latestResult.summary : intent.summary,
         attendance: intent.attendance === undefined ? latestResult.attendance : intent.attendance,
@@ -741,6 +813,9 @@ export async function correctHearingResult(
         supersedesResultId: latestResult.id,
         createdById: actor.id,
         updatedById: actor.id,
+      },
+      include: {
+        decisionDocument: DECISION_DOCUMENT_INCLUDE,
       },
     });
 
@@ -756,6 +831,7 @@ export async function correctHearingResult(
         previousResultId: latestResult.id,
         previousRevision: latestResult.revision,
         newRevision: nextRevision,
+        decisionDocumentId: newResult.decisionDocumentId,
         decisionChanged: latestResult.decisionText !== decision,
       },
     });
@@ -763,7 +839,10 @@ export async function correctHearingResult(
     const dto = mapHearingResultToDTO(newResult);
 
     return { value: dto, resultId: dto.id, acknowledgment: null };
-  }, async (tx, _ack, id) => mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({ where: { id } })));
+  }, async (tx, _ack, id) => mapHearingResultToDTO(await tx.hearingResult.findUniqueOrThrow({
+    where: { id },
+    include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
+  })));
 }
 
 export async function rescheduleHearing(
@@ -1096,6 +1175,7 @@ export async function getHearing(
       },
       results: {
         orderBy: { revision: 'desc' },
+        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
       },
     },
   });
@@ -1122,6 +1202,7 @@ export async function listHearingsForProceeding(
       results: {
         orderBy: { revision: 'desc' },
         take: 1,
+        include: { decisionDocument: DECISION_DOCUMENT_INCLUDE },
       },
       tasks: { where: { status: { in: ['OPEN', 'IN_PROGRESS'] } }, orderBy: { createdAt: 'asc' }, take: 200 },
       linksTo: {

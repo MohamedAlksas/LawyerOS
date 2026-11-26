@@ -15,7 +15,7 @@ export async function GET(
   if (originRejection) return originRejection;
 
   try {
-    const actor = await requireDocumentActor(request, 'READ_CLIENT_DATA');
+    const actor = await requireDocumentActor(request, 'READ_DOCUMENTS');
     const { attemptId } = await params;
     const data = await getUploadAttempt(actor, attemptId);
     return NextResponse.json({ success: true, data }, { headers: DOCUMENT_NO_STORE_HEADERS });

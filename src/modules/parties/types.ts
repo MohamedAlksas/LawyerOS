@@ -1,3 +1,5 @@
+import type { DocumentType } from '@prisma/client';
+
 export type PartyKind = 'PERSON' | 'ORGANIZATION';
 
 export type IdentificationType =
@@ -120,9 +122,19 @@ export interface AddCommunicationNoteInput {
   idempotencyKey: string;
 }
 
+export interface LinkableDocumentSummary {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  currentVersionId: string | null;
+  scanStatusLabel: string;
+}
+
 export interface PoASummaryDTO {
   id: string;
   partyId: string;
+  documentId: string | null;
+  linkedDocument: LinkableDocumentSummary | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;
@@ -140,9 +152,12 @@ export interface PoASummaryDTO {
   currentVersion?: number;
 }
 
+export type PowerOfAttorneyDTO = PoASummaryDTO;
+
 export interface SavePowerOfAttorneyInput {
   id?: string;
   partyId: string;
+  documentId?: string | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;

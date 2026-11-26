@@ -3,12 +3,21 @@ import { IdempotencyPayloadMismatchError, IdempotencyConcurrentConflictError } f
 import { CalendarValidationError } from '@/lib/cairo-date';
 import { CrossMatterLinkForbiddenError } from '@/modules/matters/matter-types';
 import {
+  DocumentNotFoundError,
+  DocumentNotReadyError,
+  DocumentValidationError,
+} from '@/modules/documents/document-types';
+import {
   SchedulingValidationError, ConcurrencyConflictError, NotFoundError, UnsupportedTransitionError,
   MatterArchivedError, ProceedingArchivedError, ActiveObligationError, UnauthorizedError, type ActionResult,
 } from './hearing-types';
 
 export function hearingError(error: unknown): ActionResult<never> {
-  if (error instanceof SchedulingValidationError || error instanceof CalendarValidationError) {
+  if (
+    error instanceof SchedulingValidationError ||
+    error instanceof DocumentValidationError ||
+    error instanceof CalendarValidationError
+  ) {
     return {
       success: false,
       error: error.message,
@@ -25,6 +34,14 @@ export function hearingError(error: unknown): ActionResult<never> {
     };
   }
 
+  if (error instanceof DocumentNotReadyError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'DOCUMENT_NOT_READY',
+    };
+  }
+
   if (error instanceof ConcurrencyConflictError) {
     return {
       success: false,
@@ -33,7 +50,7 @@ export function hearingError(error: unknown): ActionResult<never> {
     };
   }
 
-  if (error instanceof NotFoundError) {
+  if (error instanceof NotFoundError || error instanceof DocumentNotFoundError) {
     return {
       success: false,
       error: error.message,

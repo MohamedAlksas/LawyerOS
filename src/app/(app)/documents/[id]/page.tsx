@@ -70,7 +70,7 @@ export default async function DocumentDetailPage({ params }: DocumentDetailPageP
 
   return (
     <div className="max-w-5xl mx-auto">
-      <DocumentDetailView key={`${actor.sessionId}:${document.id}`} document={document} />
+      <DocumentDetailView key={`${actor.id}:${document.id}`} document={document} />
     </div>
   );
 }

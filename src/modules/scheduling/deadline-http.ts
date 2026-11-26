@@ -8,7 +8,7 @@ import { SchedulingValidationError, type ActionResult } from './deadline-types';
 const PRIVATE_NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
 
 export function statusFromErrorCode(code: string | undefined): number {
-  if (code === 'FORBIDDEN') return 403;
+  if (code === 'FORBIDDEN' || code === 'CROSS_MATTER_LINK_FORBIDDEN') return 403;
   if (['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '')) {
     return 401;
   }
@@ -17,6 +17,7 @@ export function statusFromErrorCode(code: string | undefined): number {
       'CONCURRENCY_CONFLICT',
       'IDEMPOTENCY_PAYLOAD_MISMATCH',
       'IDEMPOTENCY_CONCURRENT_CONFLICT',
+      'DOCUMENT_NOT_READY',
     ].includes(code ?? '')
   ) {
     return 409;

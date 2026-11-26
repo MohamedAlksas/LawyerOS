@@ -3,7 +3,10 @@ import { notFound, redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getPrismaClient } from '@/lib/auth';
+import { listDocuments } from '@/modules/documents/document-service';
+import { mapLinkableDocumentSummary, type LinkableDocumentSummary } from '@/modules/scheduling/hearing-types';
 import { HearingResultClient } from './hearing-result-client';
 
 interface HearingResultPageProps {
@@ -47,6 +50,17 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       },
       results: {
         orderBy: { revision: 'desc' },
+        include: {
+          decisionDocument: {
+            select: {
+              id: true,
+              title: true,
+              documentType: true,
+              currentVersionId: true,
+              currentVersion: { select: { scanStatus: true } },
+            },
+          },
+        },
       },
       linksFrom: {
         where: { relation: 'ADJOURNED_TO' },
@@ -77,6 +91,27 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
     nextHearing = replacement;
   }
 
+  let availableDocuments: LinkableDocumentSummary[] = [];
+  if (authorize(actor, 'READ_DOCUMENTS')) {
+    try {
+      const docsRes = await listDocuments(actor, {
+        matterId: hearing.proceeding.matterId,
+        limit: 100,
+      });
+      availableDocuments = docsRes.documents
+        .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+        .map((d) => ({
+          id: d.id,
+          title: d.title,
+          documentType: d.documentType,
+          currentVersionId: d.currentVersionId,
+          scanStatusLabel: d.currentVersion!.scanStatusLabel,
+        }));
+    } catch {
+      availableDocuments = [];
+    }
+  }
+
   return (
     <HearingResultClient
       key={`${actor.id}:${hearing.id}`}
@@ -92,6 +127,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
       matterId={hearing.proceeding.matterId}
       matterFileCode={hearing.proceeding.matter.fileCode}
       proceedingId={hearing.proceedingId}
+      availableDocuments={availableDocuments}
       history={hearing.results.map(({ revision, decisionText, correctionReason }) => ({ revision, decisionText, correctionReason }))}
       nextHearing={nextHearing && {
         id: nextHearing.id, date: nextHearing.hearingDate.toISOString().slice(0, 10), status: nextHearing.status,
@@ -104,6 +140,8 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
               revision: latestResult.revision,
               correctionReason: latestResult.correctionReason,
               recordedAt: latestResult.recordedAt.toISOString(),
+              decisionDocumentId: latestResult.decisionDocumentId ?? null,
+              decisionDocument: mapLinkableDocumentSummary(latestResult.decisionDocument),
             }
           : null
       }

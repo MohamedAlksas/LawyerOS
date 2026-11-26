@@ -2,8 +2,10 @@ import React from 'react';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
+import { listDocuments } from '@/modules/documents/document-service';
 import { listDeadlines } from '@/modules/scheduling';
-import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
+import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
 import { listSelectableMatters } from '@/modules/productivity';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { readParam } from '@/lib/search-params';
@@ -41,6 +43,7 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
 
   let initialDeadlines: DeadlineDTO[] = [];
   let selectableMatters: SelectableMatterOptionDTO[] = [];
+  let initialDocumentsByMatter: Record<string, LinkableDocumentSummary[]> | undefined;
   let initialError: string | undefined;
 
   try {
@@ -50,6 +53,28 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
     ]);
     initialDeadlines = deadlines;
     selectableMatters = matters;
+
+    const reviewTarget = reviewId
+      ? deadlines.find((d) => d.id === reviewId && d.status === 'DRAFT')
+      : undefined;
+    if (reviewTarget && authorize(actor, 'READ_DOCUMENTS')) {
+      try {
+        const docsRes = await listDocuments(actor, { matterId: reviewTarget.matterId, limit: 100 });
+        initialDocumentsByMatter = {
+          [reviewTarget.matterId]: docsRes.documents
+            .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+            .map((d) => ({
+              id: d.id,
+              title: d.title,
+              documentType: d.documentType,
+              currentVersionId: d.currentVersionId,
+              scanStatusLabel: d.currentVersion!.scanStatusLabel,
+            })),
+        };
+      } catch {
+        initialDocumentsByMatter = undefined;
+      }
+    }
   } catch {
     console.error('[Deadlines page] Failed to load deadlines');
     initialError = 'تعذر تحميل المواعيد القانونية من الخادم.';
@@ -62,6 +87,7 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
         actorId={actor.id}
         initialDeadlines={initialDeadlines}
         selectableMatters={selectableMatters}
+        initialDocumentsByMatter={initialDocumentsByMatter}
         initialError={initialError}
         initialReviewDeadlineId={reviewId}
       />

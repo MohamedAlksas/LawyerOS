@@ -448,7 +448,11 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
         path.join(preT11MigrationsDir, 'migration_lock.toml')
       );
       for (const entry of fs.readdirSync(migrationsSrc)) {
-        if (entry === 'migration_lock.toml' || entry === '20261124120000_t11_private_documents_and_uploads') {
+        if (
+          entry === 'migration_lock.toml' ||
+          entry === '20261124120000_t11_private_documents_and_uploads' ||
+          entry >= '20261126000000'
+        ) {
           continue;
         }
         const full = path.join(migrationsSrc, entry);

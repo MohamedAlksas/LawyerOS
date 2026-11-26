@@ -1,10 +1,12 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient, Prisma, type DocumentType, type DocumentScanStatus } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { Actor } from '@/modules/identity/types';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import { normalizeArabicText, normalizePhone } from '@/lib/normalization';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
+import { assertLinkableDocument } from '@/modules/documents/document-service';
+import { UNSCANNED_POLICY_NOTICE_AR } from '@/modules/documents/document-types';
 import {
   encryptPartyIdentity,
   decryptPartyIdentity,
@@ -28,6 +30,7 @@ import {
   CommunicationNoteSummaryDTO,
   SavePowerOfAttorneyInput,
   PoASummaryDTO,
+  LinkableDocumentSummary,
   PartySummaryDTO,
   DuplicateWarningDTO,
 } from './types';
@@ -62,6 +65,93 @@ const PARTY_IDENTITY_INCLUDE = {
     orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }],
   },
 } satisfies Prisma.PartyInclude;
+
+const POA_DOCUMENT_INCLUDE = {
+  document: {
+    select: {
+      id: true,
+      title: true,
+      documentType: true,
+      currentVersionId: true,
+      currentVersion: {
+        select: {
+          scanStatus: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.PowerOfAttorneyInclude;
+
+function formatPoaScanStatusLabel(scanStatus: DocumentScanStatus | null | undefined): string {
+  switch (scanStatus) {
+    case 'CLEAN':
+      return 'تم الفحص — سليم';
+    case 'PENDING':
+      return 'بانتظار الفحص';
+    case 'INFECTED':
+      return 'مرفوض أمنياً';
+    case 'FAILED':
+      return 'فشل الفحص';
+    case 'TIMEOUT':
+      return 'انتهت مهلة الفحص';
+    case 'STALE_DEFINITIONS':
+      return 'تعريفات الفحص قديمة';
+    case 'NOT_SCANNED_POLICY':
+    default:
+      return UNSCANNED_POLICY_NOTICE_AR;
+  }
+}
+
+function mapPoaLinkedDocument(
+  doc:
+    | {
+        id: string;
+        title: string;
+        documentType: DocumentType;
+        currentVersionId: string | null;
+        currentVersion?: { scanStatus: DocumentScanStatus } | null;
+      }
+    | null
+    | undefined
+): LinkableDocumentSummary | null {
+  if (!doc) return null;
+  return {
+    id: doc.id,
+    title: doc.title,
+    documentType: doc.documentType,
+    currentVersionId: doc.currentVersionId,
+    scanStatusLabel: doc.currentVersion
+      ? formatPoaScanStatusLabel(doc.currentVersion.scanStatus)
+      : 'غير جاهز',
+  };
+}
+
+function mapPoaToDTO(
+  poa: Prisma.PowerOfAttorneyGetPayload<{ include: typeof POA_DOCUMENT_INCLUDE }>
+): PoASummaryDTO {
+  return {
+    id: poa.id,
+    partyId: poa.partyId,
+    documentId: poa.documentId ?? null,
+    linkedDocument: mapPoaLinkedDocument(poa.document),
+    poaNumberText: poa.poaNumberText,
+    poaYearLabel: poa.poaYearLabel,
+    notarizationOffice: poa.notarizationOffice,
+    poaType: poa.poaType,
+    issueDate: poa.issueDate
+      ? poa.issueDate instanceof Date
+        ? poa.issueDate.toISOString().slice(0, 10)
+        : String(poa.issueDate).slice(0, 10)
+      : null,
+    humanReviewStatus: poa.humanReviewStatus,
+    humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
+    humanReviewedById: poa.humanReviewedById,
+    notes: poa.notes,
+    version: poa.version,
+    createdAt: poa.createdAt.toISOString(),
+    updatedAt: poa.updatedAt.toISOString(),
+  };
+}
 
 function mapPartySummary(
   party: Prisma.PartyGetPayload<{ include: { identities: true } }>
@@ -227,6 +317,7 @@ async function buildReplayPowerOfAttorneyResult(
   }
   const poa = await txOrPrisma.powerOfAttorney.findUnique({
     where: { id: poaId },
+    include: POA_DOCUMENT_INCLUDE,
   });
   if (!poa) {
     throw new NotFoundError('التوكيل المطلوب غير موجود.');
@@ -240,24 +331,7 @@ async function buildReplayPowerOfAttorneyResult(
       : poa.version;
 
   return {
-    id: poa.id,
-    partyId: poa.partyId,
-    poaNumberText: poa.poaNumberText,
-    poaYearLabel: poa.poaYearLabel,
-    notarizationOffice: poa.notarizationOffice,
-    poaType: poa.poaType,
-    issueDate: poa.issueDate
-      ? poa.issueDate instanceof Date
-        ? poa.issueDate.toISOString().slice(0, 10)
-        : String(poa.issueDate).slice(0, 10)
-      : null,
-    humanReviewStatus: poa.humanReviewStatus,
-    humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
-    humanReviewedById: poa.humanReviewedById,
-    notes: poa.notes,
-    version: poa.version,
-    createdAt: poa.createdAt.toISOString(),
-    updatedAt: poa.updatedAt.toISOString(),
+    ...mapPoaToDTO(poa),
     isReplay: true,
     operationVersion,
     currentVersion: poa.version,
@@ -651,6 +725,7 @@ export async function getClientProfile(
       powersOfAttorney: {
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         take: 200,
+        include: POA_DOCUMENT_INCLUDE,
       },
     },
   });
@@ -692,22 +767,7 @@ export async function getClientProfile(
       createdAt: note.createdAt.toISOString(),
       createdById: note.createdById,
     })),
-    powersOfAttorney: party.powersOfAttorney.map((poa) => ({
-      id: poa.id,
-      partyId: poa.partyId,
-      poaNumberText: poa.poaNumberText,
-      poaYearLabel: poa.poaYearLabel,
-      notarizationOffice: poa.notarizationOffice,
-      poaType: poa.poaType,
-      issueDate: poa.issueDate ? poa.issueDate.toISOString().slice(0, 10) : null,
-      humanReviewStatus: poa.humanReviewStatus,
-      humanReviewedAt: poa.humanReviewedAt ? poa.humanReviewedAt.toISOString() : null,
-      humanReviewedById: poa.humanReviewedById,
-      notes: poa.notes,
-      version: poa.version,
-      createdAt: poa.createdAt.toISOString(),
-      updatedAt: poa.updatedAt.toISOString(),
-    })),
+    powersOfAttorney: party.powersOfAttorney.map(mapPoaToDTO),
   };
 }
 
@@ -879,6 +939,13 @@ export async function savePowerOfAttorney(
             throw new ConcurrencyConflictError('تعذر تعديل التوكيل نظراً لتعديله بواسطة مستخدم آخر.');
           }
 
+          if (input.documentId) {
+            await assertLinkableDocument(tx, input.documentId, {
+              kind: 'PARTY_POA',
+              partyId: input.partyId,
+            });
+          }
+
           const isStatusChanged =
             input.humanReviewStatus && input.humanReviewStatus !== existing.humanReviewStatus;
 
@@ -896,6 +963,7 @@ export async function savePowerOfAttorney(
               ...(input.issueDate !== undefined
                 ? { issueDate: input.issueDate ? new Date(input.issueDate) : null }
                 : {}),
+              ...(input.documentId !== undefined ? { documentId: input.documentId } : {}),
               humanReviewStatus: input.humanReviewStatus ?? existing.humanReviewStatus,
               humanReviewedAt: isStatusChanged
                 ? input.humanReviewStatus === 'UNREVIEWED' ? null : new Date()
@@ -921,6 +989,7 @@ export async function savePowerOfAttorney(
 
           poaRecord = await tx.powerOfAttorney.findUniqueOrThrow({
             where: { id: input.id },
+            include: POA_DOCUMENT_INCLUDE,
           });
 
           await recordAuditEvent(
@@ -933,6 +1002,7 @@ export async function savePowerOfAttorney(
               changedFields: {
                 poaNumberText: poaRecord.poaNumberText,
                 poaYearLabel: poaRecord.poaYearLabel,
+                documentId: poaRecord.documentId,
                 humanReviewStatus: poaRecord.humanReviewStatus,
                 version: poaRecord.version,
               },
@@ -940,11 +1010,19 @@ export async function savePowerOfAttorney(
             { simulateFailure: options.simulateAuditFailure }
           );
         } else {
+          if (input.documentId) {
+            await assertLinkableDocument(tx, input.documentId, {
+              kind: 'PARTY_POA',
+              partyId: input.partyId,
+            });
+          }
+
           const isReviewed = input.humanReviewStatus && input.humanReviewStatus !== 'UNREVIEWED';
 
           poaRecord = await tx.powerOfAttorney.create({
             data: {
               partyId: input.partyId,
+              documentId: input.documentId ?? null,
               poaNumberText: input.poaNumberText,
               poaYearLabel: input.poaYearLabel,
               notarizationOffice: input.notarizationOffice,
@@ -958,6 +1036,7 @@ export async function savePowerOfAttorney(
               createdById: actor.id,
               updatedById: actor.id,
             },
+            include: POA_DOCUMENT_INCLUDE,
           });
 
           await recordAuditEvent(
@@ -970,6 +1049,7 @@ export async function savePowerOfAttorney(
               changedFields: {
                 poaNumberText: poaRecord.poaNumberText,
                 poaYearLabel: poaRecord.poaYearLabel,
+                documentId: poaRecord.documentId,
                 humanReviewStatus: poaRecord.humanReviewStatus,
                 version: 1,
               },
@@ -978,22 +1058,7 @@ export async function savePowerOfAttorney(
           );
         }
 
-        const result: PoASummaryDTO = {
-          id: poaRecord.id,
-          partyId: poaRecord.partyId,
-          poaNumberText: poaRecord.poaNumberText,
-          poaYearLabel: poaRecord.poaYearLabel,
-          notarizationOffice: poaRecord.notarizationOffice,
-          poaType: poaRecord.poaType,
-          issueDate: poaRecord.issueDate ? poaRecord.issueDate.toISOString().slice(0, 10) : null,
-          humanReviewStatus: poaRecord.humanReviewStatus,
-          humanReviewedAt: poaRecord.humanReviewedAt ? poaRecord.humanReviewedAt.toISOString() : null,
-          humanReviewedById: poaRecord.humanReviewedById,
-          notes: poaRecord.notes,
-          version: poaRecord.version,
-          createdAt: poaRecord.createdAt.toISOString(),
-          updatedAt: poaRecord.updatedAt.toISOString(),
-        };
+        const result: PoASummaryDTO = mapPoaToDTO(poaRecord);
 
         await completeIdempotencyKey(tx, {
           actorId: actor.id,

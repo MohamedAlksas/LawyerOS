@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import {
+  DocumentScanStatus,
+  DocumentType,
   HearingStatus,
   NextDateDisposition,
   HearingLinkRelation,
@@ -9,6 +11,7 @@ import {
   JobRunStatus,
   ProceedingStatus,
 } from '@prisma/client';
+import { UNSCANNED_POLICY_NOTICE_AR } from '@/modules/documents/document-types';
 import {
   validateStrictCalendarDate,
   parseCalendarDateToUtc,
@@ -106,6 +109,57 @@ export interface HearingDTO {
   updatedAt: string;
 }
 
+export interface LinkableDocumentSummary {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  currentVersionId: string | null;
+  scanStatusLabel: string;
+}
+
+export interface LinkableDocumentRow {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  currentVersionId: string | null;
+  currentVersion?: { scanStatus: DocumentScanStatus } | null;
+}
+
+function formatSchedulingScanStatusLabel(scanStatus: DocumentScanStatus | null | undefined): string {
+  switch (scanStatus) {
+    case 'CLEAN':
+      return 'تم الفحص — سليم';
+    case 'PENDING':
+      return 'بانتظار الفحص';
+    case 'INFECTED':
+      return 'مرفوض أمنياً';
+    case 'FAILED':
+      return 'فشل الفحص';
+    case 'TIMEOUT':
+      return 'انتهت مهلة الفحص';
+    case 'STALE_DEFINITIONS':
+      return 'تعريفات الفحص قديمة';
+    case 'NOT_SCANNED_POLICY':
+    default:
+      return UNSCANNED_POLICY_NOTICE_AR;
+  }
+}
+
+export function mapLinkableDocumentSummary(
+  doc: LinkableDocumentRow | null | undefined
+): LinkableDocumentSummary | null {
+  if (!doc) return null;
+  return {
+    id: doc.id,
+    title: doc.title,
+    documentType: doc.documentType,
+    currentVersionId: doc.currentVersionId,
+    scanStatusLabel: doc.currentVersion
+      ? formatSchedulingScanStatusLabel(doc.currentVersion.scanStatus)
+      : 'غير جاهز',
+  };
+}
+
 export interface HearingResultDTO {
   id: string;
   hearingId: string;
@@ -117,6 +171,8 @@ export interface HearingResultDTO {
   notes?: string | null;
   correctionReason?: string | null;
   nextDateDisposition: NextDateDisposition;
+  decisionDocumentId?: string | null;
+  decisionDocument?: LinkableDocumentSummary | null;
   recordedAt: string;
   revision: number;
   supersedesResultId?: string | null;
@@ -133,6 +189,8 @@ export interface HearingResultSummaryDTO {
   notes?: string | null;
   correctionReason?: string | null;
   nextDateDisposition: NextDateDisposition;
+  decisionDocumentId?: string | null;
+  decisionDocument?: LinkableDocumentSummary | null;
   recordedAt: string;
   revision: number;
 }
@@ -253,6 +311,7 @@ export interface CorrectHearingResultInput {
   summary?: string | null;
   attendance?: string | null;
   notes?: string | null;
+  decisionDocumentId?: string | null;
   nextDateDisposition?: NextDateDisposition;
   nextHearingDate?: string | null;
   nextHearingTime?: string | null;
@@ -310,6 +369,7 @@ export const recordHearingResultSchema = z.object({
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),
   tasks: z.array(recordHearingResultTaskSchema).max(50, 'الحد الأقصى لمهام المتابعة في الجلسة الواحدة 50 مهمة').optional(),
+  decisionDocumentId: z.string().uuid('معرف مستند القرار غير صالح.').nullable().optional(),
   proceedingStatusUpdate: z.null().optional(),
   idempotencyKey: z.string().trim().min(1).max(100),
 }).strict().refine(data => {
@@ -369,6 +429,7 @@ export const correctHearingResultSchema = z.object({
   summary: z.string().trim().max(1000).nullable().optional(),
   attendance: z.string().trim().max(500).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  decisionDocumentId: z.string().uuid('معرف مستند القرار غير صالح.').nullable().optional(),
   nextDateDisposition: z.nativeEnum(NextDateDisposition).optional(),
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),

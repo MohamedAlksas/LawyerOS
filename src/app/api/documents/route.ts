@@ -39,7 +39,7 @@ export async function GET(request: Request) {
   if (originRejection) return originRejection;
 
   try {
-    const actor = await requireDocumentActor(request, 'READ_CLIENT_DATA');
+    const actor = await requireDocumentActor(request, 'READ_DOCUMENTS');
     const sp = new URL(request.url).searchParams;
     const page = parseIntegerParam(sp, 'page');
     const limit = parseIntegerParam(sp, 'limit');

@@ -4,12 +4,15 @@ import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getPrismaClient } from '@/lib/auth';
 import {
   HEARING_STATUS_LABELS,
   HEARING_STATUS_CLASSES,
 } from '@/components/hearings/hearing-ui-types';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
+import { mapLinkableDocumentSummary } from '@/modules/scheduling/hearing-types';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
 
 interface HearingDetailPageProps {
@@ -23,8 +26,9 @@ export const metadata = { title: 'تفاصيل الجلسة — LawOffice OS' };
 export default async function HearingDetailPage({ params }: HearingDetailPageProps) {
   const { id } = await params;
 
+  let actor;
   try {
-    await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       await redirectOnAuthError(error, `/hearings/${id}`);
@@ -52,6 +56,17 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
       },
       results: {
         orderBy: { revision: 'desc' },
+        include: {
+          decisionDocument: {
+            select: {
+              id: true,
+              title: true,
+              documentType: true,
+              currentVersionId: true,
+              currentVersion: { select: { scanStatus: true } },
+            },
+          },
+        },
       },
     },
   });
@@ -72,6 +87,8 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
   const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());
   const latestResult = hearing.results[0] || null;
+  const latestDecisionDoc = latestResult ? mapLinkableDocumentSummary(latestResult.decisionDocument) : null;
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
@@ -246,6 +263,31 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               {latestResult.decisionText}
             </p>
           </div>
+
+          {latestResult.decisionDocumentId && canReadDocuments && (
+            <div className="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] text-xs flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[#4D606A]">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestDecisionDoc?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestDecisionDoc && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestDecisionDoc.documentType]})
+                  </span>
+                )}
+                {latestDecisionDoc?.scanStatusLabel && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                    {latestDecisionDoc.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
 
           {latestResult.correctionReason && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900 space-y-1">

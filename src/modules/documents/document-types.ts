@@ -222,6 +222,10 @@ export interface DocumentDTO {
   downloadDeviceNotice: string;
 }
 
+export type DocumentDetailDTO = DocumentDTO & {
+  versions: DocumentVersionDTO[];
+};
+
 export interface UploadAttemptDTO {
   id: string;
   documentId: string | null;
@@ -302,6 +306,52 @@ export interface CleanupExpiredUploadsResult {
   expiredAttemptCount: number;
   deletedQuarantineCount: number;
   skippedProtectedCount: number;
+}
+
+export interface BeginVersionUploadInput {
+  documentId: string;
+  expectedDocumentVersion: number;
+  originalFilename: string;
+  declaredMime: string;
+  expectedSizeBytes: number;
+  idempotencyKey: string;
+}
+
+export interface UpdateDocumentMetadataInput {
+  documentId: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+  title?: string;
+  documentType?: DocumentType;
+  documentDate?: string | null;
+  description?: string | null;
+  tags?: string[];
+  originalLocation?: string | null;
+  originalPresent?: DocumentOriginalPresence;
+  sensitivity?: DocumentSensitivity;
+}
+
+export interface PinDocumentVersionsResult {
+  backupId: string;
+  pinnedCount: number;
+  documentVersionIds: string[];
+}
+
+export interface ReleaseBackupFilePinsResult {
+  backupId: string;
+  releasedCount: number;
+  releasedAt: string;
+}
+
+export interface ReconcileDocumentStorageResult {
+  skipped: boolean;
+  reason?: string;
+  deletedKeys: string[];
+  protectedKeys: string[];
+  expiredAttemptCount: number;
+  deletedQuarantineCount: number;
+  skippedProtectedCount: number;
+  checksums: Record<string, string>;
 }
 
 const strictDateSchema = z.string().refine((val) => validateStrictCalendarDate(val), {
@@ -397,5 +447,67 @@ export const listDocumentsSchema = z
     includeArchived: z.boolean().optional().default(false),
     page: z.number().int().min(1).max(1000).optional().default(1),
     limit: z.number().int().min(1).max(100).optional().default(20),
+  })
+  .strict();
+
+export const beginVersionUploadSchema = z
+  .object({
+    documentId: z.string().uuid('معرف المستند غير صالح.'),
+    expectedDocumentVersion: z
+      .number({ message: 'رقم إصدار المستند المتوقع مطلوب.' })
+      .int('رقم إصدار المستند المتوقع يجب أن يكون عدداً صحيحاً.')
+      .positive('رقم إصدار المستند المتوقع يجب أن يكون موجباً.'),
+    originalFilename: z
+      .string()
+      .trim()
+      .min(1, 'اسم الملف الأصلي مطلوب.')
+      .max(255, 'اسم الملف طويل جداً.'),
+    declaredMime: z
+      .string()
+      .trim()
+      .min(1, 'نوع الملف (MIME) مطلوب.')
+      .max(120, 'نوع الملف غير صالح.'),
+    expectedSizeBytes: z
+      .number()
+      .int('حجم الملف يجب أن يكون عدداً صحيحاً بالبايت.')
+      .positive('الملف الفارغ (0 بايت) غير مسموح به.')
+      .max(MAX_DOCUMENT_BYTES, 'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.').max(128),
+  })
+  .strict();
+
+export const updateDocumentMetadataSchema = z
+  .object({
+    documentId: z.string().uuid('معرف المستند غير صالح.'),
+    expectedVersion: z
+      .number({ message: 'رقم إصدار المستند المتوقع مطلوب.' })
+      .int('رقم إصدار المستند المتوقع يجب أن يكون عدداً صحيحاً.')
+      .positive('رقم إصدار المستند المتوقع يجب أن يكون موجباً.'),
+    idempotencyKey: z.string().trim().min(1, 'مفتاح منع التكرار مطلوب.').max(128),
+    title: z
+      .string()
+      .trim()
+      .min(1, 'عنوان المستند مطلوب.')
+      .max(200, 'عنوان المستند لا يتجاوز 200 حرف.')
+      .optional(),
+    documentType: z.nativeEnum(DocumentType, { message: 'نوع المستند غير صالح.' }).optional(),
+    documentDate: strictDateSchema.nullable().optional(),
+    description: z.string().trim().max(2000, 'الوصف لا يتجاوز 2000 حرف.').nullable().optional(),
+    tags: z
+      .array(z.string().trim().min(1, 'الوسم لا يمكن أن يكون فارغاً.').max(50, 'الوسم لا يتجاوز 50 حرفاً.'))
+      .max(20, 'الحد الأقصى للوسوم هو 20 وسماً.')
+      .optional(),
+    originalLocation: z
+      .string()
+      .trim()
+      .max(300, 'مكان الأصل الورقي لا يتجاوز 300 حرف.')
+      .nullable()
+      .optional(),
+    originalPresent: z
+      .nativeEnum(DocumentOriginalPresence, { message: 'حالة وجود الأصل غير صالحة.' })
+      .optional(),
+    sensitivity: z
+      .nativeEnum(DocumentSensitivity, { message: 'درجة حساسية المستند غير صالحة.' })
+      .optional(),
   })
   .strict();

@@ -17,7 +17,7 @@ export async function POST(
   if (originRejection) return originRejection;
 
   try {
-    const actor = await requireDocumentActor(request, 'WRITE_CLIENT_DATA');
+    const actor = await requireDocumentActor(request, 'WRITE_DOCUMENTS');
     const { attemptId } = await params;
 
     const rawContentType = request.headers.get('content-type');

@@ -17,8 +17,10 @@ import type {
   ConfirmDeadlineInput,
   CreateDeadlineInput,
   DeadlineDTO,
+  LinkableDocumentSummary,
   UpdateDeadlineDraftInput,
 } from '@/modules/scheduling/deadline-types';
+import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic, getCairoTodayDateString } from '@/lib/cairo-date';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -37,6 +39,8 @@ interface DeadlinesViewProps {
   actorId: string;
   initialDeadlines: DeadlineDTO[];
   selectableMatters: SelectableMatterOptionDTO[];
+  matterDocuments?: LinkableDocumentSummary[];
+  initialDocumentsByMatter?: Record<string, LinkableDocumentSummary[]>;
   initialError?: string;
   initialReviewDeadlineId?: string;
   lockedMatterId?: string;
@@ -67,6 +71,8 @@ export function DeadlinesView({
   actorId,
   initialDeadlines,
   selectableMatters,
+  matterDocuments,
+  initialDocumentsByMatter,
   initialError,
   initialReviewDeadlineId,
   lockedMatterId,
@@ -186,6 +192,16 @@ export function DeadlinesView({
       ? restoredDraftOp.confirmPayload.basisNotes ?? initialDraftTarget?.basisNotes ?? ''
       : initialDraftTarget?.basisNotes ?? ''
   );
+  const [sourceDocumentId, setSourceDocumentId] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.sourceDocumentId ?? initialDraftTarget?.sourceDocumentId ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.sourceDocumentId ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.sourceDocumentId ?? initialDraftTarget?.sourceDocumentId ?? ''
+      : initialDraftTarget?.sourceDocumentId ?? ''
+  );
+  const [fetchedDocsByMatter, setFetchedDocsByMatter] = useState<Record<string, LinkableDocumentSummary[]>>({});
   const [lawyerReviewed, setLawyerReviewed] = useState(
     restoredDraftOp?.kind === 'confirm' ||
       restoredDraftOp?.kind === 'createAndConfirm' ||
@@ -275,7 +291,7 @@ export function DeadlinesView({
     isFrozenDraftRetry ||
     isFrozenDateRetry ||
     isFrozenCompleteRetry ||
-    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
+    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes || sourceDocumentId)) ||
     (Boolean(changeDateTarget) && Boolean(dateChangeReason)) ||
     (Boolean(completeTarget) && Boolean(completionNotes));
 
@@ -401,6 +417,51 @@ export function DeadlinesView({
     }
   }, [lockedMatterId]);
 
+  useEffect(() => {
+    const activeMatterId = lockedMatterId || matterId;
+    if (!isDraftModalOpen || !activeMatterId) return;
+    if (lockedMatterId && matterDocuments !== undefined) return;
+    if (initialDocumentsByMatter && activeMatterId in initialDocumentsByMatter) return;
+    if (activeMatterId in fetchedDocsByMatter) return;
+
+    const controller = new AbortController();
+    fetch(`/api/documents?matterId=${encodeURIComponent(activeMatterId)}&limit=100`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (res.status === 401 && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
+        const body = (await res.json().catch(() => null)) as
+          | { success: true; data: { documents: DocumentDTO[] } }
+          | { success: false }
+          | null;
+        if (controller.signal.aborted) return;
+        const docs: LinkableDocumentSummary[] =
+          res.ok && body && body.success
+            ? body.data.documents
+                .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+                .map((d) => ({
+                  id: d.id,
+                  title: d.title,
+                  documentType: d.documentType,
+                  currentVersionId: d.currentVersionId,
+                  scanStatusLabel: d.currentVersion!.scanStatusLabel,
+                }))
+            : [];
+        setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: docs }));
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: [] }));
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isDraftModalOpen, lockedMatterId, matterId, matterDocuments, initialDocumentsByMatter, fetchedDocsByMatter]);
+
   const openNewDeadlineModal = () => {
     setStatusNotice(null);
     const pending = pendingDraftOpRef.current;
@@ -423,6 +484,7 @@ export function DeadlinesView({
     setDueTime('');
     setSource('');
     setBasisNotes('');
+    setSourceDocumentId('');
     setLawyerReviewed(false);
     setIsDraftModalOpen(true);
   };
@@ -455,6 +517,7 @@ export function DeadlinesView({
     setDueTime(deadline.dueTime ?? '');
     setSource(deadline.source ?? '');
     setBasisNotes(deadline.basisNotes ?? '');
+    setSourceDocumentId(deadline.sourceDocumentId ?? '');
     setLawyerReviewed(false);
     setIsDraftModalOpen(true);
   };
@@ -462,6 +525,27 @@ export function DeadlinesView({
   const selectedMatterProceedings = lockedMatterId
     ? (lockedMatterProceedings ?? [])
     : (selectableMatters.find((m) => m.id === matterId)?.proceedings ?? []);
+
+  const activeDocsMatterId = lockedMatterId || matterId;
+  const hasPreloadedDocs =
+    (Boolean(lockedMatterId) && matterDocuments !== undefined) ||
+    Boolean(initialDocumentsByMatter && activeDocsMatterId in initialDocumentsByMatter);
+  const isLoadingMatterDocs =
+    isDraftModalOpen &&
+    Boolean(activeDocsMatterId) &&
+    !hasPreloadedDocs &&
+    !(activeDocsMatterId in fetchedDocsByMatter);
+  const rawMatterDocs =
+    lockedMatterId && matterDocuments !== undefined
+      ? matterDocuments
+      : activeDocsMatterId
+      ? (initialDocumentsByMatter?.[activeDocsMatterId] ?? fetchedDocsByMatter[activeDocsMatterId] ?? [])
+      : [];
+  const availableSourceDocs =
+    editingDeadline?.sourceDocument &&
+    !rawMatterDocs.some((doc) => doc.id === editingDeadline.sourceDocument?.id)
+      ? [editingDeadline.sourceDocument, ...rawMatterDocs]
+      : rawMatterDocs;
 
   const executePendingDraftOp = async (op: PendingDeadlineDraftOp) => {
     setIsSubmittingDraftModal(true);
@@ -485,6 +569,7 @@ export function DeadlinesView({
               dueTime: activeOp.createPayload.dueTime ?? null,
               source: activeOp.createPayload.source!,
               basisNotes: activeOp.createPayload.basisNotes!,
+              sourceDocumentId: activeOp.createPayload.sourceDocumentId ?? null,
               lawyerReviewed: true,
               confirmationAccepted: true,
               idempotencyKey: activeOp.confirmIdempotencyKey,
@@ -613,6 +698,7 @@ export function DeadlinesView({
             dueTime: trimmedTime || null,
             source: source.trim() || null,
             basisNotes: basisNotes.trim() || null,
+            sourceDocumentId: sourceDocumentId || null,
             idempotencyKey: generateClientRequestId('dl-draft'),
           },
         }
@@ -626,6 +712,7 @@ export function DeadlinesView({
             dueTime: trimmedTime || null,
             source: source.trim() || null,
             basisNotes: basisNotes.trim() || null,
+            sourceDocumentId: sourceDocumentId || null,
             idempotencyKey: generateClientRequestId('dl-create'),
           },
         };
@@ -702,6 +789,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          sourceDocumentId: sourceDocumentId || null,
           idempotencyKey: generateClientRequestId('dl-create-pre'),
         },
         confirmIdempotencyKey: generateClientRequestId('dl-confirm'),
@@ -725,6 +813,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          sourceDocumentId: sourceDocumentId || null,
           lawyerReviewed: true,
           confirmationAccepted: true,
           idempotencyKey: generateClientRequestId('dl-confirm'),
@@ -740,6 +829,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          sourceDocumentId: sourceDocumentId || null,
           lawyerReviewed: true,
           confirmationAccepted: true,
           idempotencyKey: generateClientRequestId('dl-confirm'),
@@ -1043,6 +1133,31 @@ export function DeadlinesView({
           <span className="text-[#172A35]">{d.source || 'غير محدد بعد'}</span>
         </div>
       </div>
+
+      {d.sourceDocumentId && (
+        <div className="flex flex-wrap items-center gap-2 text-sm bg-[#F9FBFC] px-3 py-2 rounded-[6px] border border-[#E8EEF1]">
+          <span className="font-semibold text-[#4D606A]">المستند المصدري:</span>
+          <Link
+            href={`/documents/${d.sourceDocumentId}`}
+            data-testid={`deadline-source-document-link-${d.id}`}
+            className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+          >
+            <bdi className="[overflow-wrap:anywhere]">
+              {d.sourceDocument?.title ?? 'عرض المستند المصدري'}
+            </bdi>
+            {d.sourceDocument && (
+              <span className="text-xs text-[#4D606A]">
+                ({DOCUMENT_TYPE_LABELS_AR[d.sourceDocument.documentType]})
+              </span>
+            )}
+            {d.sourceDocument?.scanStatusLabel && (
+              <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                {d.sourceDocument.scanStatusLabel}
+              </span>
+            )}
+          </Link>
+        </div>
+      )}
 
       {d.basisNotes && (
         <div className="text-sm bg-[#F9FBFC] p-3 rounded-[6px] border border-[#E8EEF1]">
@@ -1458,6 +1573,7 @@ export function DeadlinesView({
                       onChange={(e) => {
                         setMatterId(e.target.value);
                         setProceedingId('');
+                        setSourceDocumentId('');
                       }}
                       disabled={Boolean(editingDeadline) || isSubmittingDraftModal || isFrozenDraftRetry}
                       aria-invalid={Boolean(draftFieldErrors.matterId)}
@@ -1547,6 +1663,30 @@ export function DeadlinesView({
                     placeholder="مثال: إعلان الحكم الصادر بجلسة ... / مادة 227 مرافعات"
                     className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="deadline-source-document-select" className="block text-sm font-bold text-[#172A35]">
+                    المستند المصدري المرتبط (اختياري)
+                  </label>
+                  <select
+                    id="deadline-source-document-select"
+                    data-testid="deadline-source-document-select"
+                    value={sourceDocumentId}
+                    onChange={(e) => setSourceDocumentId(e.target.value)}
+                    disabled={isSubmittingDraftModal || isFrozenDraftRetry}
+                    className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                  >
+                    <option value="">بدون مستند مصدري مرتبط (اختياري)</option>
+                    {availableSourceDocs.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                      </option>
+                    ))}
+                  </select>
+                  {isLoadingMatterDocs && (
+                    <p className="text-xs text-[#4D606A]">جارٍ تحميل مستندات الملف الجاهزة...</p>
+                  )}
                 </div>
 
                 <div className="space-y-1">

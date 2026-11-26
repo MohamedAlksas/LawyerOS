@@ -452,16 +452,50 @@ describe('T05-01: Party Validation Schemas (Unit)', () => {
       expect(valid.issueDate).toBe('2024-02-29');
     });
 
-    it('rejects unsupported relationship fields (documentId, matterId)', () => {
+    it('accepts optional UUID documentId and rejects unsupported relationship fields (matterId) or malformed documentId', () => {
+      const validWithDoc = validateInput(savePowerOfAttorneySchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        documentId: '55555555-5555-4555-8555-555555555555',
+        poaNumberText: '123/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب توثيق قصر النيل',
+        poaType: 'GENERAL',
+        idempotencyKey: 'idemp-poa-doc-ok',
+      });
+      expect(validWithDoc.documentId).toBe('55555555-5555-4555-8555-555555555555');
+
+      const validNullDoc = validateInput(savePowerOfAttorneySchema, {
+        partyId: '11111111-1111-4111-8111-111111111111',
+        documentId: null,
+        poaNumberText: '123/أ',
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب توثيق قصر النيل',
+        poaType: 'GENERAL',
+        idempotencyKey: 'idemp-poa-doc-null',
+      });
+      expect(validNullDoc.documentId).toBeNull();
+
       expect(() =>
         validateInput(savePowerOfAttorneySchema, {
           partyId: '11111111-1111-4111-8111-111111111111',
-          documentId: '55555555-5555-4555-8555-555555555555',
+          documentId: 'invalid-doc-uuid',
           poaNumberText: '123/أ',
           poaYearLabel: '2026',
           notarizationOffice: 'مكتب توثيق قصر النيل',
           poaType: 'GENERAL',
-          idempotencyKey: 'idemp-poa-doc-fail',
+          idempotencyKey: 'idemp-poa-doc-bad',
+        })
+      ).toThrowError(ValidationError);
+
+      expect(() =>
+        validateInput(savePowerOfAttorneySchema, {
+          partyId: '11111111-1111-4111-8111-111111111111',
+          matterId: '66666666-6666-4666-8666-666666666666',
+          poaNumberText: '123/أ',
+          poaYearLabel: '2026',
+          notarizationOffice: 'مكتب توثيق قصر النيل',
+          poaType: 'GENERAL',
+          idempotencyKey: 'idemp-poa-matter-fail',
         })
       ).toThrowError(ValidationError);
     });

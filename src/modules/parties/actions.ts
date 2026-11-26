@@ -22,6 +22,12 @@ import {
   IdempotencyConcurrentConflictError,
 } from '@/lib/idempotency';
 import {
+  CrossMatterLinkForbiddenError,
+  DocumentNotFoundError,
+  DocumentNotReadyError,
+  DocumentValidationError,
+} from '@/modules/documents/document-types';
+import {
   SavePartyInput,
   SavePartyResult,
   SearchPartiesParams,
@@ -44,12 +50,28 @@ export type ActionResult<T> =
     };
 
 function handleActionError(error: unknown): ActionResult<never> {
-  if (error instanceof ValidationError) {
+  if (error instanceof ValidationError || error instanceof DocumentValidationError) {
     return {
       success: false,
       error: error.message,
       code: 'VALIDATION_ERROR',
       fieldErrors: error.fieldErrors,
+    };
+  }
+
+  if (error instanceof CrossMatterLinkForbiddenError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'CROSS_MATTER_LINK_FORBIDDEN',
+    };
+  }
+
+  if (error instanceof DocumentNotReadyError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'DOCUMENT_NOT_READY',
     };
   }
 
@@ -77,7 +99,7 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
-  if (error instanceof NotFoundError) {
+  if (error instanceof NotFoundError || error instanceof DocumentNotFoundError) {
     return {
       success: false,
       error: error.message,

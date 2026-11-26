@@ -44,13 +44,14 @@ import {
 import { TasksView } from '@/components/productivity/tasks-view';
 import { DeadlinesView } from '@/components/deadlines/deadlines-view';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
-import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
+import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailClientProps {
   ownerId: string;
   initialMatter: MatterDTO;
   initialTasks?: TaskItemDTO[];
   initialDeadlines?: DeadlineDTO[];
+  initialDocuments?: LinkableDocumentSummary[];
   tasksError?: string;
   deadlinesError?: string;
 }
@@ -60,6 +61,7 @@ export function MatterDetailClient({
   initialMatter,
   initialTasks = [],
   initialDeadlines = [],
+  initialDocuments = [],
   tasksError,
   deadlinesError,
 }: MatterDetailClientProps) {
@@ -2506,6 +2508,7 @@ export function MatterDetailClient({
           <DeadlinesView
             actorId={ownerId}
             initialDeadlines={initialDeadlines}
+            matterDocuments={initialDocuments}
             initialError={deadlinesError}
             selectableMatters={[]}
             lockedMatterId={matter.id}

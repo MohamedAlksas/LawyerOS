@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import Link from 'next/link';
+import { GuardedLink as Link } from '@/components/navigation-guard';
 import { unifiedSearchAction } from '@/modules/matters/matter-actions';
 import {
   UnifiedSearchResult,
@@ -50,6 +50,11 @@ const ENTITY_TYPE_CONFIG: Record<
     label: 'طرف / موكل',
     icon: '',
     badgeClass: 'bg-purple-50 text-purple-800 border-purple-200',
+  },
+  DOCUMENT: {
+    label: 'مستند',
+    icon: '📄',
+    badgeClass: 'bg-amber-50 text-[#7A4A00] border-[#E0B46A]',
   },
 };
 
@@ -193,32 +198,32 @@ export function UnifiedSearchClient({
   };
 
   const items = searchResult?.items || [];
-  const counts = searchResult?.counts || { all: 0, parties: 0, matters: 0, proceedings: 0 };
+  const counts = searchResult?.counts || { all: 0, parties: 0, matters: 0, proceedings: 0, documents: 0 };
   const totalCount = searchResult?.total || 0;
   const totalPages = searchResult?.totalPages || 1;
   const hasActiveFilters = Boolean(query.trim() || searchType !== 'ALL' || includeArchived);
 
   return (
-    <div className="space-y-6" dir="rtl" lang="ar-EG">
+    <div className="space-y-6 min-w-0 max-w-full" dir="rtl" lang="ar-EG">
       {/* 1. Header */}
       <div className="pb-4 border-b border-[#D5DFE3] space-y-1">
         <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
           البحث الموحد الشامل
         </h1>
         <p className="text-xs sm:text-sm text-[#4D606A] leading-relaxed">
-          بحث فوري متكامل عبر ملفات القضايا، القيود والدعاوى القضائية بالمحاكم، ودليل الأطراف والموكلين.
+          بحث فوري متكامل عبر ملفات القضايا، القيود والدعاوى القضائية بالمحاكم، دليل الأطراف والموكلين، والمستندات.
         </p>
       </div>
 
       {/* 2. Search & Filter Bar */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4">
         <form onSubmit={handleFormSubmit} className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-0">
             <input
               type="search"
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder="ابحث بالاسم، كود الملف، رقم الدعوى بالمحكمة، أو رقم الهاتف..."
+              placeholder="ابحث بالاسم، كود الملف، رقم الدعوى بالمحكمة، رقم الهاتف، أو عنوان المستند..."
               aria-label="البحث الموحد"
               data-testid="unified-search-input"
               className="w-full px-3 py-2.5 text-sm bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] placeholder-[#4D606A] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
@@ -337,6 +342,27 @@ export function UnifiedSearchClient({
                 {counts.parties}
               </span>
             </button>
+
+            <button
+              type="button"
+              aria-pressed={searchType === 'DOCUMENT'}
+              data-testid="tab-document"
+              onClick={() => handleTypeChange('DOCUMENT')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-[6px] transition-colors min-h-[44px] flex items-center gap-1.5 ${
+                searchType === 'DOCUMENT'
+                  ? 'bg-[#14566B] text-white shadow-xs'
+                  : 'bg-[#F4F6F7] text-[#172A35] hover:bg-[#E8EEF1]'
+              }`}
+            >
+              <span>المستندات</span>
+              <span
+                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                  searchType === 'DOCUMENT' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
+                }`}
+              >
+                {counts.documents}
+              </span>
+            </button>
           </div>
 
           {/* Include Archived Toggle */}
@@ -369,7 +395,7 @@ export function UnifiedSearchClient({
 
       {/* 4. Results Section */}
       {isLoading ? (
-        <LoadingIndicator label="جارٍ البحث في ملفات القضايا والقيود والأطراف..." />
+        <LoadingIndicator label="جارٍ البحث في ملفات القضايا والقيود والأطراف والمستندات..." />
       ) : error ? (
         <ErrorContainer
           title="تعذر استرجاع نتائج البحث"
@@ -463,10 +489,10 @@ export function UnifiedSearchClient({
                       </div>
 
                       {/* Title */}
-                      <h2 className="text-base font-bold text-[#172A35] leading-snug">
+                      <h2 className="text-base font-bold text-[#172A35] leading-snug break-words [overflow-wrap:anywhere]">
                         <Link
                           href={item.href}
-                          className="hover:text-[#14566B] hover:underline focus:outline-none focus:ring-1 focus:ring-[#14566B] rounded"
+                          className="inline-flex items-center min-h-[44px] hover:text-[#14566B] hover:underline focus:outline-none focus:ring-2 focus:ring-[#14566B] rounded"
                         >
                           {item.title}
                         </Link>
@@ -474,7 +500,7 @@ export function UnifiedSearchClient({
 
                       {/* Subtitle / Details */}
                       {item.subtitle && (
-                        <p className="text-xs text-[#4D606A] leading-relaxed">
+                        <p className="text-xs text-[#4D606A] leading-relaxed break-words [overflow-wrap:anywhere]">
                           {item.subtitle}
                         </p>
                       )}

@@ -4,7 +4,8 @@ import React, { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
-import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
+import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, LinkableDocumentSummary, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
 import {
   HearingStatus,
   NextDateDisposition,
@@ -36,12 +37,15 @@ interface HearingResultClientProps {
   matterId: string;
   matterFileCode: string;
   proceedingId: string;
+  availableDocuments?: LinkableDocumentSummary[];
   latestResult: {
     id: string;
     decisionText: string;
     revision: number;
     correctionReason: string | null;
     recordedAt: string;
+    decisionDocumentId?: string | null;
+    decisionDocument?: LinkableDocumentSummary | null;
   } | null;
 }
 
@@ -70,6 +74,7 @@ export function HearingResultClient({
   matterId,
   matterFileCode,
   proceedingId,
+  availableDocuments = [],
   latestResult: initialLatestResult,
 }: HearingResultClientProps) {
   const router = useRouter();
@@ -87,6 +92,7 @@ export function HearingResultClient({
   const [decision, setDecision] = useState(resultDraft.restored?.decision ?? '');
   const [summary, setSummary] = useState(resultDraft.restored?.summary ?? '');
   const [attendance, setAttendance] = useState(resultDraft.restored?.attendance ?? '');
+  const [decisionDocumentId, setDecisionDocumentId] = useState(resultDraft.restored?.decisionDocumentId ?? '');
   const [nextDateDisposition, setNextDateDisposition] = useState<NextDateDisposition>(resultDraft.restored?.nextDateDisposition ?? 'UNDETERMINED');
   const [nextHearingDate, setNextHearingDate] = useState(resultDraft.restored?.nextHearing?.hearingDate ?? '');
   const [nextHearingTime, setNextHearingTime] = useState(resultDraft.restored?.nextHearing?.hearingTime ?? '');
@@ -111,6 +117,9 @@ export function HearingResultClient({
   const [isCorrecting, setIsCorrecting] = useState(Boolean(correctionDraft.restored));
   const [correctionReason, setCorrectionReason] = useState(correctionDraft.restored?.reason ?? '');
   const [correctedDecision, setCorrectedDecision] = useState(correctionDraft.restored?.decision ?? '');
+  const [correctedDecisionDocumentId, setCorrectedDecisionDocumentId] = useState(
+    correctionDraft.restored?.decisionDocumentId ?? initialLatestResult?.decisionDocumentId ?? ''
+  );
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const [correctionFrozen, setCorrectionFrozen] = useState(Boolean(correctionDraft.restored));
   const [correctionError, setCorrectionError] = useState<string | null>(correctionDraft.restored ? unknownOutcome : null);
@@ -119,7 +128,7 @@ export function HearingResultClient({
   const resultFieldsDisabled = isSubmitting || isFrozenRetry;
   const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
   const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
-    Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
+    Boolean(decision || summary || attendance || decisionDocumentId || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
   useLeaveGuard(
     resultDirty || (isCorrecting && !correctionFrozen),
     isSubmitting || correctionSubmitting
@@ -168,6 +177,7 @@ export function HearingResultClient({
         decision: decision.trim(),
         summary: summary.trim() || null,
         attendance: attendance.trim() || null,
+        decisionDocumentId: decisionDocumentId || null,
         nextDateDisposition,
         nextHearing: nextDateDisposition === 'KNOWN'
           ? { hearingDate: nextHearingDate, hearingTime: nextHearingTime || null, courtName, circuit }
@@ -209,7 +219,12 @@ export function HearingResultClient({
       setSavedSuccess(true);
       setSavedDecision(result.decisionText);
       setCurrentStatus(hearing.status);
-      setLatestResult({ ...result, correctionReason: result.correctionReason ?? null });
+      setLatestResult({
+        ...result,
+        correctionReason: result.correctionReason ?? null,
+        decisionDocumentId: result.decisionDocumentId ?? null,
+        decisionDocument: result.decisionDocument ?? null,
+      });
       if (savedNext) setLinkedNext({ id: savedNext.id, date: savedNext.hearingDate, status: savedNext.status });
       router.refresh();
     } catch {
@@ -233,6 +248,7 @@ export function HearingResultClient({
         currentResultId: latestResult.id,
         decision: correctedDecision.trim(),
         reason: correctionReason.trim(),
+        decisionDocumentId: correctedDecisionDocumentId || null,
         idempotencyKey: generateClientRequestId('corr'),
       };
       correctionDraft.keep(pendingCorrection.current);
@@ -262,7 +278,12 @@ export function HearingResultClient({
       setSessionExpiredFor(null);
       setCorrectionSuccess(true);
       setIsCorrecting(false);
-      setLatestResult({ ...response.data, correctionReason: response.data.correctionReason ?? null });
+      setLatestResult({
+        ...response.data,
+        correctionReason: response.data.correctionReason ?? null,
+        decisionDocumentId: response.data.decisionDocumentId ?? null,
+        decisionDocument: response.data.decisionDocument ?? null,
+      });
       router.refresh();
     } catch {
       setCorrectionFrozen(true);
@@ -276,6 +297,12 @@ export function HearingResultClient({
     nextDate: nextDateDisposition === 'KNOWN' && nextHearingDate.trim() ? nextHearingDate.trim() : null,
     taskCount: tasks.filter((t) => t.title.trim().length > 0).length,
   });
+
+  const correctionSelectableDocuments =
+    latestResult?.decisionDocument &&
+    !availableDocuments.some((doc) => doc.id === latestResult.decisionDocument?.id)
+      ? [latestResult.decisionDocument, ...availableDocuments]
+      : availableDocuments;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
@@ -429,10 +456,29 @@ export function HearingResultClient({
             <span>تم حفظ النتيجة بنجاح!</span>
           </div>
           <p className="font-semibold text-emerald-800">{savedDecision}</p>
+          {latestResult?.decisionDocumentId && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="font-semibold text-emerald-900">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-white border border-emerald-300 rounded-[6px] text-[#14566B] font-semibold hover:bg-emerald-100 min-h-[44px]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestResult.decisionDocument?.scanStatusLabel && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                    {latestResult.decisionDocument.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
           <div className="pt-1 flex gap-2">
             <Link
               href={`/hearings/${hearingId}`}
-              className="px-3 py-1.5 bg-emerald-700 text-white rounded-[4px] text-xs font-bold"
+              className="px-3 py-1.5 bg-emerald-700 text-white rounded-[4px] text-xs font-bold min-h-[44px] inline-flex items-center"
             >
               عرض تفاصيل الجلسة
             </Link>
@@ -479,6 +525,7 @@ export function HearingResultClient({
                 onClick={() => {
                   setIsCorrecting(true);
                   setCorrectedDecision(latestResult?.decisionText || '');
+                  setCorrectedDecisionDocumentId(latestResult?.decisionDocumentId ?? '');
                 }}
                 data-testid="correct-result-button"
                 className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
@@ -497,6 +544,31 @@ export function HearingResultClient({
               {latestResult?.decisionText}
             </p>
           </div>
+
+          {latestResult?.decisionDocumentId && (
+            <div className="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] text-xs flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[#4D606A]">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestResult.decisionDocument && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestResult.decisionDocument.documentType]})
+                  </span>
+                )}
+                {latestResult.decisionDocument?.scanStatusLabel && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                    {latestResult.decisionDocument.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
 
           {history.some((result) => result.revision < (latestResult?.revision ?? 0)) && (
             <details className="rounded-[6px] border border-[#D5DFE3] p-3 text-xs">
@@ -556,6 +628,27 @@ export function HearingResultClient({
                   disabled={correctionFieldsDisabled}
                   className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
+              </div>
+
+              <div className="space-y-1 text-xs">
+                <label htmlFor="correction-decision-document-select" className="block font-bold text-[#172A35]">
+                  مستند القرار المرتبط (اختياري)
+                </label>
+                <select
+                  id="correction-decision-document-select"
+                  data-testid="hearing-decision-document-select"
+                  value={correctedDecisionDocumentId}
+                  onChange={(e) => setCorrectedDecisionDocumentId(e.target.value)}
+                  disabled={correctionFieldsDisabled}
+                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                >
+                  <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+                  {correctionSelectableDocuments.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -648,6 +741,27 @@ export function HearingResultClient({
               <span>الحضور (اختياري)</span>
               <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
             </label>
+          </div>
+
+          <div className="space-y-1 text-xs">
+            <label htmlFor="hearing-decision-document-select" className="block font-bold text-[#172A35]">
+              مستند القرار المرتبط (اختياري)
+            </label>
+            <select
+              id="hearing-decision-document-select"
+              data-testid="hearing-decision-document-select"
+              value={decisionDocumentId}
+              onChange={(e) => setDecisionDocumentId(e.target.value)}
+              disabled={resultFieldsDisabled}
+              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+            >
+              <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+              {availableDocuments.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                </option>
+              ))}
+            </select>
           </div>
           {/* Next Date Radio Group */}
           <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">

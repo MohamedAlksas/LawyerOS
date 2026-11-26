@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (originRejection) return originRejection;
 
   try {
-    const actor = await requireDocumentActor(request, 'WRITE_CLIENT_DATA');
+    const actor = await requireDocumentActor(request, 'WRITE_DOCUMENTS');
     const body = await parseJsonMutationBody(request);
     const data = await beginUpload(actor, body as unknown as BeginUploadInput);
     return NextResponse.json(

@@ -21,6 +21,7 @@ import {
   MAX_DOCUMENT_BYTES,
   UNSCANNED_POLICY_NOTICE_AR,
   authorizeDownload,
+  beginVersionUploadSchema,
   createLocalDocumentStorage,
   documentError,
   documentStatusFromErrorCode,
@@ -29,6 +30,7 @@ import {
   resolveSafeKeyPath,
   resolveSafeStorageRoot,
   sanitizeDisplayFilename,
+  updateDocumentMetadataSchema,
 } from '@/modules/documents';
 
 function buildSyntheticPdf(extraBytes = 0): Buffer {
@@ -675,6 +677,129 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         headers: { origin: trustedOrigin, 'sec-fetch-site': ' same-origin ' },
       });
       expect(verifyDocumentMutationOrigin(mutSameOriginPadded)).toBeNull();
+    });
+  });
+
+  describe('T12 version upload & paper-original metadata schemas', () => {
+    it('validates beginVersionUploadSchema and enforces strict types & positive bounds', () => {
+      const valid = beginVersionUploadSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedDocumentVersion: 1,
+        originalFilename: '  updated_contract_v2.pdf  ',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: 2048,
+        idempotencyKey: 'ver-begin-1',
+      });
+      expect(valid.success).toBe(true);
+      if (valid.success) {
+        expect(valid.data.originalFilename).toBe('updated_contract_v2.pdf');
+      }
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: 'not-uuid',
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k1',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 0,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k2',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: MAX_DOCUMENT_BYTES + 1,
+          idempotencyKey: 'k3',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k4',
+          extraField: 'rejected',
+        }).success
+      ).toBe(false);
+    });
+
+    it('validates updateDocumentMetadataSchema for paper original state/location and metadata', () => {
+      const validOriginal = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 2,
+        idempotencyKey: 'meta-upd-1',
+        originalPresent: 'YES',
+        originalLocation: '  خزنة المكتب الرئيسية — رف 2  ',
+      });
+      expect(validOriginal.success).toBe(true);
+      if (validOriginal.success) {
+        expect(validOriginal.data.originalLocation).toBe('خزنة المكتب الرئيسية — رف 2');
+        expect(validOriginal.data.originalPresent).toBe('YES');
+      }
+
+      const validUnknownCleared = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 3,
+        idempotencyKey: 'meta-upd-2',
+        originalPresent: 'UNKNOWN',
+        originalLocation: null,
+        documentDate: '2026-11-26',
+      });
+      expect(validUnknownCleared.success).toBe(true);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 0,
+          idempotencyKey: 'meta-bad-ver',
+          originalPresent: 'NO',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-date',
+          documentDate: '2026-02-30',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-present',
+          originalPresent: 'MAYBE',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-extra',
+          sha256: 'cannot-override-bytes',
+        }).success
+      ).toBe(false);
     });
   });
 });

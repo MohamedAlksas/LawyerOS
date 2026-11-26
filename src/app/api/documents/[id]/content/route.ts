@@ -24,7 +24,7 @@ export async function GET(
   if (originRejection) return originRejection;
 
   try {
-    const actor = await requireDocumentActor(request, 'READ_CLIENT_DATA');
+    const actor = await requireDocumentActor(request, 'READ_DOCUMENTS');
     const { id } = await params;
     const sp = new URL(request.url).searchParams;
 

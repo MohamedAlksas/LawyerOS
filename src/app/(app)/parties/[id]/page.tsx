@@ -3,7 +3,11 @@ import Link from 'next/link';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
+import { getPrismaClient } from '@/lib/auth';
+import { listDocuments } from '@/modules/documents/document-service';
 import { getClientProfile, NotFoundError } from '@/modules/parties/service';
+import type { LinkableDocumentSummary } from '@/modules/parties/types';
 import { PartyProfileClient } from '@/components/parties/party-profile-client';
 import { EmptyStateContainer } from '@/components/presentation-state';
 
@@ -61,9 +65,57 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
     throw error;
   }
 
+  let availablePoaDocuments: LinkableDocumentSummary[] = [];
+  if (!party.archivedAt && authorize(actor, 'READ_DOCUMENTS')) {
+    try {
+      const prisma = getPrismaClient();
+      const [partyDocsRes, clientMatters] = await Promise.all([
+        listDocuments(actor, { partyId: party.id, limit: 100 }),
+        prisma.matterParty.findMany({
+          where: {
+            partyId: party.id,
+            role: 'CLIENT',
+            matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+          },
+          select: { matterId: true },
+          take: 50,
+        }),
+      ]);
+      const matterDocsResults = await Promise.all(
+        clientMatters.map((m) =>
+          listDocuments(actor, { matterId: m.matterId, limit: 100 }).catch(() => null)
+        )
+      );
+      const seen = new Set<string>();
+      const allDocs = [
+        ...partyDocsRes.documents,
+        ...matterDocsResults.flatMap((res) => res?.documents ?? []),
+      ];
+      for (const doc of allDocs) {
+        if (seen.has(doc.id)) continue;
+        if (doc.archivedAt || !doc.currentVersionId || !doc.currentVersion?.isReady) continue;
+        seen.add(doc.id);
+        availablePoaDocuments.push({
+          id: doc.id,
+          title: doc.title,
+          documentType: doc.documentType,
+          currentVersionId: doc.currentVersionId,
+          scanStatusLabel: doc.currentVersion.scanStatusLabel,
+        });
+      }
+    } catch {
+      availablePoaDocuments = [];
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      <PartyProfileClient key={`${actor.id}:${party.id}`} party={party} ownerId={actor.id} />
+      <PartyProfileClient
+        key={`${actor.id}:${party.id}`}
+        party={party}
+        ownerId={actor.id}
+        availablePoaDocuments={availablePoaDocuments}
+      />
     </div>
   );
 }
