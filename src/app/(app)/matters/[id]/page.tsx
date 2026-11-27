@@ -14,6 +14,8 @@ import { listTasks, ProductivityValidationError } from '@/modules/productivity';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
 import { listDeadlines } from '@/modules/scheduling';
 import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
+import { getMatterFinanceSummary } from '@/modules/finance/finance-service';
+import type { MatterFinanceSummaryDTO } from '@/modules/finance/finance-types';
 
 interface MatterDetailPageProps {
   params: Promise<{
@@ -77,12 +79,15 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
   }
 
   const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
-  const [tasksResult, deadlinesResult, docsResult] = await Promise.allSettled([
+  const canReadFinance = authorize(actor, 'READ_FINANCE');
+  const canWriteFinance = authorize(actor, 'WRITE_FINANCE');
+  const [tasksResult, deadlinesResult, docsResult, financeResult] = await Promise.allSettled([
     listTasks(actor, { matterId: id, includeCompleted: true }),
     listDeadlines(actor, { matterId: id, includeClosed: true }),
     canReadDocuments
       ? listDocuments(actor, { matterId: id, limit: 100 })
       : Promise.resolve(null),
+    canReadFinance ? getMatterFinanceSummary(actor, id) : Promise.resolve(null),
   ]);
 
   const initialTasks = tasksResult.status === 'fulfilled' ? tasksResult.value : ([] as TaskItemDTO[]);
@@ -116,6 +121,14 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     deadlinesResult.status === 'rejected'
       ? 'تعذر تحميل المواعيد القانونية من الخادم.'
       : undefined;
+  const initialFinanceSummary: MatterFinanceSummaryDTO | undefined =
+    canReadFinance && financeResult.status === 'fulfilled' && financeResult.value
+      ? financeResult.value
+      : undefined;
+  const financeError =
+    canReadFinance && financeResult.status === 'rejected'
+      ? 'تعذر تحميل البيانات المالية للملف من الخادم.'
+      : undefined;
 
   return (
     <div className="py-2">
@@ -127,6 +140,10 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         initialDeadlines={initialDeadlines}
         initialDocuments={initialDocuments}
         canReadDocuments={canReadDocuments}
+        canReadFinance={canReadFinance}
+        canWriteFinance={canWriteFinance}
+        initialFinanceSummary={initialFinanceSummary}
+        financeError={financeError}
         documentsError={documentsError}
         tasksError={tasksError}
         deadlinesError={deadlinesError}

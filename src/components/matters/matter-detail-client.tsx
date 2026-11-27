@@ -44,8 +44,10 @@ import {
 } from './matter-ui-types';
 import { TasksView } from '@/components/productivity/tasks-view';
 import { DeadlinesView } from '@/components/deadlines/deadlines-view';
+import { FinanceWorkspace } from '@/components/finance/finance-workspace';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
 import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
+import type { FinanceOverviewDTO, MatterFinanceSummaryDTO } from '@/modules/finance/finance-types';
 
 interface MatterDetailClientProps {
   ownerId: string;
@@ -54,6 +56,10 @@ interface MatterDetailClientProps {
   initialDeadlines?: DeadlineDTO[];
   initialDocuments?: LinkableDocumentSummary[];
   canReadDocuments?: boolean;
+  canReadFinance?: boolean;
+  canWriteFinance?: boolean;
+  initialFinanceSummary?: MatterFinanceSummaryDTO;
+  financeError?: string;
   documentsError?: string;
   tasksError?: string;
   deadlinesError?: string;
@@ -66,6 +72,10 @@ export function MatterDetailClient({
   initialDeadlines = [],
   initialDocuments,
   canReadDocuments = false,
+  canReadFinance = false,
+  canWriteFinance = false,
+  initialFinanceSummary,
+  financeError,
   documentsError,
   tasksError,
   deadlinesError,
@@ -82,16 +92,18 @@ export function MatterDetailClient({
     }
   }, [initialMatter]);
   const [activeTab, setActiveTab] = useState<
-    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary'
+    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'finance' | 'summary'
   >('parties');
-  const tabRefs = useRef<Partial<Record<'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary', HTMLButtonElement | null>>>({});
+  const tabRefs = useRef<Partial<Record<'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'finance' | 'summary', HTMLButtonElement | null>>>({});
 
   const handleMatterTabKeyDown = (
     e: React.KeyboardEvent<HTMLButtonElement>,
-    currentTab: 'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary'
+    currentTab: 'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'finance' | 'summary'
   ) => {
-    const tabs = ['parties', 'proceedings', 'authorizations', 'tasksDeadlines', 'summary'] as const;
-    const idx = tabs.indexOf(currentTab);
+    const tabs = canReadFinance
+      ? (['parties', 'proceedings', 'authorizations', 'tasksDeadlines', 'finance', 'summary'] as const)
+      : (['parties', 'proceedings', 'authorizations', 'tasksDeadlines', 'summary'] as const);
+    const idx = (tabs as readonly string[]).indexOf(currentTab);
     let nextIdx = -1;
     if (e.key === 'ArrowLeft') nextIdx = (idx + 1) % tabs.length;
     else if (e.key === 'ArrowRight') nextIdx = (idx - 1 + tabs.length) % tabs.length;
@@ -1830,6 +1842,30 @@ export function MatterDetailClient({
             المهام والمواعيد ({tasksError || deadlinesError ? '—' : initialTasks.length + initialDeadlines.length})
           </button>
 
+          {canReadFinance && (
+            <button
+              ref={(el) => {
+                tabRefs.current.finance = el;
+              }}
+              id="matter-tab-finance"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'finance'}
+              aria-controls={activeTab === 'finance' ? 'matter-tabpanel-finance' : undefined}
+              tabIndex={activeTab === 'finance' ? 0 : -1}
+              data-testid="tab-finance"
+              onClick={() => setActiveTab('finance')}
+              onKeyDown={(e) => handleMatterTabKeyDown(e, 'finance')}
+              className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+                activeTab === 'finance'
+                  ? 'border-[#14566B] text-[#14566B]'
+                  : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
+              }`}
+            >
+              الحسابات
+            </button>
+          )}
+
           <button
             ref={(el) => {
               tabRefs.current.summary = el;
@@ -2653,6 +2689,53 @@ export function MatterDetailClient({
         </div>
       )}
 
+      {/* Tab: Finance */}
+      {activeTab === 'finance' && canReadFinance && (
+        <div id="matter-tabpanel-finance" role="tabpanel" aria-labelledby="matter-tab-finance" className="space-y-4">
+          {financeError ? (
+            <div role="alert" className="p-4 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold">
+              {financeError}
+            </div>
+          ) : initialFinanceSummary ? (
+            <FinanceWorkspace
+              initialOverview={{
+                currency: 'EGP',
+                totals: {
+                  feesChargedPiastres: initialFinanceSummary.feesChargedPiastres,
+                  feesCollectedPiastres: initialFinanceSummary.feesCollectedPiastres,
+                  feesDuePiastres: initialFinanceSummary.feesDuePiastres,
+                  expensesDuePiastres: initialFinanceSummary.expensesDuePiastres,
+                  advanceAvailablePiastres: initialFinanceSummary.advanceAvailablePiastres,
+                },
+                selectableMatters: [
+                  {
+                    matterId: matter.id,
+                    fileCode: matter.fileCode,
+                    title: matter.title,
+                    status: matter.status,
+                    clients: initialFinanceSummary.clients,
+                  },
+                ],
+                agreements: initialFinanceSummary.agreements,
+                openCharges: initialFinanceSummary.charges.filter(
+                  (c) => BigInt(c.remainingPiastres) > 0n
+                ),
+                recentTransactions: initialFinanceSummary.transactions,
+                selectedMatterSummary: initialFinanceSummary,
+                page: 1,
+                limit: 20,
+                totalAgreements: initialFinanceSummary.agreements.length,
+              } satisfies FinanceOverviewDTO}
+              lockedMatterId={matter.id}
+              isReadOnly={isMatterArchived}
+              canWriteFinance={canWriteFinance}
+              headingLevel="h2"
+              onDataChanged={() => router.refresh()}
+            />
+          ) : null}
+        </div>
+      )}
+
       {/* Tab 5: Summary & Notes */}
       {activeTab === 'summary' && (
         <div id="matter-tabpanel-summary" aria-labelledby="matter-tab-summary" className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs" role="tabpanel">
@@ -2696,16 +2779,6 @@ export function MatterDetailClient({
           </div>
         </div>
       )}
-
-      {/* Future Modules Notice */}
-      <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
-        <span className="font-bold text-[#172A35] block">
-          الحسابات المالية
-        </span>
-        <p>
-          حسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها في المراحل اللاحقة.
-        </p>
-      </div>
 
       {/* Archive Matter Modal */}
       {showArchiveMatterModal &&

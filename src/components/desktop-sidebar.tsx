@@ -58,6 +58,7 @@ export function DesktopSidebar({ userRole }: { userRole?: UserRole }) {
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
+  const isFinanceActive = pathname === '/finance' || pathname.startsWith('/finance/');
   const isSecurityActive = pathname === '/settings/security';
   const isReferenceActive = pathname === '/settings/reference';
 
@@ -158,6 +159,16 @@ export function DesktopSidebar({ userRole }: { userRole?: UserRole }) {
               </Link>
 
               <Link
+                href="/finance"
+                data-testid="nav-link-finance"
+                aria-current={isFinanceActive ? 'page' : undefined}
+                className={navItemClass(isFinanceActive)}
+              >
+                <IconWallet className={`w-5 h-5 shrink-0 ${isFinanceActive ? 'text-[#14566B]' : 'text-[#4D606A]'}`} />
+                <span>الحسابات</span>
+              </Link>
+
+              <Link
                 href="/settings/security"
                 data-testid="nav-link-security"
                 aria-current={isSecurityActive ? 'page' : undefined}
@@ -187,28 +198,6 @@ export function DesktopSidebar({ userRole }: { userRole?: UserRole }) {
                 <span>إعدادات المراجع</span>
               </Link>
             </>
-          )}
-
-          {/* Future Modules Indicator Section */}
-          {!isMaintainer && (
-            <div className="pt-3 mt-2 border-t border-[#D5DFE3]">
-              <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-1.5">
-                الوحدات القادمة
-              </span>
-              <div className="space-y-1">
-                <div
-                  className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[44px]"
-                >
-                  <div className="flex items-center gap-2">
-                    <IconWallet className="w-4 h-4 text-[#4D606A]" />
-                    <span>حسابات الموكلين</span>
-                  </div>
-                  <span className="text-[11px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
-                    قريباً
-                  </span>
-                </div>
-              </div>
-            </div>
           )}
         </nav>
       </div>

@@ -1361,3 +1361,144 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
   }, 60000);
 });
 
+describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
+  it('upgrades cleanly from prior T12 schema, preserves synthetic records, and enforces T13 constraints & triggers', async () => {
+    const db = await createDedicatedTestDatabase();
+    try {
+      const migrationsRoot = path.resolve(process.cwd(), 'prisma/migrations');
+      const priorMigrations = fs
+        .readdirSync(migrationsRoot)
+        .filter((name) => {
+          const sqlPath = path.join(migrationsRoot, name, 'migration.sql');
+          return fs.existsSync(sqlPath) && name < '20261127000000_t13_balanced_ledger_fees_receipts';
+        })
+        .sort();
+
+      expect(priorMigrations.length).toBeGreaterThanOrEqual(20);
+      expect(priorMigrations[priorMigrations.length - 1]).toBe('20261126010000_t12_fk_index_hygiene');
+
+      for (const name of priorMigrations) {
+        const sql = fs.readFileSync(path.join(migrationsRoot, name, 'migration.sql'), 'utf-8');
+        await db.pool.query(sql);
+        const resolved = runPrismaCli(['migrate', 'resolve', '--applied', name], db.url);
+        expect(resolved.status, `${name}: ${resolved.stderr}`).toBe(0);
+      }
+
+      // Insert synthetic T12 records before T13 migration
+      const userId = crypto.randomUUID();
+      const partyId = crypto.randomUUID();
+      const matterId = crypto.randomUUID();
+      const mpId = crypto.randomUUID();
+
+      await db.pool.query(
+        `INSERT INTO public."user" (id, name, email, "emailVerified", role, "createdAt", "updatedAt")
+         VALUES ($1, 'محامي الترقية T13', $2, true, 'OWNER', NOW(), NOW())`,
+        [userId, `t13.upgrade.${userId.slice(0, 8)}@office.eg`]
+      );
+      await db.pool.query(
+        `INSERT INTO public."party" (id, kind, name, "nameNormalized", "createdAt", "updatedAt", "createdById", "updatedById")
+         VALUES ($1, 'PERSON', 'موكل الترقية التلقائية', 'موكل الترقيه التلقائيه', NOW(), NOW(), $2, $2)`,
+        [partyId, userId]
+      );
+      await db.pool.query(
+        `INSERT INTO public."matter" (id, "fileCode", title, "titleNormalized", kind, status, "createdAt", "updatedAt", "createdById", "updatedById")
+         VALUES ($1, '2026/9901', 'ملف ما قبل الترقية T13', 'ملف ما قبل الترقيه t13', 'LITIGATION', 'ACTIVE', NOW(), NOW(), $2, $2)`,
+        [matterId, userId]
+      );
+      await db.pool.query(
+        `INSERT INTO public."matter_party" (id, "matterId", "partyId", role, "isPrimaryContact", "billingEnabled", "createdAt", "updatedAt", "createdById", "updatedById")
+         VALUES ($1, $2, $3, 'CLIENT', true, true, NOW(), NOW(), $4, $4)`,
+        [mpId, matterId, partyId, userId]
+      );
+
+      // Run prisma migrate deploy to apply T13 migration
+      const deployRes = runPrismaCli(['migrate', 'deploy'], db.url);
+      expect(deployRes.status, deployRes.stderr).toBe(0);
+
+      // Verify T13 migration recorded
+      const migRow = await db.pool.query(
+        `SELECT migration_name, finished_at FROM _prisma_migrations WHERE migration_name = $1`,
+        ['20261127000000_t13_balanced_ledger_fees_receipts']
+      );
+      expect(migRow.rows).toHaveLength(1);
+      expect(migRow.rows[0].finished_at).not.toBeNull();
+
+      // Verify pre-existing synthetic T12 records preserved
+      const preservedMp = await db.pool.query(
+        `SELECT id, "matterId", "partyId", role::text FROM public."matter_party" WHERE id = $1`,
+        [mpId]
+      );
+      expect(preservedMp.rows).toEqual([
+        { id: mpId, matterId, partyId, role: 'CLIENT' },
+      ]);
+
+      // Verify T13 tables exist
+      const tables = await db.pool.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN (
+            'money_account', 'money_transaction', 'money_line',
+            'fee_agreement', 'fee_charge', 'money_allocation',
+            'receipt_sequence', 'receipt'
+          )
+        ORDER BY table_name;
+      `);
+      expect(tables.rows).toHaveLength(8);
+
+      // Verify partial unique indexes on money_account
+      const partialIdx = await db.pool.query(`
+        SELECT indexname FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname IN (
+            'money_account_cash_clearing_key',
+            'money_account_matter_client_key',
+            'money_account_opening_bridge_key'
+          )
+        ORDER BY indexname;
+      `);
+      expect(partialIdx.rows.map((r: { indexname: string }) => r.indexname)).toEqual([
+        'money_account_cash_clearing_key',
+        'money_account_matter_client_key',
+        'money_account_opening_bridge_key',
+      ]);
+
+      // Verify immutability & balanced constraint triggers are enabled
+      const triggers = await db.pool.query(`
+        SELECT tgname, tgenabled::text AS enabled
+        FROM pg_trigger
+        WHERE tgname IN (
+          'trg_money_transaction_immutable',
+          'trg_money_line_immutable',
+          'trg_money_allocation_immutable',
+          'trg_fee_charge_immutable',
+          'trg_receipt_immutable',
+          'trg_fee_agreement_approved_immutable',
+          'trg_money_transaction_balanced',
+          'trg_money_line_balanced'
+        )
+        ORDER BY tgname;
+      `);
+      expect(triggers.rows).toHaveLength(8);
+      for (const row of triggers.rows) {
+        expect(row.enabled).toBe('O');
+      }
+
+      // Verify CHECK and unique index enforcement
+      await expect(
+        db.pool.query(
+          `INSERT INTO public."money_account" (id, type, currency) VALUES ($1, 'CASH_CLEARING', 'EGP')`,
+          [crypto.randomUUID()]
+        )
+      ).rejects.toThrow(/money_account_dimensions_check/i);
+
+      await expect(
+        db.pool.query(
+          `INSERT INTO public."money_account" (id, type, currency) VALUES ($1, 'OPENING_BRIDGE', 'USD')`,
+          [crypto.randomUUID()]
+        )
+      ).rejects.toThrow(/money_account_currency_check/i);
+    } finally {
+      await db.drop().catch(() => {});
+    }
+  }, 90000);
+});
