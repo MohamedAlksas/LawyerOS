@@ -122,7 +122,6 @@ export async function cleanupPartyFixtures(
           'Document',
           'DOCUMENT',
           'DocumentVersion',
-          'DocumentStorage',
           'UploadAttempt',
           'BackupFilePin',
         ],

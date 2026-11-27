@@ -36,7 +36,7 @@ export default async function NewPartyPage() {
           <Link href="/parties" className="hover:text-[#14566B] hover:underline">
             دليل الأطراف
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <span className="text-[#172A35] font-medium">إضافة طرف جديد</span>
         </nav>
         <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">

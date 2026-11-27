@@ -659,6 +659,20 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     const listedPdf = listJson.data.documents.find((d) => d.id === pdfDoc.id)!;
     expect(Object.hasOwn(listedPdf, 'versions')).toBe(false);
 
+    // Out-of-range page clamps to totalPages and returns the last page's items
+    const outOfRangeList = await listDocuments(owner, { matterId: matterAId, page: 99, limit: 1 });
+    expect(outOfRangeList.totalPages).toBeGreaterThanOrEqual(2);
+    expect(outOfRangeList.page).toBe(outOfRangeList.totalPages);
+    expect(outOfRangeList.documents.length).toBeGreaterThan(0);
+    const explicitLastPage = await listDocuments(owner, {
+      matterId: matterAId,
+      page: outOfRangeList.totalPages,
+      limit: 1,
+    });
+    expect(outOfRangeList.documents.map((d) => d.id)).toEqual(
+      explicitLastPage.documents.map((d) => d.id)
+    );
+
     const docMetaRes = await getDocumentRoute(
       new Request(`${trustedOrigin}/api/documents/${pdfDoc.id}`, {
         headers: { cookie: ownerCookie },

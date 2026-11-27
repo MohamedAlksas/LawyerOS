@@ -35,6 +35,7 @@ export interface ErrorContainerProps {
   onRetry?: () => void;
   isRetrying?: boolean;
   className?: string;
+  headingLevel?: 'h1' | 'h2' | 'h3';
 }
 
 export function ErrorContainer({
@@ -43,7 +44,9 @@ export function ErrorContainer({
   onRetry,
   isRetrying = false,
   className = '',
+  headingLevel = 'h3',
 }: ErrorContainerProps) {
+  const HeadingTag = headingLevel;
   return (
     <div
       role="alert"
@@ -57,7 +60,7 @@ export function ErrorContainer({
         <IconWarning className="w-6 h-6" />
       </div>
       <div className="space-y-1">
-        <h3 className="text-base font-bold text-[#172A35]">{title}</h3>
+        <HeadingTag className="text-base font-bold text-[#172A35]">{title}</HeadingTag>
         <p className="text-sm text-[#4D606A] max-w-md mx-auto leading-relaxed">{message}</p>
       </div>
       {onRetry && (

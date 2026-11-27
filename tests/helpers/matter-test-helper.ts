@@ -148,7 +148,6 @@ export async function cleanupMatterFixtures(
           'Document',
           'DOCUMENT',
           'DocumentVersion',
-          'DocumentStorage',
           'UploadAttempt',
           'BackupFilePin',
         ],

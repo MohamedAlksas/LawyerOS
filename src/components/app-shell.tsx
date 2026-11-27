@@ -222,7 +222,7 @@ export function AppShell({ children }: AppShellProps) {
           {sessionStatus === 'expired' ? (
             <>
               <p role="alert">انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.</p>
-              <a className="font-semibold underline" href="/login" target="_blank" rel="noopener noreferrer">
+              <a className="font-semibold underline min-h-[44px] inline-flex items-center" href="/login" target="_blank" rel="noopener noreferrer">
                 فتح تسجيل الدخول في نافذة جديدة
               </a>
             </>

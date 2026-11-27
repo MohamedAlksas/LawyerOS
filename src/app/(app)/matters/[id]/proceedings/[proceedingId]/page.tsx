@@ -119,15 +119,15 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         <Link href="/" className="hover:text-[#172A35]">
           الرئيسية
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href="/matters" className="hover:text-[#172A35]">
           ملفات القضايا
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/matters/${matter.id}`} className="hover:text-[#172A35]">
           ملف <bdi dir="ltr">{matter.fileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="font-bold text-[#172A35]">تفاصيل القيد القضائي</span>
       </nav>
 
@@ -365,7 +365,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           initialHearings={hearings}
           courtName={proceeding.courtName}
           circuit={proceeding.circuit}
-          isReadOnly={isReadOnly}
+          isReadOnly={isReadOnly || !canWriteClientData}
         />
       </div>
 

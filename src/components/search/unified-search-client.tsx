@@ -244,7 +244,7 @@ export function UnifiedSearchClient({
       </div>
 
       {/* 2. Search & Filter Bar */}
-      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4">
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4 print:hidden">
         <form onSubmit={handleFormSubmit} className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 min-w-0">
             <input

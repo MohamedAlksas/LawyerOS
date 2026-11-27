@@ -342,7 +342,7 @@ export function MatterListClient({
       </div>
 
       {/* Search and Filters Bar */}
-      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4">
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-4 print:hidden">
         <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <input

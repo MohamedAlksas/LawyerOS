@@ -746,9 +746,9 @@ export function TasksView({
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pb-2 border-b border-[#E8EEF1]">
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
+                      <h3 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
                         {task.title}
-                      </h2>
+                      </h3>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-[#4D606A]">
                       {task.matterId && task.matterTitle ? (

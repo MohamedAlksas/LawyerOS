@@ -1905,7 +1905,7 @@ export async function updateProceeding(
       matterPartyId: p.matterPartyId,
       capacityText: p.capacityText ?? null,
       legalCapacity: p.legalCapacity ?? null,
-      notes: p.notes ?? null,
+      notes: p.notes,
     })) ?? null,
   };
 

@@ -97,11 +97,11 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
           <Link href="/parties" className="hover:text-[#14566B] hover:underline">
             دليل الأطراف
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <Link href={`/parties/${party.id}`} className="hover:text-[#14566B] hover:underline">
             {party.name}
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <span className="text-[#172A35] font-medium">تعديل البيانات</span>
         </nav>
         <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">

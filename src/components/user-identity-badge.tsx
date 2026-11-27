@@ -45,7 +45,6 @@ export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
     return (
       <div
         data-testid="user-identity-badge"
-        aria-label="حساب المستخدم"
         className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] text-[#172A35] min-h-[44px] max-w-[130px] sm:max-w-[210px] md:max-w-[270px] shrink"
       >
         {content}

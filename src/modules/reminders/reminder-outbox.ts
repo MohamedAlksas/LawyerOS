@@ -208,11 +208,76 @@ export async function enqueueMissingSourceReminderJobsBatch(
     set.add(delivery.ruleKey);
   }
 
+  const existingTaskJobsBySource = new Map<
+    string,
+    Array<{ sourceVersion: number; dueDate: string | null }>
+  >();
+  if (sourceType === 'Task' && eligibleSourceIds.length > 0) {
+    // Sequentially fetch existing Task JobRun rows on tx so non-date edits align with the active version
+    const existingTaskJobs = await tx.jobRun.findMany({
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType: 'Task',
+        sourceId: { in: eligibleSourceIds },
+      },
+      select: {
+        sourceId: true,
+        sourceVersion: true,
+        payload: true,
+      },
+    });
+    for (const job of existingTaskJobs) {
+      const payloadDueDate =
+        job.payload !== null &&
+        typeof job.payload === 'object' &&
+        !Array.isArray(job.payload) &&
+        typeof (job.payload as { dueDate?: unknown }).dueDate === 'string'
+          ? (job.payload as { dueDate: string }).dueDate
+          : null;
+      let list = existingTaskJobsBySource.get(job.sourceId);
+      if (!list) {
+        list = [];
+        existingTaskJobsBySource.set(job.sourceId, list);
+      }
+      list.push({ sourceVersion: job.sourceVersion, dueDate: payloadDueDate });
+    }
+  }
+
   for (const item of eligibleItems) {
     if (activeSourceIds.has(item.sourceId)) continue;
 
+    let effectiveSourceVersion = item.sourceVersion;
+    if (sourceType === 'Task') {
+      const taskJobs = existingTaskJobsBySource.get(item.sourceId);
+      if (taskJobs && taskJobs.length > 0) {
+        let overallMaxSourceVersion: number | undefined;
+        let matchingMaxSourceVersion: number | undefined;
+        for (const job of taskJobs) {
+          if (
+            overallMaxSourceVersion === undefined ||
+            job.sourceVersion > overallMaxSourceVersion
+          ) {
+            overallMaxSourceVersion = job.sourceVersion;
+          }
+          if (
+            job.dueDate === item.eventDateYmd &&
+            (matchingMaxSourceVersion === undefined ||
+              job.sourceVersion > matchingMaxSourceVersion)
+          ) {
+            matchingMaxSourceVersion = job.sourceVersion;
+          }
+        }
+        if (
+          matchingMaxSourceVersion !== undefined &&
+          matchingMaxSourceVersion === overallMaxSourceVersion
+        ) {
+          effectiveSourceVersion = matchingMaxSourceVersion;
+        }
+      }
+    }
+
     const deliveredKeys = deliveredRuleKeysBySourceVer.get(
-      `${item.sourceId}:${item.sourceVersion}`
+      `${item.sourceId}:${effectiveSourceVersion}`
     );
     const pendingRules = deliveredKeys
       ? rules.filter((rule) => !deliveredKeys.has(`offset_${rule.dayOffset}`))
@@ -235,19 +300,30 @@ export async function enqueueMissingSourceReminderJobsBatch(
       }
     }
 
+    const jobPayload: Prisma.InputJsonValue =
+      sourceType === 'Task' &&
+      item.payload !== null &&
+      typeof item.payload === 'object' &&
+      !Array.isArray(item.payload)
+        ? {
+            ...(item.payload as Prisma.InputJsonObject),
+            sourceVersion: effectiveSourceVersion,
+          }
+        : item.payload;
+
     await tx.jobRun.create({
       data: {
         jobType: 'REMINDER_DELIVERY',
         sourceType,
         sourceId: item.sourceId,
-        sourceVersion: item.sourceVersion,
+        sourceVersion: effectiveSourceVersion,
         payloadVersion: 1,
         scheduledAt: earliestInstant,
         availableAt: earliestInstant,
         maxAttempts: item.maxAttempts ?? 5,
         status: 'PENDING',
         deduplicationKey: item.deduplicationKey,
-        payload: item.payload,
+        payload: jobPayload,
       },
     });
     activeSourceIds.add(item.sourceId);

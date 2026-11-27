@@ -1,21 +1,35 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /**
  * Shared Playwright globalTeardown removing the E2E storage root directory
  * once after all projects (desktop-1440, tablet-768, mobile-390) complete.
  */
 export default async function playwrightStorageTeardown(): Promise<void> {
-  const candidates = new Set(
-    [
-      process.env.LAWOFFICE_E2E_STORAGE_ROOT,
-      process.env.T11_E2E_STORAGE_ROOT,
-      process.env.T12_E2E_STORAGE_ROOT,
-    ].filter((val): val is string => Boolean(val && val.trim()))
-  );
+  const storageRoot = process.env.LAWOFFICE_E2E_STORAGE_ROOT?.trim();
+  if (!storageRoot) {
+    return;
+  }
 
-  for (const storageRoot of candidates) {
-    if (fs.existsSync(storageRoot)) {
-      fs.rmSync(storageRoot, { recursive: true, force: true });
-    }
+  const tmpRoot = path.resolve(os.tmpdir());
+  const resolved = path.resolve(storageRoot);
+  const rel = path.relative(tmpRoot, resolved);
+  const isInsideTmp =
+    rel !== '' &&
+    rel !== '..' &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(rel);
+
+  const base = path.basename(resolved);
+  const hasAllowedPrefix =
+    base.startsWith('lawoffice-t11-e2e-') || base.startsWith('lawoffice-t12-e2e-');
+
+  if (!isInsideTmp || !hasAllowedPrefix) {
+    return;
+  }
+
+  if (fs.existsSync(resolved)) {
+    fs.rmSync(resolved, { recursive: true, force: true });
   }
 }

@@ -3684,33 +3684,6 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     expect(untrustedOriginGetRes.status).toBe(403);
 
     // 2. Duplicate and RFC-6265 quoted better-auth.two_factor cookies
-    const duplicateTfRes = await authRoutePOST(
-      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          origin,
-          cookie: 'better-auth.two_factor=tok-a; better-auth.two_factor=tok-b',
-        },
-        body: JSON.stringify({ code: '123456' }),
-      })
-    );
-    expect(duplicateTfRes.status).toBe(401);
-
-    const mixedTfRes = await authRoutePOST(
-      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          origin,
-          cookie: 'better-auth.two_factor=tok-a; __Secure-better-auth.two_factor=tok-b',
-        },
-        body: JSON.stringify({ code: '123456' }),
-      })
-    );
-    expect(mixedTfRes.status).toBe(401);
-
-    // Single RFC-6265 quoted better-auth.two_factor cookie completes TOTP cleanly
     const signInPassword = 'BrandNewPassword2026!#';
     const signInChallengeRes = await authRoutePOST(
       new NextRequest(`${origin}/api/auth/sign-in/email`, {
@@ -3726,10 +3699,57 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     const tfCookieEntry = rawSetCookies.find((c) => c.startsWith('better-auth.two_factor='));
     expect(tfCookieEntry).toBeDefined();
     const tfPair = tfCookieEntry!.split(';')[0]!;
+    const totpCode = await generateTotpCode(provisionedOwner.totpSecret);
+
+    const expectClearedTwoFactorCookies = (res: Response) => {
+      const setCookies = res.headers.getSetCookie?.() || [res.headers.get('set-cookie') || ''];
+      const hasCleared = (name: string) =>
+        setCookies.some(
+          (c) =>
+            c.startsWith(`${name}=`) &&
+            (c.toLowerCase().includes('max-age=0') ||
+              c.toLowerCase().includes('expires=thu, 01 jan 1970'))
+        );
+      expect(hasCleared('better-auth.two_factor')).toBe(true);
+      expect(hasCleared('__Secure-better-auth.two_factor')).toBe(true);
+    };
+
+    const duplicateTfRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: `${tfPair}; better-auth.two_factor=tok-b`,
+        },
+        body: JSON.stringify({ code: totpCode }),
+      })
+    );
+    expect(duplicateTfRes.status).toBe(401);
+    const duplicateTfBody = (await duplicateTfRes.json()) as { error?: string };
+    expect(duplicateTfBody.error).toContain('جلسة التحقق الثنائي غير صالحة أو متعارضة');
+    expectClearedTwoFactorCookies(duplicateTfRes);
+
+    const mixedTfRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: `${tfPair}; __Secure-better-auth.two_factor=tok-b`,
+        },
+        body: JSON.stringify({ code: totpCode }),
+      })
+    );
+    expect(mixedTfRes.status).toBe(401);
+    const mixedTfBody = (await mixedTfRes.json()) as { error?: string };
+    expect(mixedTfBody.error).toContain('جلسة التحقق الثنائي غير صالحة أو متعارضة');
+    expectClearedTwoFactorCookies(mixedTfRes);
+
+    // Single RFC-6265 quoted better-auth.two_factor cookie completes TOTP cleanly
     const eqIdx = tfPair.indexOf('=');
     const quotedTfCookie = `${tfPair.slice(0, eqIdx)}="${tfPair.slice(eqIdx + 1)}"`;
 
-    const totpCode = await generateTotpCode(provisionedOwner.totpSecret);
     const quotedVerifyRes = await authRoutePOST(
       new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
         method: 'POST',
@@ -3745,10 +3765,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     // 3. POST /api/auth/sign-out and /api/auth/sign-in/email bypass inactivity 401 eviction
     const inactiveSignOutToken = `inactive-signout-${crypto.randomUUID()}`;
+    const inactiveSignOutSessionId = `sess-so-${crypto.randomUUID()}`;
     const inactiveUpdatedAt = new Date(Date.now() - 40 * 60 * 1000);
     await prisma.session.create({
       data: {
-        id: `sess-so-${crypto.randomUUID()}`,
+        id: inactiveSignOutSessionId,
         userId: provisionedOwner.userId,
         token: inactiveSignOutToken,
         createdAt: new Date(Date.now() - 50 * 60 * 1000),
@@ -3764,7 +3785,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         headers: { origin, cookie: inactiveSignOutCookie },
       })
     );
-    expect(signOutRes.status).not.toBe(401);
+    expect(signOutRes.status).toBe(200);
+    const deletedSignOutSession = await prisma.session.findUnique({
+      where: { id: inactiveSignOutSessionId },
+    });
+    expect(deletedSignOutSession).toBeNull();
 
     const inactiveSignInToken = `inactive-signin-${crypto.randomUUID()}`;
     const inactiveSignInSess = await prisma.session.create({

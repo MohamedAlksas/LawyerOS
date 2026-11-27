@@ -82,7 +82,7 @@ export function MatterDetailClient({
     }
   }, [initialMatter]);
   const [activeTab, setActiveTab] = useState<
-    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary' | 'audit'
+    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary'
   >('parties');
   const tabRefs = useRef<Partial<Record<'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary', HTMLButtonElement | null>>>({});
 
@@ -2003,7 +2003,7 @@ export function MatterDetailClient({
                     value={partyNotes}
                     onChange={(e) => setPartyNotes(e.target.value)}
                     placeholder="مثال: يتابع الملف بالنيابة عن باقي الورثة"
-                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px]"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
                   />
                 </div>
 
@@ -2657,9 +2657,9 @@ export function MatterDetailClient({
       {activeTab === 'summary' && (
         <div id="matter-tabpanel-summary" aria-labelledby="matter-tab-summary" className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs" role="tabpanel">
           <div>
-            <h3 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
+            <h2 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
               ملخص وقائع وموضوع الملف
-            </h3>
+            </h2>
             {matter.summary ? (
               <p className="text-xs text-[#172A35] whitespace-pre-wrap leading-relaxed">
                 {matter.summary}
@@ -2670,9 +2670,9 @@ export function MatterDetailClient({
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
+            <h2 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
               ملاحظات وتوجيهات داخلية للمكتب
-            </h3>
+            </h2>
             {matter.notes ? (
               <p className="text-xs text-[#172A35] whitespace-pre-wrap leading-relaxed bg-[#F9FBFC] p-3 rounded border border-[#E8EEF1]">
                 {matter.notes}

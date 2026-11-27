@@ -21,7 +21,7 @@ export interface T04Owner {
   backupCodes: string[];
 }
 
-export const T04_LONG_OWNER_NAME =
+const T04_LONG_OWNER_NAME =
   'أحمد محمود عبد الرحمن السيد الشربيني عبد الله حسن محمد الطويل الشهير بأبو محمود';
 
 function createTotpSecret(): string {

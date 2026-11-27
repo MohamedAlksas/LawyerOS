@@ -186,7 +186,7 @@ export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean 
 }
 
 const LOOPBACK_BETTER_AUTH_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
-const TRUSTED_PROXY_PREFIX_RE = /^(0|[1-9]\d*)$/;
+const TRUSTED_PROXY_PREFIX_RE = /^[1-9]\d*$/;
 
 export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
   if (!entry) return false;
@@ -197,6 +197,9 @@ export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
 
   const ipPart = entry.slice(0, slashIdx);
   const prefixPart = entry.slice(slashIdx + 1);
+  if (/^::ffff:/i.test(ipPart)) {
+    return false;
+  }
   const ipVersion = isIP(ipPart);
   if (ipVersion === 0 || !TRUSTED_PROXY_PREFIX_RE.test(prefixPart)) {
     return false;
@@ -204,7 +207,7 @@ export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
 
   const prefix = Number(prefixPart);
   const maxPrefix = ipVersion === 4 ? 32 : 128;
-  return prefix >= 0 && prefix <= maxPrefix;
+  return prefix >= 1 && prefix <= maxPrefix;
 }
 
 function parseTrustedProxyEntries(raw: string): { entries: string[]; hasInvalid: boolean } {

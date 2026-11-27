@@ -278,7 +278,7 @@ export function ReferenceSettingsClient({
 
   const handleSaveOffice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSavingOffice || isReconcilingOffice) return;
+    if (!canWriteSettings || isSavingOffice || isReconcilingOffice) return;
 
     const requestId = ++officeSaveRequestIdRef.current;
     setIsSavingOffice(true);
@@ -1046,7 +1046,7 @@ export function ReferenceSettingsClient({
             onChange={() => setOfficeDirty(true)}
             className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4"
           >
-            <fieldset disabled={officePending || isSavingOffice || isReconcilingOffice || !!reconcilePreview} className="space-y-4 border-0 p-0 m-0 min-w-0">
+            <fieldset disabled={officePending || isSavingOffice || isReconcilingOffice || !!reconcilePreview || !canWriteSettings} className="space-y-4 border-0 p-0 m-0 min-w-0">
               <h2 className="text-base font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
                 الملف التعريفي للمكتب
               </h2>

@@ -247,7 +247,7 @@ export function AgendaView({
           <div className="flex flex-wrap gap-2 print:hidden">
             <Link
               href={`/hearings/${h.id}/result`}
-              className="text-sm font-bold text-[#14566B] hover:underline"
+              className="text-sm font-bold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
             >
               تسجيل النتيجة ←
             </Link>
@@ -298,7 +298,7 @@ export function AgendaView({
           </div>
 
           <div className="print:hidden">
-            <Link href="/deadlines" className="text-sm font-bold text-[#14566B] hover:underline">
+            <Link href="/deadlines" className="text-sm font-bold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center">
               فتح شاشة المواعيد القانونية ←
             </Link>
           </div>
@@ -1112,7 +1112,7 @@ function AgendaResultsSection({
                       type="button"
                       aria-label={formatCairoDateArabic(dateStr)}
                       onClick={() => onSelectDay(dateStr)}
-                      className={`text-sm font-bold px-2 py-1 rounded-[6px] min-h-[44px] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+                      className={`text-sm font-bold px-2 py-1 rounded-[6px] min-h-[44px] min-w-[44px] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                         isToday ? 'bg-[#14566B] text-white hover:bg-[#0F4354]' : 'text-[#172A35]'
                       }`}
                     >

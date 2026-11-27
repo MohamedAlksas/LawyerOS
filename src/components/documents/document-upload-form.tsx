@@ -16,6 +16,7 @@ import { generateClientRequestId } from '@/components/matters/matter-ui-types';
 import { GuardedLink as Link, useCanLeavePage, useLeaveGuard } from '@/components/navigation-guard';
 import {
   IconCheck,
+  IconClock,
   IconDocument,
   IconRefresh,
   IconUpload,
@@ -903,6 +904,8 @@ export function DocumentUploadForm({
                               >
                                 {item.createdDocument.currentVersion.scanStatus === 'CLEAN' ? (
                                   <IconCheck className="w-3.5 h-3.5" />
+                                ) : item.createdDocument.currentVersion.scanStatus === 'PENDING' ? (
+                                  <IconClock className="w-3.5 h-3.5" />
                                 ) : (
                                   <IconWarning className="w-3.5 h-3.5" />
                                 )}

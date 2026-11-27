@@ -10,7 +10,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { AuthorizationError } from '@/modules/identity/types';
-import { addProceeding, archiveMatter, openMatter } from '@/modules/matters/matter-service';
+import { addProceeding, archiveMatter, openMatter, reopenMatter } from '@/modules/matters/matter-service';
 import {
   cancelDeadline,
   cancelHearing,
@@ -1546,51 +1546,31 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
       idempotencyKey: crypto.randomUUID(),
     });
 
-    // Clear initial PENDING jobs on active fixtures and insert historical SUCCEEDED/CANCELLED/FAILED rows
-    await prisma.jobRun.deleteMany({
-      where: { sourceId: { in: [hActive.id, dConfirmed.id, tActive.id, archivedTask.id] } },
+    // Update initial canonical-key JobRun rows in place so their original canonical keys remain in job_run
+    const histTime = new Date('2028-04-01T07:00:00.000Z');
+    const initialHJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `hearing_reminder_${hActive.id}` },
+    });
+    await prisma.jobRun.update({
+      where: { id: initialHJob.id },
+      data: { status: 'SUCCEEDED', completedAt: histTime },
     });
 
-    const histTime = new Date('2028-04-01T07:00:00.000Z');
-    await prisma.jobRun.createMany({
-      data: [
-        {
-          jobType: 'REMINDER_DELIVERY',
-          sourceType: 'Hearing',
-          sourceId: hActive.id,
-          sourceVersion: hActive.version,
-          scheduledAt: histTime,
-          availableAt: histTime,
-          status: 'SUCCEEDED',
-          completedAt: histTime,
-          deduplicationKey: `hist_succ_h_${hActive.id}`,
-          payload: { hearingId: hActive.id },
-        },
-        {
-          jobType: 'REMINDER_DELIVERY',
-          sourceType: 'Deadline',
-          sourceId: dConfirmed.id,
-          sourceVersion: dConfirmed.version,
-          scheduledAt: histTime,
-          availableAt: histTime,
-          status: 'CANCELLED',
-          completedAt: histTime,
-          deduplicationKey: `hist_canc_d_${dConfirmed.id}`,
-          payload: { deadlineId: dConfirmed.id },
-        },
-        {
-          jobType: 'REMINDER_DELIVERY',
-          sourceType: 'Task',
-          sourceId: tActive.id,
-          sourceVersion: tActive.version,
-          scheduledAt: histTime,
-          availableAt: histTime,
-          status: 'FAILED',
-          completedAt: histTime,
-          deduplicationKey: `hist_fail_t_${tActive.id}`,
-          payload: { taskId: tActive.id },
-        },
-      ],
+    const initialDJob = await prisma.jobRun.findFirstOrThrow({
+      where: { sourceType: 'Deadline', sourceId: dConfirmed.id, status: 'PENDING' },
+    });
+    expect(initialDJob.deduplicationKey).toMatch(/^deadline_reminder_/);
+    await prisma.jobRun.update({
+      where: { id: initialDJob.id },
+      data: { status: 'CANCELLED', completedAt: histTime },
+    });
+
+    const initialTJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `task_reminder_${tActive.id}_v${tActive.version}` },
+    });
+    await prisma.jobRun.update({
+      where: { id: initialTJob.id },
+      data: { status: 'FAILED', completedAt: histTime },
     });
 
     const initialRules = await listReminderRules(owner);
@@ -1622,22 +1602,34 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
         where: { sourceType: 'Hearing', sourceId: hActive.id, status: 'PENDING' },
       });
       expect(hJobs).toHaveLength(1);
+      expect(hJobs[0]!.deduplicationKey).toMatch(/^reminder_reenable_/);
+      expect(
+        (await prisma.jobRun.findUniqueOrThrow({ where: { id: initialHJob.id } })).status
+      ).toBe('SUCCEEDED');
 
       const dJobs = await prisma.jobRun.findMany({
         where: { sourceType: 'Deadline', sourceId: dConfirmed.id, status: 'PENDING' },
       });
       expect(dJobs).toHaveLength(1);
+      expect(dJobs[0]!.deduplicationKey).toMatch(/^reminder_reenable_/);
       expect(dJobs[0]!.payload).toMatchObject({
         deadlineId: dConfirmed.id,
         version: dConfirmed.version,
         sourceVersion: dConfirmed.version,
         recipientUserId: owner.id,
       });
+      expect(
+        (await prisma.jobRun.findUniqueOrThrow({ where: { id: initialDJob.id } })).status
+      ).toBe('CANCELLED');
 
       const tJobs = await prisma.jobRun.findMany({
         where: { sourceType: 'Task', sourceId: tActive.id, status: 'PENDING' },
       });
       expect(tJobs).toHaveLength(1);
+      expect(tJobs[0]!.deduplicationKey).toMatch(/^reminder_reenable_/);
+      expect(
+        (await prisma.jobRun.findUniqueOrThrow({ where: { id: initialTJob.id } })).status
+      ).toBe('FAILED');
 
       const archivedTaskJobs = await prisma.jobRun.count({
         where: { sourceType: 'Task', sourceId: archivedTask.id, status: 'PENDING' },
@@ -1661,6 +1653,121 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
         where: { sourceId: archivedTask.id },
       });
     }
+  });
+
+  it('P2-1: prevents duplicate Task ReminderDelivery after non-date updateTask followed by reopenMatter and rule re-enable', async () => {
+    const p21MatterRes = await openMatter(owner, {
+      title: `ملف اختبار عدم تكرار تذكير المهمة ${runSuffix}`,
+      kind: 'LITIGATION',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(p21MatterRes.matter.id);
+
+    const taskV1 = await createTask(owner, {
+      title: 'مهمة اختبار P2-1 الأولية',
+      matterId: p21MatterRes.matter.id,
+      dueDate: '2027-09-15',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(taskV1.id);
+    expect(taskV1.version).toBe(1);
+
+    const tDue = new Date('2027-09-14T06:05:00.000Z');
+    await runReminderWorkerTick({
+      now: tDue,
+      workerId: 'worker-p21-initial',
+    });
+
+    const initialDeliveries = await prisma.reminderDelivery.findMany({
+      where: {
+        sourceType: 'Task',
+        sourceId: taskV1.id,
+        ruleKey: 'offset_1',
+        status: 'SENT',
+      },
+    });
+    expect(initialDeliveries).toHaveLength(1);
+    expect(initialDeliveries[0]!.sourceVersion).toBe(1);
+
+    const initialJob = await prisma.jobRun.findUniqueOrThrow({
+      where: { deduplicationKey: `task_reminder_${taskV1.id}_v1` },
+    });
+    expect(initialJob.status).toBe('SUCCEEDED');
+
+    const taskV2 = await updateTask(owner, {
+      taskId: taskV1.id,
+      expectedVersion: taskV1.version,
+      status: 'IN_PROGRESS',
+      title: 'مهمة اختبار P2-1 بعد تعديل غير متعلق بالتاريخ',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(taskV2.version).toBe(2);
+
+    const archived = await archiveMatter(owner, {
+      matterId: p21MatterRes.matter.id,
+      expectedVersion: p21MatterRes.matter.version,
+      reason: 'أرشفة مؤقتة لاختبار إعادة فتح الملف P2-1',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    await reopenMatter(owner, {
+      matterId: p21MatterRes.matter.id,
+      expectedVersion: archived.version,
+      reason: 'إعادة فتح الملف للتحقق من عدم تكرار التذكير',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const taskRule = (await listReminderRules(owner)).find(
+      (r) => r.eventType === 'TASK' && r.enabled
+    )!;
+    let disabledTaskRule = false;
+    try {
+      const disabled = await updateReminderRule(owner, {
+        ruleId: taskRule.id,
+        expectedVersion: taskRule.version,
+        enabled: false,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      disabledTaskRule = true;
+      await updateReminderRule(owner, {
+        ruleId: disabled.id,
+        expectedVersion: disabled.version,
+        enabled: true,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      disabledTaskRule = false;
+    } finally {
+      if (disabledTaskRule) {
+        const latest = (await listReminderRules(owner)).find((r) => r.id === taskRule.id);
+        if (latest && !latest.enabled) {
+          await updateReminderRule(owner, {
+            ruleId: latest.id,
+            expectedVersion: latest.version,
+            enabled: true,
+            idempotencyKey: crypto.randomUUID(),
+          });
+        }
+      }
+    }
+
+    await runReminderWorkerTick({
+      now: new Date('2027-09-14T06:10:00.000Z'),
+      workerId: 'worker-p21-replay',
+    });
+
+    const finalOffsetDeliveries = await prisma.reminderDelivery.findMany({
+      where: {
+        sourceType: 'Task',
+        sourceId: taskV1.id,
+        ruleKey: 'offset_1',
+        status: 'SENT',
+      },
+    });
+    expect(finalOffsetDeliveries).toHaveLength(1);
+    const allDeliveries = await prisma.reminderDelivery.findMany({
+      where: { sourceType: 'Task', sourceId: taskV1.id },
+    });
+    expect(allDeliveries).toHaveLength(1);
   });
 
   it('Migration verification: fresh deploy, SQL CHECK constraints, and populated T09-to-T10 upgrade with available_at backfill', async () => {

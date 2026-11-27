@@ -24,7 +24,7 @@ export async function verifyActionSecurity(
     const secFetchSite = reqHeaders.get('sec-fetch-site');
     const host = reqHeaders.get('host');
 
-    if (origin && !trustedOrigins.has(origin)) {
+    if (origin !== null && !trustedOrigins.has(origin)) {
       throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
     }
 

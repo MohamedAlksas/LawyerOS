@@ -142,7 +142,7 @@ export function PartyListClient({
       </div>
 
       {/* 2. Filters & Search Section */}
-      <div className="bg-white p-4 rounded-[6px] border border-[#D5DFE3] space-y-4 shadow-xs">
+      <div className="bg-white p-4 rounded-[6px] border border-[#D5DFE3] space-y-4 shadow-xs print:hidden">
         <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative">
             <label htmlFor="party-search-input" className="sr-only">

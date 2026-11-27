@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, Suspense } from 'react';
+import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { twoFactor } from '@/lib/auth-client';
 import { parseAndValidateOtp } from '@/modules/identity/otp-input';
@@ -32,6 +32,11 @@ function VerifyForm() {
   const [isLoading, setIsLoading] = useState(false);
   const totpTabRef = useRef<HTMLButtonElement>(null);
   const backupTabRef = useRef<HTMLButtonElement>(null);
+  const totpInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    totpInputRef.current?.focus();
+  }, []);
 
   const handleMethodTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
     let nextMethod: 'totp' | 'backup' | null = null;
@@ -175,12 +180,12 @@ function VerifyForm() {
                 رمز التحقق المكوّن من 6 أرقام
               </label>
               <input
+                ref={totpInputRef}
                 id="totpCode"
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 required
-                autoFocus
                 dir="ltr"
                 value={totpCode}
                 onChange={(e) => {
@@ -208,7 +213,6 @@ function VerifyForm() {
                 id="backupCode"
                 type="text"
                 required
-                autoFocus
                 dir="ltr"
                 value={backupCode}
                 onChange={(e) => {

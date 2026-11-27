@@ -114,11 +114,11 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
         <Link href="/matters" className="hover:text-[#14566B] hover:underline">
           القضايا
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline font-mono">
           <bdi dir="ltr">{matter.fileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link
           href={`/matters/${matter.id}/proceedings/${proceeding.id}`}
           className="hover:text-[#14566B] hover:underline"
@@ -131,7 +131,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             'قيد قضائي (مسودة)'
           )}
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="text-[#172A35] font-semibold">تفاصيل الجلسة</span>
       </nav>
 

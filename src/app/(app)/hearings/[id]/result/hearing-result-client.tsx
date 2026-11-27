@@ -425,18 +425,18 @@ export function HearingResultClient({
         <Link href={`/matters/${matterId}`} className="hover:text-[#14566B] hover:underline font-mono">
           <bdi dir="ltr">{matterFileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link
           href={`/matters/${matterId}/proceedings/${proceedingId}`}
           className="hover:text-[#14566B] hover:underline"
         >
           القيد القضائي
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/hearings/${hearingId}`} className="hover:text-[#14566B] hover:underline">
           جلسة <bdi dir="ltr">{hearingDate}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="text-[#172A35] font-semibold">تسجيل النتيجة</span>
       </nav>
 
@@ -940,10 +940,10 @@ export function HearingResultClient({
             </div>
           )}
           {/* Next Date Radio Group */}
-          <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
-            <span className="block font-bold text-[#172A35]">
+          <fieldset className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs min-w-0">
+            <legend className="font-bold text-[#172A35] px-1">
               هل تقرر تأجيل الجلسة لموعد قادم؟ <span className="text-red-600">*</span>
-            </span>
+            </legend>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <label
                 className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
@@ -1028,7 +1028,7 @@ export function HearingResultClient({
                 </label>
               </div>
             )}
-          </div>
+          </fieldset>
 
           {/* Follow-up Tasks Section */}
           <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">

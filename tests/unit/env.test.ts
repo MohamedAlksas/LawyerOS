@@ -690,7 +690,15 @@ describe('Environment validation (src/lib/env.ts)', () => {
       });
       expect(validated.TRUSTED_PROXY_IPS).toBe(validList);
 
-      for (const invalidValue of ['127.0.0.1,,', 'nginx', '10.0.0.1/33', '::1/129']) {
+      for (const invalidValue of [
+        '127.0.0.1,,',
+        'nginx',
+        '10.0.0.1/33',
+        '::1/129',
+        '::ffff:10.0.0.0/104',
+        '0.0.0.0/0',
+        '::/0',
+      ]) {
         expect(() => parseTrustedProxyIps(invalidValue)).toThrowError(EnvironmentValidationError);
         expect(() =>
           validateEnv({

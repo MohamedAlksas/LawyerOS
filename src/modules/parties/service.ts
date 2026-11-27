@@ -592,10 +592,9 @@ export async function searchParties(
   const prisma = options.prismaOverride ?? getPrismaClient();
 
   const rawPage = params.page ?? 1;
-  const page = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const requestedPage = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
   const rawLimit = params.limit ?? 20;
   const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.trunc(rawLimit))) : 20;
-  const skip = (page - 1) * limit;
 
   const where: Prisma.PartyWhereInput = {};
   if (!params.includeArchived) {
@@ -625,33 +624,35 @@ export async function searchParties(
       return {
         parties: [],
         totalCount: 0,
-        page,
+        page: 1,
         totalPages: 1,
       };
     }
   }
 
-  const [totalCount, records] = await Promise.all([
-    prisma.party.count({ where }),
-    prisma.party.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      select: {
-        id: true,
-        kind: true,
-        name: true,
-        primaryPhone: true,
-        createdAt: true,
-        identities: {
-          take: 1,
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select: { identificationType: true, ciphertext: true, lastFour: true },
-        },
+  const totalCount = await prisma.party.count({ where });
+  const totalPages = Math.max(1, Math.min(MAX_SEARCH_PAGE, Math.ceil(totalCount / limit)));
+  const page = Math.min(requestedPage, totalPages);
+  const skip = (page - 1) * limit;
+
+  const records = await prisma.party.findMany({
+    where,
+    skip,
+    take: limit,
+    orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      kind: true,
+      name: true,
+      primaryPhone: true,
+      createdAt: true,
+      identities: {
+        take: 1,
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { identificationType: true, ciphertext: true, lastFour: true },
       },
-    }),
-  ]);
+    },
+  });
 
   return {
     parties: records.map(({ id, kind, name, primaryPhone, createdAt, identities: [identity] }) => ({
@@ -666,7 +667,7 @@ export async function searchParties(
     })),
     totalCount,
     page,
-    totalPages: Math.ceil(totalCount / limit) || 1,
+    totalPages,
   };
 }
 
@@ -897,7 +898,11 @@ export async function savePowerOfAttorney(
         if (input.documentId) {
           const doc = await tx.document.findUnique({
             where: { id: input.documentId },
-            select: { matterId: true, proceedingId: true },
+            select: {
+              matterId: true,
+              proceedingId: true,
+              hearing: { select: { proceedingId: true } },
+            },
           });
           if (doc?.matterId) {
             await tx.$queryRaw`
@@ -907,11 +912,12 @@ export async function savePowerOfAttorney(
               FOR UPDATE
             `;
           }
-          if (doc?.proceedingId) {
+          const effectiveProceedingId = doc?.proceedingId ?? doc?.hearing?.proceedingId;
+          if (effectiveProceedingId) {
             await tx.$queryRaw`
               SELECT "id"
               FROM "proceeding"
-              WHERE "id" = ${doc.proceedingId}
+              WHERE "id" = ${effectiveProceedingId}
               FOR UPDATE
             `;
           }

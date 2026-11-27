@@ -1956,7 +1956,7 @@ export async function listDocuments(
     return {
       documents: [],
       total: 0,
-      page: parsed.page,
+      page: 1,
       totalPages: 1,
       limit: parsed.limit,
     };
@@ -2007,23 +2007,23 @@ export async function listDocuments(
     ...(parsed.documentType ? { documentType: parsed.documentType } : {}),
   };
 
-  const skip = (parsed.page - 1) * parsed.limit;
-  const [total, rows] = await Promise.all([
-    db.document.count({ where }),
-    db.document.findMany({
-      where,
-      include: documentListInclude,
-      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
-      skip,
-      take: parsed.limit,
-    }),
-  ]);
+  const total = await db.document.count({ where });
+  const totalPages = Math.max(1, Math.ceil(total / parsed.limit));
+  const page = Math.min(parsed.page, totalPages);
+  const skip = (page - 1) * parsed.limit;
+  const rows = await db.document.findMany({
+    where,
+    include: documentListInclude,
+    orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+    skip,
+    take: parsed.limit,
+  });
 
   return {
     documents: rows.map((row) => mapDocumentToDTO(row, false)),
     total,
-    page: parsed.page,
-    totalPages: Math.max(1, Math.ceil(total / parsed.limit)),
+    page,
+    totalPages,
     limit: parsed.limit,
   };
 }

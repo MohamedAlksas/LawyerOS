@@ -1446,6 +1446,8 @@ export function DocumentDetailView({
                         >
                           {ver.scanStatus === 'CLEAN' ? (
                             <IconCheck className="w-3.5 h-3.5 shrink-0" />
+                          ) : ver.scanStatus === 'PENDING' ? (
+                            <IconClock className="w-3.5 h-3.5 shrink-0" />
                           ) : (
                             <IconWarning className="w-3.5 h-3.5 shrink-0" />
                           )}

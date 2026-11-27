@@ -10,6 +10,10 @@ import {
 } from './document-types';
 
 const SAFE_KEY_SEGMENT_RE = /^[a-zA-Z0-9._-]+$/;
+const READ_OPEN_FLAGS =
+  process.platform !== 'win32' && typeof fs.constants.O_NOFOLLOW === 'number'
+    ? fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    : fs.constants.O_RDONLY;
 
 function getRuntimeCwd(): string {
   // Indirect lookup avoids Turbopack static-tracer whole-project bundling warnings on process.cwd()
@@ -381,7 +385,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const targetPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
       let handle: fs.promises.FileHandle;
       try {
-        handle = await fs.promises.open(targetPath, 'r');
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
@@ -463,7 +467,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
       let handle: fs.promises.FileHandle;
       try {
-        handle = await fs.promises.open(targetPath, 'r');
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
@@ -488,7 +492,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
       let handle: fs.promises.FileHandle;
       try {
-        handle = await fs.promises.open(targetPath, 'r');
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
@@ -584,27 +588,41 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
 
     async computeSha256(zone: 'quarantine' | 'ready', key: string): Promise<string | null> {
       const targetPath = resolveSafeKeyPath(zoneBase(zone), key);
+      let handle: fs.promises.FileHandle;
       try {
-        const st = await fs.promises.lstat(targetPath);
-        if (!st.isFile()) return null;
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+          return null;
+        }
         throw err;
       }
 
-      return await new Promise<string | null>((resolve, reject) => {
-        const hash = crypto.createHash('sha256');
-        const stream = fs.createReadStream(targetPath);
-        stream.on('data', (chunk) => hash.update(chunk));
-        stream.on('error', (err) => {
-          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-            resolve(null);
-            return;
-          }
-          reject(err);
+      try {
+        const st = await handle.stat();
+        if (!st.isFile()) {
+          return null;
+        }
+
+        return await new Promise<string | null>((resolve, reject) => {
+          const hash = crypto.createHash('sha256');
+          const stream = handle.createReadStream({ autoClose: true });
+          stream.on('data', (chunk) => hash.update(chunk));
+          stream.on('error', (err) => {
+            handle.close().catch(() => {});
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+              resolve(null);
+              return;
+            }
+            reject(err);
+          });
+          stream.on('end', () => resolve(hash.digest('hex')));
         });
-        stream.on('end', () => resolve(hash.digest('hex')));
-      });
+      } finally {
+        await handle.close().catch(() => {});
+      }
     },
   };
 }
