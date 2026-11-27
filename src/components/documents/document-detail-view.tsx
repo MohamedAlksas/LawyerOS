@@ -986,6 +986,8 @@ export function DocumentDetailView({
             >
               {currentVersion?.scanStatus === 'CLEAN' ? (
                 <IconCheck className="w-4 h-4 shrink-0" />
+              ) : currentVersion?.scanStatus === 'PENDING' ? (
+                <IconClock className="w-4 h-4 shrink-0" />
               ) : (
                 <IconWarning className="w-4 h-4 shrink-0" />
               )}
@@ -1246,9 +1248,11 @@ export function DocumentDetailView({
                     )}
                     <span>{previewVersion.scanStatusLabel}</span>
                   </span>
-                  <span className="text-xs text-[#7A4A00]">
-                    (<bdi dir="ltr">ADR 0003</bdi>: {UNSCANNED_POLICY_NOTICE_AR})
-                  </span>
+                  {previewVersion.scanStatus === 'NOT_SCANNED_POLICY' && (
+                    <span className="text-xs text-[#7A4A00]">
+                      ({UNSCANNED_POLICY_NOTICE_AR})
+                    </span>
+                  )}
                 </div>
               </div>
             )}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useLayoutEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { addCommunicationNoteAction } from '@/modules/parties/actions';
@@ -32,6 +33,7 @@ export function CommunicationNotesSection({
   initialNotes,
   readOnly = false,
 }: CommunicationNotesSectionProps) {
+  const router = useRouter();
   const draft = useFormDraft<PendingNote>(`${ownerId}:communication`, `/parties/${partyId}`);
   const editable = useFormDraft<PendingNote>(`${ownerId}:communication-editable`, `/parties/${partyId}`);
   const restored = readOnly ? undefined : draft.restored ?? editable.restored;
@@ -141,6 +143,7 @@ export function CommunicationNotesSection({
       setIsFormOpen(false);
       setPending(null);
       draft.clear();
+      router.refresh();
     } catch {
       if (draft.isCurrent()) setError('تعذر تأكيد الحفظ. يمكنك إعادة محاولة الحفظ الأصلي.');
     } finally {

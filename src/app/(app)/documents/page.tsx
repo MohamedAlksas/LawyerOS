@@ -1,4 +1,5 @@
 import React from 'react';
+import { redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -26,7 +27,7 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
   const params = searchParams ? await searchParams : {};
   let actor;
   try {
-    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'READ_DOCUMENTS' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       await redirectOnAuthError(error, '/documents');
@@ -46,25 +47,12 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
     throw error;
   }
 
-  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
-  if (!canReadDocuments) {
-    return (
-      <div
-        role="alert"
-        data-testid="documents-forbidden"
-        className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
-      >
-        <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
-        <p>لا تمتلك الصلاحيات الكافية لاستعراض أرشيف المستندات.</p>
-      </div>
-    );
-  }
+  const canReadClientData = authorize(actor, 'READ_CLIENT_DATA');
   const canWriteDocuments = authorize(actor, 'WRITE_DOCUMENTS');
 
   const rawMatterId = readParam(params, 'matterId')?.trim();
   const rawPartyId = readParam(params, 'partyId')?.trim();
   const rawDocType = readParam(params, 'documentType')?.trim();
-  const rawQ = readParam(params, 'q')?.trim();
 
   const matterId = rawMatterId && UUID_REGEX.test(rawMatterId) ? rawMatterId : undefined;
   // A document is linked to a matter or a party, never both; the matter filter wins.
@@ -73,11 +61,20 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
     rawDocType && (Object.values(DocumentType) as string[]).includes(rawDocType)
       ? (rawDocType as DocumentType)
       : undefined;
-  const q = rawQ ? rawQ.slice(0, 200) : undefined;
 
   const rawPage = Number(readParam(params, 'page')?.trim());
   const requestedPage =
     Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, 1000) : 1;
+
+  if (params.q !== undefined) {
+    const sp = new URLSearchParams();
+    if (documentType) sp.set('documentType', documentType);
+    if (matterId) sp.set('matterId', matterId);
+    if (partyId) sp.set('partyId', partyId);
+    if (requestedPage > 1) sp.set('page', String(requestedPage));
+    const qs = sp.toString();
+    redirect(qs ? `/documents?${qs}` : '/documents');
+  }
 
   let initialDocuments: DocumentDTO[] = [];
   let initialTotal = 0;
@@ -93,12 +90,11 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
         ...(matterId ? { matterId } : {}),
         ...(partyId ? { partyId } : {}),
         ...(documentType ? { documentType } : {}),
-        ...(q ? { q } : {}),
         page: requestedPage,
         limit: 50,
       }),
-      listSelectableMatters(actor),
-      searchParties(actor, { limit: 100 }),
+      canReadClientData ? listSelectableMatters(actor) : Promise.resolve([]),
+      canReadClientData ? searchParties(actor, { limit: 100 }) : Promise.resolve({ parties: [] }),
     ]);
 
     initialDocuments = docsResult.documents;
@@ -144,7 +140,6 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
           matterId,
           partyId,
           documentType,
-          q,
         }}
         initialError={initialError}
       />

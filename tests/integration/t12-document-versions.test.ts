@@ -14,6 +14,7 @@ import {
   ADR_0003_POLICY_VERSION,
   ConcurrencyConflictError,
   CrossMatterLinkForbiddenError,
+  DocumentNotFoundError,
   DocumentNotReadyError,
   DocumentScanPolicyUnavailableError,
   DocumentValidationError,
@@ -72,13 +73,10 @@ import {
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
 import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 
 function sha256Hex(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
-}
-
-function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
-  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function signSessionTokenCookie(token: string, secret: string): string {
@@ -344,14 +342,14 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const hA1 = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: formatOffsetYmd(30),
+      hearingDate: formatCairoOffsetYmd(30),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingA1Id = hA1.id;
 
     const hA2 = await scheduleHearing(owner, {
       proceedingId: proceedingA2Id,
-      hearingDate: formatOffsetYmd(45),
+      hearingDate: formatCairoOffsetYmd(45),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingA2Id = hA2.id;
@@ -378,7 +376,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const hB = await scheduleHearing(owner, {
       proceedingId: proceedingBId,
-      hearingDate: formatOffsetYmd(60),
+      hearingDate: formatCairoOffsetYmd(60),
       idempotencyKey: crypto.randomUUID(),
     });
     hearingBId = hB.id;
@@ -561,7 +559,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       await db.pool.query(
         `INSERT INTO "hearing" ("id", "proceeding_id", "hearing_date", "status", "created_by_id", "updated_by_id", "updated_at")
          VALUES ($1, $2, $3::date, 'COMPLETED', $4, $4, NOW())`,
-        [seedHearingId, seedProcId, formatOffsetYmd(20), seedUserId]
+        [seedHearingId, seedProcId, formatCairoOffsetYmd(20), seedUserId]
       );
       await db.pool.query(
         `INSERT INTO "power_of_attorney" ("id", "partyId", "poaNumberText", "poaYearLabel", "notarizationOffice", "poaType", "createdById", "updatedById", "updatedAt")
@@ -934,7 +932,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     });
     const disposableHearing = await scheduleHearing(owner, {
       proceedingId: disposableProc.id,
-      hearingDate: formatOffsetYmd(25),
+      hearingDate: formatCairoOffsetYmd(25),
       idempotencyKey: crypto.randomUUID(),
     });
     createdHearingIds.push(disposableHearing.id);
@@ -953,6 +951,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       filename: 'hearing-proc-v1.pdf',
       bytes: buildSyntheticPdf(`T12-TC02-HEAR-PROC-${runSuffix}`),
     });
+    expect(hearingDoc.proceedingId).toBe(disposableProc.id);
     const preArchivedAttempt = await beginVersionUpload(owner, {
       documentId: procDoc.id,
       expectedDocumentVersion: procDoc.version,
@@ -1945,7 +1944,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       confirmDeadline(owner, {
         deadlineId: draftOnProcA2.id,
         expectedVersion: draftOnProcA2.version,
-        dueDate: formatOffsetYmd(50),
+        dueDate: formatCairoOffsetYmd(50),
         source: 'اختبار',
         basisNotes: 'اختبار',
         sourceDocumentId: docMatterB.id,
@@ -1958,7 +1957,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       confirmDeadline(owner, {
         deadlineId: draftOnProcA2.id,
         expectedVersion: draftOnProcA2.version,
-        dueDate: formatOffsetYmd(50),
+        dueDate: formatCairoOffsetYmd(50),
         source: 'اختبار',
         basisNotes: 'اختبار',
         sourceDocumentId: hearingOnlyDoc.id,
@@ -1968,8 +1967,8 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     ).rejects.toThrow(CrossMatterLinkForbiddenError);
 
     // Updating draft and confirming with valid sourceDocumentId keeps link intact
-    const dueYmd = formatOffsetYmd(45);
-    const agendaAnchorYmd = formatOffsetYmd(0);
+    const dueYmd = formatCairoOffsetYmd(45);
+    const agendaAnchorYmd = formatCairoOffsetYmd(0);
     const updatedDraft = await updateDeadlineDraft(owner, {
       deadlineId: validDeadlineJson.data.id,
       expectedVersion: validDeadlineJson.data.version,
@@ -1995,12 +1994,12 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     // Different-hearing same-proceeding document is rejected on HearingResult
     const hearingA1Alt = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: formatOffsetYmd(31),
+      hearingDate: formatCairoOffsetYmd(31),
       idempotencyKey: crypto.randomUUID(),
     });
     const hearingA1Target = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: formatOffsetYmd(32),
+      hearingDate: formatCairoOffsetYmd(32),
       idempotencyKey: crypto.randomUUID(),
     });
     createdHearingIds.push(hearingA1Alt.id, hearingA1Target.id);
@@ -2362,7 +2361,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const hArch = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: formatOffsetYmd(33),
+      hearingDate: formatCairoOffsetYmd(33),
       idempotencyKey: crypto.randomUUID(),
     });
     createdHearingIds.push(hArch.id);
@@ -3038,6 +3037,29 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     );
     expect(nullCurHttpRes.status).toBe(409);
 
+    // 0-byte ready/ file fails closed (DocumentNotFoundError / HTTP 404) in authorizeDownload
+    const zeroByteReadyDoc = await createReadyMatterDocument({
+      matterId: matterAId,
+      title: `مستند بملف فارغ في التخزين ${runSuffix}`,
+      bytes: buildSyntheticPdf(`T12-TC05-ZERO-READY-${runSuffix}`),
+    });
+    const zeroByteStorage = createLocalDocumentStorage(storageRoot);
+    const zeroByteVerRow = await prisma.documentVersion.findUniqueOrThrow({
+      where: { id: zeroByteReadyDoc.currentVersionId! },
+      select: { objectKey: true },
+    });
+    await zeroByteStorage.writeReadyBytes(zeroByteVerRow.objectKey, Buffer.alloc(0));
+    await expect(authorizeDownload(owner, zeroByteReadyDoc.id)).rejects.toThrow(
+      DocumentNotFoundError
+    );
+    const zeroByteHttpRes = await getDocumentContentRoute(
+      new Request(`${trustedOrigin}/api/documents/${zeroByteReadyDoc.id}/content`, {
+        headers: { cookie: ownerCookie, 'sec-fetch-site': 'same-origin' },
+      }),
+      { params: Promise.resolve({ id: zeroByteReadyDoc.id }) }
+    );
+    expect(zeroByteHttpRes.status).toBe(404);
+
     const blankVerRes = await getDocumentContentRoute(
       new Request(`${trustedOrigin}/api/documents/${doc.id}/content?versionId=%20%20`, {
         headers: { cookie: ownerCookie, 'sec-fetch-site': 'same-origin' },
@@ -3419,7 +3441,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     const linkedHrHearing = await scheduleHearing(owner, {
       proceedingId: proceedingA1Id,
-      hearingDate: formatOffsetYmd(34),
+      hearingDate: formatCairoOffsetYmd(34),
       idempotencyKey: crypto.randomUUID(),
     });
     createdHearingIds.push(linkedHrHearing.id);
@@ -3951,7 +3973,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       data: {
         matterId: matterToClose.id,
         title: `مهمة استئناف التذكيرات ${runSuffix}`,
-        dueDate: new Date(`${formatOffsetYmd(10)}T00:00:00.000Z`),
+        dueDate: new Date(`${formatCairoOffsetYmd(10)}T00:00:00.000Z`),
         status: 'OPEN',
         createdById: owner.id,
         updatedById: owner.id,

@@ -174,7 +174,7 @@ function indicatorScript(): FocusIndicator {
   };
 }
 
-export async function focusIndicatorOfFocused(page: Page): Promise<FocusIndicator> {
+async function focusIndicatorOfFocused(page: Page): Promise<FocusIndicator> {
   return page.evaluate(indicatorScript);
 }
 
@@ -311,7 +311,7 @@ function contrastScript(): ContrastSample {
  * Measures rendered contrast. Callers mark one element with
  * `data-t04-contrast-target="true"` immediately before measuring.
  */
-export async function contrastOf(locator: Locator): Promise<ContrastSample> {
+async function contrastOf(locator: Locator): Promise<ContrastSample> {
   await locator.evaluate((element) => element.setAttribute('data-t04-contrast-target', 'true'));
   try {
     return await locator.evaluate(contrastScript);
@@ -320,17 +320,8 @@ export async function contrastOf(locator: Locator): Promise<ContrastSample> {
   }
 }
 
-export async function expectContrast(locator: Locator, minimum: number): Promise<ContrastSample> {
-  const sample = await contrastOf(locator);
-  expect(
-    sample.ratio,
-    `Contrast ${sample.ratio.toFixed(2)}:1 below ${minimum}:1 for "${sample.text}" (color=${sample.foreground}, background=${sample.background})`
-  ).toBeGreaterThanOrEqual(minimum);
-  return sample;
-}
-
 /** WCAG large text: >=24px, or >=18.66px bold. */
-export function minimumContrastFor(sample: ContrastSample): number {
+function minimumContrastFor(sample: ContrastSample): number {
   const large = sample.fontSize >= 24 || (sample.fontSize >= 18.66 && sample.fontWeight >= 700);
   return large ? 3 : 4.5;
 }

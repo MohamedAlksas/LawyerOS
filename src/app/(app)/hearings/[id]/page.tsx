@@ -91,8 +91,12 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
   const docketText = proceeding.numberText && proceeding.yearLabel
     ? `${proceeding.numberText}/${proceeding.yearLabel}`
     : null;
+  const canWriteClientData = authorize(actor, 'WRITE_CLIENT_DATA');
   const isArchived = Boolean(proceeding.archivedAt || matter.archivedAt || matter.status === 'ARCHIVED');
-  const canOpenResult = !isArchived && (hearing.status === 'SCHEDULED' || hearing.status === 'COMPLETED');
+  const canOpenResult =
+    canWriteClientData &&
+    !isArchived &&
+    (hearing.status === 'SCHEDULED' || hearing.status === 'COMPLETED');
 
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
   const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());

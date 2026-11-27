@@ -16,6 +16,7 @@ import {
   listActiveSessions,
   regenerateRecoveryCodes,
   AuthenticationError,
+  AuthorizationError,
   ProvisioningError,
 } from '@/modules/identity';
 import { getPrismaClient, getAuth } from '@/lib/auth';
@@ -25,7 +26,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { closeDbPool } from '@/lib/db';
 import { createOTP } from '@better-auth/utils/otp';
 import { base32 } from '@better-auth/utils/base32';
-import { symmetricDecrypt } from 'better-auth/crypto';
+import { hashPassword, symmetricDecrypt } from 'better-auth/crypto';
 import { getEnv, EnvironmentValidationError } from '@/lib/env';
 import { NextRequest } from 'next/server';
 import crypto from 'crypto';
@@ -3659,6 +3660,210 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
     } finally {
       await client.query(`DROP SCHEMA IF EXISTS evil_schema CASCADE;`).catch(() => {});
       client.release();
+    }
+  });
+
+  it('enforces GET origin/Sec-Fetch-Site guards, duplicate/quoted two-factor cookies, sign-out/sign-in inactivity bypass, and preserves session.updatedAt on 403', async () => {
+    const prisma = getPrismaClient();
+    const env = getEnv();
+    const origin = new URL(env.BETTER_AUTH_URL).origin;
+
+    // 1. GET /api/auth/* rejects Sec-Fetch-Site: cross-site and untrusted Origin with 403
+    const crossSiteGetRes = await authRouteGET(
+      new NextRequest(`${origin}/api/auth/get-session`, {
+        headers: { 'sec-fetch-site': 'cross-site' },
+      })
+    );
+    expect(crossSiteGetRes.status).toBe(403);
+
+    const untrustedOriginGetRes = await authRouteGET(
+      new NextRequest(`${origin}/api/auth/get-session`, {
+        headers: { origin: 'https://evil.example' },
+      })
+    );
+    expect(untrustedOriginGetRes.status).toBe(403);
+
+    // 2. Duplicate and RFC-6265 quoted better-auth.two_factor cookies
+    const duplicateTfRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: 'better-auth.two_factor=tok-a; better-auth.two_factor=tok-b',
+        },
+        body: JSON.stringify({ code: '123456' }),
+      })
+    );
+    expect(duplicateTfRes.status).toBe(401);
+
+    const mixedTfRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: 'better-auth.two_factor=tok-a; __Secure-better-auth.two_factor=tok-b',
+        },
+        body: JSON.stringify({ code: '123456' }),
+      })
+    );
+    expect(mixedTfRes.status).toBe(401);
+
+    // Single RFC-6265 quoted better-auth.two_factor cookie completes TOTP cleanly
+    const signInPassword = 'BrandNewPassword2026!#';
+    const signInChallengeRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ email: provisionedOwner.email, password: signInPassword }),
+      })
+    );
+    expect(signInChallengeRes.status).toBe(200);
+    const rawSetCookies = signInChallengeRes.headers.getSetCookie?.() || [
+      signInChallengeRes.headers.get('set-cookie') || '',
+    ];
+    const tfCookieEntry = rawSetCookies.find((c) => c.startsWith('better-auth.two_factor='));
+    expect(tfCookieEntry).toBeDefined();
+    const tfPair = tfCookieEntry!.split(';')[0]!;
+    const eqIdx = tfPair.indexOf('=');
+    const quotedTfCookie = `${tfPair.slice(0, eqIdx)}="${tfPair.slice(eqIdx + 1)}"`;
+
+    const totpCode = await generateTotpCode(provisionedOwner.totpSecret);
+    const quotedVerifyRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/two-factor/verify-totp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: quotedTfCookie,
+        },
+        body: JSON.stringify({ code: totpCode }),
+      })
+    );
+    expect(quotedVerifyRes.status).toBe(200);
+
+    // 3. POST /api/auth/sign-out and /api/auth/sign-in/email bypass inactivity 401 eviction
+    const inactiveSignOutToken = `inactive-signout-${crypto.randomUUID()}`;
+    const inactiveUpdatedAt = new Date(Date.now() - 40 * 60 * 1000);
+    await prisma.session.create({
+      data: {
+        id: `sess-so-${crypto.randomUUID()}`,
+        userId: provisionedOwner.userId,
+        token: inactiveSignOutToken,
+        createdAt: new Date(Date.now() - 50 * 60 * 1000),
+        updatedAt: inactiveUpdatedAt,
+        expiresAt: new Date(Date.now() + 6 * 3600 * 1000),
+        credentialVersion: 1,
+      },
+    });
+    const inactiveSignOutCookie = `better-auth.session_token=${signSessionTokenCookie(inactiveSignOutToken, env.BETTER_AUTH_SECRET)}`;
+    const signOutRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/sign-out`, {
+        method: 'POST',
+        headers: { origin, cookie: inactiveSignOutCookie },
+      })
+    );
+    expect(signOutRes.status).not.toBe(401);
+
+    const inactiveSignInToken = `inactive-signin-${crypto.randomUUID()}`;
+    const inactiveSignInSess = await prisma.session.create({
+      data: {
+        id: `sess-si-${crypto.randomUUID()}`,
+        userId: provisionedOwner.userId,
+        token: inactiveSignInToken,
+        createdAt: new Date(Date.now() - 50 * 60 * 1000),
+        updatedAt: inactiveUpdatedAt,
+        expiresAt: new Date(Date.now() + 6 * 3600 * 1000),
+        credentialVersion: 1,
+      },
+    });
+    const inactiveSignInCookie = `better-auth.session_token=${signSessionTokenCookie(inactiveSignInToken, env.BETTER_AUTH_SECRET)}`;
+    const signInWithStaleCookieRes = await authRoutePOST(
+      new NextRequest(`${origin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin,
+          cookie: inactiveSignInCookie,
+        },
+        body: JSON.stringify({ email: provisionedOwner.email, password: signInPassword }),
+      })
+    );
+    expect(signInWithStaleCookieRes.status).toBe(200);
+    await prisma.session.deleteMany({ where: { id: inactiveSignInSess.id } });
+
+    // 4. 403 calls by MAINTAINER (generate-backup-codes + requireActor permission denial) must NOT advance session.updatedAt
+    const maintainerId = `maint-403-${crypto.randomUUID()}`;
+    const maintainerToken = `maint-tok-${crypto.randomUUID()}`;
+    const initialUpdatedAt = new Date(Date.now() - 10 * 60 * 1000);
+    const passwordHash = await hashPassword('MaintainerSecret2026!');
+
+    await prisma.user.create({
+      data: {
+        id: maintainerId,
+        name: 'مسؤول صيانة للاختبار 403',
+        email: `maint.${maintainerId}@office.eg`,
+        emailVerified: true,
+        role: 'MAINTAINER',
+        twoFactorEnabled: false,
+        credentialVersion: 1,
+      },
+    });
+    await prisma.account.create({
+      data: {
+        id: `acc-${maintainerId}`,
+        userId: maintainerId,
+        accountId: maintainerId,
+        providerId: 'credential',
+        password: passwordHash,
+        createdAt: new Date(Date.now() - 20 * 60 * 1000),
+        updatedAt: new Date(Date.now() - 20 * 60 * 1000),
+      },
+    });
+    const maintainerSession = await prisma.session.create({
+      data: {
+        id: `sess-${maintainerId}`,
+        userId: maintainerId,
+        token: maintainerToken,
+        createdAt: new Date(Date.now() - 20 * 60 * 1000),
+        updatedAt: initialUpdatedAt,
+        expiresAt: new Date(Date.now() + 6 * 3600 * 1000),
+        credentialVersion: 1,
+      },
+    });
+
+    try {
+      const maintainerCookie = `better-auth.session_token=${signSessionTokenCookie(maintainerToken, env.BETTER_AUTH_SECRET)}`;
+
+      const genBackupRes = await authRoutePOST(
+        new NextRequest(`${origin}/api/auth/two-factor/generate-backup-codes`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin,
+            cookie: maintainerCookie,
+          },
+          body: JSON.stringify({ currentPassword: 'MaintainerSecret2026!' }),
+        })
+      );
+      expect(genBackupRes.status).toBe(403);
+
+      await expect(
+        requireActor({
+          headers: new Headers({ cookie: maintainerCookie }),
+          requiredPermission: 'MANAGE_SECURITY',
+        })
+      ).rejects.toThrow(AuthorizationError);
+
+      const sessionAfter403 = await prisma.session.findUniqueOrThrow({
+        where: { id: maintainerSession.id },
+      });
+      expect(sessionAfter403.updatedAt.getTime()).toBe(initialUpdatedAt.getTime());
+    } finally {
+      await prisma.session.deleteMany({ where: { userId: maintainerId } });
+      await prisma.account.deleteMany({ where: { userId: maintainerId } });
+      await prisma.user.deleteMany({ where: { id: maintainerId } });
     }
   });
 

@@ -317,9 +317,22 @@ async function replayResult(
   );
   const hearing = await replayHearing(tx, ack.hearing, ack.resultId, canReadDocuments);
   const nextHearing = ack.next ? await replayHearing(tx, ack.next, undefined, canReadDocuments) : null;
-  const tasks = await Promise.all(ack.tasks.map(async (snapshot) => ({
-    ...mapTaskToDTO(await tx.task.findUniqueOrThrow({ where: { id: snapshot.id } })), ...snapshot,
-  })));
+  const taskIds = ack.tasks.map((s) => s.id);
+  const taskRecords =
+    taskIds.length > 0
+      ? await tx.task.findMany({ where: { id: { in: taskIds } } })
+      : [];
+  const taskById = new Map(taskRecords.map((t) => [t.id, t]));
+  const tasks = ack.tasks.map((snapshot) => {
+    const taskRecord = taskById.get(snapshot.id);
+    if (!taskRecord) {
+      throw new NotFoundError('المهمة المرتبطة بنتيجة الجلسة غير موجودة.');
+    }
+    return {
+      ...mapTaskToDTO(taskRecord),
+      ...snapshot,
+    };
+  });
   return { resultId: result.id, result, hearing, nextHearing, tasks, taskIds: tasks.map((task) => task.id) };
 }
 
@@ -781,10 +794,10 @@ export async function correctHearingResult(
     currentResultId: input.currentResultId,
     reason,
     decision,
-    summary: input.summary ?? null,
-    attendance: input.attendance ?? null,
-    notes: input.notes ?? null,
-    decisionDocumentId: input.decisionDocumentId ?? null,
+    summary: input.summary === undefined ? undefined : (input.summary === '' ? null : input.summary),
+    attendance: input.attendance === undefined ? undefined : (input.attendance === '' ? null : input.attendance),
+    notes: input.notes === undefined ? undefined : (input.notes === '' ? null : input.notes),
+    decisionDocumentId: input.decisionDocumentId,
     nextDateDisposition: input.nextDateDisposition ?? null,
     nextHearingDate: input.nextHearingDate ?? null,
     nextHearingTime: nextHearingTime ?? null,

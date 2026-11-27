@@ -43,7 +43,11 @@ export default async function SecuritySettingsPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6" dir="rtl" lang="ar-EG">
       <div>
-        <nav className="text-xs text-[#4D606A] mb-1">الإعدادات &gt; الأمان</nav>
+        <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] mb-1 flex items-center gap-1.5">
+          <span>الإعدادات</span>
+          <span aria-hidden="true">/</span>
+          <span>الأمان</span>
+        </nav>
         <h1 className="text-2xl font-bold text-[#172A35]">الأمان وإدارة الجلسات</h1>
         <p className="text-sm text-[#4D606A] mt-1">
           إدارة مفاتيح التحقق الثنائي ومراجعة وإنهاء الجلسات والأجهزة النشطة لمكتب المحاماة.
@@ -51,7 +55,7 @@ export default async function SecuritySettingsPage() {
       </div>
 
       <SecurityClient
-        key={`${actor.id}:${sessions.map((s) => `${s.id}-${s.createdAt}`).join(':')}`}
+        key={`${actor.id}:${actor.sessionId}`}
         initialSessions={sessions}
         actor={{
           name: actor.name,

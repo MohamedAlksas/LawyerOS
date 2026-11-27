@@ -80,6 +80,13 @@ export async function readSchedulingFromRequest<R>(
         { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
       );
     }
+    const origin = request.headers.get('origin');
+    if (origin !== null && !getTrustedOrigins().has(origin)) {
+      return NextResponse.json(
+        { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },
+        { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
+      );
+    }
     const actor = await requireActor({
       headers: request.headers,
       requiredPermission: 'READ_CLIENT_DATA',

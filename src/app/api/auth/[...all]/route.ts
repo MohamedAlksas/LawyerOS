@@ -245,6 +245,17 @@ export async function GET(request: NextRequest) {
   if (request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site') {
     return noStoreJson({ error: 'غير مصرح بالوصول من مصدر خارجي.' }, { status: 403 });
   }
+  try {
+    const origin = request.headers.get('origin');
+    if (origin !== null && !getTrustedOrigins().has(origin)) {
+      return noStoreJson({ error: 'مصدر الطلب غير موثوق.' }, { status: 403 });
+    }
+  } catch {
+    return noStoreJson(
+      { error: 'حدث خطأ غير متوقع أثناء التحقق من مصدر الطلب.' },
+      { status: 500 }
+    );
+  }
   const blocked = await handleAuthSecurityGuards(request);
   if (blocked) return blocked;
   return privateAuthResponse(await auth.handler(request));
@@ -260,74 +271,77 @@ export async function POST(request: NextRequest) {
   // Pinned Provider Trusted-Origin Parity without Host expansion, identical Identity authorization,
   // password reauthentication, and atomic lockout budget
   if (pathname.includes('/two-factor/generate-backup-codes')) {
-    const cookieHeader = request.headers.get('cookie');
-    if (cookieHeader) {
-      const secFetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
-      if (secFetchSite === 'cross-site') {
-        return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-      }
-
-      const origin = request.headers.get('origin');
-      const referer = request.headers.get('referer');
-
-      // Cookie-bearing requests strictly require Origin or Referer
-      if (!origin && !referer) {
-        return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-      }
-
-      const allowedOrigins = getTrustedOrigins();
-
-      const host = request.headers.get('host');
-      if (host) {
-        const isTrustedHost = Array.from(allowedOrigins).some((to) => {
-          try {
-            return new URL(to).host === host;
-          } catch {
-            return false;
-          }
-        });
-        if (!isTrustedHost) {
-          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-        }
-      }
-
-      if (origin === 'null') {
-        let reqOrigin: string;
-        try {
-          reqOrigin = new URL(request.url).origin;
-        } catch {
-          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-        }
-
-        // R12-04: Validate complete inferred destination origin (scheme, host, port) from request.url
-        // Reject untrusted scheme/destination even if Host header matches a trusted host,
-        // and reject untrusted Host header even if request.url was constructed with trusted base
-        if (
-          !allowedOrigins.has(reqOrigin) ||
-          secFetchSite !== 'same-origin'
-        ) {
-          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-        }
-      } else {
-        let originToValidate: string | null = origin;
-        if (!originToValidate && referer) {
-          try {
-            originToValidate = new URL(referer).origin;
-          } catch {
-            originToValidate = null;
-          }
-        }
-
-        // Do NOT synthesize origin from request.nextUrl.origin
-        // Do NOT add request Host or forwarded headers (x-forwarded-proto) to allowed origins
-        if (!originToValidate || !allowedOrigins.has(originToValidate)) {
-          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
-        }
-      }
-    }
-
     try {
-      const actor = await requireActor({ headers: request.headers });
+      const cookieHeader = request.headers.get('cookie');
+      if (cookieHeader) {
+        const secFetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
+        if (secFetchSite === 'cross-site') {
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        }
+
+        const origin = request.headers.get('origin');
+        const referer = request.headers.get('referer');
+
+        // Cookie-bearing requests strictly require Origin or Referer
+        if (!origin && !referer) {
+          return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+        }
+
+        const allowedOrigins = getTrustedOrigins();
+
+        const host = request.headers.get('host');
+        if (host) {
+          const isTrustedHost = Array.from(allowedOrigins).some((to) => {
+            try {
+              return new URL(to).host === host;
+            } catch {
+              return false;
+            }
+          });
+          if (!isTrustedHost) {
+            return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          }
+        }
+
+        if (origin === 'null') {
+          let reqOrigin: string;
+          try {
+            reqOrigin = new URL(request.url).origin;
+          } catch {
+            return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          }
+
+          // R12-04: Validate complete inferred destination origin (scheme, host, port) from request.url
+          // Reject untrusted scheme/destination even if Host header matches a trusted host,
+          // and reject untrusted Host header even if request.url was constructed with trusted base
+          if (
+            !allowedOrigins.has(reqOrigin) ||
+            secFetchSite !== 'same-origin'
+          ) {
+            return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          }
+        } else {
+          let originToValidate: string | null = origin;
+          if (!originToValidate && referer) {
+            try {
+              originToValidate = new URL(referer).origin;
+            } catch {
+              originToValidate = null;
+            }
+          }
+
+          // Do NOT synthesize origin from request.nextUrl.origin
+          // Do NOT add request Host or forwarded headers (x-forwarded-proto) to allowed origins
+          if (!originToValidate || !allowedOrigins.has(originToValidate)) {
+            return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          }
+        }
+      }
+
+      const actor = await requireActor({
+        headers: request.headers,
+        requiredPermission: 'MANAGE_SECURITY',
+      });
       let parsedBody: unknown;
       try {
         parsedBody = await request.clone().json();
@@ -427,93 +441,100 @@ export async function POST(request: NextRequest) {
         clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
         return errRes;
       }
-      const activeTfName = getActiveTwoFactorCookieName();
-      const tfCookie =
-        activeTfName === '__Secure-better-auth.two_factor'
-          ? secureTfCookies[0]
-          : standardTfCookies[0];
-      if (tfCookie) {
-        const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
-        if (rawToken) {
-          mfaRawToken = rawToken;
-          const prisma = getPrismaClient();
-          const verifRecord = await prisma.verification.findFirst({
-            where: { identifier: { in: candidateIdentifiers } },
-          });
-          if (verifRecord) {
-            challengeCreatedAt = new Date(verifRecord.createdAt);
-            targetUserId = verifRecord.value;
-
-            // Load companion 2fa-cred-ver-${rawToken}
-            const companionCandidates = candidateIdentifiers.map((id) => `2fa-cred-ver-${id}`);
-            const credVerRecord = await prisma.verification.findFirst({
-              where: { identifier: { in: companionCandidates } },
+      try {
+        const activeTfName = getActiveTwoFactorCookieName();
+        const tfCookie =
+          activeTfName === '__Secure-better-auth.two_factor'
+            ? secureTfCookies[0]
+            : standardTfCookies[0];
+        if (tfCookie) {
+          const { rawToken, candidateIdentifiers } = extractRawTokens(tfCookie);
+          if (rawToken) {
+            mfaRawToken = rawToken;
+            const prisma = getPrismaClient();
+            const verifRecord = await prisma.verification.findFirst({
+              where: { identifier: { in: candidateIdentifiers } },
             });
+            if (verifRecord) {
+              challengeCreatedAt = new Date(verifRecord.createdAt);
+              targetUserId = verifRecord.value;
 
-            let currentCredVer: number;
-            try {
-              currentCredVer = await getUserCredentialVersion(targetUserId);
-              expectedCredVer = currentCredVer;
-            } catch {
-              // Fail closed if version resolution fails
-              await prisma.verification.deleteMany({
-                where: {
-                  OR: [
-                    { id: verifRecord.id },
-                    { identifier: { in: candidateIdentifiers } },
-                    { identifier: { in: companionCandidates } },
-                  ],
-                },
-              }).catch(() => {});
-              const errRes = noStoreJson(
-                {
-                  error:
-                    'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
-                },
-                { status: 401 }
-              );
-              clearAuthCookie(errRes, 'better-auth.two_factor');
-              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
-              await auditSignInMfa(targetUserId, false);
-              return errRes;
-            }
+              // Load companion 2fa-cred-ver-${rawToken}
+              const companionCandidates = candidateIdentifiers.map((id) => `2fa-cred-ver-${id}`);
+              const credVerRecord = await prisma.verification.findFirst({
+                where: { identifier: { in: companionCandidates } },
+              });
 
-            const account = await prisma.account.findFirst({
-              where: { userId: targetUserId, providerId: 'credential' },
-            });
+              let currentCredVer: number;
+              try {
+                currentCredVer = await getUserCredentialVersion(targetUserId);
+                expectedCredVer = currentCredVer;
+              } catch {
+                // Fail closed if version resolution fails
+                await prisma.verification.deleteMany({
+                  where: {
+                    OR: [
+                      { id: verifRecord.id },
+                      { identifier: { in: candidateIdentifiers } },
+                      { identifier: { in: companionCandidates } },
+                    ],
+                  },
+                }).catch(() => {});
+                const errRes = noStoreJson(
+                  {
+                    error:
+                      'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+                  },
+                  { status: 401 }
+                );
+                clearAuthCookie(errRes, 'better-auth.two_factor');
+                clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+                await auditSignInMfa(targetUserId, false);
+                return errRes;
+              }
 
-            const isStaleByAccount =
-              account && challengeCreatedAt < new Date(account.updatedAt);
-            const isStaleByCredVer =
-              !credVerRecord || Number(credVerRecord.value) !== currentCredVer;
+              const account = await prisma.account.findFirst({
+                where: { userId: targetUserId, providerId: 'credential' },
+              });
 
-            // R12-01: Enforce credVerRecord presence: if missing, mismatched, or stale, fail closed
-            if (!credVerRecord || isStaleByAccount || isStaleByCredVer) {
-              // Stale challenge created under prior password or missing companion record! Delete and reject fail-closed!
-              await prisma.verification.deleteMany({
-                where: {
-                  OR: [
-                    { id: verifRecord.id },
-                    { identifier: { in: candidateIdentifiers } },
-                    { identifier: { in: companionCandidates } },
-                  ],
-                },
-              }).catch(() => {});
+              const isStaleByAccount =
+                account && challengeCreatedAt < new Date(account.updatedAt);
+              const isStaleByCredVer =
+                !credVerRecord || Number(credVerRecord.value) !== currentCredVer;
 
-              const errRes = noStoreJson(
-                {
-                  error:
-                    'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
-                },
-                { status: 401 }
-              );
-              clearAuthCookie(errRes, 'better-auth.two_factor');
-              clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
-              await auditSignInMfa(targetUserId, false);
-              return errRes;
+              // R12-01: Enforce credVerRecord presence: if missing, mismatched, or stale, fail closed
+              if (!credVerRecord || isStaleByAccount || isStaleByCredVer) {
+                // Stale challenge created under prior password or missing companion record! Delete and reject fail-closed!
+                await prisma.verification.deleteMany({
+                  where: {
+                    OR: [
+                      { id: verifRecord.id },
+                      { identifier: { in: candidateIdentifiers } },
+                      { identifier: { in: companionCandidates } },
+                    ],
+                  },
+                }).catch(() => {});
+
+                const errRes = noStoreJson(
+                  {
+                    error:
+                      'تم تغيير كلمة المرور. تم إلغاء جلسة التحقق السابقة، يرجى تسجيل الدخول مجدداً بكلمة المرور الجديدة.',
+                  },
+                  { status: 401 }
+                );
+                clearAuthCookie(errRes, 'better-auth.two_factor');
+                clearAuthCookie(errRes, '__Secure-better-auth.two_factor');
+                await auditSignInMfa(targetUserId, false);
+                return errRes;
+              }
             }
           }
         }
+      } catch {
+        return noStoreJson(
+          { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
+          { status: 500 }
+        );
       }
     }
   }

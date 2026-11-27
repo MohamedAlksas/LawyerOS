@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -203,20 +202,13 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
   });
 
   test.afterAll(async () => {
-    const storageRoot = resolveE2EStorageRoot();
-    try {
-      await cleanupScopedT11Data({
-        ownerIds: owner?.id ? [owner.id] : [],
-        partyIds: createdPartyIds,
-        courtIds: createdCourtIds,
-      });
-      if (owner?.id) {
-        await deleteT04Owner(owner.id);
-      }
-    } finally {
-      if (storageRoot && fs.existsSync(storageRoot)) {
-        fs.rmSync(storageRoot, { recursive: true, force: true });
-      }
+    await cleanupScopedT11Data({
+      ownerIds: owner?.id ? [owner.id] : [],
+      partyIds: createdPartyIds,
+      courtIds: createdCourtIds,
+    });
+    if (owner?.id) {
+      await deleteT04Owner(owner.id);
     }
   });
 

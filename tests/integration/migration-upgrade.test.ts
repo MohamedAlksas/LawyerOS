@@ -145,11 +145,14 @@ describe('Historical identity data upgrade (R14 retained-data evidence)', () => 
         expect(deployed.status, deployed.stderr).toBe(0);
 
         const t12Mig = await db.pool.query(
-          `SELECT finished_at FROM _prisma_migrations WHERE migration_name = $1`,
-          ['20261126000000_t12_document_versions_and_links']
+          `SELECT migration_name, finished_at FROM _prisma_migrations WHERE migration_name IN ($1, $2) ORDER BY migration_name`,
+          ['20261126000000_t12_document_versions_and_links', '20261126010000_t12_fk_index_hygiene']
         );
-        expect(t12Mig.rows).toHaveLength(1);
+        expect(t12Mig.rows).toHaveLength(2);
+        expect(t12Mig.rows[0].migration_name).toBe('20261126000000_t12_document_versions_and_links');
         expect(t12Mig.rows[0].finished_at).not.toBeNull();
+        expect(t12Mig.rows[1].migration_name).toBe('20261126010000_t12_fk_index_hygiene');
+        expect(t12Mig.rows[1].finished_at).not.toBeNull();
 
         const t12Cols = await db.pool.query(`
           SELECT table_name, column_name
@@ -194,7 +197,9 @@ describe('Historical identity data upgrade (R14 retained-data evidence)', () => 
               'power_of_attorney_document_id_idx',
               'hearing_result_decision_document_id_idx',
               'deadline_source_document_id_idx',
-              'backup_file_pin_document_version_id_released_at_idx'
+              'backup_file_pin_document_version_id_released_at_idx',
+              'upload_attempt_document_id_idx',
+              'backup_file_pin_document_version_id_idx'
             )
           ORDER BY indexname;
         `);
@@ -203,6 +208,7 @@ describe('Historical identity data upgrade (R14 retained-data evidence)', () => 
           'deadline_source_document_id_idx',
           'hearing_result_decision_document_id_idx',
           'power_of_attorney_document_id_idx',
+          'upload_attempt_document_id_idx',
         ]);
       }
       expect((await runIdentityBaseline({ targetUrl: db.url, silent: true })).success).toBe(true);

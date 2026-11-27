@@ -15,7 +15,11 @@ import {
   type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
-import { cancelSourceReminderJobsBatch, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
+import { getCairoTodayDateString, parseCalendarDateToUtcDate } from '@/lib/cairo-date';
+import {
+  cancelSourceReminderJobsBatch,
+  enqueueMissingSourceReminderJobsBatch,
+} from '@/modules/reminders/reminder-outbox';
 import {
   MatterDTO,
   MatterPartySummaryDTO,
@@ -875,12 +879,12 @@ export async function updateMatter(
     title: input.title,
     kind: input.kind,
     status: input.status,
-    practiceAreaId: input.practiceAreaId ?? null,
-    openingDate: input.openingDate ?? null,
-    closingDate: input.closingDate ?? null,
-    summary: input.summary ?? null,
-    notes: input.notes ?? null,
-    paperLocationId: input.paperLocationId ?? null,
+    practiceAreaId: input.practiceAreaId,
+    openingDate: input.openingDate,
+    closingDate: input.closingDate,
+    summary: input.summary,
+    notes: input.notes,
+    paperLocationId: input.paperLocationId,
   };
 
   return runMatterCommand(
@@ -1889,13 +1893,13 @@ export async function updateProceeding(
     expectedVersion: input.expectedVersion,
     courtId: input.courtId,
     instance: input.instance,
-    parentProceedingId: input.parentProceedingId ?? null,
-    registerType: input.registerType ?? null,
-    circuit: input.circuit ?? null,
-    numberText: input.numberText ?? null,
-    yearLabel: input.yearLabel ?? null,
-    filingDate: input.filingDate ?? null,
-    claimAmount: input.claimAmount ?? null,
+    parentProceedingId: input.parentProceedingId,
+    registerType: input.registerType,
+    circuit: input.circuit,
+    numberText: input.numberText,
+    yearLabel: input.yearLabel,
+    filingDate: input.filingDate,
+    claimAmount: input.claimAmount,
     status: input.status,
     parties: input.parties?.map((p) => ({
       matterPartyId: p.matterPartyId,
@@ -3441,13 +3445,24 @@ export async function reopenMatter(
       });
 
       const now = new Date();
+      const todayUtc = parseCalendarDateToUtcDate(getCairoTodayDateString(now))!;
       const openTasks = await tx.task.findMany({
         where: {
           status: { in: ['OPEN', 'IN_PROGRESS'] },
-          dueDate: { gte: now },
-          OR: [
-            { matterId: input.matterId },
-            { proceeding: { matterId: input.matterId } },
+          dueDate: { gte: todayUtc },
+          AND: [
+            {
+              OR: [
+                { matterId: input.matterId },
+                { proceeding: { matterId: input.matterId } },
+              ],
+            },
+            {
+              OR: [
+                { proceedingId: null },
+                { proceeding: { archivedAt: null } },
+              ],
+            },
           ],
         },
         select: {
@@ -3460,26 +3475,30 @@ export async function reopenMatter(
           createdById: true,
         },
       });
-      for (const t of openTasks) {
-        if (!t.dueDate) continue;
-        const dueDateStr = t.dueDate.toISOString().slice(0, 10);
-        await enqueueSourceReminderJob(tx, {
-          sourceType: 'Task',
-          sourceId: t.id,
-          sourceVersion: t.version,
-          eventDateYmd: dueDateStr,
-          deduplicationKey: `task_reminder_${t.id}_v${t.version}`,
-          payload: {
-            taskId: t.id,
-            matterId: t.matterId,
-            proceedingId: t.proceedingId,
-            dueDate: dueDateStr,
-            dueTime: t.dueTime,
-            sourceVersion: t.version,
-            recipientUserId: t.createdById,
-          },
-        });
-      }
+      await enqueueMissingSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks
+          .filter((t): t is typeof t & { dueDate: Date } => t.dueDate !== null)
+          .map((t) => {
+            const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+            return {
+              sourceId: t.id,
+              sourceVersion: t.version,
+              eventDateYmd: dueDateStr,
+              deduplicationKey: `task_reminder_${t.id}_v${t.version}_reopen_m${updated.version}`,
+              payload: {
+                taskId: t.id,
+                matterId: t.matterId,
+                proceedingId: t.proceedingId,
+                dueDate: dueDateStr,
+                dueTime: t.dueTime,
+                sourceVersion: t.version,
+                recipientUserId: t.createdById,
+              },
+            };
+          })
+      );
 
       await recordAuditEvent(tx, {
         userId: actor.id,
@@ -3878,11 +3897,12 @@ export async function reopenProceeding(
       `;
 
       const now = new Date();
+      const todayUtc = parseCalendarDateToUtcDate(getCairoTodayDateString(now))!;
       const openTasks = await tx.task.findMany({
         where: {
           proceedingId: input.proceedingId,
           status: { in: ['OPEN', 'IN_PROGRESS'] },
-          dueDate: { gte: now },
+          dueDate: { gte: todayUtc },
         },
         select: {
           id: true,
@@ -3894,26 +3914,30 @@ export async function reopenProceeding(
           createdById: true,
         },
       });
-      for (const t of openTasks) {
-        if (!t.dueDate) continue;
-        const dueDateStr = t.dueDate.toISOString().slice(0, 10);
-        await enqueueSourceReminderJob(tx, {
-          sourceType: 'Task',
-          sourceId: t.id,
-          sourceVersion: t.version,
-          eventDateYmd: dueDateStr,
-          deduplicationKey: `task_reminder_${t.id}_v${t.version}`,
-          payload: {
-            taskId: t.id,
-            matterId: t.matterId,
-            proceedingId: t.proceedingId,
-            dueDate: dueDateStr,
-            dueTime: t.dueTime,
-            sourceVersion: t.version,
-            recipientUserId: t.createdById,
-          },
-        });
-      }
+      await enqueueMissingSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks
+          .filter((t): t is typeof t & { dueDate: Date } => t.dueDate !== null)
+          .map((t) => {
+            const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+            return {
+              sourceId: t.id,
+              sourceVersion: t.version,
+              eventDateYmd: dueDateStr,
+              deduplicationKey: `task_reminder_${t.id}_v${t.version}_reopen_p${updated.version}`,
+              payload: {
+                taskId: t.id,
+                matterId: t.matterId,
+                proceedingId: t.proceedingId,
+                dueDate: dueDateStr,
+                dueTime: t.dueTime,
+                sourceVersion: t.version,
+                recipientUserId: t.createdById,
+              },
+            };
+          })
+      );
 
       await recordAuditEvent(tx, {
         userId: actor.id,
@@ -4044,33 +4068,33 @@ export async function searchProceedings(
 
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const rawPage = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
-  const page = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const requestedPage = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const total = await prisma.proceeding.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
   const skip = (page - 1) * limit;
 
-  const [proceedings, total] = await Promise.all([
-    prisma.proceeding.findMany({
-      where,
-      select: {
-        id: true,
-        matterId: true,
-        courtId: true,
-        instance: true,
-        registerType: true,
-        circuit: true,
-        numberText: true,
-        yearLabel: true,
-        status: true,
-        archivedAt: true,
-        updatedAt: true,
-        court: { select: { name: true } },
-        matter: { select: { title: true, fileCode: true } },
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit,
-      skip,
-    }),
-    prisma.proceeding.count({ where }),
-  ]);
+  const proceedings = await prisma.proceeding.findMany({
+    where,
+    select: {
+      id: true,
+      matterId: true,
+      courtId: true,
+      instance: true,
+      registerType: true,
+      circuit: true,
+      numberText: true,
+      yearLabel: true,
+      status: true,
+      archivedAt: true,
+      updatedAt: true,
+      court: { select: { name: true } },
+      matter: { select: { title: true, fileCode: true } },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit,
+    skip,
+  });
 
   return {
     proceedings: proceedings.map((p) => ({
@@ -4091,7 +4115,7 @@ export async function searchProceedings(
     })),
     total,
     page,
-    totalPages: Math.ceil(total / limit) || 1,
+    totalPages,
     limit,
   };
 }

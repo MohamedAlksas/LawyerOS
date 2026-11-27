@@ -13,7 +13,7 @@ import type {
 } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
 import { LoadingIndicator, EmptyStateContainer } from '@/components/presentation-state';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
   IconBell,
   IconCalendar,
@@ -109,6 +109,9 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           pendingCompleteKeysRef.current.delete(opKey);
         }
@@ -478,7 +481,7 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
                 </div>
                 <Link
                   href="/agenda"
-                  className="min-h-[36px] px-3 py-1.5 bg-[#F8FAFB] hover:bg-[#E9F2F5] border border-[#D5DFE3] rounded-[6px] text-xs font-semibold text-[#14566B] inline-flex items-center gap-1.5 transition-colors"
+                  className="min-h-[44px] px-3 py-1.5 bg-[#F8FAFB] hover:bg-[#E9F2F5] border border-[#D5DFE3] rounded-[6px] text-xs font-semibold text-[#14566B] inline-flex items-center gap-1.5 transition-colors"
                 >
                   <IconCalendar className="w-3.5 h-3.5" />
                   <span>عرض كشف الجلسات والأجندة</span>
@@ -547,7 +550,7 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
                 <p>{operatingAlerts.workerStatusNote}</p>
                 <Link
                   href="/inbox"
-                  className="shrink-0 font-bold text-[#14566B] hover:underline min-h-[36px] inline-flex items-center"
+                  className="shrink-0 font-bold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
                 >
                   عرض صندوق التنبيهات وحالة العامل
                 </Link>

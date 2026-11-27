@@ -132,35 +132,28 @@ export async function cleanupMatterFixtures(
 
   await prisma.auditEvent.deleteMany({
     where: {
-      OR: [
-        {
-          entityType: {
-            in: [
-              'Matter',
-              'MATTER',
-              'MatterParty',
-              'Proceeding',
-              'PROCEEDING',
-              'ProceedingParty',
-              'MatterAuthorization',
-              'Hearing',
-              'HearingResult',
-              'Task',
-              'Deadline',
-              'Document',
-              'DOCUMENT',
-              'DocumentVersion',
-              'DocumentStorage',
-              'UploadAttempt',
-              'BackupFilePin',
-            ],
-          },
-          entityId: { in: allEntityIds },
-        },
-        {
-          entityType: 'DocumentStorage',
-        },
-      ],
+      entityType: {
+        in: [
+          'Matter',
+          'MATTER',
+          'MatterParty',
+          'Proceeding',
+          'PROCEEDING',
+          'ProceedingParty',
+          'MatterAuthorization',
+          'Hearing',
+          'HearingResult',
+          'Task',
+          'Deadline',
+          'Document',
+          'DOCUMENT',
+          'DocumentVersion',
+          'DocumentStorage',
+          'UploadAttempt',
+          'BackupFilePin',
+        ],
+      },
+      entityId: { in: allEntityIds },
     },
   });
 

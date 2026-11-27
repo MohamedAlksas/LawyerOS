@@ -8,6 +8,7 @@ import { DocumentValidationError, MAX_DOCUMENT_BYTES } from './document-types';
 export const DOCUMENT_NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
 };
 
 export function documentHttpErrorResponse(error: unknown) {

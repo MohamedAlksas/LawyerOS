@@ -110,7 +110,7 @@ function handleActionError(error: unknown): ActionResult<never> {
 
 export async function getOfficeSettingsAction(): Promise<ActionResult<OfficeSettingsDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await getOfficeSettings(actor);
     return { success: true, data };
   } catch (error) {
@@ -122,7 +122,7 @@ export async function updateOfficeSettingsAction(
   input: UpdateOfficeSettingsInput
 ): Promise<ActionResult<OfficeSettingsDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await updateOfficeSettings(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -135,7 +135,7 @@ export async function listReferenceItemsAction(
   includeInactive?: boolean
 ): Promise<ActionResult<ReferenceItemDTO[]>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await listReferenceItems(type, includeInactive, actor);
     return { success: true, data };
   } catch (error) {
@@ -147,7 +147,7 @@ export async function createReferenceItemAction(
   input: CreateReferenceItemInput
 ): Promise<ActionResult<ReferenceItemDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await createReferenceItem(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -159,7 +159,7 @@ export async function updateReferenceItemAction(
   input: UpdateReferenceItemInput
 ): Promise<ActionResult<ReferenceItemDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await updateReferenceItem(actor, input);
     return { success: true, data };
   } catch (error) {

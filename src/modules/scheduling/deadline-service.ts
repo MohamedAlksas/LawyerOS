@@ -558,13 +558,13 @@ export async function updateDeadlineDraft(
   const intent = {
     deadlineId: input.deadlineId,
     expectedVersion: input.expectedVersion,
-    proceedingId: input.proceedingId ?? null,
+    proceedingId: input.proceedingId,
     title: input.title,
     dueDate: input.dueDate,
-    dueTime: input.dueTime ?? null,
+    dueTime: input.dueTime,
     source: input.source,
-    basisNotes: input.basisNotes ?? null,
-    sourceDocumentId: input.sourceDocumentId ?? null,
+    basisNotes: input.basisNotes,
+    sourceDocumentId: input.sourceDocumentId,
   };
 
   return deadlineCommand(

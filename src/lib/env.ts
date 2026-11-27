@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 /**
@@ -185,6 +186,32 @@ export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean 
 }
 
 const LOOPBACK_BETTER_AUTH_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+const TRUSTED_PROXY_PREFIX_RE = /^(0|[1-9]\d*)$/;
+
+export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
+  if (!entry) return false;
+  const slashIdx = entry.indexOf('/');
+  if (slashIdx === -1) {
+    return isIP(entry) !== 0;
+  }
+
+  const ipPart = entry.slice(0, slashIdx);
+  const prefixPart = entry.slice(slashIdx + 1);
+  const ipVersion = isIP(ipPart);
+  if (ipVersion === 0 || !TRUSTED_PROXY_PREFIX_RE.test(prefixPart)) {
+    return false;
+  }
+
+  const prefix = Number(prefixPart);
+  const maxPrefix = ipVersion === 4 ? 32 : 128;
+  return prefix >= 0 && prefix <= maxPrefix;
+}
+
+function parseTrustedProxyEntries(raw: string): { entries: string[]; hasInvalid: boolean } {
+  const entries = raw.split(',').map((entry) => entry.trim());
+  const hasInvalid = entries.some((entry) => !isValidTrustedProxyIpOrCidr(entry));
+  return { entries, hasInvalid };
+}
 
 /**
  * Server-only environment schema for LawOffice OS.
@@ -262,6 +289,18 @@ const baseEnvSchema = z.object({
   DOCUMENT_SCAN_POLICY_MODE: z
     .enum(['INITIAL_DEFERRED', 'REQUIRED'])
     .default('INITIAL_DEFERRED'),
+}).superRefine((env, ctx) => {
+  if (env.TRUSTED_PROXY_IPS !== undefined && env.TRUSTED_PROXY_IPS.trim().length > 0) {
+    const { hasInvalid } = parseTrustedProxyEntries(env.TRUSTED_PROXY_IPS);
+    if (hasInvalid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['TRUSTED_PROXY_IPS'],
+        message:
+          'TRUSTED_PROXY_IPS must be a comma-separated list of valid IPv4/IPv6 addresses or CIDR blocks (e.g. 127.0.0.1,::1,10.0.0.0/8)',
+      });
+    }
+  }
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;
@@ -457,11 +496,18 @@ export function isWorkerDispatchDisabled(
 }
 
 export function parseTrustedProxyIps(raw?: string): string[] {
-  const entries = (raw ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  return entries.length > 0 ? entries : ['127.0.0.1', '::1'];
+  if (!raw || raw.trim().length === 0) {
+    return ['127.0.0.1', '::1'];
+  }
+  const { entries, hasInvalid } = parseTrustedProxyEntries(raw);
+  if (hasInvalid) {
+    throw new EnvironmentValidationError(
+      'Environment validation failed.\nInvalid environment variable(s): TRUSTED_PROXY_IPS\nTRUSTED_PROXY_IPS must be a comma-separated list of valid IPv4/IPv6 addresses or CIDR blocks.\nConsult .env.example for required configuration. Secret values are redacted.',
+      [],
+      ['TRUSTED_PROXY_IPS']
+    );
+  }
+  return entries;
 }
 
 /**

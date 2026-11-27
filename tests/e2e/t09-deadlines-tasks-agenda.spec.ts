@@ -7,6 +7,7 @@ import { seedT04Owner, deleteT04Owner, signInWithTotp, type T04Owner } from '../
 import { cleanupTrackedFixtures, createValidatedTestPool } from '../helpers/test-db';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 import {
   expectNoElementOverflow,
   expectNoPageOverflow,
@@ -36,10 +37,6 @@ import {
  *              populated/empty/offline/error states, keyboard accessibility, 200% scale reflow,
  *              390/768/1440 responsive screenshots, print view, and browser storage privacy
  */
-
-function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
-  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 const prisma = getPrismaClient();
 
@@ -181,7 +178,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
   let testCourtId: string;
   let testPartyId: string;
 
-  const runId = Math.random().toString(36).slice(2, 7);
+  const runId = randomUUID().slice(0, 6);
   const createdMatterIds: string[] = [];
   const createdPartyIds: string[] = [];
   const createdCourtIds: string[] = [];
@@ -209,7 +206,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         kind: 'PERSON',
         name: `محمود عبد الحميد السري ${runId}`,
         nameNormalized: `محمود عبد الحميد السري ${runId}`,
-        primaryPhone: `010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        primaryPhone: `010${randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`,
         createdById: owner.id,
         updatedById: owner.id,
       },
@@ -291,7 +288,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
     );
 
     // Fill date, missing source -> rejected
-    await page.getByTestId('deadline-date-input').fill(formatOffsetYmd(30));
+    await page.getByTestId('deadline-date-input').fill(formatCairoOffsetYmd(30));
     await confirmBtn.click();
     await expect(page.getByTestId('deadline-form-error')).toContainText(
       'مصدر الموعد القانوني مطلوب للاعتماد'
@@ -335,7 +332,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
 
     const updated = await prisma.deadline.findUniqueOrThrow({ where: { id: draftDeadline.id } });
     expect(updated.status).toBe('CONFIRMED');
-    expect(updated.dueDate?.toISOString().slice(0, 10)).toBe(formatOffsetYmd(30));
+    expect(updated.dueDate?.toISOString().slice(0, 10)).toBe(formatCairoOffsetYmd(30));
     expect(updated.confirmedById).toBe(owner.id);
     expect(updated.confirmedByName).toBe(owner.name);
     expect(updated.confirmedAt).not.toBeNull();
@@ -375,7 +372,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         matterId: matter.id,
         proceedingId: proceeding.id,
         title: `تقديم مذكرة الرد النهائية ${runId}`,
-        dueDate: new Date(`${formatOffsetYmd(40)}T00:00:00.000Z`),
+        dueDate: new Date(`${formatCairoOffsetYmd(40)}T00:00:00.000Z`),
         dueTime: null,
         source: 'قرار المحكمة بالجلسة السابقة',
         basisNotes: 'أجل مسجل بمحضر الجلسة',
@@ -394,7 +391,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         jobType: 'REMINDER_DELIVERY',
         sourceType: 'Deadline',
         sourceId: confirmedDeadline.id,
-        scheduledAt: new Date(`${formatOffsetYmd(40)}T00:00:00.000Z`),
+        scheduledAt: new Date(`${formatCairoOffsetYmd(40)}T00:00:00.000Z`),
         status: 'PENDING',
         deduplicationKey: `t09_tc03_${confirmedDeadline.id}`,
         payload: { deadlineId: confirmedDeadline.id },
@@ -466,7 +463,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       'تاريخ تنفيذ الإجراء القانوني مطلوب'
     );
 
-    await page.getByTestId('deadline-completion-date-input').fill(formatOffsetYmd(35));
+    await page.getByTestId('deadline-completion-date-input').fill(formatCairoOffsetYmd(35));
     await page.getByTestId('deadline-completion-submit-button').click();
 
     await expect(completedSection.getByTestId(`deadline-card-${confirmedDeadline.id}`)).toBeVisible();
@@ -478,7 +475,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       where: { id: confirmedDeadline.id },
     });
     expect(finalDeadline.status).toBe('COMPLETED');
-    expect(finalDeadline.completedDate?.toISOString().slice(0, 10)).toBe(formatOffsetYmd(35));
+    expect(finalDeadline.completedDate?.toISOString().slice(0, 10)).toBe(formatCairoOffsetYmd(35));
     expect(finalDeadline.completionDescription).toBe('تم إيداع المذكرة بالسكرتارية برقم 412');
     expect(finalDeadline.completedById).toBe(owner.id);
 

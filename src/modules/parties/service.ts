@@ -894,6 +894,29 @@ export async function savePowerOfAttorney(
           return await buildReplayPowerOfAttorneyResult(tx, claim, canReadDocuments);
         }
 
+        if (input.documentId) {
+          const doc = await tx.document.findUnique({
+            where: { id: input.documentId },
+            select: { matterId: true, proceedingId: true },
+          });
+          if (doc?.matterId) {
+            await tx.$queryRaw`
+              SELECT "id"
+              FROM "matter"
+              WHERE "id" = ${doc.matterId}
+              FOR UPDATE
+            `;
+          }
+          if (doc?.proceedingId) {
+            await tx.$queryRaw`
+              SELECT "id"
+              FROM "proceeding"
+              WHERE "id" = ${doc.proceedingId}
+              FOR UPDATE
+            `;
+          }
+        }
+
         const [party] = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
           SELECT "id", "archivedAt"
           FROM "party"

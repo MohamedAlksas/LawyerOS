@@ -143,17 +143,3 @@ export async function signInWithTotp(page: Page, owner: T04Owner): Promise<void>
 
   await expect(page).not.toHaveURL(/\/(?:login|verify)(?:[/?]|$)/);
 }
-
-export async function signInWithBackupCode(page: Page, owner: T04Owner, code: string): Promise<void> {
-  await page.goto('/login');
-  await page.locator('#email').fill(owner.email);
-  await page.locator('#password').fill(owner.password);
-  await page.locator('button[type="submit"]').click();
-
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('التحقق الثنائي');
-  await page.getByRole('button', { name: /رمز استرداد للطوارئ/ }).click();
-  await page.locator('#backupCode').fill(code);
-  await page.locator('button[type="submit"]').click();
-
-  await expect(page).not.toHaveURL(/\/(?:login|verify)(?:[/?]|$)/);
-}

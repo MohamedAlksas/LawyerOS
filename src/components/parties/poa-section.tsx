@@ -224,6 +224,7 @@ export function PoaSection({
       setIsFormOpen(false);
       idempotencyKeyRef.current = null;
       setIsSubmitting(false);
+      router.refresh();
     } catch {
       setPending(payload);
       setError('تعذر تأكيد الحفظ. أعد المحاولة بنفس البيانات.');

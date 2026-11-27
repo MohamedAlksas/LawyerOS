@@ -3,7 +3,7 @@ import zlib from 'node:zlib';
 /**
  * Shared deterministic synthetic file builders for T11/T12 unit, integration, and E2E tests.
  */
-export function crc32(buf: Buffer): number {
+function crc32(buf: Buffer): number {
   let crc = 0xffffffff;
   for (let i = 0; i < buf.length; i++) {
     crc ^= buf[i];

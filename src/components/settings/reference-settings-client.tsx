@@ -48,13 +48,29 @@ export function ReferenceSettingsClient({
   initialPracticeAreas,
   initialStorageLocations,
   initialLookupError,
-  canWriteSettings = true,
+  canWriteSettings = false,
 }: ReferenceSettingsClientProps) {
   const router = useRouter();
   const draft = useFormDraft<ReferenceDraft>(ownerId, '/settings/reference');
   const restored = draft.restored;
 
   const [activeTab, setActiveTab] = useState<ReferenceTab>(restored?.tab ?? 'office');
+  const tabRefs = useRef<Partial<Record<ReferenceTab, HTMLButtonElement | null>>>({});
+
+  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, currentTab: ReferenceTab) => {
+    const tabs: ReferenceTab[] = ['office', 'courts', 'practice_areas', 'storage_locations'];
+    const idx = tabs.indexOf(currentTab);
+    let nextIdx = -1;
+    if (e.key === 'ArrowLeft') nextIdx = (idx + 1) % tabs.length;
+    else if (e.key === 'ArrowRight') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = tabs.length - 1;
+    if (nextIdx === -1) return;
+    e.preventDefault();
+    const nextTab = tabs[nextIdx];
+    setActiveTab(nextTab);
+    tabRefs.current[nextTab]?.focus();
+  };
 
   // Office Settings State
   const [officeSettings, setOfficeSettings] = useState<OfficeSettingsDTO>(initialOfficeSettings);
@@ -528,6 +544,7 @@ export function ReferenceSettingsClient({
 
   // Open Edit Modal (C19/U9)
   const handleOpenEditModal = (item: ReferenceItemDTO) => {
+    if (!canWriteSettings) return;
     setEditingItem(item);
     setEditItemName(item.name);
     setEditItemCode(item.code || '');
@@ -543,7 +560,7 @@ export function ReferenceSettingsClient({
   // Handle Save Edited Reference Item (C19/U1/U9)
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSavingEditItem || !editingItem || !editItemName.trim()) return;
+    if (!canWriteSettings || isSavingEditItem || !editingItem || !editItemName.trim()) return;
     setIsSavingEditItem(true);
     setEditItemError(null);
     setEditItemFieldErrors({});
@@ -635,7 +652,7 @@ export function ReferenceSettingsClient({
 
   // Handle Toggle Active/Inactive (U1/U3: frozen key and recovery)
   const handleToggleActive = async (item: ReferenceItemDTO) => {
-    if (isTogglingActive) return;
+    if (!canWriteSettings || isTogglingActive) return;
 
     if (togglePendingRef.current && togglePendingRef.current.item.id !== item.id) {
       setItemError('توجد عملية تعديل حالة معلّقة لعنصر آخر. يرجى حسم العملية العالقة أولاً.');
@@ -745,7 +762,7 @@ export function ReferenceSettingsClient({
 
         <Link
           href="/settings/security"
-          className="text-xs font-semibold text-[#14566B] hover:underline flex items-center gap-1"
+          className="text-xs font-semibold text-[#14566B] hover:underline flex items-center gap-1 min-h-[44px]"
         >
           <span>الانتقال لإعدادات الأمان والجلسات</span>
         </Link>
@@ -776,13 +793,20 @@ export function ReferenceSettingsClient({
 
       {/* Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-1" aria-label="أقسام الإعدادات" role="tablist">
+        <div className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-1" aria-label="أقسام الإعدادات" role="tablist">
           <button
+            ref={(el) => {
+              tabRefs.current.office = el;
+            }}
+            id="ref-tab-office"
             type="button"
             role="tab"
             aria-selected={activeTab === 'office'}
+            aria-controls={activeTab === 'office' ? 'ref-tabpanel-office' : undefined}
+            tabIndex={activeTab === 'office' ? 0 : -1}
             data-testid="tab-office-profile"
             onClick={() => setActiveTab('office')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'office')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'office'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -793,11 +817,18 @@ export function ReferenceSettingsClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.courts = el;
+            }}
+            id="ref-tab-courts"
             type="button"
             role="tab"
             aria-selected={activeTab === 'courts'}
+            aria-controls={activeTab === 'courts' ? 'ref-tabpanel-courts' : undefined}
+            tabIndex={activeTab === 'courts' ? 0 : -1}
             data-testid="tab-courts"
             onClick={() => setActiveTab('courts')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'courts')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'courts'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -808,11 +839,18 @@ export function ReferenceSettingsClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.practice_areas = el;
+            }}
+            id="ref-tab-practice_areas"
             type="button"
             role="tab"
             aria-selected={activeTab === 'practice_areas'}
+            aria-controls={activeTab === 'practice_areas' ? 'ref-tabpanel-practice_areas' : undefined}
+            tabIndex={activeTab === 'practice_areas' ? 0 : -1}
             data-testid="tab-practice-areas"
             onClick={() => setActiveTab('practice_areas')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'practice_areas')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'practice_areas'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -823,11 +861,18 @@ export function ReferenceSettingsClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.storage_locations = el;
+            }}
+            id="ref-tab-storage_locations"
             type="button"
             role="tab"
             aria-selected={activeTab === 'storage_locations'}
+            aria-controls={activeTab === 'storage_locations' ? 'ref-tabpanel-storage_locations' : undefined}
+            tabIndex={activeTab === 'storage_locations' ? 0 : -1}
             data-testid="tab-storage-locations"
             onClick={() => setActiveTab('storage_locations')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'storage_locations')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'storage_locations'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -836,12 +881,12 @@ export function ReferenceSettingsClient({
           >
             أماكن الحفظ الورقي ({storageLocations.length})
           </button>
-        </nav>
+        </div>
       </div>
 
       {/* Tab 1: Office Profile */}
       {activeTab === 'office' && (
-        <div className="space-y-6" role="tabpanel">
+        <div id="ref-tabpanel-office" role="tabpanel" aria-labelledby="ref-tab-office" className="space-y-6">
           {officeMessage && (
             <div
               role="status"
@@ -872,7 +917,7 @@ export function ReferenceSettingsClient({
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="office-session-login-link"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
                 >
                   فتح شاشة تسجيل الدخول في نافذة جديدة ↗
                 </a>
@@ -880,7 +925,7 @@ export function ReferenceSettingsClient({
                   type="submit"
                   form="office-settings-form"
                   data-testid="office-session-retry-button"
-                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
                 >
                   إعادة محاولة الحفظ
                 </button>
@@ -906,11 +951,11 @@ export function ReferenceSettingsClient({
                   <div className="font-semibold text-amber-900">البيانات الحالية على الخادم (النسخة {reconcilePreview.version}):</div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-700">
                     <div><span className="font-medium">الاسم:</span> {reconcilePreview.officeName}</div>
-                    <div><span className="font-medium">الهاتف:</span> {reconcilePreview.phone || '—'}</div>
+                    <div><span className="font-medium">الهاتف:</span> {reconcilePreview.phone ? <bdi dir="ltr">{reconcilePreview.phone}</bdi> : '—'}</div>
                     <div><span className="font-medium">العنوان:</span> {reconcilePreview.address || '—'}</div>
                     <div><span className="font-medium">المحامي:</span> {reconcilePreview.lawyerName || '—'}</div>
-                    <div><span className="font-medium">البريد الإلكتروني:</span> {reconcilePreview.email || '—'}</div>
-                    <div><span className="font-medium">الرقم الضريبي:</span> {reconcilePreview.taxNumber || '—'}</div>
+                    <div><span className="font-medium">البريد الإلكتروني:</span> {reconcilePreview.email ? <bdi dir="ltr">{reconcilePreview.email}</bdi> : '—'}</div>
+                    <div><span className="font-medium">الرقم الضريبي:</span> {reconcilePreview.taxNumber ? <bdi dir="ltr">{reconcilePreview.taxNumber}</bdi> : '—'}</div>
                   </div>
                   <div className="flex items-center gap-2 pt-2">
                     <button
@@ -918,7 +963,7 @@ export function ReferenceSettingsClient({
                       data-testid="office-reconcile-confirm-button"
                       onClick={handleConfirmReconcile}
                       disabled={isSavingOffice || isReconcilingOffice}
-                      className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] min-h-[36px]"
+                      className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] text-white font-semibold rounded-[6px] min-h-[44px]"
                     >
                       تأكيد اعتماد بيانات الخادم
                     </button>
@@ -927,7 +972,7 @@ export function ReferenceSettingsClient({
                       data-testid="office-reconcile-cancel-button"
                       onClick={() => setReconcilePreview(null)}
                       disabled={isSavingOffice || isReconcilingOffice}
-                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-[6px] min-h-[36px]"
+                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold rounded-[6px] min-h-[44px]"
                     >
                       إلغاء والاحتفاظ بالمسودة
                     </button>
@@ -940,7 +985,7 @@ export function ReferenceSettingsClient({
                     onClick={handleFetchOfficeForReconcile}
                     disabled={isSavingOffice || isReconcilingOffice}
                     data-testid="office-reconcile-server-button"
-                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
+                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50"
                   >
                     {isReconcilingOffice ? 'جارٍ جلب بيانات الخادم...' : 'استعراض وتحديث بأحدث بيانات من الخادم'}
                   </button>
@@ -968,7 +1013,7 @@ export function ReferenceSettingsClient({
                   form="office-settings-form"
                   disabled={isSavingOffice || isReconcilingOffice}
                   data-testid="office-operation-retry-button"
-                  className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] disabled:opacity-50 text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-[#14566B] hover:bg-[#114252] disabled:opacity-50 text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
                 >
                   {isSavingOffice ? 'جارٍ إعادة المحاولة...' : 'إعادة محاولة العملية الأصلية'}
                 </button>
@@ -977,7 +1022,7 @@ export function ReferenceSettingsClient({
                   onClick={handleStartNewOfficeEdit}
                   disabled={isSavingOffice || isReconcilingOffice}
                   data-testid="office-operation-start-new-button"
-                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px] disabled:opacity-50"
+                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[44px] disabled:opacity-50"
                 >
                   بدء تعديل جديد
                 </button>
@@ -1142,7 +1187,7 @@ export function ReferenceSettingsClient({
 
       {/* Tabs 2, 3, 4: Generic Reference Items Section */}
       {activeTab !== 'office' && (
-        <div className="space-y-6" role="tabpanel">
+        <div id={`ref-tabpanel-${activeTab}`} role="tabpanel" aria-labelledby={`ref-tab-${activeTab}`} className="space-y-6">
           {itemSuccessMessage && (
             <div
               role="status"
@@ -1173,7 +1218,7 @@ export function ReferenceSettingsClient({
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="item-session-login-link"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
                 >
                   فتح شاشة تسجيل الدخول في نافذة جديدة ↗
                 </a>
@@ -1190,7 +1235,7 @@ export function ReferenceSettingsClient({
                     handleCreateItem(type);
                   }}
                   data-testid="item-session-retry-button"
-                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                  className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
                 >
                   إعادة محاولة الإضافة
                 </button>
@@ -1225,7 +1270,7 @@ export function ReferenceSettingsClient({
                     handleCreateItem(type);
                   }}
                   data-testid="item-operation-retry-button"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
                 >
                   إعادة محاولة العملية الأصلية
                 </button>
@@ -1233,7 +1278,7 @@ export function ReferenceSettingsClient({
                   type="button"
                   onClick={handleStartNewItemCreate}
                   data-testid="item-operation-start-new-button"
-                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[44px]"
                 >
                   بدء إضافة جديدة
                 </button>
@@ -1260,7 +1305,7 @@ export function ReferenceSettingsClient({
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="toggle-session-login-link"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
                 >
                   فتح شاشة تسجيل الدخول في نافذة جديدة ↗
                 </a>
@@ -1271,7 +1316,7 @@ export function ReferenceSettingsClient({
                       if (togglePendingItem) handleToggleActive(togglePendingItem);
                     }}
                     data-testid="toggle-session-retry-button"
-                    className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[36px]"
+                    className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
                   >
                     إعادة محاولة تعديل الحالة
                   </button>
@@ -1300,7 +1345,7 @@ export function ReferenceSettingsClient({
                     if (togglePendingItem) handleToggleActive(togglePendingItem);
                   }}
                   data-testid="toggle-operation-retry-button"
-                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+                  className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
                 >
                   إعادة محاولة تعديل الحالة
                 </button>
@@ -1468,7 +1513,7 @@ export function ReferenceSettingsClient({
                           </span>
                           {item.code && (
                             <span className="font-mono text-[11px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
-                              {item.code}
+                              <bdi dir="ltr">{item.code}</bdi>
                             </span>
                           )}
                           <span
@@ -1483,34 +1528,36 @@ export function ReferenceSettingsClient({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          data-testid={`edit-reference-item-${item.id}`}
-                          onClick={() => handleOpenEditModal(item)}
-                          disabled={isTogglingActive || togglePending}
-                          className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[36px] transition-colors ${
-                            isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                        >
-                          تعديل
-                        </button>
-                        <button
-                          type="button"
-                          data-testid={`toggle-active-${item.id}`}
-                          onClick={() => handleToggleActive(item)}
-                          disabled={isTogglingActive || togglePending}
-                          className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border min-h-[36px] transition-colors ${
-                            isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed ' : ''
-                          }${
-                            item.isActive
-                              ? 'text-red-700 bg-red-50 hover:bg-red-100 border-red-200'
-                              : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
-                          }`}
-                        >
-                          {item.isActive ? 'تعطيل العنصر' : 'إعادة التفعيل'}
-                        </button>
-                      </div>
+                      {canWriteSettings && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            data-testid={`edit-reference-item-${item.id}`}
+                            onClick={() => handleOpenEditModal(item)}
+                            disabled={isTogglingActive || togglePending}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border border-[#D5DFE3] bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] min-h-[44px] transition-colors ${
+                              isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`toggle-active-${item.id}`}
+                            onClick={() => handleToggleActive(item)}
+                            disabled={isTogglingActive || togglePending}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-[6px] border min-h-[44px] transition-colors ${
+                              isTogglingActive || togglePending ? 'opacity-50 cursor-not-allowed ' : ''
+                            }${
+                              item.isActive
+                                ? 'text-red-700 bg-red-50 hover:bg-red-100 border-red-200'
+                                : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                            }`}
+                          >
+                            {item.isActive ? 'تعطيل العنصر' : 'إعادة التفعيل'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1525,7 +1572,7 @@ export function ReferenceSettingsClient({
         renderModalPortal(
           <div
             role="presentation"
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto"
           >
             <div
               ref={editDialogRef}
@@ -1533,7 +1580,7 @@ export function ReferenceSettingsClient({
               aria-modal="true"
               aria-labelledby="edit-reference-title"
               data-testid="reference-item-modal"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs max-h-[90vh] overflow-y-auto"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs max-h-[90vh] overflow-y-auto my-auto"
               dir="rtl"
               lang="ar-EG"
             >
@@ -1545,7 +1592,7 @@ export function ReferenceSettingsClient({
                 type="button"
                 onClick={handleCloseEditModal}
                 aria-label="إغلاق نافذة تعديل العنصر المرجعي"
-                className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm min-h-[36px] min-w-[36px] flex items-center justify-center"
+                className="text-[#4D606A] hover:text-[#172A35] p-1 font-bold text-sm min-h-[44px] min-w-[44px] flex items-center justify-center"
               >
                 ✕
               </button>
@@ -1564,7 +1611,7 @@ export function ReferenceSettingsClient({
                     href="/login"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded hover:bg-[#114252] inline-block"
+                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded hover:bg-[#114252] inline-flex items-center min-h-[44px]"
                   >
                     تسجيل الدخول في نافذة جديدة ↗
                   </a>
@@ -1572,7 +1619,7 @@ export function ReferenceSettingsClient({
                     type="submit"
                     form="edit-reference-item-form"
                     disabled={isSavingEditItem}
-                    className="px-2.5 py-1 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded disabled:opacity-50"
+                    className="px-2.5 py-1 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded min-h-[44px] disabled:opacity-50"
                   >
                     إعادة محاولة الحفظ
                   </button>
@@ -1593,14 +1640,14 @@ export function ReferenceSettingsClient({
                     type="submit"
                     form="edit-reference-item-form"
                     disabled={isSavingEditItem}
-                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded disabled:opacity-50"
+                    className="px-2.5 py-1 bg-[#14566B] text-white text-xs font-semibold rounded min-h-[44px] disabled:opacity-50"
                   >
                     إعادة المحاولة
                   </button>
                   <button
                     type="button"
                     onClick={handleStartNewEditItem}
-                    className="px-2.5 py-1 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded"
+                    className="px-2.5 py-1 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded min-h-[44px]"
                   >
                     بدء تعديل جديد
                   </button>
@@ -1615,7 +1662,7 @@ export function ReferenceSettingsClient({
             )}
 
             <form id="edit-reference-item-form" onSubmit={handleSaveEditItem} className="space-y-4">
-              <fieldset disabled={isSavingEditItem || editItemPending} className="space-y-4 border-0 p-0 m-0 min-w-0">
+              <fieldset disabled={!canWriteSettings || isSavingEditItem || editItemPending} className="space-y-4 border-0 p-0 m-0 min-w-0">
                 <div className="space-y-1">
                   <label htmlFor="edit-reference-name-input" className="block font-bold text-[#172A35]">
                     الاسم <span className="text-red-600">*</span>
@@ -1693,7 +1740,7 @@ export function ReferenceSettingsClient({
                   </button>
                   <button
                     type="submit"
-                    disabled={isSavingEditItem || editItemPending || !editItemName.trim()}
+                    disabled={!canWriteSettings || isSavingEditItem || editItemPending || !editItemName.trim()}
                     data-testid="save-edit-reference-item-button"
                     className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[44px]"
                   >

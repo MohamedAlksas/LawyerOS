@@ -671,6 +671,9 @@ export function DeadlinesView({
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setDraftSessionExpired(true);
           setIsFrozenDraftRetry(true);
           setDraftFormError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة بنفس المفتاح.');
@@ -960,6 +963,9 @@ export function DeadlinesView({
       const res = await changeDeadlineDateAction(pendingDateOpRef.current);
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setDateChangeSessionExpired(true);
           setIsFrozenDateRetry(true);
           setDateChangeError('انتهت صلاحية الجلسة أو يلزم التحقق. أُبقي طلب تعديل التاريخ مجمّداً بنفس المفتاح.');
@@ -1046,6 +1052,9 @@ export function DeadlinesView({
       const res = await completeDeadlineAction(pendingCompleteOpRef.current);
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setCompleteSessionExpired(true);
           setIsFrozenCompleteRetry(true);
           setCompleteError('انتهت صلاحية الجلسة أو يلزم التحقق. أُبقي طلب الإتمام مجمّداً بنفس المفتاح.');
@@ -1107,6 +1116,11 @@ export function DeadlinesView({
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           pendingCancelKeysRef.current.delete(opKey);
         }
@@ -1558,7 +1572,7 @@ export function DeadlinesView({
               aria-labelledby="deadline-modal-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="deadline-modal-title" className="text-lg font-bold text-[#172A35]">
@@ -1929,7 +1943,7 @@ export function DeadlinesView({
               aria-labelledby="change-deadline-date-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="change-deadline-date-title" className="text-lg font-bold text-[#172A35]">
@@ -2094,7 +2108,7 @@ export function DeadlinesView({
               aria-labelledby="complete-deadline-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="complete-deadline-title" className="text-lg font-bold text-[#172A35]">
@@ -2240,7 +2254,7 @@ export function DeadlinesView({
               aria-labelledby="cancel-deadline-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="cancel-deadline-title" className="text-lg font-bold text-[#172A35]">

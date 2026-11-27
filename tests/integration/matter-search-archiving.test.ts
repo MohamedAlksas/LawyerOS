@@ -33,6 +33,8 @@ import {
 } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { saveParty, getClientProfile } from '@/modules/parties/service';
+import { createTask } from '@/modules/productivity/productivity-service';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 
 describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving', () => {
   const prisma = getPrismaClient();
@@ -1175,5 +1177,127 @@ describe('T07 Integration Tests: Search, Filters, Pagination, and Safe Archiving
     expect(incIds.has(mNoClient.matter.id)).toBe(true);
     expect(incIds.has(mWithDraftProc.matter.id)).toBe(true);
     expect(incIds.has(mComplete.matter.id)).toBe(false);
+  });
+
+  it('reopenMatter and reopenProceeding re-enqueue open future tasks over CANCELLED archive jobs without P2002 and skip sibling archived proceedings', async () => {
+    const clientRes = await saveParty(actor, {
+      kind: 'PERSON',
+      name: `موكل إعادة فتح تذكيرات ${Date.now()}`,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdPartyIds.push(clientRes.party.id);
+
+    const opened = await openMatter(actor, {
+      title: `ملف إعادة فتح مع مهام مؤجلة ${Date.now()}`,
+      kind: 'LITIGATION',
+      status: 'ACTIVE',
+      initialClientId: clientRes.party.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(opened.matter.id);
+
+    const procActive = await addProceeding(actor, {
+      matterId: opened.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: '8101',
+      yearLabel: '2027',
+      registerType: 'مدني كلي',
+      status: 'ACTIVE',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const procArchivedSibling = await addProceeding(actor, {
+      matterId: opened.matter.id,
+      courtId: testCourtId,
+      instance: 'FIRST_INSTANCE',
+      numberText: '8102',
+      yearLabel: '2027',
+      registerType: 'مدني كلي',
+      status: 'ACTIVE',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const taskActive = await createTask(actor, {
+      title: 'مهمة قيد نشط لإعادة الفتح',
+      matterId: opened.matter.id,
+      proceedingId: procActive.id,
+      dueDate: formatCairoOffsetYmd(15),
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const taskSibling = await createTask(actor, {
+      title: 'مهمة قيد شقيق مؤرشف',
+      matterId: opened.matter.id,
+      proceedingId: procArchivedSibling.id,
+      dueDate: formatCairoOffsetYmd(20),
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Archive sibling proceeding first -> cancels taskSibling's JobRun
+    const archivedSibling = await archiveProceeding(actor, {
+      matterId: opened.matter.id,
+      proceedingId: procArchivedSibling.id,
+      expectedVersion: procArchivedSibling.version,
+      reason: 'أرشفة القيد الشقيق قبل أرشفة الملف',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Archive matter -> cancels taskActive's JobRun
+    const currentMatter = await getMatter(opened.matter.id, actor);
+    const archivedMatter = await archiveMatter(actor, {
+      matterId: opened.matter.id,
+      expectedVersion: currentMatter.version,
+      reason: 'أرشفة الملف مع مهام مستقبلية مفتوحة',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const cancelledActiveCount = await prisma.jobRun.count({
+      where: { sourceType: 'Task', sourceId: taskActive.id, status: 'CANCELLED' },
+    });
+    const cancelledSiblingCount = await prisma.jobRun.count({
+      where: { sourceType: 'Task', sourceId: taskSibling.id, status: 'CANCELLED' },
+    });
+    expect(cancelledActiveCount).toBeGreaterThanOrEqual(1);
+    expect(cancelledSiblingCount).toBeGreaterThanOrEqual(1);
+
+    // Reopen matter -> succeeds without P2002, creates reopen-scoped PENDING JobRun for taskActive,
+    // and does NOT re-enqueue taskSibling belonging to the still-archived sibling proceeding
+    const reopenedMatter = await reopenMatter(actor, {
+      matterId: opened.matter.id,
+      expectedVersion: archivedMatter.version,
+      reason: 'إعادة فتح الملف للعمل',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const reopenedActiveJobs = await prisma.jobRun.findMany({
+      where: { sourceType: 'Task', sourceId: taskActive.id, status: 'PENDING' },
+    });
+    expect(reopenedActiveJobs).toHaveLength(1);
+    expect(reopenedActiveJobs[0]!.deduplicationKey).toBe(
+      `task_reminder_${taskActive.id}_v${taskActive.version}_reopen_m${reopenedMatter.version}`
+    );
+
+    const siblingPendingAfterMatterReopen = await prisma.jobRun.count({
+      where: { sourceType: 'Task', sourceId: taskSibling.id, status: 'PENDING' },
+    });
+    expect(siblingPendingAfterMatterReopen).toBe(0);
+
+    // Reopen the archived sibling proceeding -> succeeds without P2002 and creates reopen-scoped PENDING JobRun for taskSibling
+    const reopenedSibling = await reopenProceeding(actor, {
+      matterId: opened.matter.id,
+      proceedingId: procArchivedSibling.id,
+      expectedVersion: archivedSibling.version,
+      reason: 'إعادة فتح القيد الشقيق',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const reopenedSiblingJobs = await prisma.jobRun.findMany({
+      where: { sourceType: 'Task', sourceId: taskSibling.id, status: 'PENDING' },
+    });
+    expect(reopenedSiblingJobs).toHaveLength(1);
+    expect(reopenedSiblingJobs[0]!.deduplicationKey).toBe(
+      `task_reminder_${taskSibling.id}_v${taskSibling.version}_reopen_p${reopenedSibling.version}`
+    );
   });
 });

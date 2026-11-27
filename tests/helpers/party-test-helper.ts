@@ -10,11 +10,6 @@ export function setupTestEncryptionKeys(): void {
   process.env.PARTY_IDENTITY_KEY_ID = SYNTHETIC_KEY_ID;
 }
 
-export function restoreTestEncryptionKeys(): void {
-  delete process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
-  delete process.env.PARTY_IDENTITY_KEY_ID;
-}
-
 export function createSyntheticActor(overrides: Partial<Actor> = {}): Actor {
   return {
     id: overrides.id ?? 'synthetic-owner-uuid-001',
@@ -116,30 +111,23 @@ export async function cleanupPartyFixtures(
   // Clean up associated audit and idempotency records for test cleanliness
   await prisma.auditEvent.deleteMany({
     where: {
-      OR: [
-        {
-          entityType: {
-            in: [
-              'Party',
-              'PARTY',
-              'PartyIdentity',
-              'CommunicationNote',
-              'PowerOfAttorney',
-              'MatterAuthorization',
-              'Document',
-              'DOCUMENT',
-              'DocumentVersion',
-              'DocumentStorage',
-              'UploadAttempt',
-              'BackupFilePin',
-            ],
-          },
-          entityId: { in: allEntityIds },
-        },
-        {
-          entityType: 'DocumentStorage',
-        },
-      ],
+      entityType: {
+        in: [
+          'Party',
+          'PARTY',
+          'PartyIdentity',
+          'CommunicationNote',
+          'PowerOfAttorney',
+          'MatterAuthorization',
+          'Document',
+          'DOCUMENT',
+          'DocumentVersion',
+          'DocumentStorage',
+          'UploadAttempt',
+          'BackupFilePin',
+        ],
+      },
+      entityId: { in: allEntityIds },
     },
   });
 

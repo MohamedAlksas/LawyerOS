@@ -696,7 +696,7 @@ export async function beginUpload(
           changedFields: {
             matterId: parsed.matterId ?? null,
             partyId: parsed.partyId ?? null,
-            proceedingId: parsed.proceedingId ?? null,
+            proceedingId: effectiveProceedingId,
             hearingId: parsed.hearingId ?? null,
             documentType: parsed.documentType,
             originalFilename: displayFilename,
@@ -1711,7 +1711,7 @@ export async function finalizeUpload(
               versionNumber: 1,
               matterId: lockedAttempt.matterId,
               partyId: lockedAttempt.partyId,
-              proceedingId: lockedAttempt.proceedingId,
+              proceedingId: finalProceedingId,
               hearingId: lockedAttempt.hearingId,
               documentType: lockedAttempt.documentType,
               originalFilename: inspected.displayFilename,

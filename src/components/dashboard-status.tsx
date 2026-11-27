@@ -31,9 +31,9 @@ async function probeHealthReady(signal: AbortSignal) {
 
 export function DashboardStatus({
   actorEmail,
-  canReadClientData = true,
-  canReadDocuments = true,
-  canManageSecurity = true,
+  canReadClientData = false,
+  canReadDocuments = false,
+  canManageSecurity = false,
 }: DashboardStatusProps) {
   const [status, setStatus] = useState<'loading' | 'error' | 'settled'>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

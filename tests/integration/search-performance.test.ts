@@ -11,15 +11,21 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
   let testCourtId: string;
   let createdCourtId: string | null = null;
 
-  beforeAll(async () => {
-    setupTestEncryptionKeys();
-
+  async function cleanupPerfFixtures() {
     await prisma.$executeRawUnsafe(`
+      UPDATE "document" SET "current_version_id" = NULL WHERE id LIKE 'perf-doc-%';
+      DELETE FROM "document_version" WHERE id LIKE 'perf-docver-%';
       DELETE FROM "document" WHERE id LIKE 'perf-doc-%';
       DELETE FROM "proceeding" WHERE id LIKE 'perf-proc-%';
       DELETE FROM "matter" WHERE id LIKE 'perf-matter-%';
       DELETE FROM "party" WHERE id LIKE 'perf-party-%';
     `);
+  }
+
+  beforeAll(async () => {
+    setupTestEncryptionKeys();
+
+    await cleanupPerfFixtures();
 
     let court = await prisma.court.findFirst({ where: { isActive: true } });
     if (!court) {
@@ -115,14 +121,7 @@ describe('T07 Search Performance Benchmark against PRD NFR-04 (P50, P90, P95 < 2
   }, 60000);
 
   afterAll(async () => {
-    await prisma.$executeRawUnsafe(`
-      UPDATE "document" SET "current_version_id" = NULL WHERE id LIKE 'perf-doc-%';
-      DELETE FROM "document_version" WHERE id LIKE 'perf-docver-%';
-      DELETE FROM "document" WHERE id LIKE 'perf-doc-%';
-      DELETE FROM "proceeding" WHERE id LIKE 'perf-proc-%';
-      DELETE FROM "matter" WHERE id LIKE 'perf-matter-%';
-      DELETE FROM "party" WHERE id LIKE 'perf-party-%';
-    `);
+    await cleanupPerfFixtures();
     if (createdCourtId) {
       await prisma.court.delete({ where: { id: createdCourtId } }).catch(() => {});
     }

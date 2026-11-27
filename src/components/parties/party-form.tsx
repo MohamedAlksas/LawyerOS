@@ -312,7 +312,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
                     <Link
                       href={`/parties/${dup.id}`}
                       data-testid={`view-existing-duplicate-${dup.id}`}
-                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs inline-flex items-center gap-1"
+                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs inline-flex items-center gap-1 min-h-[44px]"
                     >
                       <span>فتح الملف الموجود</span>
                       <span aria-hidden="true">↗</span>

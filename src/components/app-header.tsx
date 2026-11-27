@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React from 'react';
+import type { UserRole } from '@/modules/identity/types';
 import { GuardedLink as Link } from './navigation-guard';
 import { UserIdentityBadge } from './user-identity-badge';
 import { HeaderNotificationsMenu } from './reminders/header-notifications-menu';
@@ -9,7 +10,7 @@ interface AppHeaderProps {
   onToggleDrawer: () => void;
   isDrawerOpen: boolean;
   drawerTriggerRef?: React.RefObject<HTMLButtonElement | null>;
-  user?: { name?: string; email?: string } | null;
+  user?: { name?: string; email?: string; role?: UserRole } | null;
   showNotifications?: boolean;
 }
 

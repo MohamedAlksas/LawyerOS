@@ -315,7 +315,7 @@ export function PartyProfileClient({
                     </span>
                     {!revealedNumber ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-100 text-slate-800 border border-slate-200">
-                        •••• •••• •••• <bdi dir="ltr">{party.identityMask.lastFour}</bdi>
+                        <bdi dir="ltr">•••• •••• •••• {party.identityMask.lastFour}</bdi>
                       </span>
                     ) : (
                       <span
@@ -416,7 +416,7 @@ export function PartyProfileClient({
           {!isArchived && (
             <Link
               href="/matters/new"
-              className="text-xs font-semibold text-[#14566B] hover:underline"
+              className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
             >
               + فتح ملف جديد
             </Link>
@@ -433,7 +433,7 @@ export function PartyProfileClient({
             <button
               type="button"
               onClick={() => loadMatters(requestedMattersPage.current)}
-              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
+              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs min-h-[44px]"
             >
               إعادة المحاولة
             </button>
@@ -449,7 +449,7 @@ export function PartyProfileClient({
               <div
                 key={m.matterPartyId}
                 data-testid={`linked-matter-${m.matterId}`}
-                className="py-3 flex items-center justify-between gap-3 text-xs"
+                className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
               >
                 <div className="space-y-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 min-w-0">

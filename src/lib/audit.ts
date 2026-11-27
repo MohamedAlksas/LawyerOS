@@ -91,8 +91,8 @@ function sanitizeAuditRecord(
         continue;
       }
 
-      if (normalizedKey === 'number' && typeof value === 'string' && value.length > 4) {
-        sanitized[key] = `****${value.slice(-4)}`;
+      if (normalizedKey === 'number' && typeof value === 'string') {
+        sanitized[key] = value.length > 4 ? `****${value.slice(-4)}` : '****';
         continue;
       }
 

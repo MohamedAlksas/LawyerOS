@@ -521,4 +521,64 @@ describe('T08 Integration Tests: Hearing Transactions & Atomicity', () => {
     expect(untouchedTask.hearingId).toBe(hearing.id);
     expect(untouchedTask.dueTime).toBe('11:45');
   });
+
+  it('preserves summary/attendance/notes when omitted on correctHearingResult, sets duplicateDateWarning on same-day nextHearing, and replays multi-task result idempotently', async () => {
+    const sameDayTargetDate = '2027-12-20';
+    // Pre-existing active SCHEDULED hearing on sameDayTargetDate in the same proceeding
+    await scheduleHearing(actor, {
+      proceedingId: testProceedingId,
+      hearingDate: sameDayTargetDate,
+      idempotencyKey: `sched_existing_same_day_${crypto.randomUUID()}`,
+    });
+
+    const sourceHearing = await scheduleHearing(actor, {
+      proceedingId: testProceedingId,
+      hearingDate: '2027-11-15',
+      idempotencyKey: `sched_multi_task_${crypto.randomUUID()}`,
+    });
+
+    const multiTaskKey = `rec_multi_task_${crypto.randomUUID()}`;
+    const recordInput = {
+      hearingId: sourceHearing.id,
+      expectedVersion: sourceHearing.version,
+      decisionText: 'تأجيل لتقديم المستندات ومذكرات الدفاع',
+      summary: 'ملخص الجلسة الأولى',
+      attendance: 'حضر الأستاذ أحمد عن المدعي',
+      notes: 'ملاحظات خاصة محفوظة عبر المراجعات',
+      nextDateDisposition: 'KNOWN' as const,
+      nextHearingDate: sameDayTargetDate,
+      tasks: [
+        { title: 'مهمة أولى: استخراج شهادة', dueDate: '2027-12-05', dueTime: '10:00' },
+        { title: 'مهمة ثانية: سداد رسم', dueDate: '2027-12-10', dueTime: '12:30' },
+      ],
+      idempotencyKey: multiTaskKey,
+    };
+
+    const recorded = await recordHearingResult(actor, recordInput);
+    expect(recorded.nextHearing?.duplicateDateWarning).toBe(true);
+    expect(recorded.tasks).toHaveLength(2);
+    expect(recorded.taskIds).toHaveLength(2);
+
+    // Replay with the same idempotencyKey exercises multi-task replayResult
+    const replayed = await recordHearingResult(actor, recordInput);
+    expect(replayed.resultId).toBe(recorded.resultId);
+    expect(replayed.nextHearing?.duplicateDateWarning).toBe(true);
+    expect(replayed.taskIds).toEqual(recorded.taskIds);
+    expect(replayed.tasks).toHaveLength(2);
+    expect(await prisma.task.count({ where: { hearingId: sourceHearing.id } })).toBe(2);
+
+    // Correct result omitting summary, attendance, and notes -> preserves prior revision values
+    const corrected = await correctHearingResult(actor, {
+      hearingId: sourceHearing.id,
+      currentResultId: recorded.resultId,
+      correctionReason: 'تصحيح صياغة المنطوق مع الإبقاء على الملخص والحضور والملاحظات',
+      decisionText: 'تأجيل لتقديم حافظة المستندات الختامية',
+      idempotencyKey: `correct_preserve_${crypto.randomUUID()}`,
+    });
+
+    expect(corrected.revision).toBe(2);
+    expect(corrected.summary).toBe('ملخص الجلسة الأولى');
+    expect(corrected.attendance).toBe('حضر الأستاذ أحمد عن المدعي');
+    expect(corrected.notes).toBe('ملاحظات خاصة محفوظة عبر المراجعات');
+  });
 });

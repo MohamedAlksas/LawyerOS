@@ -5,6 +5,7 @@ const SECURITY_HEADERS = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'no-referrer' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
 ];
 
 const PAGE_CSP_VALUE =

@@ -306,6 +306,56 @@ describe('T11 & T12 Unit Tests: Document Content Validation, Storage Safety & AD
         })
       ).toThrow(DocumentValidationError);
 
+      // Indexed-color PNG (colorType === 3) passes with valid PLTE chunk and rejects missing or invalid PLTE
+      const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const indexedIhdr = makePngChunk(
+        'IHDR',
+        Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 3, 0, 0, 0])
+      );
+      const indexedIdat = makePngChunk(
+        'IDAT',
+        Buffer.from([0x78, 0x9c, 0x63, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01])
+      );
+      const iendChunk = makePngChunk('IEND', Buffer.alloc(0));
+
+      const validIndexedPng = Buffer.concat([
+        pngSig,
+        indexedIhdr,
+        makePngChunk('PLTE', Buffer.from([0x14, 0x56, 0x6b])),
+        indexedIdat,
+        iendChunk,
+      ]);
+      expect(
+        inspectFileContent(validIndexedPng, {
+          originalFilename: 'indexed-valid.png',
+          declaredMime: 'image/png',
+        }).detectedMime
+      ).toBe('image/png');
+
+      const missingPltePng = Buffer.concat([pngSig, indexedIhdr, indexedIdat, iendChunk]);
+      expect(() =>
+        inspectFileContent(missingPltePng, {
+          originalFilename: 'indexed-no-plte.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      for (const badPlteBytes of [Buffer.alloc(0), Buffer.alloc(4, 0x11), Buffer.alloc(771, 0x22)]) {
+        const badPltePng = Buffer.concat([
+          pngSig,
+          indexedIhdr,
+          makePngChunk('PLTE', badPlteBytes),
+          indexedIdat,
+          iendChunk,
+        ]);
+        expect(() =>
+          inspectFileContent(badPltePng, {
+            originalFilename: 'indexed-bad-plte.png',
+            declaredMime: 'image/png',
+          })
+        ).toThrow(DocumentValidationError);
+      }
+
       // JPEG with 0x0 dimensions (height=0 or width=0) in SOF0 segment is rejected
       const jpegZeroDim = Buffer.from([
         0xff, 0xd8, // SOI

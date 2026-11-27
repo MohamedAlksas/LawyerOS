@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { seedT04Owner, deleteT04Owner, T04Owner, signInWithTotp } from '../helpers/t04-auth';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 
 /**
  * T08 E2E Browser Test Suite: Hearings, Results, Adjournments, and Follow-ups
@@ -14,9 +15,6 @@ import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matt
  * - T08-TC-05: Browser conflict presentation and result correction
  * - T08-TC-07: Keyboard accessibility, offline disconnection & in-memory recovery, and 200% text scale reflow
  */
-function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
-  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
   let owner: T04Owner;
@@ -138,7 +136,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    const date = formatOffsetYmd(150);
+    const date = formatCairoOffsetYmd(150);
     await signInWithTotp(page, owner);
     await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
     await expect(page.getByText('الرقم غير مستكمل').first()).toBeVisible();
@@ -221,10 +219,10 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    const origHearingDate = formatOffsetYmd(-10);
-    const nextHearingDate = formatOffsetYmd(15);
-    const rescheduleHearingDate = formatOffsetYmd(25);
-    const taskDueDate = formatOffsetYmd(23);
+    const origHearingDate = formatCairoOffsetYmd(-10);
+    const nextHearingDate = formatCairoOffsetYmd(15);
+    const rescheduleHearingDate = formatCairoOffsetYmd(25);
+    const taskDueDate = formatCairoOffsetYmd(23);
 
     const hearing = await prisma.hearing.create({
       data: {
@@ -356,7 +354,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date(`${formatOffsetYmd(-5)}T00:00:00.000Z`),
+        hearingDate: new Date(`${formatCairoOffsetYmd(-5)}T00:00:00.000Z`),
         status: 'SCHEDULED',
         createdById: owner.id,
         updatedById: owner.id,
@@ -368,7 +366,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page.getByLabel(/منطوق القرار|قرار المحكمة/i).fill('تأجيل للاطلاع وتبادل المستندات');
 
     await page.getByRole('radio', { name: /يوجد موعد قادم/ }).locator('..').click();
-    await page.getByTestId('next-hearing-date-input').fill(formatOffsetYmd(10));
+    await page.getByTestId('next-hearing-date-input').fill(formatCairoOffsetYmd(10));
     await page.getByTestId('add-task-button').click();
     await page.getByTestId('task-title-0').fill('متابعة المستندات');
     const bodies: Array<string | null> = [];
@@ -436,7 +434,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date(`${formatOffsetYmd(-1)}T00:00:00.000Z`),
+        hearingDate: new Date(`${formatCairoOffsetYmd(-1)}T00:00:00.000Z`),
         status: 'SCHEDULED',
         version: 1,
         createdById: owner.id,
@@ -544,7 +542,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date(`${formatOffsetYmd(10)}T00:00:00.000Z`),
+        hearingDate: new Date(`${formatCairoOffsetYmd(10)}T00:00:00.000Z`),
         hearingTime: null, // Unknown time
         status: 'SCHEDULED',
         createdById: owner.id,

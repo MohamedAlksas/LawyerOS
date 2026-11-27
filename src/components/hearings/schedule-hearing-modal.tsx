@@ -131,7 +131,7 @@ export function ScheduleHearingModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="schedule-hearing-modal-title"
-        className="bg-white rounded-[8px] border border-[#D5DFE3] shadow-lg w-full max-w-lg p-6 space-y-5 text-right my-8"
+        className="bg-white rounded-[8px] border border-[#D5DFE3] shadow-lg w-full max-w-lg p-6 space-y-5 text-right max-h-[90vh] overflow-y-auto my-auto"
         dir="rtl"
         lang="ar-EG"
       >

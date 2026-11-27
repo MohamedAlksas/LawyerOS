@@ -282,7 +282,7 @@ export async function updateOfficeSettings(
         actorId: actor.id,
         commandType: 'updateOfficeSettings',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
       if (!resolved) return { resolved: false };
       const dto = await getOfficeSettingsInternal(prisma);
@@ -609,8 +609,9 @@ export async function updateReferenceItem(
     id: input.id,
     expectedVersion: input.expectedVersion,
     name: input.name,
-    code: input.code ?? null,
-    notes: input.notes ?? null,
+    code: input.code,
+    circuitTypes: input.circuitTypes,
+    notes: input.notes,
     isActive: input.isActive,
   };
 
@@ -757,7 +758,7 @@ export async function updateReferenceItem(
         actorId: actor.id,
         commandType: `updateReferenceItem:${input.type}`,
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
       if (!resolved) return { resolved: false };
       const resourceId = extractResourceId(resolved);

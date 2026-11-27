@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { twoFactor } from '@/lib/auth-client';
 import { parseAndValidateOtp } from '@/modules/identity/otp-input';
@@ -30,6 +30,25 @@ function VerifyForm() {
   const [backupCode, setBackupCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const totpTabRef = useRef<HTMLButtonElement>(null);
+  const backupTabRef = useRef<HTMLButtonElement>(null);
+
+  const handleMethodTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    let nextMethod: 'totp' | 'backup' | null = null;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      nextMethod = method === 'totp' ? 'backup' : 'totp';
+    } else if (e.key === 'Home') {
+      nextMethod = 'totp';
+    } else if (e.key === 'End') {
+      nextMethod = 'backup';
+    }
+    if (!nextMethod) return;
+    e.preventDefault();
+    setMethod(nextMethod);
+    setError(null);
+    if (nextMethod === 'totp') totpTabRef.current?.focus();
+    else backupTabRef.current?.focus();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,13 +125,18 @@ function VerifyForm() {
 
         <div className="flex border-b border-[#D5DFE3] mb-5" role="tablist" aria-label="طريقة التحقق">
           <button
+            ref={totpTabRef}
+            id="verify-tab-totp"
             type="button"
             role="tab"
             aria-selected={method === 'totp'}
+            aria-controls={method === 'totp' ? 'verify-panel-totp' : undefined}
+            tabIndex={method === 'totp' ? 0 : -1}
             onClick={() => {
               setMethod('totp');
               setError(null);
             }}
+            onKeyDown={handleMethodTabKeyDown}
             className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors min-h-[44px] ${
               method === 'totp'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -122,13 +146,18 @@ function VerifyForm() {
             رمز تطبيق المصادقة (TOTP)
           </button>
           <button
+            ref={backupTabRef}
+            id="verify-tab-backup"
             type="button"
             role="tab"
             aria-selected={method === 'backup'}
+            aria-controls={method === 'backup' ? 'verify-panel-backup' : undefined}
+            tabIndex={method === 'backup' ? 0 : -1}
             onClick={() => {
               setMethod('backup');
               setError(null);
             }}
+            onKeyDown={handleMethodTabKeyDown}
             className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors min-h-[44px] ${
               method === 'backup'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -141,7 +170,7 @@ function VerifyForm() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {method === 'totp' ? (
-            <div role="tabpanel">
+            <div id="verify-panel-totp" role="tabpanel" aria-labelledby="verify-tab-totp">
               <label htmlFor="totpCode" className="block text-sm font-medium text-[#172A35] mb-1">
                 رمز التحقق المكوّن من 6 أرقام
               </label>
@@ -171,7 +200,7 @@ function VerifyForm() {
               </div>
             </div>
           ) : (
-            <div role="tabpanel">
+            <div id="verify-panel-backup" role="tabpanel" aria-labelledby="verify-tab-backup">
               <label htmlFor="backupCode" className="block text-sm font-medium text-[#172A35] mb-1">
                 رمز الاسترداد المطبوع
               </label>

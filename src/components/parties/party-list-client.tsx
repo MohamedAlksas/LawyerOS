@@ -170,7 +170,7 @@ export function PartyListClient({
 
         {/* Kind Filters */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E8EEF1]">
-          <div className="flex items-center gap-2" role="group" aria-label="تصفية حسب نوع الطرف">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="تصفية حسب نوع الطرف">
             <span className="text-xs font-semibold text-[#4D606A] ml-1">التصنيف:</span>
 
             <button

@@ -21,10 +21,10 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const originRejection = verifyDocumentReadOrigin(request);
-  if (originRejection) return originRejection;
-
   try {
+    const originRejection = verifyDocumentReadOrigin(request);
+    if (originRejection) return originRejection;
+
     const actor = await requireDocumentActor(request, 'READ_DOCUMENTS');
     const { id } = await params;
     const sp = new URL(request.url).searchParams;

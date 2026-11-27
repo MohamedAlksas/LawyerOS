@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React, { useState, useEffect, useLayoutEffect, useId, useRef } from 'react';
+import NextLink from 'next/link';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { useRouter } from 'next/navigation';
 import { openMatterAction, updateMatterAction } from '@/modules/matters/matter-actions';
@@ -121,7 +122,14 @@ export function MatterForm({
   const [clientSearchTotalCount, setClientSearchTotalCount] = useState(parties.length);
   const [clientSearchTotalPages, setClientSearchTotalPages] = useState(1);
   const searchGenRef = useRef(0);
+  const clientSearchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const prevMatterRef = useRef(initialMatter);
+
+  useEffect(() => {
+    return () => {
+      if (clientSearchTimerRef.current) clearTimeout(clientSearchTimerRef.current);
+    };
+  }, []);
   const [prevParties, setPrevParties] = useState(parties);
 
   if (prevParties !== parties) {
@@ -166,6 +174,7 @@ export function MatterForm({
   const formDomId = `${formId}-form`;
 
   const runClientSearch = async (queryText: string, page: number) => {
+    if (clientSearchTimerRef.current) clearTimeout(clientSearchTimerRef.current);
     const gen = ++searchGenRef.current;
     if (!queryText.trim()) {
       setPartiesList(parties);
@@ -206,13 +215,23 @@ export function MatterForm({
     }
   };
 
-  const handleClientSearchChange = async (queryText: string) => {
+  const handleClientSearchChange = (queryText: string) => {
     setClientSearchQuery(queryText);
     // Hide old results immediately so a stale row cannot be selected while the
     // next query is still in flight.
     setPartiesList([]);
     setClientSearchPage(1);
-    await runClientSearch(queryText, 1);
+    if (clientSearchTimerRef.current) clearTimeout(clientSearchTimerRef.current);
+    if (!queryText.trim()) {
+      void runClientSearch(queryText, 1);
+      return;
+    }
+    searchGenRef.current++;
+    setIsSearchingClient(true);
+    setClientSearchError(null);
+    clientSearchTimerRef.current = setTimeout(() => {
+      void runClientSearch(queryText, 1);
+    }, 250);
   };
 
   const selectedClient = selectedClientObj || partiesList.find((p) => p.id === selectedClientId) || parties.find((p) => p.id === selectedClientId);
@@ -453,7 +472,7 @@ export function MatterForm({
               target="_blank"
               rel="noopener noreferrer"
               data-testid="session-recovery-login-link"
-              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-block"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] transition-colors inline-flex items-center min-h-[44px]"
             >
               فتح شاشة تسجيل الدخول في نافذة جديدة ↗
             </a>
@@ -461,7 +480,7 @@ export function MatterForm({
               type="submit"
               form={formDomId}
               data-testid="session-recovery-retry-button"
-              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors"
+              className="px-3 py-1.5 border border-[#14566B] text-[#14566B] bg-white text-xs font-semibold rounded-[6px] hover:bg-[#F4F6F7] transition-colors min-h-[44px]"
             >
               إعادة محاولة الحفظ
             </button>
@@ -488,7 +507,7 @@ export function MatterForm({
               type="submit"
               form={formDomId}
               data-testid="operation-retry-button"
-              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[36px]"
+              className="px-3 py-1.5 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] min-h-[44px]"
             >
               إعادة محاولة العملية الأصلية
             </button>
@@ -496,7 +515,7 @@ export function MatterForm({
               type="button"
               onClick={handleStartNewEdit}
               data-testid="operation-start-new-button"
-              className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[36px]"
+              className="px-3 py-1.5 bg-white border border-[#14566B] text-[#14566B] text-xs font-semibold rounded-[6px] min-h-[44px]"
             >
               بدء تعديل جديد (يتخلى عن العملية المعلّقة)
             </button>
@@ -715,7 +734,7 @@ export function MatterForm({
                     setSelectedClientObj(null);
                     setIsDirty(true);
                   }}
-                  className="text-xs font-semibold text-red-700 hover:text-red-900 p-1 rounded"
+                  className="text-xs font-semibold text-red-700 hover:text-red-900 px-2 py-1 rounded min-h-[44px]"
                 >
                   إزالة واختيار موكل آخر
                 </button>
@@ -739,14 +758,14 @@ export function MatterForm({
                 ) : partiesList.length === 0 ? (
                   <p className="text-xs text-[#4D606A] italic">
                     لم يتم العثور على أطراف مطابقة للبحث. يمكنك حفظ الملف كمسودة أو{' '}
-                    <Link
-                      href="/parties/new?returnTo=/matters/new"
+                    <NextLink
+                      href="/parties/new"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[#14566B] underline font-bold"
+                      className="text-[#14566B] underline font-bold inline-flex items-center min-h-[44px]"
                     >
                       إضافة طرف جديد في نافذة جديدة ↗
-                    </Link>
+                    </NextLink>
                     {' '}ثم العودة لهذه الصفحة لاختياره (تبقى المسودة الحالية في الذاكرة).
                   </p>
                 ) : (
@@ -757,11 +776,13 @@ export function MatterForm({
                         type="button"
                         data-testid={`select-client-option-${p.id}`}
                         onClick={() => {
+                          if (clientSearchTimerRef.current) clearTimeout(clientSearchTimerRef.current);
+                          searchGenRef.current++;
                           setSelectedClientId(p.id);
                           setSelectedClientObj(p);
                           setIsDirty(true);
                         }}
-                        className="w-full text-right p-2.5 text-xs hover:bg-[#F4F6F7] flex items-center justify-between transition-colors min-h-[40px]"
+                        className="w-full text-right p-2.5 text-xs hover:bg-[#F4F6F7] flex items-center justify-between transition-colors min-h-[44px]"
                       >
                         <span className="font-bold text-[#172A35]">{p.name}</span>
                         {p.primaryPhone ? (
@@ -786,7 +807,7 @@ export function MatterForm({
                         type="button"
                         disabled={clientSearchPage <= 1 || isSearchingClient}
                         onClick={() => runClientSearch(clientSearchQuery, clientSearchPage - 1)}
-                        className="px-2 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                        className="px-3 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[44px]"
                       >
                         السابق
                       </button>
@@ -794,7 +815,7 @@ export function MatterForm({
                         type="button"
                         disabled={clientSearchPage >= clientSearchTotalPages || isSearchingClient}
                         onClick={() => runClientSearch(clientSearchQuery, clientSearchPage + 1)}
-                        className="px-2 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[32px]"
+                        className="px-3 py-1 rounded border border-[#D5DFE3] bg-white disabled:opacity-40 min-h-[44px]"
                       >
                         التالي
                       </button>

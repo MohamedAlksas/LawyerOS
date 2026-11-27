@@ -27,6 +27,7 @@ const T12_E2E_STORAGE_ROOT = (process.env.T12_E2E_STORAGE_ROOT ??= path.join(
   os.tmpdir(),
   `lawoffice-t12-e2e-${process.pid}-${Date.now()}`
 ));
+process.env.LAWOFFICE_E2E_STORAGE_ROOT ??= T12_E2E_STORAGE_ROOT;
 
 const env = validateTestEnvironment();
 Object.assign(process.env, {
@@ -38,6 +39,7 @@ Object.assign(process.env, {
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: '**/t12-*.spec.ts',
+  globalTeardown: './tests/helpers/playwright-storage-teardown.ts',
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

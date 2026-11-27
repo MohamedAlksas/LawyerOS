@@ -23,7 +23,7 @@ export default defineConfig({
   testDir: './tests/e2e',
   testMatch: ['**/auth.spec.ts', '**/auth-round11-browser.spec.ts'],
   fullyParallel: false,
-  forbidOnly: !!process.env.CI,
+  forbidOnly: true,
   retries: 0,
   workers: 1,
   timeout: 60_000,

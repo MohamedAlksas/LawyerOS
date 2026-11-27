@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getMatter } from '@/modules/matters/matter-service';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { NotFoundError } from '@/modules/matters/matter-types';
@@ -32,9 +33,6 @@ const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
 export default async function ProceedingDetailPage({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
-  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
-    notFound();
-  }
   let actor;
   try {
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
@@ -52,6 +50,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     }
     throw error;
   }
+
+  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
+    notFound();
+  }
+
+  const canWriteClientData = authorize(actor, 'WRITE_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   let matter;
   try {
@@ -108,7 +113,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   const hearings: HearingDTO[] = await listHearingsForProceeding(actor, proceedingId);
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
+    <div className="max-w-5xl mx-auto space-y-6" dir="rtl" lang="ar-EG">
       {/* Breadcrumb Navigation */}
       <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] flex flex-wrap items-center gap-1.5">
         <Link href="/" className="hover:text-[#172A35]">
@@ -192,8 +197,8 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {!isReadOnly && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {!isReadOnly && canWriteClientData && (
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
                 data-testid="edit-proceeding-button"
@@ -287,7 +292,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             {proceeding.parentProceedingId && (
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.parentProceedingId}`}
-                className="text-[#14566B] font-bold hover:underline shrink-0"
+                className="text-[#14566B] font-bold hover:underline shrink-0 min-h-[44px] inline-flex items-center"
               >
                 عرض القيد السابق ←
               </Link>
@@ -314,9 +319,9 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             <table className="w-full text-xs text-right border-collapse">
               <thead>
                 <tr className="bg-[#F4F6F7] text-[#4D606A] border-b border-[#D5DFE3]">
-                  <th className="p-3 font-semibold">اسم الطرف</th>
-                  <th className="p-3 font-semibold">الصفة الإجرائية المقررة</th>
-                  <th className="p-3 font-semibold">الوصف التفصيلي للصفة</th>
+                  <th scope="col" className="p-3 font-semibold">اسم الطرف</th>
+                  <th scope="col" className="p-3 font-semibold">الصفة الإجرائية المقررة</th>
+                  <th scope="col" className="p-3 font-semibold">الوصف التفصيلي للصفة</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E8EEF1]">
@@ -353,6 +358,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       {/* Hearings & Court Calendar Section (S05 & S06) */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs">
         <HearingList
+          key={`${actor.id}:${proceeding.id}`}
           actorId={actor.id}
           proceedingId={proceeding.id}
           matterId={matter.id}
@@ -364,20 +370,22 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       </div>
 
       {/* Active Matter Documents Link */}
-      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h3>
-          <Link
-            href={`/documents?matterId=${id}`}
-            className="text-xs font-semibold text-[#14566B] hover:underline"
-          >
-            عرض مستندات الملف في الأرشيف &larr;
-          </Link>
+      {canReadDocuments && (
+        <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h3>
+            <Link
+              href={`/documents?matterId=${id}`}
+              className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
+            >
+              عرض مستندات الملف في الأرشيف &larr;
+            </Link>
+          </div>
+          <p className="text-xs text-[#4D606A] leading-relaxed">
+            يمكنك استعراض ورفع المستندات والمذكرات المرتبطة بهذا الملف عبر أرشيف المستندات.
+          </p>
         </div>
-        <p className="text-xs text-[#4D606A] leading-relaxed">
-          يمكنك استعراض ورفع المستندات والمذكرات المرتبطة بهذا الملف عبر أرشيف المستندات.
-        </p>
-      </div>
+      )}
     </div>
   );
 }

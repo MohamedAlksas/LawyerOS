@@ -10,7 +10,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import { AuthorizationError } from '@/modules/identity/types';
-import { addProceeding, openMatter } from '@/modules/matters/matter-service';
+import { addProceeding, archiveMatter, openMatter } from '@/modules/matters/matter-service';
 import {
   cancelDeadline,
   cancelHearing,
@@ -1366,7 +1366,7 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
       expect(runningAfterRuleUpdate.availableAt.getTime()).toBe(runningJobBefore.availableAt.getTime());
       expect(runningAfterRuleUpdate.deduplicationKey).toBe(runningPrimaryKey);
 
-      // Tick 2: 5 days before 2028-02-20 => delivers offset_5 and chains r3 without dropping it
+      // Tick 2: 5 days before 2028-02-20 => rule7 already delivered at offset_7 so delivery is skipped (dedup by ruleId:recipientUserId), while chaining r3 without dropping it
       await runReminderWorkerTick({
         now: new Date('2028-02-15T07:05:00.000Z'),
         workerId: 'worker-resched-r5',
@@ -1482,6 +1482,183 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
       });
       await prisma.hearing.deleteMany({
         where: { id: hSucc.id },
+      });
+    }
+  });
+
+  it('updateReminderRule re-enables disabled HEARING/DEADLINE/TASK rules over historical SUCCEEDED/CANCELLED/FAILED jobs without P2002 and filters archived matters', async () => {
+    const hActive = await scheduleHearing(owner, {
+      proceedingId,
+      hearingDate: '2028-05-20',
+      hearingTime: '09:30',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdHearingIds.push(hActive.id);
+
+    const dDraft = await createDeadline(owner, {
+      matterId,
+      proceedingId,
+      title: 'موعد قانوني لاختبار إعادة تفعيل القاعدة',
+      dueDate: '2028-05-25',
+      dueTime: '11:00',
+      source: 'قرار محكمة',
+      basisNotes: 'مراجعة يدوية',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const dConfirmed = await confirmDeadline(owner, {
+      deadlineId: dDraft.id,
+      expectedVersion: dDraft.version,
+      dueDate: '2028-05-25',
+      dueTime: '11:00',
+      source: 'قرار محكمة',
+      basisNotes: 'مراجعة يدوية',
+      confirmationAccepted: true,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdDeadlineIds.push(dConfirmed.id);
+
+    const tActive = await createTask(owner, {
+      title: 'مهمة نشطة لاختبار إعادة تفعيل القاعدة',
+      matterId,
+      proceedingId,
+      dueDate: '2028-05-18',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdTaskIds.push(tActive.id);
+
+    // Archived matter fixture whose open future task must NOT be re-enqueued
+    const archivedMatterRes = await openMatter(owner, {
+      title: `ملف مؤرشف لتصفية إعادة التفعيل ${runSuffix}`,
+      kind: 'LITIGATION',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdMatterIds.push(archivedMatterRes.matter.id);
+    const archivedTask = await createTask(owner, {
+      title: 'مهمة في ملف سيتم أرشفته',
+      matterId: archivedMatterRes.matter.id,
+      dueDate: '2028-05-22',
+      idempotencyKey: crypto.randomUUID(),
+    });
+    await archiveMatter(owner, {
+      matterId: archivedMatterRes.matter.id,
+      expectedVersion: archivedMatterRes.matter.version,
+      reason: 'أرشفة للتحقق من تصفية إعادة تفعيل القواعد',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Clear initial PENDING jobs on active fixtures and insert historical SUCCEEDED/CANCELLED/FAILED rows
+    await prisma.jobRun.deleteMany({
+      where: { sourceId: { in: [hActive.id, dConfirmed.id, tActive.id, archivedTask.id] } },
+    });
+
+    const histTime = new Date('2028-04-01T07:00:00.000Z');
+    await prisma.jobRun.createMany({
+      data: [
+        {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Hearing',
+          sourceId: hActive.id,
+          sourceVersion: hActive.version,
+          scheduledAt: histTime,
+          availableAt: histTime,
+          status: 'SUCCEEDED',
+          completedAt: histTime,
+          deduplicationKey: `hist_succ_h_${hActive.id}`,
+          payload: { hearingId: hActive.id },
+        },
+        {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Deadline',
+          sourceId: dConfirmed.id,
+          sourceVersion: dConfirmed.version,
+          scheduledAt: histTime,
+          availableAt: histTime,
+          status: 'CANCELLED',
+          completedAt: histTime,
+          deduplicationKey: `hist_canc_d_${dConfirmed.id}`,
+          payload: { deadlineId: dConfirmed.id },
+        },
+        {
+          jobType: 'REMINDER_DELIVERY',
+          sourceType: 'Task',
+          sourceId: tActive.id,
+          sourceVersion: tActive.version,
+          scheduledAt: histTime,
+          availableAt: histTime,
+          status: 'FAILED',
+          completedAt: histTime,
+          deduplicationKey: `hist_fail_t_${tActive.id}`,
+          payload: { taskId: tActive.id },
+        },
+      ],
+    });
+
+    const initialRules = await listReminderRules(owner);
+    const hearingRule = initialRules.find((r) => r.eventType === 'HEARING' && r.enabled)!;
+    const deadlineRule = initialRules.find((r) => r.eventType === 'DEADLINE' && r.enabled)!;
+    const taskRule = initialRules.find((r) => r.eventType === 'TASK' && r.enabled)!;
+
+    const disabledIds: string[] = [];
+    try {
+      for (const rule of [hearingRule, deadlineRule, taskRule]) {
+        const disabled = await updateReminderRule(owner, {
+          ruleId: rule.id,
+          expectedVersion: rule.version,
+          enabled: false,
+          idempotencyKey: crypto.randomUUID(),
+        });
+        disabledIds.push(rule.id);
+
+        const reenabled = await updateReminderRule(owner, {
+          ruleId: disabled.id,
+          expectedVersion: disabled.version,
+          enabled: true,
+          idempotencyKey: crypto.randomUUID(),
+        });
+        expect(reenabled.enabled).toBe(true);
+      }
+
+      const hJobs = await prisma.jobRun.findMany({
+        where: { sourceType: 'Hearing', sourceId: hActive.id, status: 'PENDING' },
+      });
+      expect(hJobs).toHaveLength(1);
+
+      const dJobs = await prisma.jobRun.findMany({
+        where: { sourceType: 'Deadline', sourceId: dConfirmed.id, status: 'PENDING' },
+      });
+      expect(dJobs).toHaveLength(1);
+      expect(dJobs[0]!.payload).toMatchObject({
+        deadlineId: dConfirmed.id,
+        version: dConfirmed.version,
+        sourceVersion: dConfirmed.version,
+        recipientUserId: owner.id,
+      });
+
+      const tJobs = await prisma.jobRun.findMany({
+        where: { sourceType: 'Task', sourceId: tActive.id, status: 'PENDING' },
+      });
+      expect(tJobs).toHaveLength(1);
+
+      const archivedTaskJobs = await prisma.jobRun.count({
+        where: { sourceType: 'Task', sourceId: archivedTask.id, status: 'PENDING' },
+      });
+      expect(archivedTaskJobs).toBe(0);
+    } finally {
+      // Ensure rules are restored to enabled=true even if assertions fail mid-loop
+      const currentRules = await listReminderRules(owner);
+      for (const id of disabledIds) {
+        const r = currentRules.find((item) => item.id === id);
+        if (r && !r.enabled) {
+          await updateReminderRule(owner, {
+            ruleId: r.id,
+            expectedVersion: r.version,
+            enabled: true,
+            idempotencyKey: crypto.randomUUID(),
+          });
+        }
+      }
+      await prisma.jobRun.deleteMany({
+        where: { sourceId: archivedTask.id },
       });
     }
   });

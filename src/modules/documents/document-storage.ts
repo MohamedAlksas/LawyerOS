@@ -379,26 +379,33 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       maxBytes: number = MAX_DOCUMENT_BYTES
     ): Promise<Buffer> {
       const targetPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
-      let stat: fs.Stats;
+      let handle: fs.promises.FileHandle;
       try {
-        stat = await fs.promises.stat(targetPath);
+        handle = await fs.promises.open(targetPath, 'r');
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
           throw new DocumentValidationError('تعذر العثور على بيانات الملف المؤقتة في الحجر.');
         }
         throw err;
       }
-      if (!stat.isFile() || stat.size <= 0) {
-        throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size <= 0) {
+          throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+        }
+        if (stat.size > maxBytes) {
+          throw new DocumentValidationError(
+            'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+            { file: 'حجم الملف يتجاوز 25 ميجابايت' },
+            'PAYLOAD_TOO_LARGE'
+          );
+        }
+        return await handle.readFile();
+      } finally {
+        await handle.close().catch(() => {});
       }
-      if (stat.size > maxBytes) {
-        throw new DocumentValidationError(
-          'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
-          { file: 'حجم الملف يتجاوز 25 ميجابايت' },
-          'PAYLOAD_TOO_LARGE'
-        );
-      }
-      return await fs.promises.readFile(targetPath);
     },
 
     async writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void> {
@@ -459,7 +466,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         handle = await fs.promises.open(targetPath, 'r');
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR') {
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;

@@ -52,18 +52,7 @@ import {
 } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
-import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
-
-function buildSyntheticJpeg(marker: number): Buffer {
-  return Buffer.from([
-    0xff, 0xd8, // SOI
-    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
-    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
-    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
-    marker & 0xff, (marker >> 8) & 0xff, 0x11, 0x22, // entropy
-    0xff, 0xd9, // EOI
-  ]);
-}
+import { buildSyntheticJpeg, buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
 
 function signSessionTokenCookie(token: string, secret: string): string {
   const sig = crypto.createHmac('sha256', secret).update(token).digest('base64');

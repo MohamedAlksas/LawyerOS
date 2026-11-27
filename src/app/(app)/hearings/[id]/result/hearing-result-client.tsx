@@ -96,9 +96,12 @@ export function HearingResultClient({
   const [docsError, setDocsError] = useState<string | null>(documentsLoadError ?? null);
   const [isRetryingDocs, setIsRetryingDocs] = useState(false);
   const retryDocsAbortRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       retryDocsAbortRef.current?.abort();
     };
   }, []);
@@ -144,10 +147,22 @@ export function HearingResultClient({
   const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
   const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
     Boolean(decision || summary || attendance || decisionDocumentId || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
+  // Keep isFrozenRetry/correctionFrozen out of GuardedLink confirm (T08-TC-03 navigates via breadcrumb
+  // while draft is preserved in FormDrafts), but still guard tab close/reload via beforeunload.
   useLeaveGuard(
     resultDirty || (isCorrecting && !correctionFrozen),
     isSubmitting || correctionSubmitting
   );
+
+  useEffect(() => {
+    if (!isFrozenRetry && !correctionFrozen) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isFrozenRetry, correctionFrozen]);
 
   const handleAddTask = () => {
     const newTask: FollowUpTaskItem = {
@@ -316,7 +331,11 @@ export function HearingResultClient({
     retryDocsAbortRef.current?.abort();
     const controller = new AbortController();
     retryDocsAbortRef.current = controller;
-    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15_000);
 
     try {
       const res = await fetch(`/api/documents?matterId=${encodeURIComponent(matterId)}&limit=100`, {
@@ -331,7 +350,12 @@ export function HearingResultClient({
         | { success: true; data: { documents: DocumentDTO[] } }
         | { success: false; error?: string }
         | null;
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (timedOut && isMountedRef.current) {
+          setDocsError('انتهت مهلة تحميل مستندات الملف. يرجى المحاولة مرة أخرى.');
+        }
+        return;
+      }
       if (!res.ok || !body || !body.success) {
         setDocsError(
           (body && !body.success && body.error) || 'تعذر تحميل مستندات الملف الجاهزة من الخادم.'
@@ -361,11 +385,18 @@ export function HearingResultClient({
       );
       setDocsError(null);
     } catch {
-      if (controller.signal.aborted) return;
-      setDocsError('تعذر تحميل مستندات الملف بسبب انقطاع الاتصال.');
+      if (controller.signal.aborted && !timedOut) return;
+      if (isMountedRef.current) {
+        setDocsError(
+          timedOut
+            ? 'انتهت مهلة تحميل مستندات الملف. يرجى المحاولة مرة أخرى.'
+            : 'تعذر تحميل مستندات الملف بسبب انقطاع الاتصال.'
+        );
+      }
     } finally {
       clearTimeout(timeoutId);
-      if (!controller.signal.aborted) {
+      if (isMountedRef.current && retryDocsAbortRef.current === controller) {
+        retryDocsAbortRef.current = null;
         setIsRetryingDocs(false);
       }
     }
@@ -577,12 +608,12 @@ export function HearingResultClient({
         </div>
       )}
       {linkedNext && (
-        <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm">
-          <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline">
+        <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm flex flex-wrap items-center gap-2">
+          <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline inline-flex items-center min-h-[44px]">
             الجلسة المرتبطة <bdi dir="ltr">{linkedNext.date}</bdi> ({HEARING_STATUS_LABELS[linkedNext.status]})
           </Link>
-          {' · '}
-          <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline">
+          <span aria-hidden="true">·</span>
+          <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline inline-flex items-center min-h-[44px]">
             عرض الموعد أو تغييره من القيد
           </Link>
         </div>
@@ -861,11 +892,11 @@ export function HearingResultClient({
           <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
             <label className="space-y-1 font-semibold">
               <span>ملخص الجلسة (اختياري)</span>
-              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px]" />
             </label>
             <label className="space-y-1 font-semibold">
               <span>الحضور (اختياري)</span>
-              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px]" />
             </label>
           </div>
 
@@ -915,7 +946,7 @@ export function HearingResultClient({
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'KNOWN'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -934,7 +965,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'UNDETERMINED'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -953,7 +984,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'NONE'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -1001,7 +1032,7 @@ export function HearingResultClient({
 
           {/* Follow-up Tasks Section */}
           <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="space-y-0.5">
                 <h3 className="font-bold text-[#172A35]">مهام المتابعة الناتجة عن الجلسة (اختياري)</h3>
                 <p className="text-xs text-[#4D606A]">

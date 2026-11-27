@@ -11,10 +11,10 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ attemptId: string }> }
 ) {
-  const originRejection = verifyDocumentReadOrigin(request);
-  if (originRejection) return originRejection;
-
   try {
+    const originRejection = verifyDocumentReadOrigin(request);
+    if (originRejection) return originRejection;
+
     const actor = await requireDocumentActor(request, 'READ_DOCUMENTS');
     const { attemptId } = await params;
     const data = await getUploadAttempt(actor, attemptId);

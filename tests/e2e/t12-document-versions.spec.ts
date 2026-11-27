@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -37,12 +36,9 @@ import {
   snapshotStorage,
 } from '../helpers/t04-storage';
 import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
+import { formatCairoOffsetYmd, getCairoYear } from '../helpers/cairo-test-date';
 
 const prisma = getPrismaClient();
-
-function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
-  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
 
 function resolveE2EStorageRoot(): string {
   return (
@@ -286,19 +282,12 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
   });
 
   test.afterAll(async () => {
-    const storageRoot = resolveE2EStorageRoot();
-    try {
-      await cleanupScopedT12Data({
-        ownerIds: owner?.id ? [owner.id] : [],
-        courtIds: createdCourtIds,
-      });
-      if (owner?.id) {
-        await deleteT04Owner(owner.id);
-      }
-    } finally {
-      if (storageRoot && fs.existsSync(storageRoot)) {
-        fs.rmSync(storageRoot, { recursive: true, force: true });
-      }
+    await cleanupScopedT12Data({
+      ownerIds: owner?.id ? [owner.id] : [],
+      courtIds: createdCourtIds,
+    });
+    if (owner?.id) {
+      await deleteT04Owner(owner.id);
     }
   });
 
@@ -307,7 +296,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
   }) => {
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
-    const currentYear = String(new Date().getUTCFullYear());
+    const currentYear = String(getCairoYear());
 
     try {
       const matter = await prisma.matter.create({
@@ -509,7 +498,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
     const maintainerId = randomUUID();
-    const currentYear = String(new Date().getUTCFullYear());
+    const currentYear = String(getCairoYear());
 
     try {
       const matter = await prisma.matter.create({
@@ -691,9 +680,9 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
     const localMatterIds: string[] = [];
     const localPartyIds: string[] = [];
     const localDocIds: string[] = [];
-    const currentYear = String(new Date().getUTCFullYear());
-    const futureHearingYmd = formatOffsetYmd(30);
-    const futureDueDateYmd = formatOffsetYmd(45);
+    const currentYear = String(getCairoYear());
+    const futureHearingYmd = formatCairoOffsetYmd(30);
+    const futureDueDateYmd = formatCairoOffsetYmd(45);
 
     try {
       const party = await prisma.party.create({
@@ -1111,7 +1100,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
   }, testInfo) => {
     const width = testInfo.project.use.viewport?.width ?? 1440;
     const tag = `${runId}-w${width}`;
-    const currentYear = String(new Date().getUTCFullYear());
+    const currentYear = String(getCairoYear());
 
     const localMatterIds: string[] = [];
     const localDocIds: string[] = [];
@@ -1367,6 +1356,25 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       ).toHaveCount(1);
       await expectNoPageOverflow(page);
       await page.unroute('**/api/documents?*');
+
+      // Invalid-UUID detail URL returns the Arabic 404 page without uncaught browser errors
+      const notFoundPageErrors: string[] = [];
+      const onNotFoundPageError = (err: Error) => {
+        notFoundPageErrors.push(err.message);
+      };
+      page.on('pageerror', onNotFoundPageError);
+      try {
+        const notFoundRes = await page.goto('/hearings/not-a-uuid');
+        expect(notFoundRes?.status()).toBe(404);
+        await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+        await expect(
+          page.getByRole('heading', { level: 1, name: 'الصفحة أو السجل غير موجود' })
+        ).toBeVisible();
+        await expect(page.getByRole('link', { name: 'العودة إلى الرئيسية' })).toBeVisible();
+        expect(notFoundPageErrors).toEqual([]);
+      } finally {
+        page.off('pageerror', onNotFoundPageError);
+      }
 
       // Privacy & session cookie hardening checks
       const cookies = await snapshotCookies(page);

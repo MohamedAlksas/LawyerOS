@@ -23,9 +23,6 @@ const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
 export default async function EditProceedingPage({ params }: EditProceedingPageProps) {
   const { id, proceedingId } = await params;
-  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
-    notFound();
-  }
   let actor;
   try {
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });
@@ -42,6 +39,10 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
       );
     }
     throw error;
+  }
+
+  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
+    notFound();
   }
 
   let matter;

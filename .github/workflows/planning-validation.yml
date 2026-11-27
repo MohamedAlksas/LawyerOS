@@ -10,14 +10,19 @@ on:
       - 'fix/**'
       - 'codex/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   validate-planning:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validate task cards and project skills
         shell: pwsh
         run: ./scripts/Validate-AntigravityKit.ps1

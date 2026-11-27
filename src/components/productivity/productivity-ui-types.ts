@@ -134,7 +134,11 @@ export function useAccessibleModal(options: {
       }
       if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
         requestAnimationFrame(() => {
-          previouslyFocused.focus();
+          if (previouslyFocused.isConnected) {
+            previouslyFocused.focus();
+          } else {
+            document.getElementById('main-content')?.focus();
+          }
         });
       }
     };

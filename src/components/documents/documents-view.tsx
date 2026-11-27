@@ -28,7 +28,7 @@ import {
   IconWarning,
   IconClock,
 } from '@/components/stitch-icons';
-import { bindSearchSession, writeSearchHistory } from '@/lib/search-session-store';
+import { bindSearchSession, readSearchHistory, writeSearchHistory } from '@/lib/search-session-store';
 import { DocumentUploadForm } from './document-upload-form';
 import {
   DOCUMENT_TYPE_LABELS_AR,
@@ -92,6 +92,22 @@ function syncUrl(filters: DocumentFilters, page: number, sessionId?: string) {
   }
 }
 
+const VALID_DOC_TYPES = new Set<string>(DOCUMENT_TYPE_OPTIONS.map((opt) => opt.value));
+const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
+function parseDocumentLocation(search: string) {
+  const sp = new URLSearchParams(search);
+  const rawType = sp.get('documentType')?.trim() ?? '';
+  const documentType = VALID_DOC_TYPES.has(rawType) ? rawType : '';
+  const rawMatter = sp.get('matterId')?.trim() ?? '';
+  const rawParty = sp.get('partyId')?.trim() ?? '';
+  const matterId = UUID_RE.test(rawMatter) ? rawMatter : '';
+  const partyId = !matterId && UUID_RE.test(rawParty) ? rawParty : '';
+  const rawPage = Number(sp.get('page')?.trim());
+  const page = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(rawPage, 1000) : 1;
+  return { documentType, matterId, partyId, page, hasQueryParam: sp.has('q') };
+}
+
 export function DocumentsView({
   initialDocuments,
   initialTotal,
@@ -127,12 +143,6 @@ export function DocumentsView({
   const documentsRef = useRef<DocumentDTO[]>(initialDocuments);
   const abortRef = useRef<AbortController | null>(null);
   const reqSeqRef = useRef(0);
-
-  useEffect(() => {
-    if (sessionId) {
-      bindSearchSession(sessionId);
-    }
-  }, [sessionId]);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -206,6 +216,84 @@ export function DocumentsView({
       }
     }
   }, [sessionId]);
+
+  useEffect(() => {
+    if (sessionId) {
+      bindSearchSession(sessionId);
+    }
+    const initialFilterState: DocumentFilters = {
+      q: (initialFilters.q ?? '').trim(),
+      documentType: initialFilters.documentType ?? '',
+      matterId: initialFilters.matterId ?? '',
+      partyId: initialFilters.partyId ?? '',
+    };
+
+    const scrubQueryParam = (parsed: ReturnType<typeof parseDocumentLocation>) => {
+      if (!parsed.hasQueryParam) return;
+      const clean = new URLSearchParams();
+      if (parsed.documentType) clean.set('documentType', parsed.documentType);
+      if (parsed.matterId) clean.set('matterId', parsed.matterId);
+      if (parsed.partyId) clean.set('partyId', parsed.partyId);
+      if (parsed.page > 1) clean.set('page', String(parsed.page));
+      const qs = clean.toString();
+      window.history.replaceState(
+        window.history.state,
+        '',
+        qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+      );
+    };
+
+    const restoreFromHistory = () => {
+      if (window.location.pathname !== '/documents') return;
+      const parsed = parseDocumentLocation(window.location.search);
+      scrubQueryParam(parsed);
+      const restoredQuery = sessionId ? (readSearchHistory(sessionId)?.query ?? '') : '';
+      setQuery(restoredQuery);
+      setSelectedType(parsed.documentType);
+      setSelectedMatterId(parsed.matterId);
+      setSelectedPartyId(parsed.partyId);
+      void fetchDocuments(
+        {
+          q: restoredQuery,
+          documentType: parsed.documentType,
+          matterId: parsed.matterId,
+          partyId: parsed.partyId,
+        },
+        parsed.page
+      );
+    };
+
+    const currentParsed = parseDocumentLocation(window.location.search);
+    scrubQueryParam(currentParsed);
+    const saved = sessionId ? readSearchHistory(sessionId) : undefined;
+    const matchesInitial =
+      !initialError &&
+      saved?.query === initialFilterState.q &&
+      currentParsed.documentType === initialFilterState.documentType &&
+      currentParsed.matterId === initialFilterState.matterId &&
+      currentParsed.partyId === initialFilterState.partyId &&
+      currentParsed.page === initialPage;
+
+    const firstRestore = saved && !matchesInitial ? setTimeout(restoreFromHistory, 0) : undefined;
+    if (!saved) {
+      syncUrl(initialFilterState, initialPage, sessionId);
+    }
+
+    window.addEventListener('popstate', restoreFromHistory);
+    return () => {
+      if (firstRestore !== undefined) clearTimeout(firstRestore);
+      window.removeEventListener('popstate', restoreFromHistory);
+    };
+  }, [
+    fetchDocuments,
+    initialError,
+    initialFilters.documentType,
+    initialFilters.matterId,
+    initialFilters.partyId,
+    initialFilters.q,
+    initialPage,
+    sessionId,
+  ]);
 
   const currentInputFilters = (): DocumentFilters => ({
     q: query,
@@ -340,7 +428,7 @@ export function DocumentsView({
       <form
         onSubmit={handleFilterSubmit}
         data-testid="documents-filter-form"
-        className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-3 min-w-0 max-w-full"
+        className="bg-white rounded-[6px] border border-[#D5DFE3] p-4 shadow-xs space-y-3 min-w-0 max-w-full print:hidden"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 min-w-0">
           <div className="min-w-0">
