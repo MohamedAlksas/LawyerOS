@@ -585,6 +585,7 @@ export function DocumentsView({
           title="تعذر تحميل المستندات"
           message={loadError}
           onRetry={() => void fetchDocuments(appliedFilters, page)}
+          headingLevel="h2"
         />
       )}
 
@@ -739,7 +740,7 @@ export function DocumentsView({
                     <div className="min-w-0 break-all">
                       <span className="font-semibold text-[#172A35]">الملف: </span>
                       <bdi dir="ltr">{ver.originalFilename}</bdi>
-                      <span className="mx-1">•</span>
+                      <span aria-hidden="true" className="mx-1">•</span>
                       <span>{formatFileSizeArabic(ver.sizeBytes)}</span>
                     </div>
                   )}

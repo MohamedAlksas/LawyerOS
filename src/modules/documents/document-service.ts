@@ -2008,7 +2008,7 @@ export async function listDocuments(
   };
 
   const total = await db.document.count({ where });
-  const totalPages = Math.max(1, Math.ceil(total / parsed.limit));
+  const totalPages = Math.max(1, Math.min(1000, Math.ceil(total / parsed.limit)));
   const page = Math.min(parsed.page, totalPages);
   const skip = (page - 1) * parsed.limit;
   const rows = await db.document.findMany({

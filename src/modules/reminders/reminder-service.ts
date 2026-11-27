@@ -835,6 +835,7 @@ async function reschedulePendingReminderJobs(
         sourceType,
         sourceId: { in: sourceIds },
         channel: 'IN_APP',
+        status: 'SENT',
       },
       select: {
         sourceId: true,

@@ -1470,15 +1470,15 @@ export function DocumentDetailView({
                         <span>
                           <bdi dir="ltr">{ver.detectedMime ?? ver.declaredMime ?? '—'}</bdi>
                         </span>
-                        <span>•</span>
+                        <span aria-hidden="true">•</span>
                         <span>{formatFileSizeArabic(ver.sizeBytes)}</span>
-                        <span>•</span>
+                        <span aria-hidden="true">•</span>
                         <span>
                           <bdi dir="ltr" className="font-mono" title={ver.sha256 ?? undefined}>
                             SHA-256: {formatShortSha256(ver.sha256)}
                           </bdi>
                         </span>
-                        <span>•</span>
+                        <span aria-hidden="true">•</span>
                         <span>{formatCairoInstantArabic(ver.createdAt)}</span>
                       </div>
                     </div>

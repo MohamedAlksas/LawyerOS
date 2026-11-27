@@ -1976,7 +1976,7 @@ export function MatterDetailClient({
                   {/* Primary Contact Toggle */}
                   {selectedPartyRole === 'CLIENT' && (
                     <div className="space-y-1 flex items-center pt-5">
-                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <label className="inline-flex items-center gap-2 cursor-pointer min-h-[44px]">
                         <input
                           type="checkbox"
                           checked={isPrimaryContact}

@@ -55,6 +55,7 @@ export default async function PartyDetailPage({ params }: PartyDetailPageProps) 
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الطرف غير موجود"
             description="لم يتم العثور على الطرف المطلوب. قد يكون تم حذفه أو أن المعرف غير صحيح."
             action={

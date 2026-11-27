@@ -60,6 +60,7 @@ export default async function DocumentDetailPage({ params }: DocumentDetailPageP
         <div className="max-w-3xl mx-auto py-8">
           <EmptyStateContainer
             testId="document-not-found"
+            headingLevel="h1"
             title="المستند غير موجود"
             description="لم يتم العثور على المستند المطلوب. قد يكون المعرف غير صحيح أو تم نقله."
             action={

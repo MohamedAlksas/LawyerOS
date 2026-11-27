@@ -67,6 +67,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الملف غير موجود"
             description="لم يتم العثور على ملف القضية المطلوب."
             action={
@@ -90,6 +91,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       <div className="max-w-3xl mx-auto py-12">
         <EmptyStateContainer
           icon=""
+          headingLevel="h1"
           title="القيد القضائي غير موجود"
           description="لم يتم العثور على القيد القضائي المطلوب داخل هذا الملف، أو قد يكون تابعاً لملف آخر."
           action={
@@ -373,7 +375,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       {canReadDocuments && (
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h3>
+            <h2 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h2>
             <Link
               href={`/documents?matterId=${id}`}
               className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"

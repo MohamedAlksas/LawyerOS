@@ -320,19 +320,23 @@ export async function POST(request: NextRequest) {
           ) {
             return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
           }
+        } else if (origin !== null) {
+          if (!allowedOrigins.has(origin)) {
+            return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
+          }
         } else {
-          let originToValidate: string | null = origin;
-          if (!originToValidate && referer) {
+          let refererOrigin: string | null = null;
+          if (referer) {
             try {
-              originToValidate = new URL(referer).origin;
+              refererOrigin = new URL(referer).origin;
             } catch {
-              originToValidate = null;
+              refererOrigin = null;
             }
           }
 
           // Do NOT synthesize origin from request.nextUrl.origin
           // Do NOT add request Host or forwarded headers (x-forwarded-proto) to allowed origins
-          if (!originToValidate || !allowedOrigins.has(originToValidate)) {
+          if (!refererOrigin || !allowedOrigins.has(refererOrigin)) {
             return noStoreJson({ error: 'Origin غير صالح أو غير موثوق.' }, { status: 403 });
           }
         }

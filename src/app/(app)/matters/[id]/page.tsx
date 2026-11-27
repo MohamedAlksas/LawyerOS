@@ -58,6 +58,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="ملف القضية غير موجود"
             description="لم يتم العثور على الملف المطلوب. قد يكون المعرف غير صحيح أو تم نقله."
             action={

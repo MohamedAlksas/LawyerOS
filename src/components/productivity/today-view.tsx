@@ -156,7 +156,7 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
               <IconWarning className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <h2 className="text-base font-bold text-[#172A35]">تعذر تحميل بيانات اليوم</h2>
+              <h1 className="text-base font-bold text-[#172A35]">تعذر تحميل بيانات اليوم</h1>
               <p className="text-sm text-[#4D606A] max-w-md mx-auto leading-relaxed">
                 {loadError || 'حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة مجدداً.'}
               </p>
@@ -254,11 +254,11 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
           </span>
           {h.circuit && (
             <>
-              <span className="text-[#D5DFE3]">—</span>
+              <span aria-hidden="true" className="text-[#D5DFE3]">—</span>
               <span>{h.circuit}</span>
             </>
           )}
-          <span className="text-[#D5DFE3]">—</span>
+          <span aria-hidden="true" className="text-[#D5DFE3]">—</span>
           <span>قيد: {h.proceedingLabel}</span>
         </div>
 
@@ -323,7 +323,7 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
               <p className="font-semibold text-[#172A35]" data-testid="today-cairo-date">
                 {overview.cairoTodayFormatted} (<bdi dir="ltr">{overview.cairoToday}</bdi>)
               </p>
-              <span className="text-[#D5DFE3]">•</span>
+              <span aria-hidden="true" className="text-[#D5DFE3]">•</span>
               <span>متابعة الجلسات والمواعيد القانونية والمهام المقررة اليوم</span>
             </div>
           </div>

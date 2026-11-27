@@ -1378,13 +1378,13 @@ export function ReferenceSettingsClient({
             }}
             className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-4"
           >
-            <h3 className="text-sm font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
+            <h2 className="text-sm font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
               {activeTab === 'courts'
                 ? '+ إضافة محكمة أو جهة قضائية جديدة'
                 : activeTab === 'practice_areas'
                 ? '+ إضافة دائرة تخصص قانوني جديدة'
                 : '+ إضافة مكان حفظ ورقي جديد'}
-            </h3>
+            </h2>
 
             <fieldset disabled={isCreatingItem || itemPending || !canWriteSettings} className="space-y-3 border-0 p-0 m-0 min-w-0">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1466,7 +1466,7 @@ export function ReferenceSettingsClient({
                 )
               </span>
 
-              <label className="flex items-center gap-1.5 text-xs text-[#4D606A] cursor-pointer">
+              <label className="flex items-center gap-1.5 text-xs text-[#4D606A] cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={filterActiveOnly}
@@ -1724,7 +1724,7 @@ export function ReferenceSettingsClient({
                     data-testid="edit-reference-item-active-checkbox"
                     className="w-4 h-4 text-[#14566B] rounded border-[#D5DFE3]"
                   />
-                  <label htmlFor="edit-reference-active-checkbox" className="font-semibold text-[#172A35] cursor-pointer">
+                  <label htmlFor="edit-reference-active-checkbox" className="font-semibold text-[#172A35] cursor-pointer min-h-[44px] inline-flex items-center">
                     عنصر نشط ومتاح للاختيار بالملفات والقضايا
                   </label>
                 </div>

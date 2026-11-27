@@ -53,6 +53,7 @@ export default async function MatterEditPage({ params }: MatterEditPageProps) {
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الملف غير موجود"
             description="لم يتم العثور على الملف المطلوب تعديله."
             action={

@@ -388,7 +388,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentValidationError('تعذر العثور على بيانات الملف المؤقتة في الحجر.');
         }
         throw err;
@@ -443,12 +443,28 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const destDir = path.dirname(destPath);
       await ensurePrivateDir(destDir, rootDir);
 
+      let srcHandle: fs.promises.FileHandle;
+      try {
+        srcHandle = await fs.promises.open(srcPath, READ_OPEN_FLAGS);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+          throw new DocumentValidationError('تعذر العثور على بيانات الملف المؤقتة في الحجر.');
+        }
+        throw err;
+      }
+
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
-        await fs.promises.copyFile(srcPath, tempPartPath, fs.constants.COPYFILE_EXCL);
-        handle = await fs.promises.open(tempPartPath, 'r+');
+        const st = await srcHandle.stat();
+        if (!st.isFile() || st.size <= 0) {
+          throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+        }
+        const bytes = await srcHandle.readFile();
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
         await ensurePrivateFileMode(handle);
+        await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
         handle = null;
@@ -460,6 +476,8 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         }
         await unlinkIfExists(tempPartPath).catch(() => {});
         throw err;
+      } finally {
+        await srcHandle.close().catch(() => {});
       }
     },
 
@@ -470,7 +488,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;
@@ -495,7 +513,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;

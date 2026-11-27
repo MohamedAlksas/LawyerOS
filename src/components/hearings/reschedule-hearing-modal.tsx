@@ -266,7 +266,7 @@ export function RescheduleHearingModal({
                   تحديد وقت الجلسة الجديدة (اختياري)
                 </span>
               )}
-              <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-[#14566B] font-semibold">
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-[#14566B] font-semibold min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={hasSpecificTime}
@@ -363,7 +363,7 @@ export function RescheduleHearingModal({
                 const selected = taskChanges.find(({ taskId }) => taskId === task.id);
                 return (
                   <div key={task.id}>
-                    <label className="flex gap-2">
+                    <label className="flex items-center gap-2 min-h-[44px] cursor-pointer">
                       <input type="checkbox" checked={Boolean(selected)} onChange={(event) => {
                         setTaskChanges(event.target.checked
                           ? [...taskChanges, { taskId: task.id, expectedVersion: task.version, dueDate: newHearingDate }]

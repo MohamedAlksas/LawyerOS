@@ -188,6 +188,47 @@ export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean 
 const LOOPBACK_BETTER_AUTH_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const TRUSTED_PROXY_PREFIX_RE = /^[1-9]\d*$/;
 
+function isIpv4MappedIpv6(ip: string): boolean {
+  const halves = ip.split('::');
+  if (halves.length > 2) return false;
+  const parsePart = (part: string): number[] | null => {
+    if (!part) return [];
+    const tokens = part.split(':');
+    const out: number[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]!;
+      if (tok.includes('.')) {
+        if (i !== tokens.length - 1) return null;
+        const octets = tok.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+          return null;
+        }
+        out.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!);
+      } else {
+        const val = Number.parseInt(tok, 16);
+        if (Number.isNaN(val)) return null;
+        out.push(val);
+      }
+    }
+    return out;
+  };
+  const left = parsePart(halves[0]!);
+  const right = halves.length === 2 ? parsePart(halves[1]!) : [];
+  if (!left || !right) return false;
+  const missing = halves.length === 2 ? 8 - (left.length + right.length) : 0;
+  if (missing < 0 || (halves.length === 1 && left.length !== 8)) return false;
+  const groups = [...left, ...new Array<number>(missing).fill(0), ...right];
+  return (
+    groups.length === 8 &&
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0xffff
+  );
+}
+
 export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
   if (!entry) return false;
   const slashIdx = entry.indexOf('/');
@@ -197,11 +238,11 @@ export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
 
   const ipPart = entry.slice(0, slashIdx);
   const prefixPart = entry.slice(slashIdx + 1);
-  if (/^::ffff:/i.test(ipPart)) {
-    return false;
-  }
   const ipVersion = isIP(ipPart);
   if (ipVersion === 0 || !TRUSTED_PROXY_PREFIX_RE.test(prefixPart)) {
+    return false;
+  }
+  if (ipVersion === 6 && isIpv4MappedIpv6(ipPart)) {
     return false;
   }
 

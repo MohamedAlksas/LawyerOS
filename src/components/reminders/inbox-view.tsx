@@ -383,6 +383,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
           message={loadError || 'حدث خطأ أثناء الاتصال بالخادم.'}
           onRetry={() => void refreshInbox()}
           isRetrying={isRefreshing}
+          headingLevel="h1"
         />
       </div>
     );

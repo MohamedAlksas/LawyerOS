@@ -105,6 +105,7 @@ export function DashboardStatus({
         title="تعذر تحميل بيانات لوحة المتابعة"
         message={errorMessage || 'تعذر تحميل بيانات لوحة المتابعة. يرجى التحقق من الاتصال والمحاولة مجدداً.'}
         onRetry={executeStatusCheck}
+        headingLevel="h2"
       />
     );
   }
@@ -190,7 +191,7 @@ export function DashboardStatus({
         <bdi dir="ltr" className="font-mono text-[#172A35] font-medium">
           {actorEmail}
         </bdi>
-        <span className="text-slate-300">•</span>
+        <span aria-hidden="true" className="text-slate-300">•</span>
         <span className="text-[#176449] font-medium">النظام متصل وجاهز</span>
       </div>
     </div>

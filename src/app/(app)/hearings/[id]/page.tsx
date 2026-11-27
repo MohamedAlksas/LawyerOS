@@ -196,7 +196,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               {hearing.hearingTime ? (
                 <bdi dir="ltr" className="font-mono text-sm">{hearing.hearingTime}</bdi>
               ) : (
-                <span data-testid={`hearing-time-${hearing.id}`} className="text-[#64748B] italic">
+                <span data-testid={`hearing-time-${hearing.id}`} className="text-[#4D606A] italic">
                   الساعة غير محددة
                 </span>
               )}

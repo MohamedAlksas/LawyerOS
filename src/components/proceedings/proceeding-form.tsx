@@ -1000,7 +1000,7 @@ export function ProceedingForm({
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] space-y-1">
               <label
                 htmlFor={`${formId}-incompleteAck`}
-                className="flex items-start gap-2 text-xs text-amber-950"
+                className="flex items-start gap-2 text-xs text-amber-950 min-h-[44px] py-2 cursor-pointer"
               >
                 <input
                   id={`${formId}-incompleteAck`}

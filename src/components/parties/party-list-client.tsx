@@ -230,6 +230,7 @@ export function PartyListClient({
           title="تعذر تحميل دليل الأطراف"
           message={error}
           onRetry={() => fetchParties(appliedQuery, selectedKind, page)}
+          headingLevel="h2"
         />
       ) : parties.length === 0 ? (
         hasActiveFilters ? (

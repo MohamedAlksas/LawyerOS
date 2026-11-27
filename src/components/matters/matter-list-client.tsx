@@ -656,6 +656,7 @@ export function MatterListClient({
           title="تعذر تحميل ملفات القضايا"
           message={error}
           onRetry={() => fetchMatters(query, view, selectedClient)}
+          headingLevel="h2"
         />
       ) : matters.length === 0 ? (
         hasActiveFilters ? (

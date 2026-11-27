@@ -88,6 +88,7 @@ export interface EmptyStateContainerProps {
   children?: React.ReactNode;
   className?: string;
   testId?: string;
+  headingLevel?: 'h1' | 'h2' | 'h3';
 }
 
 export function EmptyStateContainer({
@@ -98,7 +99,9 @@ export function EmptyStateContainer({
   children,
   className = '',
   testId = 'empty-state-container',
+  headingLevel = 'h2',
 }: EmptyStateContainerProps) {
+  const HeadingTag = headingLevel;
   const renderedIcon =
     typeof icon === 'string'
       ? icon.trim() || <IconFolder className="w-7 h-7" />
@@ -115,7 +118,7 @@ export function EmptyStateContainer({
         {renderedIcon}
       </div>
       <div className="max-w-md mx-auto space-y-2">
-        <h2 className="text-lg font-bold text-[#172A35]">{title}</h2>
+        <HeadingTag className="text-lg font-bold text-[#172A35]">{title}</HeadingTag>
         <p className="text-sm text-[#4D606A] leading-relaxed">{description}</p>
       </div>
       {action && <div className="pt-2">{action}</div>}

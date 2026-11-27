@@ -433,6 +433,7 @@ export function UnifiedSearchClient({
           title="تعذر استرجاع نتائج البحث"
           message={error}
           onRetry={() => executeSearch(query, filters)}
+          headingLevel="h2"
         />
       ) : items.length === 0 ? (
         hasActiveFilters ? (
@@ -462,7 +463,7 @@ export function UnifiedSearchClient({
           <div
             data-testid="search-results-list"
             className="space-y-3"
-            role="feed"
+            role="region"
             aria-busy={isLoading}
             aria-label="قائمة نتائج البحث"
           >

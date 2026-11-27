@@ -453,7 +453,7 @@ export function HearingResultClient({
               {hearingTime ? (
                 <bdi dir="ltr" className="font-mono">{hearingTime}</bdi>
               ) : (
-                <span data-testid="hearing-unknown-time" className="italic text-[#64748B]">
+                <span data-testid="hearing-unknown-time" className="italic text-[#4D606A]">
                   الساعة غير محددة
                 </span>
               )}
@@ -1034,7 +1034,7 @@ export function HearingResultClient({
           <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="space-y-0.5">
-                <h3 className="font-bold text-[#172A35]">مهام المتابعة الناتجة عن الجلسة (اختياري)</h3>
+                <h2 className="font-bold text-[#172A35]">مهام المتابعة الناتجة عن الجلسة (اختياري)</h2>
                 <p className="text-xs text-[#4D606A]">
                   مهام عمل تنشأ ذرياً وتكلف للمكتب لمتابعة إجراءات الجلسة
                 </p>

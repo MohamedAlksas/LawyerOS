@@ -54,6 +54,7 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الملف غير موجود"
             description="لم يتم العثور على ملف القضية المطلوب."
             action={
@@ -77,6 +78,7 @@ export default async function EditProceedingPage({ params }: EditProceedingPageP
       <div className="max-w-3xl mx-auto py-12">
         <EmptyStateContainer
           icon=""
+          headingLevel="h1"
           title="القيد القضائي غير موجود"
           description="لم يتم العثور على القيد القضائي المطلوب تعديله داخل هذا الملف."
           action={

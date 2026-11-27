@@ -266,7 +266,7 @@ export function CommunicationNotesSection({
           </div>
 
           <div className="space-y-2 pt-1 border-t border-[#D5DFE3]">
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2 cursor-pointer min-h-[44px]">
               <input
                 type="checkbox"
                 data-testid="note-follow-up-checkbox"

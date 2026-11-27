@@ -697,6 +697,7 @@ export function TasksView({
           message={loadError}
           onRetry={refreshTasks}
           isRetrying={isLoading}
+          headingLevel={lockedMatterId ? 'h3' : 'h2'}
         />
       ) : filteredTasks.length === 0 ? (
         <EmptyStateContainer
@@ -731,6 +732,7 @@ export function TasksView({
           {filteredTasks.map((task) => {
             const isOpenTask = task.status === 'OPEN' || task.status === 'IN_PROGRESS';
             const isBusy = mutatingTaskId === task.id;
+            const TaskTitleTag = lockedMatterId ? 'h3' : 'h2';
             return (
               <article
                 key={task.id}
@@ -746,9 +748,9 @@ export function TasksView({
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pb-2 border-b border-[#E8EEF1]">
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
+                      <TaskTitleTag className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
                         {task.title}
-                      </h3>
+                      </TaskTitleTag>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-[#4D606A]">
                       {task.matterId && task.matterTitle ? (
