@@ -111,6 +111,48 @@ export async function expectNotCovered(page: Page, locator: Locator): Promise<vo
   expect(result.hitOk, 'A sticky/overlapping layer covers the focused control').toBe(true);
 }
 
+/**
+ * Waits for a smooth scroll transition to settle and verifies the target element
+ * is visible, below any sticky header, and not covered by an overlay,
+ * WITHOUT calling scrollIntoViewIfNeeded() or .focus() on non-focusable elements.
+ */
+export async function expectScrollSettledAndNotCovered(
+  page: Page,
+  locator: Locator,
+  headerSelector = '[data-testid="app-header"]'
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        return locator.evaluate((element, hdrSel) => {
+          const rect = element.getBoundingClientRect();
+          const header = document.querySelector(hdrSel) || document.querySelector('header');
+          const headerBottom = header ? header.getBoundingClientRect().bottom : 0;
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + Math.min(rect.height / 2, 20);
+          const hit = document.elementFromPoint(x, y);
+          const hitOk = hit === element || (hit !== null && element.contains(hit));
+          return {
+            topBelowHeader: rect.top >= headerBottom - 1,
+            inViewport: rect.top < window.innerHeight && rect.bottom > 0,
+            hitOk,
+          };
+        }, headerSelector);
+      },
+      {
+        message: 'Expected scrolled element to settle below header and remain uncovered',
+        intervals: [100, 200, 300],
+        timeout: 10_000,
+      }
+    )
+    .toEqual({
+      topBelowHeader: true,
+      inViewport: true,
+      hitOk: true,
+    });
+}
+
+
 function indicatorScript(): FocusIndicator {
   const element = document.activeElement as HTMLElement | null;
   if (!element) {
@@ -132,7 +174,7 @@ function indicatorScript(): FocusIndicator {
   };
 }
 
-export async function focusIndicatorOfFocused(page: Page): Promise<FocusIndicator> {
+async function focusIndicatorOfFocused(page: Page): Promise<FocusIndicator> {
   return page.evaluate(indicatorScript);
 }
 
@@ -269,7 +311,7 @@ function contrastScript(): ContrastSample {
  * Measures rendered contrast. Callers mark one element with
  * `data-t04-contrast-target="true"` immediately before measuring.
  */
-export async function contrastOf(locator: Locator): Promise<ContrastSample> {
+async function contrastOf(locator: Locator): Promise<ContrastSample> {
   await locator.evaluate((element) => element.setAttribute('data-t04-contrast-target', 'true'));
   try {
     return await locator.evaluate(contrastScript);
@@ -278,17 +320,8 @@ export async function contrastOf(locator: Locator): Promise<ContrastSample> {
   }
 }
 
-export async function expectContrast(locator: Locator, minimum: number): Promise<ContrastSample> {
-  const sample = await contrastOf(locator);
-  expect(
-    sample.ratio,
-    `Contrast ${sample.ratio.toFixed(2)}:1 below ${minimum}:1 for "${sample.text}" (color=${sample.foreground}, background=${sample.background})`
-  ).toBeGreaterThanOrEqual(minimum);
-  return sample;
-}
-
 /** WCAG large text: >=24px, or >=18.66px bold. */
-export function minimumContrastFor(sample: ContrastSample): number {
+function minimumContrastFor(sample: ContrastSample): number {
   const large = sample.fontSize >= 24 || (sample.fontSize >= 18.66 && sample.fontWeight >= 700);
   return large ? 3 : 4.5;
 }

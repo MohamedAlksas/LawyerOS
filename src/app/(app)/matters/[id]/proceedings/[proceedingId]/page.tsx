@@ -1,8 +1,10 @@
 import React from 'react';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getMatter } from '@/modules/matters/matter-service';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
 import { NotFoundError } from '@/modules/matters/matter-types';
@@ -27,6 +29,8 @@ interface ProceedingDetailPageProps {
 
 export const metadata = { title: 'القيد القضائي — LawOffice OS' };
 
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
 export default async function ProceedingDetailPage({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
   let actor;
@@ -38,7 +42,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض هذا القيد القضائي.</p>
         </div>
@@ -46,6 +50,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
     }
     throw error;
   }
+
+  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
+    notFound();
+  }
+
+  const canWriteClientData = authorize(actor, 'WRITE_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   let matter;
   try {
@@ -56,6 +67,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الملف غير موجود"
             description="لم يتم العثور على ملف القضية المطلوب."
             action={
@@ -79,6 +91,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       <div className="max-w-3xl mx-auto py-12">
         <EmptyStateContainer
           icon=""
+          headingLevel="h1"
           title="القيد القضائي غير موجود"
           description="لم يتم العثور على القيد القضائي المطلوب داخل هذا الملف، أو قد يكون تابعاً لملف آخر."
           action={
@@ -102,21 +115,21 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
   const hearings: HearingDTO[] = await listHearingsForProceeding(actor, proceedingId);
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl" lang="ar-EG">
+    <div className="max-w-5xl mx-auto space-y-6" dir="rtl" lang="ar-EG">
       {/* Breadcrumb Navigation */}
       <nav aria-label="مسار التنقل" className="text-xs text-[#4D606A] flex flex-wrap items-center gap-1.5">
         <Link href="/" className="hover:text-[#172A35]">
           الرئيسية
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href="/matters" className="hover:text-[#172A35]">
           ملفات القضايا
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/matters/${matter.id}`} className="hover:text-[#172A35]">
           ملف <bdi dir="ltr">{matter.fileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="font-bold text-[#172A35]">تفاصيل القيد القضائي</span>
       </nav>
 
@@ -181,13 +194,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
 
             <div className="text-xs text-[#4D606A] flex flex-wrap items-center gap-3 pt-1">
               <span>الملف: <bdi dir="ltr" className="font-semibold text-[#172A35]">{matter.fileCode}</bdi></span>
-              <span>•</span>
+              <span aria-hidden="true">•</span>
               <span className="text-[#14566B] font-medium">{matter.title}</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {!isReadOnly && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {!isReadOnly && canWriteClientData && (
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.id}/edit`}
                 data-testid="edit-proceeding-button"
@@ -252,7 +265,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           <div className="space-y-1">
             <span className="text-[#4D606A] block font-semibold">قيمة المطالبة:</span>
             <span className="font-bold text-[#172A35]">
-              {proceeding.claimAmount ? `${proceeding.claimAmount} ج.م` : 'غير محدد'}
+              {proceeding.claimAmount ? (
+                <>
+                  <bdi dir="ltr">{proceeding.claimAmount}</bdi> ج.م
+                </>
+              ) : (
+                'غير محدد'
+              )}
             </span>
           </div>
 
@@ -275,7 +294,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             {proceeding.parentProceedingId && (
               <Link
                 href={`/matters/${matter.id}/proceedings/${proceeding.parentProceedingId}`}
-                className="text-[#14566B] font-bold hover:underline shrink-0"
+                className="text-[#14566B] font-bold hover:underline shrink-0 min-h-[44px] inline-flex items-center"
               >
                 عرض القيد السابق ←
               </Link>
@@ -302,9 +321,9 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
             <table className="w-full text-xs text-right border-collapse">
               <thead>
                 <tr className="bg-[#F4F6F7] text-[#4D606A] border-b border-[#D5DFE3]">
-                  <th className="p-3 font-semibold">اسم الطرف</th>
-                  <th className="p-3 font-semibold">الصفة الإجرائية المقررة</th>
-                  <th className="p-3 font-semibold">الوصف التفصيلي للصفة</th>
+                  <th scope="col" className="p-3 font-semibold">اسم الطرف</th>
+                  <th scope="col" className="p-3 font-semibold">الصفة الإجرائية المقررة</th>
+                  <th scope="col" className="p-3 font-semibold">الوصف التفصيلي للصفة</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E8EEF1]">
@@ -341,28 +360,34 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
       {/* Hearings & Court Calendar Section (S05 & S06) */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 shadow-xs">
         <HearingList
+          key={`${actor.id}:${proceeding.id}`}
           actorId={actor.id}
           proceedingId={proceeding.id}
           matterId={matter.id}
           initialHearings={hearings}
           courtName={proceeding.courtName}
           circuit={proceeding.circuit}
-          isReadOnly={isReadOnly}
+          isReadOnly={isReadOnly || !canWriteClientData}
         />
       </div>
 
-      {/* Honest Future Modules Placeholder */}
-      <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
+      {/* Active Matter Documents Link */}
+      {canReadDocuments && (
+        <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h2>
+            <Link
+              href={`/documents?matterId=${id}`}
+              className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
+            >
+              عرض مستندات الملف في الأرشيف &larr;
+            </Link>
+          </div>
+          <p className="text-xs text-[#4D606A] leading-relaxed">
+            يمكنك استعراض ورفع المستندات والمذكرات المرتبطة بهذا الملف عبر أرشيف المستندات.
+          </p>
         </div>
-        <p className="text-xs text-[#4D606A] leading-relaxed">
-          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
-        </p>
-        <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-          قريباً في المرحلة القادمة
-        </span>
-      </div>
+      )}
     </div>
   );
 }

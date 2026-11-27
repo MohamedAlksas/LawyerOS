@@ -16,6 +16,7 @@ import {
 import {
   InactiveReferenceSelectedError,
 } from '@/modules/matters/matter-types';
+import { IdempotencyPayloadMismatchError } from '@/lib/idempotency';
 import {
   createSyntheticActor,
   setupTestEncryptionKeys,
@@ -241,5 +242,61 @@ describe('T06-08: Reference Settings Maintenance & Inactive Reference Guards', (
       })
     ).rejects.toThrow(InactiveReferenceSelectedError);
   });
-});
 
+  it('maintains concurrent replay consistency on updateOfficeSettings/updateReferenceItem and detects circuitTypes idempotency mismatch', async () => {
+    const initialSettings = await getOfficeSettings(actor);
+    const officeKey = `concurrent-office-${crypto.randomUUID()}`;
+    const officeInput = {
+      officeName: 'مكتب التحديث المتزامن للمحاماة',
+      lawyerName: 'الأستاذ كريم',
+      expectedVersion: initialSettings.version,
+      idempotencyKey: officeKey,
+    };
+
+    const [officeA, officeB] = await Promise.all([
+      updateOfficeSettings(actor, officeInput),
+      updateOfficeSettings(actor, officeInput),
+    ]);
+    expect(officeA.officeName).toBe('مكتب التحديث المتزامن للمحاماة');
+    expect(officeB.officeName).toBe('مكتب التحديث المتزامن للمحاماة');
+    expect(officeA.version).toBe(initialSettings.version + 1);
+    expect(officeB.version).toBe(initialSettings.version + 1);
+    expect(officeA.operationVersion).toBe(officeB.operationVersion);
+
+    const court = await createReferenceItem(actor, {
+      type: 'COURT',
+      name: 'محكمة طنطا الابتدائية',
+      circuitTypes: ['مدني', 'تجاري'],
+      idempotencyKey: `create-tanta-${crypto.randomUUID()}`,
+    });
+    createdCourtIds.push(court.id);
+
+    const refUpdateKey = `concurrent-ref-${crypto.randomUUID()}`;
+    const refUpdateInput = {
+      type: 'COURT' as const,
+      id: court.id,
+      expectedVersion: court.version,
+      name: 'محكمة طنطا الابتدائية المحدثة',
+      circuitTypes: ['مدني', 'تجاري', 'عمالي'],
+      isActive: true,
+      idempotencyKey: refUpdateKey,
+    };
+
+    const [refA, refB] = await Promise.all([
+      updateReferenceItem(actor, refUpdateInput),
+      updateReferenceItem(actor, refUpdateInput),
+    ]);
+    expect(refA.version).toBe(court.version + 1);
+    expect(refB.version).toBe(court.version + 1);
+    expect(refA.circuitTypes).toEqual(['مدني', 'تجاري', 'عمالي']);
+    expect(refB.circuitTypes).toEqual(['مدني', 'تجاري', 'عمالي']);
+
+    // Reusing the same idempotencyKey with altered circuitTypes must reject with IdempotencyPayloadMismatchError
+    await expect(
+      updateReferenceItem(actor, {
+        ...refUpdateInput,
+        circuitTypes: ['مدني', 'جنائي'],
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+  });
+});

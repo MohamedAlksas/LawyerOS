@@ -7,7 +7,7 @@ import { validateEnv, EnvironmentValidationError, AppEnv, validatePostgresUrlStr
  * Explicitly assigns canonical default port 5432 when omitted, preventing
  * the pg driver from falling back to ambient PGPORT or other environment defaults.
  */
-export function canonicalizePostgresUrl(urlStr: string): string {
+function canonicalizePostgresUrl(urlStr: string): string {
   const structure = validatePostgresUrlStructure(urlStr);
   if (!structure.valid) {
     return urlStr; // Let validateTestEnvironment handle structural errors fail-closed

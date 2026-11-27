@@ -10,6 +10,11 @@ import {
   ProceedingStatus,
 } from '@prisma/client';
 import {
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
+} from '@/modules/documents/document-types';
+import {
   validateStrictCalendarDate,
   parseCalendarDateToUtc,
   strictDateSchema,
@@ -106,6 +111,12 @@ export interface HearingDTO {
   updatedAt: string;
 }
 
+export {
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+  type LinkableDocumentSummary,
+};
+
 export interface HearingResultDTO {
   id: string;
   hearingId: string;
@@ -117,6 +128,8 @@ export interface HearingResultDTO {
   notes?: string | null;
   correctionReason?: string | null;
   nextDateDisposition: NextDateDisposition;
+  decisionDocumentId?: string | null;
+  decisionDocument?: LinkableDocumentSummary | null;
   recordedAt: string;
   revision: number;
   supersedesResultId?: string | null;
@@ -133,6 +146,8 @@ export interface HearingResultSummaryDTO {
   notes?: string | null;
   correctionReason?: string | null;
   nextDateDisposition: NextDateDisposition;
+  decisionDocumentId?: string | null;
+  decisionDocument?: LinkableDocumentSummary | null;
   recordedAt: string;
   revision: number;
 }
@@ -253,6 +268,7 @@ export interface CorrectHearingResultInput {
   summary?: string | null;
   attendance?: string | null;
   notes?: string | null;
+  decisionDocumentId?: string | null;
   nextDateDisposition?: NextDateDisposition;
   nextHearingDate?: string | null;
   nextHearingTime?: string | null;
@@ -310,6 +326,7 @@ export const recordHearingResultSchema = z.object({
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),
   tasks: z.array(recordHearingResultTaskSchema).max(50, 'الحد الأقصى لمهام المتابعة في الجلسة الواحدة 50 مهمة').optional(),
+  decisionDocumentId: z.string().uuid('معرف مستند القرار غير صالح.').nullable().optional(),
   proceedingStatusUpdate: z.null().optional(),
   idempotencyKey: z.string().trim().min(1).max(100),
 }).strict().refine(data => {
@@ -369,6 +386,7 @@ export const correctHearingResultSchema = z.object({
   summary: z.string().trim().max(1000).nullable().optional(),
   attendance: z.string().trim().max(500).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  decisionDocumentId: z.string().uuid('معرف مستند القرار غير صالح.').nullable().optional(),
   nextDateDisposition: z.nativeEnum(NextDateDisposition).optional(),
   nextHearingDate: strictDateSchema.nullable().optional(),
   nextHearingTime: z.string().nullable().optional(),

@@ -18,7 +18,7 @@ import type {
 } from '@/modules/reminders/reminder-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
 import { EmptyStateContainer, ErrorContainer, LoadingIndicator } from '@/components/presentation-state';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import {
   formatCairoInstantArabic,
   isUncertainMutationOutcome,
@@ -225,6 +225,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         idempotencyKey: generateClientRequestId('inbox-read'),
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setActionError(res.error || 'تعذر تأشير التنبيه كمقروء.');
         return;
       }
@@ -260,6 +263,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           retryJobKeysRef.current.delete(opKey);
         }
@@ -316,6 +322,9 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           ruleKeysRef.current.delete(opKey);
         }
@@ -374,6 +383,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
           message={loadError || 'حدث خطأ أثناء الاتصال بالخادم.'}
           onRetry={() => void refreshInbox()}
           isRetrying={isRefreshing}
+          headingLevel="h1"
         />
       </div>
     );
@@ -522,7 +532,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
               {overview.overdueCount}
             </strong>
             <span className="text-xs text-[#4D606A]">متأخرة</span>
-            <span className="text-[#D5DFE3]">•</span>
+            <span aria-hidden="true" className="text-[#D5DFE3]">•</span>
             <strong className="text-2xl font-bold text-[#A4262C]" data-testid="inbox-failed-count">
               {overview.failedCount}
             </strong>
@@ -836,7 +846,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             </h2>
           </div>
           <span className="text-xs text-[#4D606A]">
-            التذكير يحدد وقت التنبيه فقط ولا يغير وقت الجلسة المجهول
+            التذكير يحدد وقت التنبيه فقط ولا يغير وقت الجلسة المجدول
           </span>
         </div>
 

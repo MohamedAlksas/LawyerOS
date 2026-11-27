@@ -292,6 +292,9 @@ export function TasksView({
         const res = await updateTaskAction(pendingUpdateRef.current);
         if (!res.success) {
           if (isAuthRecoveryCode(res.code)) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('lawoffice:recheck-session'));
+            }
             setCreateSessionExpired(true);
             setIsFrozenCreateRetry(true);
             setCreateError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت تعديلات المهمة مجمّدة؛ سجّل الدخول ثم أعد المحاولة.');
@@ -374,6 +377,9 @@ export function TasksView({
       const res = await createTaskAction(pendingCreateRef.current);
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setCreateSessionExpired(true);
           setIsFrozenCreateRetry(true);
           setCreateError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت بيانات المهمة مجمّدة؛ سجّل الدخول ثم أعد المحاولة.');
@@ -425,6 +431,9 @@ export function TasksView({
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           pendingTaskKeysRef.current.delete(opKeyId);
         }
@@ -466,6 +475,9 @@ export function TasksView({
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           pendingTaskKeysRef.current.delete(opKeyId);
         }
@@ -605,7 +617,7 @@ export function TasksView({
             type="button"
             onClick={() => setStatusNotice(null)}
             aria-label="إغلاق التنبيه"
-            className="px-2 py-1 font-bold hover:underline min-h-[36px]"
+            className="px-2 py-1 font-bold hover:underline min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             ✕
           </button>
@@ -640,7 +652,7 @@ export function TasksView({
             type="button"
             onClick={() => setActionError(null)}
             aria-label="إغلاق رسالة الخطأ"
-            className="px-2 py-1 font-bold min-h-[36px]"
+            className="px-2 py-1 font-bold min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             ✕
           </button>
@@ -685,6 +697,7 @@ export function TasksView({
           message={loadError}
           onRetry={refreshTasks}
           isRetrying={isLoading}
+          headingLevel={lockedMatterId ? 'h3' : 'h2'}
         />
       ) : filteredTasks.length === 0 ? (
         <EmptyStateContainer
@@ -719,6 +732,7 @@ export function TasksView({
           {filteredTasks.map((task) => {
             const isOpenTask = task.status === 'OPEN' || task.status === 'IN_PROGRESS';
             const isBusy = mutatingTaskId === task.id;
+            const TaskTitleTag = lockedMatterId ? 'h3' : 'h2';
             return (
               <article
                 key={task.id}
@@ -734,9 +748,9 @@ export function TasksView({
                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 pb-2 border-b border-[#E8EEF1]">
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
+                      <TaskTitleTag className="text-base font-bold text-[#172A35] [overflow-wrap:anywhere]">
                         {task.title}
-                      </h2>
+                      </TaskTitleTag>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-[#4D606A]">
                       {task.matterId && task.matterTitle ? (
@@ -868,7 +882,7 @@ export function TasksView({
               aria-labelledby="create-task-modal-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5 text-right my-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-5 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="create-task-modal-title" className="text-lg font-bold text-[#172A35]">
@@ -954,6 +968,7 @@ export function TasksView({
                       id="task-due-date-input"
                       data-testid="task-due-date-input"
                       type="date"
+                      dir="ltr"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
                       disabled={isSubmittingCreate || isFrozenCreateRetry}
@@ -970,6 +985,7 @@ export function TasksView({
                       id="task-due-time-input"
                       data-testid="task-due-time-input"
                       type="time"
+                      dir="ltr"
                       value={dueTime}
                       onChange={(e) => setDueTime(e.target.value)}
                       disabled={isSubmittingCreate || isFrozenCreateRetry}
@@ -1116,7 +1132,7 @@ export function TasksView({
               aria-labelledby="cancel-task-modal-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="cancel-task-modal-title" className="text-lg font-bold text-[#172A35]">

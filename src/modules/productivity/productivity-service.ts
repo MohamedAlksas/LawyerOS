@@ -1,7 +1,7 @@
 ﻿import type { Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import type { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import { computeWorkerHealth } from '@/modules/reminders/reminder-service';
@@ -1009,6 +1009,7 @@ export async function listAgenda(
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
 
   const params = parseOrThrow(listAgendaSchema, rawParams, 'معاملات عرض الأجندة غير صالحة.');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const cairoToday = getCairoTodayDateString(opts?.now);
   const anchorDate = params.anchorDate ?? cairoToday;
   const view: AgendaView = params.view ?? 'list';
@@ -1240,7 +1241,7 @@ export async function listAgenda(
       timeLabel: formatTimeOrUnspecified(d.dueTime),
       source: d.source ?? null,
       basisNotes: d.basisNotes ?? null,
-      sourceDocumentId: d.sourceDocumentId ?? null,
+      sourceDocumentId: canReadDocuments ? (d.sourceDocumentId ?? null) : null,
       status: d.status,
       isOverdue,
       needsReview: d.status === 'DRAFT',

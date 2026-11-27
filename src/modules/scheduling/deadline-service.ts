@@ -1,9 +1,10 @@
 ﻿import type { Prisma } from '@prisma/client';
 import { getPrismaClient } from '@/lib/auth';
 import type { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
 import { recordAuditEvent } from '@/lib/audit';
 import { cancelSourceReminderJobs, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
+import { assertLinkableDocument } from '@/modules/documents/document-service';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
@@ -18,6 +19,11 @@ import {
   parseCalendarDateToUtcDate,
   validateOptionalCalendarTime,
 } from '@/lib/cairo-date';
+import {
+  LINKABLE_DOCUMENT_SELECT,
+  mapLinkableDocumentSummary,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
 import {
   DeadlineDTO,
   DeadlineStatus,
@@ -87,12 +93,12 @@ function parseOrThrow<T>(
 
 function rejectDeferredDocumentLink(
   docId: string | null | undefined,
-  field: 'sourceDocumentId' | 'evidenceDocumentId'
+  field: 'evidenceDocumentId'
 ): void {
   if (docId !== undefined && docId !== null && docId.trim() !== '') {
     throw new SchedulingValidationError(
-      'ربط المستندات بالمواعيد القانونية غير متاح قبل تنفيذ وحدة المستندات (T12).',
-      { [field]: 'ربط المستندات مؤجل حتى تنفيذ T12' }
+      'ربط المستند كدليل إثبات للموعد القانوني غير مدعوم في هذا الإجراء.',
+      { [field]: 'ربط مستند الإثبات غير مدعوم' }
     );
   }
 }
@@ -125,6 +131,7 @@ interface DeadlineWithRelations {
   source: string | null;
   basisNotes: string | null;
   sourceDocumentId: string | null;
+  sourceDocument?: LinkableDocumentRow | null;
   status: DeadlineStatus;
   confirmedAt: Date | null;
   confirmedById: string | null;
@@ -152,10 +159,35 @@ interface DeadlineWithRelations {
   } | null;
 }
 
+const DEADLINE_BASE_INCLUDE = {
+  matter: { select: { fileCode: true, title: true } },
+  proceeding: {
+    select: {
+      id: true,
+      courtId: true,
+      numberText: true,
+      yearLabel: true,
+      court: { select: { id: true, name: true } },
+    },
+  },
+} satisfies Prisma.DeadlineInclude;
+
+const DEADLINE_RELATIONS_INCLUDE = {
+  ...DEADLINE_BASE_INCLUDE,
+  sourceDocument: {
+    select: LINKABLE_DOCUMENT_SELECT,
+  },
+} satisfies Prisma.DeadlineInclude;
+
+function getDeadlineRelationsInclude(canReadDocuments: boolean): Prisma.DeadlineInclude {
+  return canReadDocuments ? DEADLINE_RELATIONS_INCLUDE : DEADLINE_BASE_INCLUDE;
+}
+
 function mapDeadlineToDTO(
   row: DeadlineWithRelations,
   pendingReminderCount: number,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments: boolean
 ): DeadlineDTO {
   const dueDate = formatUtcDateToIsoDate(row.dueDate);
   const completedDate = formatUtcDateToIsoDate(row.completedDate);
@@ -176,7 +208,8 @@ function mapDeadlineToDTO(
     timeLabel: formatTimeOrUnspecified(row.dueTime),
     source: row.source ?? null,
     basisNotes: row.basisNotes ?? null,
-    sourceDocumentId: row.sourceDocumentId ?? null,
+    sourceDocumentId: canReadDocuments ? (row.sourceDocumentId ?? null) : null,
+    sourceDocument: canReadDocuments ? mapLinkableDocumentSummary(row.sourceDocument) : null,
     status: row.status,
     isOverdue,
     needsReview: row.status === 'DRAFT',
@@ -231,27 +264,17 @@ function buildDeadlineAck(dto: DeadlineDTO): DeadlineAcknowledgment {
 async function replayDeadline(
   tx: Prisma.TransactionClient,
   ack: DeadlineAcknowledgment,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments: boolean
 ): Promise<DeadlineDTO> {
-  const row = await tx.deadline.findUniqueOrThrow({
+  const row = (await tx.deadline.findUniqueOrThrow({
     where: { id: ack.id },
-    include: {
-      matter: { select: { fileCode: true, title: true } },
-      proceeding: {
-        select: {
-          id: true,
-          courtId: true,
-          numberText: true,
-          yearLabel: true,
-          court: { select: { id: true, name: true } },
-        },
-      },
-    },
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations;
   const pendingReminderCount = await tx.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: row.id, status: 'PENDING' },
   });
-  const baseDto = mapDeadlineToDTO(row, pendingReminderCount, cairoToday);
+  const baseDto = mapDeadlineToDTO(row, pendingReminderCount, cairoToday, canReadDocuments);
   const isOverdue = ack.status === 'CONFIRMED' && isCairoDateOverdue(ack.dueDate, cairoToday);
   return {
     ...baseDto,
@@ -345,13 +368,14 @@ async function lockDeadlineForMutation(
       id: string;
       matter_id: string;
       proceeding_id: string | null;
+      source_document_id: string | null;
       status: DeadlineStatus;
       version: number;
       due_date: Date | null;
       due_time: string | null;
     }>
   >`
-    SELECT "id", "matter_id", "proceeding_id", "status", "version", "due_date", "due_time"
+    SELECT "id", "matter_id", "proceeding_id", "source_document_id", "status", "version", "due_date", "due_time"
     FROM "deadline"
     WHERE "id" = ${deadlineId}
     FOR UPDATE
@@ -408,27 +432,17 @@ async function deadlineCommand<T>(
 async function loadDeadlineDTO(
   tx: Prisma.TransactionClient,
   id: string,
-  cairoToday: string
+  cairoToday: string,
+  canReadDocuments: boolean
 ): Promise<DeadlineDTO> {
-  const row = await tx.deadline.findUniqueOrThrow({
+  const row = (await tx.deadline.findUniqueOrThrow({
     where: { id },
-    include: {
-      matter: { select: { fileCode: true, title: true } },
-      proceeding: {
-        select: {
-          id: true,
-          courtId: true,
-          numberText: true,
-          yearLabel: true,
-          court: { select: { id: true, name: true } },
-        },
-      },
-    },
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations;
   const pendingReminderCount = await tx.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: id, status: 'PENDING' },
   });
-  return mapDeadlineToDTO(row, pendingReminderCount, cairoToday);
+  return mapDeadlineToDTO(row, pendingReminderCount, cairoToday, canReadDocuments);
 }
 
 function shouldInjectFault(opts: DeadlineServiceOptions | undefined, target: 'audit' | 'outbox'): boolean {
@@ -443,7 +457,6 @@ export async function createDeadline(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(createDeadlineSchema, rawInput, 'بيانات الموعد القانوني غير صالحة.');
-  rejectDeferredDocumentLink(input.sourceDocumentId, 'sourceDocumentId');
 
   const dueDateStr = input.dueDate ? input.dueDate.trim() : null;
   const dueDateUtc = parseCalendarDateToUtcDate(dueDateStr);
@@ -451,6 +464,11 @@ export async function createDeadline(
   const source = input.source?.trim() || null;
   const basisNotes = input.basisNotes?.trim() || null;
   const proceedingId = input.proceedingId ?? null;
+  const sourceDocumentId = input.sourceDocumentId ?? null;
+  if (sourceDocumentId) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const cairoToday = getCairoTodayDateString(opts?.now);
 
   const intent = {
@@ -461,6 +479,7 @@ export async function createDeadline(
     dueTime: normTime,
     source,
     basisNotes,
+    sourceDocumentId,
   };
 
   return deadlineCommand(
@@ -471,6 +490,14 @@ export async function createDeadline(
     async (tx) => {
       await lockDeadlineParents(tx, input.matterId, [proceedingId]);
 
+      if (sourceDocumentId) {
+        await assertLinkableDocument(tx, sourceDocumentId, {
+          kind: 'MATTER',
+          matterId: input.matterId,
+          proceedingId,
+        });
+      }
+
       const created = await tx.deadline.create({
         data: {
           matterId: input.matterId,
@@ -480,6 +507,7 @@ export async function createDeadline(
           dueTime: normTime,
           source,
           basisNotes,
+          sourceDocumentId,
           status: 'DRAFT',
           version: 1,
           createdById: actor.id,
@@ -497,6 +525,7 @@ export async function createDeadline(
           changedFields: {
             matterId: input.matterId,
             proceedingId,
+            sourceDocumentId,
             status: 'DRAFT',
             dueDate: dueDateStr,
             dueTime: normTime,
@@ -505,10 +534,10 @@ export async function createDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, created.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, created.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -520,7 +549,10 @@ export async function updateDeadlineDraft(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(updateDeadlineDraftSchema, rawInput, 'بيانات تحديث مسودة الموعد غير صالحة.');
-  rejectDeferredDocumentLink(input.sourceDocumentId, 'sourceDocumentId');
+  if (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const cairoToday = getCairoTodayDateString(opts?.now);
   const intent = {
@@ -532,6 +564,7 @@ export async function updateDeadlineDraft(
     dueTime: input.dueTime,
     source: input.source,
     basisNotes: input.basisNotes,
+    sourceDocumentId: input.sourceDocumentId,
   };
 
   return deadlineCommand(
@@ -550,6 +583,37 @@ export async function updateDeadlineDraft(
       if (locked.status !== 'DRAFT') {
         throw new UnsupportedTransitionError(
           'يمكن تعديل بيانات المسودة فقط قبل اعتمادها. لتغيير تاريخ موعد مؤكد استخدم إجراء تعديل الموعد.'
+        );
+      }
+
+      if (
+        locked.source_document_id !== null &&
+        input.sourceDocumentId !== undefined &&
+        input.sourceDocumentId !== locked.source_document_id
+      ) {
+        assertAuthorized(actor, 'READ_DOCUMENTS');
+      }
+
+      const effectiveProceedingId =
+        input.proceedingId !== undefined ? input.proceedingId : locked.proceeding_id;
+      const effectiveSourceDocumentId =
+        input.sourceDocumentId !== undefined ? input.sourceDocumentId : locked.source_document_id;
+
+      if (
+        effectiveSourceDocumentId !== null &&
+        (input.sourceDocumentId !== undefined || input.proceedingId !== undefined)
+      ) {
+        const isUnchangedExistingLink =
+          input.sourceDocumentId === undefined || input.sourceDocumentId === locked.source_document_id;
+        await assertLinkableDocument(
+          tx,
+          effectiveSourceDocumentId,
+          {
+            kind: 'MATTER',
+            matterId: locked.matter_id,
+            proceedingId: effectiveProceedingId,
+          },
+          { allowExistingArchived: isUnchangedExistingLink }
         );
       }
 
@@ -572,6 +636,7 @@ export async function updateDeadlineDraft(
       }
       if (input.source !== undefined) updateData.source = input.source?.trim() || null;
       if (input.basisNotes !== undefined) updateData.basisNotes = input.basisNotes?.trim() || null;
+      if (input.sourceDocumentId !== undefined) updateData.sourceDocumentId = input.sourceDocumentId;
 
       const updated = await tx.deadline.updateMany({
         where: { id: locked.id, version: input.expectedVersion, status: 'DRAFT' },
@@ -592,15 +657,16 @@ export async function updateDeadlineDraft(
             version: locked.version + 1,
             dueDate: nextDueDateStr,
             dueTime: normTime,
+            ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
           },
         },
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -612,7 +678,10 @@ export async function confirmDeadline(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(confirmDeadlineSchema, rawInput, 'بيانات اعتماد الموعد القانوني غير مكتملة.');
-  rejectDeferredDocumentLink(input.sourceDocumentId, 'sourceDocumentId');
+  if (input.sourceDocumentId !== undefined && input.sourceDocumentId !== null) {
+    assertAuthorized(actor, 'READ_DOCUMENTS');
+  }
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const dueDateUtc = parseCalendarDateToUtcDate(input.dueDate);
   if (!dueDateUtc) {
@@ -629,6 +698,7 @@ export async function confirmDeadline(
     dueTime: normTime,
     source: input.source,
     basisNotes: input.basisNotes,
+    ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
     confirmed: true,
   };
 
@@ -646,6 +716,31 @@ export async function confirmDeadline(
         );
       }
 
+      if (
+        locked.source_document_id !== null &&
+        input.sourceDocumentId !== undefined &&
+        input.sourceDocumentId !== locked.source_document_id
+      ) {
+        assertAuthorized(actor, 'READ_DOCUMENTS');
+      }
+
+      const effectiveSourceDocumentId =
+        input.sourceDocumentId !== undefined ? input.sourceDocumentId : locked.source_document_id;
+      if (effectiveSourceDocumentId !== null) {
+        const isUnchangedExistingLink =
+          input.sourceDocumentId === undefined || input.sourceDocumentId === locked.source_document_id;
+        await assertLinkableDocument(
+          tx,
+          effectiveSourceDocumentId,
+          {
+            kind: 'MATTER',
+            matterId: locked.matter_id,
+            proceedingId: locked.proceeding_id,
+          },
+          { allowExistingArchived: isUnchangedExistingLink }
+        );
+      }
+
       const nextVersion = locked.version + 1;
       const updated = await tx.deadline.updateMany({
         where: { id: locked.id, version: input.expectedVersion, status: 'DRAFT' },
@@ -654,6 +749,7 @@ export async function confirmDeadline(
           dueTime: normTime,
           source: input.source,
           basisNotes: input.basisNotes,
+          ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
           status: 'CONFIRMED',
           confirmedAt: now,
           confirmedById: actor.id,
@@ -704,6 +800,7 @@ export async function confirmDeadline(
             dueDate: input.dueDate,
             dueTime: normTime,
             source: input.source,
+            ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
             confirmedAt: now.toISOString(),
             confirmedById: actor.id,
             version: nextVersion,
@@ -712,10 +809,10 @@ export async function confirmDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -727,6 +824,7 @@ export async function changeDeadlineDate(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(changeDeadlineDateSchema, rawInput, 'بيانات تعديل تاريخ الموعد غير صالحة.');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const dueDateStr = input.dueDate ?? null;
   const dueDateUtc = parseCalendarDateToUtcDate(dueDateStr);
   const normTime = validateOptionalCalendarTime(dueDateStr, input.dueTime, 'dueTime');
@@ -809,10 +907,10 @@ export async function changeDeadlineDate(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -825,6 +923,7 @@ export async function completeDeadline(
 
   const input = parseOrThrow(completeDeadlineSchema, rawInput, 'بيانات إتمام الموعد القانوني غير مكتملة.');
   rejectDeferredDocumentLink(input.evidenceDocumentId, 'evidenceDocumentId');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const completedDateUtc = parseCalendarDateToUtcDate(input.completionDate);
   if (!completedDateUtc) {
@@ -898,10 +997,10 @@ export async function completeDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -913,6 +1012,7 @@ export async function cancelDeadline(
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
   const input = parseOrThrow(cancelDeadlineSchema, rawInput, 'بيانات إلغاء الموعد القانوني غير صالحة.');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const now = opts?.now ?? new Date();
   const cairoToday = getCairoTodayDateString(now);
 
@@ -975,10 +1075,10 @@ export async function cancelDeadline(
         { simulateFailure: shouldInjectFault(opts, 'audit') }
       );
 
-      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday);
+      const dto = await loadDeadlineDTO(tx, locked.id, cairoToday, canReadDocuments);
       return { value: dto, resultId: dto.id, acknowledgment: buildDeadlineAck(dto) };
     },
-    (tx, ack) => replayDeadline(tx, ack, cairoToday)
+    (tx, ack) => replayDeadline(tx, ack, cairoToday, canReadDocuments)
   );
 }
 
@@ -988,22 +1088,12 @@ export async function getDeadline(
   opts?: { now?: Date }
 ): Promise<DeadlineDTO> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
-  const row = await prisma.deadline.findUnique({
+  const row = (await prisma.deadline.findUnique({
     where: { id: deadlineId },
-    include: {
-      matter: { select: { fileCode: true, title: true } },
-      proceeding: {
-        select: {
-          id: true,
-          courtId: true,
-          numberText: true,
-          yearLabel: true,
-          court: { select: { id: true, name: true } },
-        },
-      },
-    },
-  });
+    include: getDeadlineRelationsInclude(canReadDocuments),
+  })) as unknown as DeadlineWithRelations | null;
   if (!row) {
     throw new NotFoundError('الموعد القانوني المطلوب غير موجود.');
   }
@@ -1011,7 +1101,12 @@ export async function getDeadline(
   const pendingReminderCount = await prisma.jobRun.count({
     where: { sourceType: 'Deadline', sourceId: row.id, status: 'PENDING' },
   });
-  return mapDeadlineToDTO(row, pendingReminderCount, getCairoTodayDateString(opts?.now));
+  return mapDeadlineToDTO(
+    row,
+    pendingReminderCount,
+    getCairoTodayDateString(opts?.now),
+    canReadDocuments
+  );
 }
 
 export async function listDeadlines(
@@ -1020,6 +1115,7 @@ export async function listDeadlines(
   opts?: { now?: Date }
 ): Promise<DeadlineDTO[]> {
   assertActorAuthorized(actor, 'READ_CLIENT_DATA');
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
 
   const params = parseOrThrow(listDeadlinesSchema, rawParams, 'معاملات تصفية المواعيد غير صالحة.');
   const cairoToday = getCairoTodayDateString(opts?.now);
@@ -1050,24 +1146,13 @@ export async function listDeadlines(
   const limit = params.limit ?? 100;
   const page = params.page ?? 1;
 
-  const rows = await prisma.deadline.findMany({
+  const rows = (await prisma.deadline.findMany({
     where,
-    include: {
-      matter: { select: { fileCode: true, title: true } },
-      proceeding: {
-        select: {
-          id: true,
-          courtId: true,
-          numberText: true,
-          yearLabel: true,
-          court: { select: { id: true, name: true } },
-        },
-      },
-    },
+    include: getDeadlineRelationsInclude(canReadDocuments),
     orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }, { id: 'asc' }],
     skip: (page - 1) * limit,
     take: limit,
-  });
+  })) as unknown as DeadlineWithRelations[];
 
   if (rows.length === 0) return [];
 
@@ -1082,5 +1167,7 @@ export async function listDeadlines(
   });
   const pendingMap = new Map(pendingCounts.map((c) => [c.sourceId, c._count._all]));
 
-  return rows.map((row) => mapDeadlineToDTO(row, pendingMap.get(row.id) ?? 0, cairoToday));
+  return rows.map((row) =>
+    mapDeadlineToDTO(row, pendingMap.get(row.id) ?? 0, cairoToday, canReadDocuments)
+  );
 }

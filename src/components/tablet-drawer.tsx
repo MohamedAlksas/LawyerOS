@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import type { UserRole } from '@/modules/identity/types';
 import { GuardedLink as Link, useCanLeavePage } from './navigation-guard';
 import { usePathname } from 'next/navigation';
 import { signOutAndReset } from '@/lib/auth-client';
@@ -24,15 +25,18 @@ interface TabletDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
+  userRole?: UserRole;
 }
 
-export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps) {
+export function TabletDrawer({ isOpen, onClose, triggerRef, userRole }: TabletDrawerProps) {
   const pathname = usePathname();
   const canLeavePage = useCanLeavePage();
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const isMaintainer = userRole === 'MAINTAINER';
+  const prevPathnameRef = useRef(pathname);
 
   const handleClose = useCallback(() => {
     setLogoutError(null);
@@ -44,6 +48,15 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   useEffect(() => {
     handleCloseRef.current = handleClose;
   }, [handleClose]);
+
+  useEffect(() => {
+    if (prevPathnameRef.current !== pathname) {
+      prevPathnameRef.current = pathname;
+      if (isOpen) {
+        handleCloseRef.current();
+      }
+    }
+  }, [pathname, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -142,7 +155,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
   const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
   const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
-  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search/');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
@@ -157,7 +170,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
+    <div className="fixed inset-0 z-50 lg:hidden flex justify-start">
       <div
         data-testid="drawer-backdrop"
         aria-hidden="true"
@@ -207,141 +220,147 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
               href="/"
               data-testid="nav-link-home"
               aria-current={isHomeActive ? 'page' : undefined}
-              onNavigate={onClose}
+              onNavigate={handleClose}
               className={navItemClass(isHomeActive)}
             >
               <IconDashboard className="w-5 h-5 shrink-0" />
               <span>الرئيسية</span>
             </Link>
 
-            <Link
-              href="/today"
-              data-testid="nav-link-today"
-              aria-current={isTodayActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isTodayActive)}
-            >
-              <IconToday className="w-5 h-5 shrink-0" />
-              <span>أجندة اليوم</span>
-            </Link>
-
-            <Link
-              href="/agenda"
-              data-testid="nav-link-agenda"
-              aria-current={isAgendaActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isAgendaActive)}
-            >
-              <IconCalendar className="w-5 h-5 shrink-0" />
-              <span>جدول الجلسات والأجندة</span>
-            </Link>
-
-            <Link
-              href="/tasks"
-              data-testid="nav-link-tasks"
-              aria-current={isTasksActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isTasksActive)}
-            >
-              <IconTask className="w-5 h-5 shrink-0" />
-              <span>المهام الإجرائية</span>
-            </Link>
-
-            <Link
-              href="/deadlines"
-              data-testid="nav-link-deadlines"
-              aria-current={isDeadlinesActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isDeadlinesActive)}
-            >
-              <IconDeadline className="w-5 h-5 shrink-0" />
-              <span>المواعيد القانونية</span>
-            </Link>
-
-            <Link
-              href="/matters"
-              data-testid="nav-link-matters"
-              aria-current={isMattersActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isMattersActive)}
-            >
-              <IconFolder className="w-5 h-5 shrink-0" />
-              <span>ملفات القضايا</span>
-            </Link>
-
-            <Link
-              href="/parties"
-              data-testid="nav-link-parties"
-              aria-current={isPartiesActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isPartiesActive)}
-            >
-              <IconUsers className="w-5 h-5 shrink-0" />
-              <span>دليل الأطراف</span>
-            </Link>
-
-            <Link
-              href="/documents"
-              data-testid="nav-link-documents"
-              aria-current={isDocumentsActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isDocumentsActive)}
-            >
-              <IconDocument className="w-5 h-5 shrink-0" />
-              <span>المستندات</span>
-            </Link>
-
-            <Link
-              href="/settings/security"
-              data-testid="nav-link-security"
-              aria-current={isSecurityActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isSecurityActive)}
-            >
-              <IconShield className="w-5 h-5 shrink-0" />
-              <span>إعدادات الأمان</span>
-            </Link>
-
-            <Link
-              href="/search"
-              data-testid="nav-link-search"
-              aria-current={isSearchActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isSearchActive)}
-            >
-              <IconSearch className="w-5 h-5 shrink-0" />
-              <span>البحث الموحد</span>
-            </Link>
-
-            <Link
-              href="/settings/reference"
-              data-testid="nav-link-reference"
-              aria-current={isReferenceActive ? 'page' : undefined}
-              onNavigate={onClose}
-              className={navItemClass(isReferenceActive)}
-            >
-              <IconSettings className="w-5 h-5 shrink-0" />
-              <span>إعدادات المراجع</span>
-            </Link>
-
-            <div className="pt-3 mt-2 border-t border-[#D5DFE3]">
-              <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-1.5">
-                الوحدات القادمة
-              </span>
-              <div className="space-y-1">
-                <div
-                  className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
+            {!isMaintainer && (
+              <>
+                <Link
+                  href="/today"
+                  data-testid="nav-link-today"
+                  aria-current={isTodayActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isTodayActive)}
                 >
-                  <div className="flex items-center gap-2">
-                    <IconWallet className="w-4 h-4 text-[#4D606A]" />
-                    <span>حسابات الموكلين</span>
+                  <IconToday className="w-5 h-5 shrink-0" />
+                  <span>أجندة اليوم</span>
+                </Link>
+
+                <Link
+                  href="/agenda"
+                  data-testid="nav-link-agenda"
+                  aria-current={isAgendaActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isAgendaActive)}
+                >
+                  <IconCalendar className="w-5 h-5 shrink-0" />
+                  <span>جدول الجلسات والأجندة</span>
+                </Link>
+
+                <Link
+                  href="/tasks"
+                  data-testid="nav-link-tasks"
+                  aria-current={isTasksActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isTasksActive)}
+                >
+                  <IconTask className="w-5 h-5 shrink-0" />
+                  <span>المهام الإجرائية</span>
+                </Link>
+
+                <Link
+                  href="/deadlines"
+                  data-testid="nav-link-deadlines"
+                  aria-current={isDeadlinesActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isDeadlinesActive)}
+                >
+                  <IconDeadline className="w-5 h-5 shrink-0" />
+                  <span>المواعيد القانونية</span>
+                </Link>
+
+                <Link
+                  href="/matters"
+                  data-testid="nav-link-matters"
+                  aria-current={isMattersActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isMattersActive)}
+                >
+                  <IconFolder className="w-5 h-5 shrink-0" />
+                  <span>ملفات القضايا</span>
+                </Link>
+
+                <Link
+                  href="/parties"
+                  data-testid="nav-link-parties"
+                  aria-current={isPartiesActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isPartiesActive)}
+                >
+                  <IconUsers className="w-5 h-5 shrink-0" />
+                  <span>دليل الأطراف</span>
+                </Link>
+
+                <Link
+                  href="/documents"
+                  data-testid="nav-link-documents"
+                  aria-current={isDocumentsActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isDocumentsActive)}
+                >
+                  <IconDocument className="w-5 h-5 shrink-0" />
+                  <span>المستندات</span>
+                </Link>
+
+                <Link
+                  href="/settings/security"
+                  data-testid="nav-link-security"
+                  aria-current={isSecurityActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isSecurityActive)}
+                >
+                  <IconShield className="w-5 h-5 shrink-0" />
+                  <span>إعدادات الأمان</span>
+                </Link>
+
+                <Link
+                  href="/search"
+                  data-testid="nav-link-search"
+                  aria-current={isSearchActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isSearchActive)}
+                >
+                  <IconSearch className="w-5 h-5 shrink-0" />
+                  <span>البحث الموحد</span>
+                </Link>
+
+                <Link
+                  href="/settings/reference"
+                  data-testid="nav-link-reference"
+                  aria-current={isReferenceActive ? 'page' : undefined}
+                  onNavigate={handleClose}
+                  className={navItemClass(isReferenceActive)}
+                >
+                  <IconSettings className="w-5 h-5 shrink-0" />
+                  <span>إعدادات المراجع</span>
+                </Link>
+              </>
+            )}
+
+            {!isMaintainer && (
+              <div className="pt-3 mt-2 border-t border-[#D5DFE3]">
+                <span className="block px-3 text-xs font-semibold text-[#4D606A] mb-1.5">
+                  الوحدات القادمة
+                </span>
+                <div className="space-y-1">
+                  <div
+                    className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[44px]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <IconWallet className="w-4 h-4 text-[#4D606A]" />
+                      <span>حسابات الموكلين</span>
+                    </div>
+                    <span className="text-[11px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
+                      قريباً
+                    </span>
                   </div>
-                  <span className="text-[10px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
-                    قريباً
-                  </span>
                 </div>
               </div>
-            </div>
+            )}
           </nav>
         </div>
 

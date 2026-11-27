@@ -21,16 +21,22 @@ export async function verifyActionSecurity(
   if (reqHeaders) {
     const trustedOrigins = getTrustedOrigins();
     const origin = reqHeaders.get('origin');
-    if (origin && !trustedOrigins.has(origin)) {
+    const secFetchSite = reqHeaders.get('sec-fetch-site');
+    const host = reqHeaders.get('host');
+
+    if (origin !== null && !trustedOrigins.has(origin)) {
       throw new AuthorizationError('غير مصرح بالوصول من هذا المصدر.');
     }
 
-    const secFetchSite = reqHeaders.get('sec-fetch-site');
     if (secFetchSite !== null) {
       const normalized = secFetchSite.trim().toLowerCase();
       if (!ALLOWED_ACTION_FETCH_SITES.has(normalized)) {
         throw new AuthorizationError('غير مصرح بالوصول من مصدر خارجي.');
       }
+    }
+
+    if (!origin && secFetchSite === null && host) {
+      throw new AuthorizationError('غير مصرح بالوصول بدون مصدر موثوق.');
     }
   }
 

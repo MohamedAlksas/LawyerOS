@@ -136,7 +136,7 @@ export function documentError(error: unknown): DocumentActionResult<never> {
 }
 
 export function documentStatusFromErrorCode(code: DocumentErrorCode | string | undefined): number {
-  if (code === 'FORBIDDEN') return 403;
+  if (code === 'FORBIDDEN' || code === 'CROSS_MATTER_LINK_FORBIDDEN') return 403;
   if (['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '')) {
     return 401;
   }

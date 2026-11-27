@@ -8,6 +8,8 @@ import {
   validateRawPostgresUrlSyntax,
   extractNormalizedDbIdentity,
   areDatabaseIdentitiesEqual,
+  parseTrustedProxyIps,
+  redactErrorMessage,
 } from '@/lib/env';
 
 describe('Environment validation (src/lib/env.ts)', () => {
@@ -669,6 +671,58 @@ describe('Environment validation (src/lib/env.ts)', () => {
           process.env.NEXT_PHASE = originalAmbientNextPhase;
         }
       }
+    });
+  });
+
+  describe('TRUSTED_PROXY_IPS validation and redactErrorMessage path redaction', () => {
+    it('accepts valid IPv4/IPv6/CIDR entries and rejects empty tokens, hostnames, and out-of-range CIDR masks', () => {
+      const validList = '127.0.0.1, ::1, 10.0.0.0/8, fd00::/8';
+      expect(parseTrustedProxyIps(validList)).toEqual([
+        '127.0.0.1',
+        '::1',
+        '10.0.0.0/8',
+        'fd00::/8',
+      ]);
+
+      const validated = validateEnv({
+        ...validSyntheticEnv,
+        TRUSTED_PROXY_IPS: validList,
+      });
+      expect(validated.TRUSTED_PROXY_IPS).toBe(validList);
+
+      for (const invalidValue of [
+        '127.0.0.1,,',
+        'nginx',
+        '10.0.0.1/33',
+        '::1/129',
+        '::ffff:10.0.0.0/104',
+        '0:0:0:0:0:ffff:10.0.0.0/104',
+        '0::ffff:10.0.0.0/104',
+        '0:0:0:0:0:ffff:0a00:0000/104',
+        '0:0:0:0:0:ffff:10.0.0.0/24',
+        '0.0.0.0/0',
+        '::/0',
+      ]) {
+        expect(() => parseTrustedProxyIps(invalidValue)).toThrowError(EnvironmentValidationError);
+        expect(() =>
+          validateEnv({
+            ...validSyntheticEnv,
+            TRUSTED_PROXY_IPS: invalidValue,
+          })
+        ).toThrowError(EnvironmentValidationError);
+      }
+    });
+
+    it('redacts Windows and POSIX filesystem paths in redactErrorMessage', () => {
+      const winErr = new Error('Failed reading C:\\Users\\foo\\bar.ts during job');
+      const winRedacted = redactErrorMessage(winErr);
+      expect(winRedacted).toContain('[REDACTED_PATH]');
+      expect(winRedacted).not.toContain('C:\\Users\\foo\\bar.ts');
+
+      const posixErr = new Error('Missing file /home/app/secret.txt in worker');
+      const posixRedacted = redactErrorMessage(posixErr);
+      expect(posixRedacted).toContain('[REDACTED_PATH]');
+      expect(posixRedacted).not.toContain('/home/app/secret.txt');
     });
   });
 });

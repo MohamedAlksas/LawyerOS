@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -18,6 +18,8 @@ interface NewProceedingPageProps {
 
 export const metadata = { title: 'إضافة قيد قضائي جديد — LawOffice OS' };
 
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
 export default async function NewProceedingPage({ params }: NewProceedingPageProps) {
   const { id } = await params;
   let actor;
@@ -29,13 +31,17 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لإضافة قيد قضائي.</p>
         </div>
       );
     }
     throw error;
+  }
+
+  if (!UUID_REGEX.test(id)) {
+    notFound();
   }
 
   let matter;
@@ -47,6 +53,7 @@ export default async function NewProceedingPage({ params }: NewProceedingPagePro
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الملف غير موجود"
             description="لم يتم العثور على الملف المراد إضافة قيد قضائي له."
             action={

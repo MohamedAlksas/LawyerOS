@@ -9,7 +9,8 @@ import {
 } from './document-types';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const BIDI_AND_CONTROL_RE = /[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
+const MAX_PNG_DIMENSION = 16_384;
+const BIDI_AND_CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 export interface SanitizedFilenameResult {
   displayFilename: string;
@@ -69,7 +70,8 @@ export function sanitizeDisplayFilename(rawFilename: string): SanitizedFilenameR
   if (
     trimmed.includes('/') ||
     trimmed.includes('\\') ||
-    trimmed.includes('..') ||
+    trimmed === '.' ||
+    trimmed === '..' ||
     trimmed.includes(':')
   ) {
     throw new DocumentValidationError(
@@ -139,23 +141,23 @@ function isAsciiWordByte(b: number): boolean {
   );
 }
 
-function hasWordToken(buffer: Buffer, token: Buffer): boolean {
-  let pos = 0;
+function findWordToken(buffer: Buffer, token: Buffer, startOffset = 0): number {
+  let pos = startOffset;
   while (pos <= buffer.byteLength - token.byteLength) {
     const idx = buffer.indexOf(token, pos);
-    if (idx === -1) return false;
+    if (idx === -1) return -1;
     const beforeOk = idx === 0 || !isAsciiWordByte(buffer[idx - 1]);
     const afterPos = idx + token.byteLength;
     const afterOk = afterPos === buffer.byteLength || !isAsciiWordByte(buffer[afterPos]);
-    if (beforeOk && afterOk) return true;
+    if (beforeOk && afterOk) return idx;
     pos = idx + 1;
   }
-  return false;
+  return -1;
 }
 
 /**
  * PDF structural gate (not a full parser): `%PDF-1.x|2.x` + EOL at byte 0, at least one
- * `obj`/`endobj` pair, `startxref` and a final `%%EOF` in the tail followed only by whitespace.
+ * ordered `obj`..`endobj` pair, `startxref` and a final `%%EOF` in the tail followed only by whitespace.
  */
 function isValidPdfBytes(buffer: Buffer): boolean {
   if (buffer.byteLength < 12) return false;
@@ -176,7 +178,9 @@ function isValidPdfBytes(buffer: Buffer): boolean {
   if (!tailSlice.slice(0, lastEofIdx).includes('startxref')) {
     return false;
   }
-  return hasWordToken(buffer, PDF_OBJ_TOKEN) && hasWordToken(buffer, PDF_ENDOBJ_TOKEN);
+  const objIdx = findWordToken(buffer, PDF_OBJ_TOKEN);
+  if (objIdx === -1) return false;
+  return findWordToken(buffer, PDF_ENDOBJ_TOKEN, objIdx + PDF_OBJ_TOKEN.byteLength) !== -1;
 }
 
 function isJpegSof(marker: number): boolean {
@@ -243,7 +247,13 @@ function isValidJpegBytes(buffer: Buffer): boolean {
       return false;
     }
     seenSegment = true;
-    if (isJpegSof(marker)) seenSof = true;
+    if (isJpegSof(marker)) {
+      if (segLen < 8) return false;
+      const height = buffer.readUInt16BE(pos + 3);
+      const width = buffer.readUInt16BE(pos + 5);
+      if (height === 0 || width === 0) return false;
+      seenSof = true;
+    }
     pos += segLen;
 
     // SOS: skip entropy-coded data; FF00 is a stuffed byte and (fill FFs +) RST0..RST7 stay in the scan (T.81 B.1.1.2)
@@ -287,7 +297,12 @@ const PNG_VALID_BIT_DEPTHS: Record<number, readonly number[]> = {
 function isValidPngIhdr(buffer: Buffer, dataStart: number): boolean {
   const width = buffer.readUInt32BE(dataStart);
   const height = buffer.readUInt32BE(dataStart + 4);
-  if (width === 0 || width > 0x7fffffff || height === 0 || height > 0x7fffffff) {
+  if (
+    width === 0 ||
+    width > MAX_PNG_DIMENSION ||
+    height === 0 ||
+    height > MAX_PNG_DIMENSION
+  ) {
     return false;
   }
   const bitDepth = buffer[dataStart + 8];
@@ -309,6 +324,8 @@ function isValidPngBytes(buffer: Buffer): boolean {
 
   let offset = 8;
   let idatBytes = 0;
+  let colorType = -1;
+  let hasPlte = false;
 
   while (offset + 12 <= buffer.byteLength) {
     const length = buffer.readUInt32BE(offset);
@@ -332,13 +349,24 @@ function isValidPngBytes(buffer: Buffer): boolean {
       if (chunkType !== 'IHDR' || length !== 13 || !isValidPngIhdr(buffer, offset + 8)) {
         return false;
       }
+      colorType = buffer[offset + 8 + 9];
     } else if (chunkType === 'IHDR') {
       return false;
+    } else if (chunkType === 'PLTE') {
+      if (length < 3 || length > 768 || length % 3 !== 0) {
+        return false;
+      }
+      hasPlte = true;
     } else if (chunkType === 'IDAT') {
       idatBytes += length;
     } else if (chunkType === 'IEND') {
       // Must terminate cleanly at buffer end with no trailing bytes
-      return length === 0 && idatBytes > 0 && chunkEnd === buffer.byteLength;
+      return (
+        length === 0 &&
+        idatBytes > 0 &&
+        (colorType !== 3 || hasPlte) &&
+        chunkEnd === buffer.byteLength
+      );
     }
 
     offset = chunkEnd;

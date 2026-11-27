@@ -1,3 +1,7 @@
+import type { LinkableDocumentSummary } from '@/modules/documents/document-types';
+
+export type { LinkableDocumentSummary };
+
 export type PartyKind = 'PERSON' | 'ORGANIZATION';
 
 export type IdentificationType =
@@ -123,6 +127,8 @@ export interface AddCommunicationNoteInput {
 export interface PoASummaryDTO {
   id: string;
   partyId: string;
+  documentId: string | null;
+  linkedDocument: LinkableDocumentSummary | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;
@@ -140,9 +146,12 @@ export interface PoASummaryDTO {
   currentVersion?: number;
 }
 
+export type PowerOfAttorneyDTO = PoASummaryDTO;
+
 export interface SavePowerOfAttorneyInput {
   id?: string;
   partyId: string;
+  documentId?: string | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;

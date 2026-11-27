@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import NextLink from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { renderModalPortal, useAccessibleModal } from '@/components/productivity/productivity-ui-types';
@@ -44,13 +45,16 @@ import {
 import { TasksView } from '@/components/productivity/tasks-view';
 import { DeadlinesView } from '@/components/deadlines/deadlines-view';
 import type { TaskItemDTO } from '@/modules/productivity/productivity-types';
-import type { DeadlineDTO } from '@/modules/scheduling/deadline-types';
+import type { DeadlineDTO, LinkableDocumentSummary } from '@/modules/scheduling/deadline-types';
 
 interface MatterDetailClientProps {
   ownerId: string;
   initialMatter: MatterDTO;
   initialTasks?: TaskItemDTO[];
   initialDeadlines?: DeadlineDTO[];
+  initialDocuments?: LinkableDocumentSummary[];
+  canReadDocuments?: boolean;
+  documentsError?: string;
   tasksError?: string;
   deadlinesError?: string;
 }
@@ -60,6 +64,9 @@ export function MatterDetailClient({
   initialMatter,
   initialTasks = [],
   initialDeadlines = [],
+  initialDocuments,
+  canReadDocuments = false,
+  documentsError,
   tasksError,
   deadlinesError,
 }: MatterDetailClientProps) {
@@ -75,8 +82,27 @@ export function MatterDetailClient({
     }
   }, [initialMatter]);
   const [activeTab, setActiveTab] = useState<
-    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary' | 'audit'
+    'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary'
   >('parties');
+  const tabRefs = useRef<Partial<Record<'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary', HTMLButtonElement | null>>>({});
+
+  const handleMatterTabKeyDown = (
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: 'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'summary'
+  ) => {
+    const tabs = ['parties', 'proceedings', 'authorizations', 'tasksDeadlines', 'summary'] as const;
+    const idx = tabs.indexOf(currentTab);
+    let nextIdx = -1;
+    if (e.key === 'ArrowLeft') nextIdx = (idx + 1) % tabs.length;
+    else if (e.key === 'ArrowRight') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = tabs.length - 1;
+    if (nextIdx === -1) return;
+    e.preventDefault();
+    const nextTab = tabs[nextIdx];
+    setActiveTab(nextTab);
+    tabRefs.current[nextTab]?.focus();
+  };
 
   // Party Linking Modal / Form State (C11 guarded async lifecycle)
   const [showAddPartyModal, setShowAddPartyModal] = useState(false);
@@ -85,6 +111,13 @@ export function MatterDetailClient({
   const [isSearchingParty, setIsSearchingParty] = useState(false);
   const [partySearchError, setPartySearchError] = useState<string | null>(null);
   const partySearchGenRef = useRef(0);
+  const partySearchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (partySearchTimerRef.current) clearTimeout(partySearchTimerRef.current);
+    };
+  }, []);
 
   const [selectedPartyId, setSelectedPartyId] = useState('');
   const [selectedPartyRole, setSelectedPartyRole] = useState<MatterPartyRole>('CLIENT');
@@ -114,6 +147,7 @@ export function MatterDetailClient({
   const [matterLifecycleReason, setMatterLifecycleReason] = useState('');
   const [isLifecycleSubmitting, setIsLifecycleSubmitting] = useState(false);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [lifecycleSessionExpired, setLifecycleSessionExpired] = useState(false);
 
   // Proceeding Archive/Reopen State
   const [selectedProceedingForLifecycle, setSelectedProceedingForLifecycle] = useState<ProceedingSummaryDTO | null>(null);
@@ -276,6 +310,7 @@ export function MatterDetailClient({
     setActionError(null);
     setPartyActionError(null);
     setPartySearchError(null);
+    if (partySearchTimerRef.current) clearTimeout(partySearchTimerRef.current);
     partySearchGenRef.current++;
     setSearchedParties([]);
     setShowAddPartyModal(true);
@@ -284,6 +319,7 @@ export function MatterDetailClient({
   const closePartyModal = () => {
     // U4: invalidate any in-flight search so a late response cannot repopulate
     // the panel after it was closed.
+    if (partySearchTimerRef.current) clearTimeout(partySearchTimerRef.current);
     partySearchGenRef.current++;
     setSearchedParties([]);
     setIsSearchingParty(false);
@@ -314,6 +350,7 @@ export function MatterDetailClient({
     }
     setActionError(null);
     setLifecycleError(null);
+    setLifecycleSessionExpired(false);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'archiveMatter'
         ? pendingLifecycleOpRef.current.payload.reason
@@ -335,6 +372,7 @@ export function MatterDetailClient({
     }
     setActionError(null);
     setLifecycleError(null);
+    setLifecycleSessionExpired(false);
     setMatterLifecycleReason(
       pendingLifecycleOpRef.current?.kind === 'reopenMatter'
         ? pendingLifecycleOpRef.current.payload.reason
@@ -368,6 +406,7 @@ export function MatterDetailClient({
     setSelectedProceedingForLifecycle(proc);
     setProceedingLifecycleAction(action);
     setProceedingLifecycleError(null);
+    setLifecycleSessionExpired(false);
     const isFrozenMatching =
       pendingLifecycleOpRef.current &&
       ((action === 'archive' && pendingLifecycleOpRef.current.kind === 'archiveProceeding') ||
@@ -419,10 +458,11 @@ export function MatterDetailClient({
 
   // Search Parties for Linking (C11/U4: separate query from selection, clear
   // stale rows on query change, and invalidate generations on selection/close)
-  const handleSearchParties = async (q: string) => {
+  const handleSearchParties = (q: string) => {
     setPartySearchQuery(q);
     setSelectedPartyId('');
     setSearchedParties([]);
+    if (partySearchTimerRef.current) clearTimeout(partySearchTimerRef.current);
     const gen = ++partySearchGenRef.current;
 
     if (!q.trim()) {
@@ -434,23 +474,25 @@ export function MatterDetailClient({
     setIsSearchingParty(true);
     setPartySearchError(null);
 
-    try {
-      const res = await searchPartiesAction({ query: q.trim(), limit: 10 });
-      if (gen !== partySearchGenRef.current) return; // Stale delayed response, discard
-      if (res.success) {
-        setSearchedParties(res.data.parties.map((p) => ({ id: p.id, name: p.name })));
-      } else {
-        setPartySearchError(res.error || 'تعذر البحث عن الأطراف.');
+    partySearchTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await searchPartiesAction({ query: q.trim(), limit: 10 });
+        if (gen !== partySearchGenRef.current) return; // Stale delayed response, discard
+        if (res.success) {
+          setSearchedParties(res.data.parties.map((p) => ({ id: p.id, name: p.name })));
+        } else {
+          setPartySearchError(res.error || 'تعذر البحث عن الأطراف.');
+        }
+      } catch {
+        if (gen === partySearchGenRef.current) {
+          setPartySearchError('حدث خطأ في الاتصال أثناء البحث.');
+        }
+      } finally {
+        if (gen === partySearchGenRef.current) {
+          setIsSearchingParty(false);
+        }
       }
-    } catch {
-      if (gen === partySearchGenRef.current) {
-        setPartySearchError('حدث خطأ في الاتصال أثناء البحث.');
-      }
-    } finally {
-      if (gen === partySearchGenRef.current) {
-        setIsSearchingParty(false);
-      }
-    }
+    }, 250);
   };
 
   // Execute Link Party (U1/U3 frozen recovery)
@@ -1017,6 +1059,7 @@ export function MatterDetailClient({
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
           updatePendingLifecycleOp(op);
+          setLifecycleSessionExpired(true);
           setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1024,6 +1067,7 @@ export function MatterDetailClient({
           res.code === 'DATABASE_UNAVAILABLE' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(op);
           setLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
@@ -1031,12 +1075,14 @@ export function MatterDetailClient({
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(null);
           setLifecycleError(res.error || 'تعذر أرشفة الملف.');
         }
         return;
       }
 
+      setLifecycleSessionExpired(false);
       updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
@@ -1100,6 +1146,7 @@ export function MatterDetailClient({
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
           updatePendingLifecycleOp(op);
+          setLifecycleSessionExpired(true);
           setLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1107,6 +1154,7 @@ export function MatterDetailClient({
           res.code === 'DATABASE_UNAVAILABLE' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(op);
           setLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
@@ -1114,12 +1162,14 @@ export function MatterDetailClient({
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(null);
           setLifecycleError(res.error || 'تعذر إعادة فتح الملف.');
         }
         return;
       }
 
+      setLifecycleSessionExpired(false);
       updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
@@ -1183,6 +1233,7 @@ export function MatterDetailClient({
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
           updatePendingLifecycleOp(op);
+          setLifecycleSessionExpired(true);
           setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1190,6 +1241,7 @@ export function MatterDetailClient({
           res.code === 'DATABASE_UNAVAILABLE' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(op);
           setProceedingLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
@@ -1197,12 +1249,14 @@ export function MatterDetailClient({
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(null);
           setProceedingLifecycleError(res.error || 'تعذر أرشفة القيد القضائي.');
         }
         return;
       }
 
+      setLifecycleSessionExpired(false);
       updatePendingLifecycleOp(null);
       // NOTE (Spec 4): Closed Proceeding must not be presented as archived, and archiving keeps existing status
       setMatter((prev) => ({
@@ -1275,6 +1329,7 @@ export function MatterDetailClient({
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
           updatePendingLifecycleOp(op);
+          setLifecycleSessionExpired(true);
           setProceedingLifecycleError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة؛ سجّل الدخول في نافذة جديدة ثم أعد المحاولة بنفس المفتاح.');
         } else if (
           !res.code ||
@@ -1282,6 +1337,7 @@ export function MatterDetailClient({
           res.code === 'DATABASE_UNAVAILABLE' ||
           res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
         ) {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(op);
           setProceedingLifecycleError(
             res.code === 'IDEMPOTENCY_CONCURRENT_CONFLICT'
@@ -1289,12 +1345,14 @@ export function MatterDetailClient({
               : res.error || 'لم يتأكد وصول العملية إلى الخادم. أُبقيت العملية مجمّدة؛ يمكنك إعادة المحاولة.'
           );
         } else {
+          setLifecycleSessionExpired(false);
           updatePendingLifecycleOp(null);
           setProceedingLifecycleError(res.error || 'تعذر إعادة فتح القيد القضائي.');
         }
         return;
       }
 
+      setLifecycleSessionExpired(false);
       updatePendingLifecycleOp(null);
       setMatter((prev) => ({
         ...prev,
@@ -1363,7 +1421,7 @@ export function MatterDetailClient({
             <Link href="/matters" className="hover:text-[#14566B] hover:underline">
               ملفات القضايا
             </Link>
-            <span aria-hidden="true">&gt;</span>
+            <span aria-hidden="true">/</span>
             <bdi dir="ltr" className="font-mono text-[#14566B] font-bold">
               {matter.fileCode}
             </bdi>
@@ -1469,7 +1527,7 @@ export function MatterDetailClient({
                 }
               }
             }}
-            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-[6px] transition-colors whitespace-nowrap min-h-[36px]"
+            className="px-3.5 py-1.5 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded-[6px] transition-colors whitespace-nowrap min-h-[44px]"
           >
             متابعة وإعادة المحاولة
           </button>
@@ -1639,12 +1697,14 @@ export function MatterDetailClient({
             <span className="font-semibold text-[#4D606A]">مكان الحفظ الورقي بالمكتب:</span>
             <span className="font-bold text-[#14566B]">{matter.paperLocationName}</span>
           </div>
-          <Link
-            href={`/matters/${matter.id}/edit`}
-            className="text-[#14566B] hover:underline font-medium"
-          >
-            تغيير
-          </Link>
+          {!isMatterArchived && (
+            <Link
+              href={`/matters/${matter.id}/edit`}
+              className="text-[#14566B] hover:underline font-medium min-h-[44px] inline-flex items-center"
+            >
+              تغيير
+            </Link>
+          )}
         </div>
       ) : null}
 
@@ -1681,11 +1741,20 @@ export function MatterDetailClient({
 
       {/* 4. Navigation Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية">
+        <div className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية" role="tablist">
           <button
+            ref={(el) => {
+              tabRefs.current.parties = el;
+            }}
+            id="matter-tab-parties"
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'parties'}
+            aria-controls={activeTab === 'parties' ? 'matter-tabpanel-parties' : undefined}
+            tabIndex={activeTab === 'parties' ? 0 : -1}
             data-testid="tab-parties"
             onClick={() => setActiveTab('parties')}
+            onKeyDown={(e) => handleMatterTabKeyDown(e, 'parties')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'parties'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -1696,9 +1765,18 @@ export function MatterDetailClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.proceedings = el;
+            }}
+            id="matter-tab-proceedings"
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'proceedings'}
+            aria-controls={activeTab === 'proceedings' ? 'matter-tabpanel-proceedings' : undefined}
+            tabIndex={activeTab === 'proceedings' ? 0 : -1}
             data-testid="tab-proceedings"
             onClick={() => setActiveTab('proceedings')}
+            onKeyDown={(e) => handleMatterTabKeyDown(e, 'proceedings')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'proceedings'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -1709,9 +1787,18 @@ export function MatterDetailClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.authorizations = el;
+            }}
+            id="matter-tab-authorizations"
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'authorizations'}
+            aria-controls={activeTab === 'authorizations' ? 'matter-tabpanel-authorizations' : undefined}
+            tabIndex={activeTab === 'authorizations' ? 0 : -1}
             data-testid="tab-authorizations"
             onClick={() => setActiveTab('authorizations')}
+            onKeyDown={(e) => handleMatterTabKeyDown(e, 'authorizations')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'authorizations'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -1722,9 +1809,18 @@ export function MatterDetailClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.tasksDeadlines = el;
+            }}
+            id="matter-tab-tasksDeadlines"
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'tasksDeadlines'}
+            aria-controls={activeTab === 'tasksDeadlines' ? 'matter-tabpanel-tasksDeadlines' : undefined}
+            tabIndex={activeTab === 'tasksDeadlines' ? 0 : -1}
             data-testid="tab-tasks-deadlines"
             onClick={() => setActiveTab('tasksDeadlines')}
+            onKeyDown={(e) => handleMatterTabKeyDown(e, 'tasksDeadlines')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'tasksDeadlines'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -1735,9 +1831,18 @@ export function MatterDetailClient({
           </button>
 
           <button
+            ref={(el) => {
+              tabRefs.current.summary = el;
+            }}
+            id="matter-tab-summary"
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'summary'}
+            aria-controls={activeTab === 'summary' ? 'matter-tabpanel-summary' : undefined}
+            tabIndex={activeTab === 'summary' ? 0 : -1}
             data-testid="tab-summary"
             onClick={() => setActiveTab('summary')}
+            onKeyDown={(e) => handleMatterTabKeyDown(e, 'summary')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
               activeTab === 'summary'
                 ? 'border-[#14566B] text-[#14566B]'
@@ -1746,12 +1851,12 @@ export function MatterDetailClient({
           >
             الملخص والملاحظات
           </button>
-        </nav>
+        </div>
       </div>
 
       {/* Tab 1: Parties Section */}
       {activeTab === 'parties' && (
-        <div className="space-y-6">
+        <div id="matter-tabpanel-parties" role="tabpanel" aria-labelledby="matter-tab-parties" className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-[#172A35]">
               أطراف الملف (الموكلون والخصوم)
@@ -1762,7 +1867,7 @@ export function MatterDetailClient({
                 data-testid="open-add-party-modal"
                 onClick={handleOpenPartyModal}
                 disabled={isAssocSubmitting || !!pendingAssocOp}
-                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
+                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] flex items-center gap-1.5 transition-colors ${
                   isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
@@ -1785,7 +1890,7 @@ export function MatterDetailClient({
                 <button
                   type="button"
                   onClick={closePartyModal}
-                  className="text-xs text-[#4D606A] hover:text-[#172A35] p-1"
+                  className="text-xs text-[#4D606A] hover:text-[#172A35] px-2 py-1 min-h-[44px] flex items-center"
                 >
                   ✕ إغلاق
                 </button>
@@ -1826,12 +1931,13 @@ export function MatterDetailClient({
                           data-testid={`select-party-${p.id}`}
                           onClick={() => {
                             // Selection invalidates any in-flight query response.
+                            if (partySearchTimerRef.current) clearTimeout(partySearchTimerRef.current);
                             partySearchGenRef.current++;
                             setSelectedPartyId(p.id);
                             setPartySearchQuery(p.name);
                             setSearchedParties([]);
                           }}
-                          className={`w-full text-right p-2 hover:bg-[#F4F6F7] text-xs font-medium ${
+                          className={`w-full text-right p-2 hover:bg-[#F4F6F7] text-xs font-medium min-h-[44px] ${
                             selectedPartyId === p.id ? 'bg-[#E8EEF1] font-bold text-[#14566B]' : ''
                           }`}
                         >
@@ -1870,7 +1976,7 @@ export function MatterDetailClient({
                   {/* Primary Contact Toggle */}
                   {selectedPartyRole === 'CLIENT' && (
                     <div className="space-y-1 flex items-center pt-5">
-                      <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <label className="inline-flex items-center gap-2 cursor-pointer min-h-[44px]">
                         <input
                           type="checkbox"
                           checked={isPrimaryContact}
@@ -1897,7 +2003,7 @@ export function MatterDetailClient({
                     value={partyNotes}
                     onChange={(e) => setPartyNotes(e.target.value)}
                     placeholder="مثال: يتابع الملف بالنيابة عن باقي الورثة"
-                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px]"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
                   />
                 </div>
 
@@ -1905,7 +2011,7 @@ export function MatterDetailClient({
                   <button
                     type="button"
                     onClick={closePartyModal}
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
                   >
                     إلغاء
                   </button>
@@ -1927,7 +2033,7 @@ export function MatterDetailClient({
             <h3 className="text-sm font-bold text-emerald-900 bg-emerald-50/70 p-2.5 rounded-[6px] border border-emerald-200 flex items-center justify-between">
               <span>الموكلون وأصحاب الشأن ({clients.length})</span>
               <span className="text-[11px] text-emerald-700 font-normal">
-                {matter.status === 'ACTIVE' ? 'الملف نشط ويتطلب موكلاً واحداً على الأقل دائماً' : 'مسودة'}
+                {matter.status === 'ACTIVE' ? 'الملف نشط ويتطلب موكلاً واحداً على الأقل دائماً' : MATTER_STATUS_LABELS[matter.status]}
               </span>
             </h3>
 
@@ -1970,7 +2076,8 @@ export function MatterDetailClient({
                             onClick={() => handleTogglePrimary(c)}
                             disabled={isAssocSubmitting || !!pendingAssocOp}
                             title={c.isPrimaryContact ? 'إلغاء التعيين كأساسي' : 'تعيين كأساسي'}
-                            className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded ${
+                            aria-label={c.isPrimaryContact ? 'إلغاء التعيين كجهة اتصال أساسية' : 'تعيين كجهة اتصال أساسية'}
+                            className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                               isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                           >
@@ -1981,10 +2088,11 @@ export function MatterDetailClient({
                             data-testid={`unlink-party-${c.id}`}
                             onClick={() => handleUnlinkParty(c)}
                             disabled={isAssocSubmitting || !!pendingAssocOp}
-                            className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                            className={`text-xs text-red-600 hover:text-red-800 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                               isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                             title="إزالة الطرف من الملف"
+                            aria-label="إزالة الطرف من الملف"
                           >
                             ✕
                           </button>
@@ -2034,10 +2142,11 @@ export function MatterDetailClient({
                           data-testid={`unlink-opponent-${op.id}`}
                           onClick={() => handleUnlinkParty(op)}
                           disabled={isAssocSubmitting || !!pendingAssocOp}
-                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                             isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
                           title="إزالة الخصم"
+                          aria-label="إزالة الخصم من الملف"
                         >
                           ✕
                         </button>
@@ -2079,8 +2188,8 @@ export function MatterDetailClient({
                           onClick={() => handleUnlinkParty(oth)}
                           disabled={isAssocSubmitting || !!pendingAssocOp}
                           title="إزالة الطرف"
-                          aria-label="إزالة الطرف"
-                          className={`text-xs text-red-600 hover:text-red-800 p-1 ${
+                          aria-label="إزالة الطرف من الملف"
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded ${
                             isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
                         >
@@ -2098,7 +2207,7 @@ export function MatterDetailClient({
 
       {/* Tab 2: Court Proceedings */}
       {activeTab === 'proceedings' && (
-        <div className="space-y-6">
+        <div id="matter-tabpanel-proceedings" role="tabpanel" aria-labelledby="matter-tab-proceedings" className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-[#172A35]">
               القيود والدعاوى القضائية المسجلة
@@ -2107,7 +2216,7 @@ export function MatterDetailClient({
               <Link
                 href={`/matters/${matter.id}/proceedings/new`}
                 data-testid="add-proceeding-tab-button"
-                className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors"
+                className="px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] flex items-center gap-1.5 transition-colors"
               >
                 <span>+ تسجيل قيد قضائي جديد</span>
               </Link>
@@ -2201,11 +2310,11 @@ export function MatterDetailClient({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <Link
                           href={`/matters/${matter.id}/proceedings/${proc.id}`}
                           data-testid={`view-proceeding-${proc.id}`}
-                          className="px-3 py-1.5 bg-white hover:bg-[#F4F6F7] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#14566B]/30 transition-colors min-h-[36px] flex items-center"
+                          className="px-3 py-1.5 bg-white hover:bg-[#F4F6F7] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#14566B]/30 transition-colors min-h-[44px] flex items-center"
                         >
                           عرض تفاصيل القيد
                         </Link>
@@ -2213,7 +2322,7 @@ export function MatterDetailClient({
                           <Link
                             href={`/matters/${matter.id}/proceedings/${proc.id}/edit`}
                             data-testid={`edit-proceeding-${proc.id}`}
-                            className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[36px] flex items-center"
+                            className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#14566B] text-xs font-bold rounded-[6px] border border-[#D5DFE3] transition-colors min-h-[44px] flex items-center"
                           >
                             تعديل القيد
                           </Link>
@@ -2233,7 +2342,7 @@ export function MatterDetailClient({
                               onClick={() => {
                                 openProceedingLifecycleModal(proc, 'archive');
                               }}
-                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-medium rounded-[6px] border border-amber-300 transition-colors min-h-[36px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-medium rounded-[6px] border border-amber-300 transition-colors min-h-[44px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               أرشفة القيد
                             </button>
@@ -2251,7 +2360,7 @@ export function MatterDetailClient({
                               onClick={() => {
                                 openProceedingLifecycleModal(proc, 'reopen');
                               }}
-                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium rounded-[6px] border border-emerald-300 transition-colors min-h-[36px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-medium rounded-[6px] border border-emerald-300 transition-colors min-h-[44px] flex items-center disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               إعادة فتح القيد
                             </button>
@@ -2307,7 +2416,7 @@ export function MatterDetailClient({
 
       {/* Tab 3: Authorizations / POAs */}
       {activeTab === 'authorizations' && (
-        <div className="space-y-6">
+        <div id="matter-tabpanel-authorizations" role="tabpanel" aria-labelledby="matter-tab-authorizations" className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <h2 className="text-base font-bold text-[#172A35]">
@@ -2324,7 +2433,7 @@ export function MatterDetailClient({
                 data-testid="open-add-poa-modal"
                 onClick={handleOpenPoaModal}
                 disabled={isAssocSubmitting || !!pendingAssocOp}
-                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[40px] flex items-center gap-1.5 transition-colors ${
+                className={`px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] flex items-center gap-1.5 transition-colors ${
                   isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                 }`}
               >
@@ -2347,7 +2456,7 @@ export function MatterDetailClient({
                 <button
                   type="button"
                   onClick={closePoaModal}
-                  className="text-xs text-[#4D606A] hover:text-[#172A35] p-1"
+                  className="text-xs text-[#4D606A] hover:text-[#172A35] px-2 py-1 min-h-[44px] flex items-center"
                 >
                   ✕ إغلاق
                 </button>
@@ -2357,7 +2466,7 @@ export function MatterDetailClient({
                 <p
                   role="alert"
                   data-testid="poa-load-error"
-                  className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded"
+                  className="text-xs text-[#A4262C] font-bold bg-red-50 p-2 rounded"
                 >
                   {poaActionError}
                 </p>
@@ -2378,7 +2487,7 @@ export function MatterDetailClient({
                         type="button"
                         onClick={handleOpenPoaModal}
                         data-testid="retry-load-poas"
-                        className="px-3 py-1.5 bg-white border border-red-300 text-red-900 font-semibold rounded-[6px] min-h-[32px]"
+                        className="px-3 py-1.5 bg-white border border-red-300 text-red-900 font-semibold rounded-[6px] min-h-[44px]"
                       >
                         إعادة محاولة تحميل التوكيلات
                       </button>
@@ -2417,7 +2526,7 @@ export function MatterDetailClient({
                   <button
                     type="button"
                     onClick={closePoaModal}
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
                   >
                     إلغاء
                   </button>
@@ -2472,7 +2581,7 @@ export function MatterDetailClient({
                         data-testid={`unlink-poa-${auth.id}`}
                         onClick={() => handleUnlinkPoa(auth)}
                         disabled={isAssocSubmitting || !!pendingAssocOp}
-                        className={`text-xs text-red-600 hover:text-red-800 p-1 ${
+                        className={`text-xs text-red-600 hover:text-red-800 px-2 py-1 min-h-[44px] flex items-center ${
                           isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                         title="إلغاء ربط التوكيل"
@@ -2502,10 +2611,13 @@ export function MatterDetailClient({
 
       {/* Tab 4: Tasks & Legal Deadlines */}
       {activeTab === 'tasksDeadlines' && (
-        <div className="space-y-8" data-testid="matter-tasks-deadlines-panel">
+        <div id="matter-tabpanel-tasksDeadlines" aria-labelledby="matter-tab-tasksDeadlines" className="space-y-8" role="tabpanel" data-testid="matter-tasks-deadlines-panel">
           <DeadlinesView
             actorId={ownerId}
             initialDeadlines={initialDeadlines}
+            canReadDocuments={canReadDocuments}
+            matterDocuments={initialDocuments}
+            documentsLoadError={documentsError}
             initialError={deadlinesError}
             selectableMatters={[]}
             lockedMatterId={matter.id}
@@ -2543,11 +2655,11 @@ export function MatterDetailClient({
 
       {/* Tab 5: Summary & Notes */}
       {activeTab === 'summary' && (
-        <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs">
+        <div id="matter-tabpanel-summary" aria-labelledby="matter-tab-summary" className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs" role="tabpanel">
           <div>
-            <h3 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
+            <h2 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
               ملخص وقائع وموضوع الملف
-            </h3>
+            </h2>
             {matter.summary ? (
               <p className="text-xs text-[#172A35] whitespace-pre-wrap leading-relaxed">
                 {matter.summary}
@@ -2558,9 +2670,9 @@ export function MatterDetailClient({
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
+            <h2 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
               ملاحظات وتوجيهات داخلية للمكتب
-            </h3>
+            </h2>
             {matter.notes ? (
               <p className="text-xs text-[#172A35] whitespace-pre-wrap leading-relaxed bg-[#F9FBFC] p-3 rounded border border-[#E8EEF1]">
                 {matter.notes}
@@ -2588,10 +2700,10 @@ export function MatterDetailClient({
       {/* Future Modules Notice */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          المستندات والحسابات
+          الحسابات المالية
         </span>
         <p>
-          وحدات حفظ المستندات الرقمية وحسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها.
+          حسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها في المراحل اللاحقة.
         </p>
       </div>
 
@@ -2605,7 +2717,7 @@ export function MatterDetailClient({
                 closeArchiveMatterModal();
               }
             }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
           >
             <div
               ref={archiveMatterModalRef}
@@ -2615,7 +2727,7 @@ export function MatterDetailClient({
               data-testid="archive-matter-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto my-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2626,7 +2738,7 @@ export function MatterDetailClient({
                 data-testid="cancel-archive-matter-button"
                 disabled={isLifecycleSubmitting}
                 onClick={closeArchiveMatterModal}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-xs text-[#4D606A] hover:text-[#172A35] px-2 py-1 min-h-[44px] flex items-center rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2650,17 +2762,29 @@ export function MatterDetailClient({
                 >
                   العملية مجمّدة بنفس مفتاح الطلب والسبب الأصلي لضمان عدم التكرار. لا يمكن تعديل السبب أثناء إعادة المحاولة.
                 </div>
-                <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
                   <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
-                  <button
-                    type="button"
-                    data-testid="retry-archive-matter-button"
-                    disabled={isLifecycleSubmitting}
-                    onClick={() => executeArchiveMatter(pendingLifecycleOp)}
-                    className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[32px] disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {lifecycleSessionExpired && (
+                      <NextLink
+                        href="/login"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] inline-flex items-center"
+                      >
+                        فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                      </NextLink>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="retry-archive-matter-button"
+                      disabled={isLifecycleSubmitting}
+                      onClick={() => executeArchiveMatter(pendingLifecycleOp)}
+                      className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[44px] disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2696,7 +2820,7 @@ export function MatterDetailClient({
                   type="button"
                   disabled={isLifecycleSubmitting}
                   onClick={closeArchiveMatterModal}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2704,7 +2828,7 @@ export function MatterDetailClient({
                   type="submit"
                   disabled={isLifecycleSubmitting || (pendingLifecycleOp?.kind === 'archiveMatter' ? false : matterLifecycleReason.trim().length < 3)}
                   data-testid="confirm-archive-matter-button"
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
+                  className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px]"
                 >
                   {isLifecycleSubmitting
                     ? 'جارٍ الأرشفة...'
@@ -2728,7 +2852,7 @@ export function MatterDetailClient({
                 closeReopenMatterModal();
               }
             }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
           >
             <div
               ref={reopenMatterModalRef}
@@ -2738,7 +2862,7 @@ export function MatterDetailClient({
               data-testid="reopen-matter-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto my-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2749,7 +2873,7 @@ export function MatterDetailClient({
                 data-testid="cancel-reopen-matter-button"
                 disabled={isLifecycleSubmitting}
                 onClick={closeReopenMatterModal}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-xs text-[#4D606A] hover:text-[#172A35] px-2 py-1 min-h-[44px] flex items-center rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2773,17 +2897,29 @@ export function MatterDetailClient({
                 >
                   العملية مجمّدة بنفس مفتاح الطلب والسبب الأصلي لضمان عدم التكرار. لا يمكن تعديل السبب أثناء إعادة المحاولة.
                 </div>
-                <div className="flex items-center justify-between p-2.5 bg-sky-50 border border-sky-200 rounded-[6px] text-xs text-sky-900">
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-sky-50 border border-sky-200 rounded-[6px] text-xs text-sky-900">
                   <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
-                  <button
-                    type="button"
-                    data-testid="retry-reopen-matter-button"
-                    disabled={isLifecycleSubmitting}
-                    onClick={() => executeReopenMatter(pendingLifecycleOp)}
-                    className="px-3 py-1 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded min-h-[32px] disabled:opacity-50 whitespace-nowrap"
-                  >
-                    {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {lifecycleSessionExpired && (
+                      <NextLink
+                        href="/login"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] inline-flex items-center"
+                      >
+                        فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                      </NextLink>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="retry-reopen-matter-button"
+                      disabled={isLifecycleSubmitting}
+                      onClick={() => executeReopenMatter(pendingLifecycleOp)}
+                      className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded min-h-[44px] disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {isLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2819,7 +2955,7 @@ export function MatterDetailClient({
                   type="button"
                   disabled={isLifecycleSubmitting}
                   onClick={closeReopenMatterModal}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2827,7 +2963,7 @@ export function MatterDetailClient({
                   type="submit"
                   disabled={isLifecycleSubmitting || (pendingLifecycleOp?.kind === 'reopenMatter' ? false : matterLifecycleReason.trim().length < 3)}
                   data-testid="confirm-reopen-matter-button"
-                  className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px]"
+                  className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px]"
                 >
                   {isLifecycleSubmitting
                     ? 'جارٍ إعادة الفتح...'
@@ -2852,7 +2988,7 @@ export function MatterDetailClient({
                 closeProceedingLifecycleModal();
               }
             }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
           >
             <div
               ref={procLifecycleModalRef}
@@ -2862,7 +2998,7 @@ export function MatterDetailClient({
               data-testid="proceeding-lifecycle-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto my-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">
@@ -2873,7 +3009,7 @@ export function MatterDetailClient({
                 data-testid="close-proceeding-lifecycle-modal-button"
                 disabled={isProceedingLifecycleSubmitting}
                 onClick={closeProceedingLifecycleModal}
-                className="text-xs text-[#4D606A] hover:text-[#172A35] p-1 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                className="text-xs text-[#4D606A] hover:text-[#172A35] px-2 py-1 min-h-[44px] flex items-center rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✕ إغلاق
               </button>
@@ -2902,24 +3038,36 @@ export function MatterDetailClient({
                   >
                     العملية مجمّدة بنفس مفتاح الطلب والسبب الأصلي لضمان عدم التكرار. لا يمكن تعديل السبب أثناء إعادة المحاولة.
                   </div>
-                  <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900">
                     <span>العملية مجمّدة بمفتاح الطلب نفسه لضمان عدم التكرار.</span>
-                    <button
-                      type="button"
-                      data-testid="retry-proceeding-lifecycle-button"
-                      disabled={isProceedingLifecycleSubmitting}
-                      onClick={() => {
-                        if (!pendingLifecycleOp) return;
-                        if (pendingLifecycleOp.kind === 'archiveProceeding') {
-                          executeArchiveProceeding(pendingLifecycleOp);
-                        } else if (pendingLifecycleOp.kind === 'reopenProceeding') {
-                          executeReopenProceeding(pendingLifecycleOp);
-                        }
-                      }}
-                      className="px-3 py-1 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[32px] disabled:opacity-50 whitespace-nowrap"
-                    >
-                      {isProceedingLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {lifecycleSessionExpired && (
+                        <NextLink
+                          href="/login"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] inline-flex items-center"
+                        >
+                          فتح شاشة تسجيل الدخول في نافذة جديدة ↗
+                        </NextLink>
+                      )}
+                      <button
+                        type="button"
+                        data-testid="retry-proceeding-lifecycle-button"
+                        disabled={isProceedingLifecycleSubmitting}
+                        onClick={() => {
+                          if (!pendingLifecycleOp) return;
+                          if (pendingLifecycleOp.kind === 'archiveProceeding') {
+                            executeArchiveProceeding(pendingLifecycleOp);
+                          } else if (pendingLifecycleOp.kind === 'reopenProceeding') {
+                            executeReopenProceeding(pendingLifecycleOp);
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded min-h-[44px] disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {isProceedingLifecycleSubmitting ? 'جارٍ إعادة المحاولة...' : 'إعادة المحاولة'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2981,7 +3129,7 @@ export function MatterDetailClient({
                   data-testid="cancel-proceeding-lifecycle-button"
                   disabled={isProceedingLifecycleSubmitting}
                   onClick={closeProceedingLifecycleModal}
-                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-xs font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   إلغاء
                 </button>
@@ -2996,9 +3144,9 @@ export function MatterDetailClient({
                       : proceedingLifecycleReason.trim().length < 3)
                   }
                   data-testid="confirm-proceeding-lifecycle-button"
-                  className={`px-4 py-2 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[40px] ${
+                  className={`px-4 py-2 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px] ${
                     proceedingLifecycleAction === 'archive'
-                      ? 'bg-amber-600 hover:bg-amber-700'
+                      ? 'bg-amber-700 hover:bg-amber-800'
                       : 'bg-[#14566B] hover:bg-[#0F4354]'
                   }`}
                 >

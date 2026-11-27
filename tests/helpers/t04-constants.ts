@@ -27,7 +27,6 @@ export const T04_TEST_IDS = {
   sessionExpiredAlert: 'session-expired-alert',
   navHome: 'nav-link-home',
   navToday: 'nav-link-today',
-  navInbox: 'nav-link-inbox',
   navAgenda: 'nav-link-agenda',
   navTasks: 'nav-link-tasks',
   navDeadlines: 'nav-link-deadlines',
@@ -61,26 +60,6 @@ export const T04_ROUTES = {
   offlineHtml: '/offline.html',
   manifest: '/manifest.webmanifest',
 } as const;
-
-/** Routes that exist and are reachable in T04/T05/T06/T07/T09/T11 (section 2.1). */
-export const T04_AVAILABLE_ROUTES: readonly string[] = [
-  T04_ROUTES.home,
-  T04_ROUTES.today,
-  T04_ROUTES.inbox,
-  T04_ROUTES.agenda,
-  T04_ROUTES.tasks,
-  T04_ROUTES.deadlines,
-  T04_ROUTES.login,
-  T04_ROUTES.verify,
-  T04_ROUTES.matters,
-  T04_ROUTES.parties,
-  T04_ROUTES.documents,
-  T04_ROUTES.reference,
-  T04_ROUTES.security,
-  T04_ROUTES.search,
-  T04_ROUTES.offline,
-  T04_ROUTES.offlineHtml,
-];
 
 /** The only destinations the navigation shell may expose (section 4.2). */
 export const T04_ALLOWED_NAV_HREFS: readonly string[] = [

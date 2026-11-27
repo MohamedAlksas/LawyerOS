@@ -141,6 +141,195 @@ export async function enqueueSourceReminderJob(
   return job;
 }
 
+export interface EnqueueSourceReminderBatchItem {
+  sourceId: string;
+  sourceVersion: number;
+  eventDateYmd: string;
+  deduplicationKey: string;
+  payload: Prisma.InputJsonValue;
+  maxAttempts?: number;
+}
+
+/**
+ * Batch-enqueues missing reminder jobs for active sources without active PENDING/RUNNING
+ * jobs, skipping rules already delivered (IN_APP SENT) for each source version.
+ */
+export async function enqueueMissingSourceReminderJobsBatch(
+  tx: Prisma.TransactionClient,
+  sourceType: 'Hearing' | 'Deadline' | 'Task',
+  items: EnqueueSourceReminderBatchItem[]
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const eventType = reminderEventTypeFromSourceType(sourceType);
+  if (!eventType) return;
+
+  const rules = await listEnabledRulesForEventType(tx, eventType);
+  if (rules.length === 0) return;
+
+  const sourceIds = Array.from(new Set(items.map((item) => item.sourceId)));
+  const activeJobs = await tx.jobRun.findMany({
+    where: {
+      jobType: 'REMINDER_DELIVERY',
+      sourceType,
+      sourceId: { in: sourceIds },
+      status: { in: ['PENDING', 'RUNNING'] },
+    },
+    select: { sourceId: true },
+  });
+  const activeSourceIds = new Set(activeJobs.map((j) => j.sourceId));
+
+  const eligibleItems = items.filter((item) => !activeSourceIds.has(item.sourceId));
+  if (eligibleItems.length === 0) return;
+
+  const eligibleSourceIds = Array.from(new Set(eligibleItems.map((item) => item.sourceId)));
+  const sentDeliveries = await tx.reminderDelivery.findMany({
+    where: {
+      sourceType,
+      sourceId: { in: eligibleSourceIds },
+      channel: 'IN_APP',
+      status: 'SENT',
+    },
+    select: {
+      sourceId: true,
+      sourceVersion: true,
+      ruleKey: true,
+    },
+  });
+
+  const deliveredRuleKeysBySourceVer = new Map<string, Set<string>>();
+  for (const delivery of sentDeliveries) {
+    const key = `${delivery.sourceId}:${delivery.sourceVersion}`;
+    let set = deliveredRuleKeysBySourceVer.get(key);
+    if (!set) {
+      set = new Set<string>();
+      deliveredRuleKeysBySourceVer.set(key, set);
+    }
+    set.add(delivery.ruleKey);
+  }
+
+  const existingTaskJobsBySource = new Map<
+    string,
+    Array<{ sourceVersion: number; dueDate: string | null }>
+  >();
+  if (sourceType === 'Task' && eligibleSourceIds.length > 0) {
+    // Sequentially fetch existing Task JobRun rows on tx so non-date edits align with the active version
+    const existingTaskJobs = await tx.jobRun.findMany({
+      where: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType: 'Task',
+        sourceId: { in: eligibleSourceIds },
+      },
+      select: {
+        sourceId: true,
+        sourceVersion: true,
+        payload: true,
+      },
+    });
+    for (const job of existingTaskJobs) {
+      const payloadDueDate =
+        job.payload !== null &&
+        typeof job.payload === 'object' &&
+        !Array.isArray(job.payload) &&
+        typeof (job.payload as { dueDate?: unknown }).dueDate === 'string'
+          ? (job.payload as { dueDate: string }).dueDate
+          : null;
+      let list = existingTaskJobsBySource.get(job.sourceId);
+      if (!list) {
+        list = [];
+        existingTaskJobsBySource.set(job.sourceId, list);
+      }
+      list.push({ sourceVersion: job.sourceVersion, dueDate: payloadDueDate });
+    }
+  }
+
+  for (const item of eligibleItems) {
+    if (activeSourceIds.has(item.sourceId)) continue;
+
+    let effectiveSourceVersion = item.sourceVersion;
+    if (sourceType === 'Task') {
+      const taskJobs = existingTaskJobsBySource.get(item.sourceId);
+      if (taskJobs && taskJobs.length > 0) {
+        let overallMaxSourceVersion: number | undefined;
+        let matchingMaxSourceVersion: number | undefined;
+        for (const job of taskJobs) {
+          if (
+            overallMaxSourceVersion === undefined ||
+            job.sourceVersion > overallMaxSourceVersion
+          ) {
+            overallMaxSourceVersion = job.sourceVersion;
+          }
+          if (
+            job.dueDate === item.eventDateYmd &&
+            (matchingMaxSourceVersion === undefined ||
+              job.sourceVersion > matchingMaxSourceVersion)
+          ) {
+            matchingMaxSourceVersion = job.sourceVersion;
+          }
+        }
+        if (
+          matchingMaxSourceVersion !== undefined &&
+          matchingMaxSourceVersion === overallMaxSourceVersion
+        ) {
+          effectiveSourceVersion = matchingMaxSourceVersion;
+        }
+      }
+    }
+
+    const deliveredKeys = deliveredRuleKeysBySourceVer.get(
+      `${item.sourceId}:${effectiveSourceVersion}`
+    );
+    const pendingRules = deliveredKeys
+      ? rules.filter((rule) => !deliveredKeys.has(`offset_${rule.dayOffset}`))
+      : rules;
+    if (pendingRules.length === 0) continue;
+
+    let earliestInstant = computeCairoReminderInstant(
+      item.eventDateYmd,
+      pendingRules[0]!.dayOffset,
+      pendingRules[0]!.reminderTime
+    );
+    for (const rule of pendingRules.slice(1)) {
+      const candidate = computeCairoReminderInstant(
+        item.eventDateYmd,
+        rule.dayOffset,
+        rule.reminderTime
+      );
+      if (candidate.getTime() < earliestInstant.getTime()) {
+        earliestInstant = candidate;
+      }
+    }
+
+    const jobPayload: Prisma.InputJsonValue =
+      sourceType === 'Task' &&
+      item.payload !== null &&
+      typeof item.payload === 'object' &&
+      !Array.isArray(item.payload)
+        ? {
+            ...(item.payload as Prisma.InputJsonObject),
+            sourceVersion: effectiveSourceVersion,
+          }
+        : item.payload;
+
+    await tx.jobRun.create({
+      data: {
+        jobType: 'REMINDER_DELIVERY',
+        sourceType,
+        sourceId: item.sourceId,
+        sourceVersion: effectiveSourceVersion,
+        payloadVersion: 1,
+        scheduledAt: earliestInstant,
+        availableAt: earliestInstant,
+        maxAttempts: item.maxAttempts ?? 5,
+        status: 'PENDING',
+        deduplicationKey: item.deduplicationKey,
+        payload: jobPayload,
+      },
+    });
+    activeSourceIds.add(item.sourceId);
+  }
+}
+
 /**
  * Cancels all pending/running/failed outbox jobs and pending/processing deliveries
  * for one or more source records inside the business mutation transaction.
@@ -155,6 +344,7 @@ export async function cancelSourceReminderJobsBatch(
 
   await tx.jobRun.updateMany({
     where: {
+      jobType: 'REMINDER_DELIVERY',
       sourceType,
       sourceId: { in: sourceIds },
       status: { in: ['PENDING', 'RUNNING', 'FAILED'] },

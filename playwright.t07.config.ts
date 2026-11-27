@@ -5,7 +5,7 @@ import path from 'path';
 /**
  * T07 browser-verification configuration.
  *
- * Dedicated to Task T07 matters, proceedings, relationships, and reference settings.
+ * Dedicated to Task T07 matter/party search, lifecycle archiving, and pagination.
  * Runs on isolated application port 3207 against test PostgreSQL database.
  */
 
@@ -52,7 +52,6 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
       },
-      grep: /@(?:t07|matters|search|lifecycle|pagination|a11y)\b/,
     },
     {
       name: 'tablet-768',

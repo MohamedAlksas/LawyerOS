@@ -5,10 +5,13 @@ import type { Actor } from '@/modules/identity/types';
 import { hearingError } from './hearing-errors';
 import { SchedulingValidationError, type ActionResult } from './deadline-types';
 
-const PRIVATE_NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
+const PRIVATE_NO_STORE_HEADERS = {
+  'Cache-Control': 'private, no-store',
+  'X-Content-Type-Options': 'nosniff',
+};
 
 export function statusFromErrorCode(code: string | undefined): number {
-  if (code === 'FORBIDDEN') return 403;
+  if (code === 'FORBIDDEN' || code === 'CROSS_MATTER_LINK_FORBIDDEN') return 403;
   if (['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '')) {
     return 401;
   }
@@ -17,6 +20,7 @@ export function statusFromErrorCode(code: string | undefined): number {
       'CONCURRENCY_CONFLICT',
       'IDEMPOTENCY_PAYLOAD_MISMATCH',
       'IDEMPOTENCY_CONCURRENT_CONFLICT',
+      'DOCUMENT_NOT_READY',
     ].includes(code ?? '')
   ) {
     return 409;
@@ -73,6 +77,13 @@ export async function readSchedulingFromRequest<R>(
     if (isCrossSiteRequest(request)) {
       return NextResponse.json(
         { success: false, code: 'FORBIDDEN', error: 'غير مصرح بالوصول من مصدر خارجي.' },
+        { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
+      );
+    }
+    const origin = request.headers.get('origin');
+    if (origin !== null && !getTrustedOrigins().has(origin)) {
+      return NextResponse.json(
+        { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },
         { status: 403, headers: PRIVATE_NO_STORE_HEADERS }
       );
     }

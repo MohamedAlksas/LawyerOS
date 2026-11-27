@@ -4,13 +4,23 @@ import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { getPrismaClient } from '@/lib/auth';
 import {
   HEARING_STATUS_LABELS,
   HEARING_STATUS_CLASSES,
 } from '@/components/hearings/hearing-ui-types';
 import { hasCompleteProceedingRegistration } from '@/modules/matters/matter-types';
+import { mapLinkableDocumentSummary } from '@/modules/scheduling/hearing-types';
+import {
+  DOCUMENT_TYPE_LABELS_AR,
+  LINKABLE_DOCUMENT_SELECT,
+  type LinkableDocumentRow,
+} from '@/modules/documents/document-types';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
+
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 
 interface HearingDetailPageProps {
   params: Promise<{
@@ -23,15 +33,16 @@ export const metadata = { title: 'تفاصيل الجلسة — LawOffice OS' };
 export default async function HearingDetailPage({ params }: HearingDetailPageProps) {
   const { id } = await params;
 
+  let actor;
   try {
-    await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
+    actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
       await redirectOnAuthError(error, `/hearings/${id}`);
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض تفاصيل هذه الجلسة.</p>
         </div>
@@ -40,6 +51,11 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
     throw error;
   }
 
+  if (!UUID_REGEX.test(id)) {
+    notFound();
+  }
+
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const prisma = getPrismaClient();
   const hearing = await prisma.hearing.findUnique({
     where: { id },
@@ -52,6 +68,15 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
       },
       results: {
         orderBy: { revision: 'desc' },
+        ...(canReadDocuments
+          ? {
+              include: {
+                decisionDocument: {
+                  select: LINKABLE_DOCUMENT_SELECT,
+                },
+              },
+            }
+          : {}),
       },
     },
   });
@@ -66,12 +91,21 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
   const docketText = proceeding.numberText && proceeding.yearLabel
     ? `${proceeding.numberText}/${proceeding.yearLabel}`
     : null;
+  const canWriteClientData = authorize(actor, 'WRITE_CLIENT_DATA');
   const isArchived = Boolean(proceeding.archivedAt || matter.archivedAt || matter.status === 'ARCHIVED');
-  const canOpenResult = !isArchived && (hearing.status === 'SCHEDULED' || hearing.status === 'COMPLETED');
+  const canOpenResult =
+    canWriteClientData &&
+    !isArchived &&
+    (hearing.status === 'SCHEDULED' || hearing.status === 'COMPLETED');
 
   const dateIso = hearing.hearingDate.toISOString().slice(0, 10);
   const formattedDate = formatCairoDateOnly(hearing.hearingDate.toISOString());
   const latestResult = hearing.results[0] || null;
+  const rawDecisionDoc =
+    canReadDocuments && latestResult && 'decisionDocument' in latestResult
+      ? (latestResult.decisionDocument as LinkableDocumentRow | null | undefined)
+      : null;
+  const latestDecisionDoc = canReadDocuments ? mapLinkableDocumentSummary(rawDecisionDoc) : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
@@ -80,11 +114,11 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
         <Link href="/matters" className="hover:text-[#14566B] hover:underline">
           القضايا
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/matters/${matter.id}`} className="hover:text-[#14566B] hover:underline font-mono">
           <bdi dir="ltr">{matter.fileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link
           href={`/matters/${matter.id}/proceedings/${proceeding.id}`}
           className="hover:text-[#14566B] hover:underline"
@@ -97,7 +131,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
             'قيد قضائي (مسودة)'
           )}
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="text-[#172A35] font-semibold">تفاصيل الجلسة</span>
       </nav>
 
@@ -162,7 +196,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               {hearing.hearingTime ? (
                 <bdi dir="ltr" className="font-mono text-sm">{hearing.hearingTime}</bdi>
               ) : (
-                <span data-testid={`hearing-time-${hearing.id}`} className="text-[#64748B] italic">
+                <span data-testid={`hearing-time-${hearing.id}`} className="text-[#4D606A] italic">
                   الساعة غير محددة
                 </span>
               )}
@@ -246,6 +280,33 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
               {latestResult.decisionText}
             </p>
           </div>
+
+          {latestResult.decisionDocumentId && canReadDocuments && (
+            <div className="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] text-xs flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[#4D606A]">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestDecisionDoc?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestDecisionDoc && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestDecisionDoc.documentType]})
+                  </span>
+                )}
+                {latestDecisionDoc?.scanStatusLabel && (
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestDecisionDoc)}`}
+                  >
+                    {latestDecisionDoc.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
 
           {latestResult.correctionReason && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-[6px] text-xs text-amber-900 space-y-1">

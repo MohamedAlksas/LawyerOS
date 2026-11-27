@@ -370,7 +370,7 @@ test.describe('T06 Matters Failure UX & Invariant Enforcements @matters', () => 
 
     // 13. Recover from conflict by reloading latest snapshot and reapplying edits
     await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}/edit`);
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('proceeding-circuit-input')).toBeVisible();
 
     // Adopted latest background circuit
     await expect(page.getByTestId('proceeding-circuit-input')).toHaveValue('دائرة معدلة في الخلفية');

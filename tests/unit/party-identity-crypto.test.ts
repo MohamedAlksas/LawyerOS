@@ -267,5 +267,72 @@ describe('T05-07: Party Identity Authenticated Envelope Crypto (Unit)', () => {
       ).toThrowError(CryptoDecryptionError);
     });
   });
+
+  describe('PARTY_IDENTITY_PREVIOUS_KEYS key rotation support', () => {
+    const OLD_KEY_HEX = 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+    const OLD_KEY_ID = 'k2025_01';
+    const originalPrevKeys = process.env.PARTY_IDENTITY_PREVIOUS_KEYS;
+
+    afterEach(() => {
+      if (originalPrevKeys === undefined) {
+        delete process.env.PARTY_IDENTITY_PREVIOUS_KEYS;
+      } else {
+        process.env.PARTY_IDENTITY_PREVIOUS_KEYS = originalPrevKeys;
+      }
+    });
+
+    it('decrypts ciphertext encrypted with older key when previous keys configured as JSON object', () => {
+      process.env.PARTY_IDENTITY_ENCRYPTION_KEY = OLD_KEY_HEX;
+      process.env.PARTY_IDENTITY_KEY_ID = OLD_KEY_ID;
+      const nationalId = '29501011234567';
+      const partyId = '11111111-1111-4111-8111-111111111111';
+      const env = encryptPartyIdentity({
+        plaintext: nationalId,
+        partyId,
+        identificationType: 'NATIONAL_ID',
+      });
+      expect(env.keyId).toBe(OLD_KEY_ID);
+
+      process.env.PARTY_IDENTITY_ENCRYPTION_KEY = TEST_KEY_HEX;
+      process.env.PARTY_IDENTITY_KEY_ID = TEST_KEY_ID;
+      process.env.PARTY_IDENTITY_PREVIOUS_KEYS = JSON.stringify({ [OLD_KEY_ID]: OLD_KEY_HEX });
+
+      const decrypted = decryptPartyIdentity({
+        ciphertext: env.ciphertext,
+        iv: env.iv,
+        authTag: env.authTag,
+        partyId,
+        identificationType: 'NATIONAL_ID',
+        keyId: env.keyId,
+      });
+      expect(decrypted).toBe(nationalId);
+    });
+
+    it('decrypts ciphertext encrypted with older key when previous keys configured as comma-separated pairs', () => {
+      process.env.PARTY_IDENTITY_ENCRYPTION_KEY = OLD_KEY_HEX;
+      process.env.PARTY_IDENTITY_KEY_ID = OLD_KEY_ID;
+      const nationalId = '29501011234567';
+      const partyId = '11111111-1111-4111-8111-111111111111';
+      const env = encryptPartyIdentity({
+        plaintext: nationalId,
+        partyId,
+        identificationType: 'NATIONAL_ID',
+      });
+
+      process.env.PARTY_IDENTITY_ENCRYPTION_KEY = TEST_KEY_HEX;
+      process.env.PARTY_IDENTITY_KEY_ID = TEST_KEY_ID;
+      process.env.PARTY_IDENTITY_PREVIOUS_KEYS = `${OLD_KEY_ID}:${OLD_KEY_HEX},k2024_99:0102030405060708010203040506070801020304050607080102030405060708`;
+
+      const decrypted = decryptPartyIdentity({
+        ciphertext: env.ciphertext,
+        iv: env.iv,
+        authTag: env.authTag,
+        partyId,
+        identificationType: 'NATIONAL_ID',
+        keyId: env.keyId,
+      });
+      expect(decrypted).toBe(nationalId);
+    });
+  });
 });
 

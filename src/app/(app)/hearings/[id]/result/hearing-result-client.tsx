@@ -1,10 +1,12 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
-import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
+import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, LinkableDocumentSummary, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
+import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import {
   HearingStatus,
   NextDateDisposition,
@@ -36,12 +38,17 @@ interface HearingResultClientProps {
   matterId: string;
   matterFileCode: string;
   proceedingId: string;
+  canReadDocuments?: boolean;
+  availableDocuments?: LinkableDocumentSummary[];
+  documentsLoadError?: string;
   latestResult: {
     id: string;
     decisionText: string;
     revision: number;
     correctionReason: string | null;
     recordedAt: string;
+    decisionDocumentId?: string | null;
+    decisionDocument?: LinkableDocumentSummary | null;
   } | null;
 }
 
@@ -70,6 +77,9 @@ export function HearingResultClient({
   matterId,
   matterFileCode,
   proceedingId,
+  canReadDocuments = false,
+  availableDocuments = [],
+  documentsLoadError,
   latestResult: initialLatestResult,
 }: HearingResultClientProps) {
   const router = useRouter();
@@ -82,11 +92,25 @@ export function HearingResultClient({
   const [linkedNext, setLinkedNext] = useState(nextHearing);
   const [currentStatus, setCurrentStatus] = useState<HearingStatus>(initialStatus);
   const [latestResult, setLatestResult] = useState(initialLatestResult);
+  const [docsList, setDocsList] = useState<LinkableDocumentSummary[]>(availableDocuments);
+  const [docsError, setDocsError] = useState<string | null>(documentsLoadError ?? null);
+  const [isRetryingDocs, setIsRetryingDocs] = useState(false);
+  const retryDocsAbortRef = useRef<AbortController | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      retryDocsAbortRef.current?.abort();
+    };
+  }, []);
 
   // Form state
   const [decision, setDecision] = useState(resultDraft.restored?.decision ?? '');
   const [summary, setSummary] = useState(resultDraft.restored?.summary ?? '');
   const [attendance, setAttendance] = useState(resultDraft.restored?.attendance ?? '');
+  const [decisionDocumentId, setDecisionDocumentId] = useState(resultDraft.restored?.decisionDocumentId ?? '');
   const [nextDateDisposition, setNextDateDisposition] = useState<NextDateDisposition>(resultDraft.restored?.nextDateDisposition ?? 'UNDETERMINED');
   const [nextHearingDate, setNextHearingDate] = useState(resultDraft.restored?.nextHearing?.hearingDate ?? '');
   const [nextHearingTime, setNextHearingTime] = useState(resultDraft.restored?.nextHearing?.hearingTime ?? '');
@@ -111,6 +135,9 @@ export function HearingResultClient({
   const [isCorrecting, setIsCorrecting] = useState(Boolean(correctionDraft.restored));
   const [correctionReason, setCorrectionReason] = useState(correctionDraft.restored?.reason ?? '');
   const [correctedDecision, setCorrectedDecision] = useState(correctionDraft.restored?.decision ?? '');
+  const [correctedDecisionDocumentId, setCorrectedDecisionDocumentId] = useState(
+    correctionDraft.restored?.decisionDocumentId ?? initialLatestResult?.decisionDocumentId ?? ''
+  );
   const [correctionSubmitting, setCorrectionSubmitting] = useState(false);
   const [correctionFrozen, setCorrectionFrozen] = useState(Boolean(correctionDraft.restored));
   const [correctionError, setCorrectionError] = useState<string | null>(correctionDraft.restored ? unknownOutcome : null);
@@ -119,11 +146,23 @@ export function HearingResultClient({
   const resultFieldsDisabled = isSubmitting || isFrozenRetry;
   const correctionFieldsDisabled = correctionSubmitting || correctionFrozen;
   const resultDirty = currentStatus === 'SCHEDULED' && !isFrozenRetry &&
-    Boolean(decision || summary || attendance || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
+    Boolean(decision || summary || attendance || decisionDocumentId || nextDateDisposition !== 'UNDETERMINED' || tasks.length);
+  // Keep isFrozenRetry/correctionFrozen out of GuardedLink confirm (T08-TC-03 navigates via breadcrumb
+  // while draft is preserved in FormDrafts), but still guard tab close/reload via beforeunload.
   useLeaveGuard(
     resultDirty || (isCorrecting && !correctionFrozen),
     isSubmitting || correctionSubmitting
   );
+
+  useEffect(() => {
+    if (!isFrozenRetry && !correctionFrozen) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isFrozenRetry, correctionFrozen]);
 
   const handleAddTask = () => {
     const newTask: FollowUpTaskItem = {
@@ -168,6 +207,7 @@ export function HearingResultClient({
         decision: decision.trim(),
         summary: summary.trim() || null,
         attendance: attendance.trim() || null,
+        ...(canReadDocuments ? { decisionDocumentId: decisionDocumentId || null } : {}),
         nextDateDisposition,
         nextHearing: nextDateDisposition === 'KNOWN'
           ? { hearingDate: nextHearingDate, hearingTime: nextHearingTime || null, courtName, circuit }
@@ -209,7 +249,12 @@ export function HearingResultClient({
       setSavedSuccess(true);
       setSavedDecision(result.decisionText);
       setCurrentStatus(hearing.status);
-      setLatestResult({ ...result, correctionReason: result.correctionReason ?? null });
+      setLatestResult({
+        ...result,
+        correctionReason: result.correctionReason ?? null,
+        decisionDocumentId: result.decisionDocumentId ?? null,
+        decisionDocument: result.decisionDocument ?? null,
+      });
       if (savedNext) setLinkedNext({ id: savedNext.id, date: savedNext.hearingDate, status: savedNext.status });
       router.refresh();
     } catch {
@@ -233,6 +278,7 @@ export function HearingResultClient({
         currentResultId: latestResult.id,
         decision: correctedDecision.trim(),
         reason: correctionReason.trim(),
+        ...(canReadDocuments ? { decisionDocumentId: correctedDecisionDocumentId || null } : {}),
         idempotencyKey: generateClientRequestId('corr'),
       };
       correctionDraft.keep(pendingCorrection.current);
@@ -260,9 +306,15 @@ export function HearingResultClient({
       correctionDraft.clear();
       setCorrectionFrozen(false);
       setSessionExpiredFor(null);
+      setCorrectionReason('');
       setCorrectionSuccess(true);
       setIsCorrecting(false);
-      setLatestResult({ ...response.data, correctionReason: response.data.correctionReason ?? null });
+      setLatestResult({
+        ...response.data,
+        correctionReason: response.data.correctionReason ?? null,
+        decisionDocumentId: canReadDocuments ? (response.data.decisionDocumentId ?? null) : null,
+        decisionDocument: canReadDocuments ? (response.data.decisionDocument ?? null) : null,
+      });
       router.refresh();
     } catch {
       setCorrectionFrozen(true);
@@ -272,10 +324,99 @@ export function HearingResultClient({
     }
   };
 
+  const retryLoadDocuments = async () => {
+    if (!canReadDocuments || isRetryingDocs) return;
+    setIsRetryingDocs(true);
+    setDocsError(null);
+    retryDocsAbortRef.current?.abort();
+    const controller = new AbortController();
+    retryDocsAbortRef.current = controller;
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 15_000);
+
+    try {
+      const res = await fetch(`/api/documents?matterId=${encodeURIComponent(matterId)}&limit=100`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (res.status === 401 && typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { success: true; data: { documents: DocumentDTO[] } }
+        | { success: false; error?: string }
+        | null;
+      if (controller.signal.aborted) {
+        if (timedOut && isMountedRef.current) {
+          setDocsError('انتهت مهلة تحميل مستندات الملف. يرجى المحاولة مرة أخرى.');
+        }
+        return;
+      }
+      if (!res.ok || !body || !body.success) {
+        setDocsError(
+          (body && !body.success && body.error) || 'تعذر تحميل مستندات الملف الجاهزة من الخادم.'
+        );
+        return;
+      }
+      setDocsList(
+        body.data.documents
+          .filter(
+            (d) =>
+              !d.archivedAt &&
+              d.currentVersionId &&
+              d.currentVersion?.isReady &&
+              (!d.proceedingId || d.proceedingId === proceedingId) &&
+              (!d.hearingId || d.hearingId === hearingId)
+          )
+          .map((d) => ({
+            id: d.id,
+            title: d.title,
+            documentType: d.documentType,
+            currentVersionId: d.currentVersionId,
+            scanStatus: d.currentVersion!.scanStatus,
+            scanStatusLabel: d.currentVersion!.scanStatusLabel,
+            proceedingId: d.proceedingId,
+            hearingId: d.hearingId,
+          }))
+      );
+      setDocsError(null);
+    } catch {
+      if (controller.signal.aborted && !timedOut) return;
+      if (isMountedRef.current) {
+        setDocsError(
+          timedOut
+            ? 'انتهت مهلة تحميل مستندات الملف. يرجى المحاولة مرة أخرى.'
+            : 'تعذر تحميل مستندات الملف بسبب انقطاع الاتصال.'
+        );
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      if (isMountedRef.current && retryDocsAbortRef.current === controller) {
+        retryDocsAbortRef.current = null;
+        setIsRetryingDocs(false);
+      }
+    }
+  };
+
   const summaryText = formatRecordResultSummary({
     nextDate: nextDateDisposition === 'KNOWN' && nextHearingDate.trim() ? nextHearingDate.trim() : null,
     taskCount: tasks.filter((t) => t.title.trim().length > 0).length,
   });
+
+  const isPreservedDecisionDocExcluded =
+    Boolean(latestResult?.decisionDocument) &&
+    !docsError &&
+    !docsList.some((doc) => doc.id === latestResult?.decisionDocument?.id);
+
+  const correctionSelectableDocuments =
+    latestResult?.decisionDocument &&
+    !docsList.some((doc) => doc.id === latestResult.decisionDocument?.id)
+      ? [latestResult.decisionDocument, ...docsList]
+      : docsList;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12" dir="rtl" lang="ar-EG">
@@ -284,18 +425,18 @@ export function HearingResultClient({
         <Link href={`/matters/${matterId}`} className="hover:text-[#14566B] hover:underline font-mono">
           <bdi dir="ltr">{matterFileCode}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link
           href={`/matters/${matterId}/proceedings/${proceedingId}`}
           className="hover:text-[#14566B] hover:underline"
         >
           القيد القضائي
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <Link href={`/hearings/${hearingId}`} className="hover:text-[#14566B] hover:underline">
           جلسة <bdi dir="ltr">{hearingDate}</bdi>
         </Link>
-        <span>/</span>
+        <span aria-hidden="true">/</span>
         <span className="text-[#172A35] font-semibold">تسجيل النتيجة</span>
       </nav>
 
@@ -312,7 +453,7 @@ export function HearingResultClient({
               {hearingTime ? (
                 <bdi dir="ltr" className="font-mono">{hearingTime}</bdi>
               ) : (
-                <span data-testid="hearing-unknown-time" className="italic text-[#64748B]">
+                <span data-testid="hearing-unknown-time" className="italic text-[#4D606A]">
                   الساعة غير محددة
                 </span>
               )}
@@ -421,7 +562,8 @@ export function HearingResultClient({
       {/* Success Banner */}
       {savedSuccess && (
         <div
-          role="alert"
+          role="status"
+          aria-live="polite"
           data-testid="save-success-banner"
           className="p-4 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 space-y-2"
         >
@@ -429,10 +571,36 @@ export function HearingResultClient({
             <span>تم حفظ النتيجة بنجاح!</span>
           </div>
           <p className="font-semibold text-emerald-800">{savedDecision}</p>
+          {canReadDocuments && latestResult?.decisionDocumentId && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="font-semibold text-emerald-900">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-white border border-emerald-300 rounded-[6px] text-[#14566B] font-semibold hover:bg-emerald-100 min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestResult.decisionDocument && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestResult.decisionDocument.documentType]})
+                  </span>
+                )}
+                {latestResult.decisionDocument?.scanStatusLabel && (
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestResult.decisionDocument)}`}
+                  >
+                    {latestResult.decisionDocument.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
           <div className="pt-1 flex gap-2">
             <Link
               href={`/hearings/${hearingId}`}
-              className="px-3 py-1.5 bg-emerald-700 text-white rounded-[4px] text-xs font-bold"
+              className="px-3 py-1.5 bg-emerald-700 text-white rounded-[4px] text-xs font-bold min-h-[44px] inline-flex items-center"
             >
               عرض تفاصيل الجلسة
             </Link>
@@ -440,12 +608,12 @@ export function HearingResultClient({
         </div>
       )}
       {linkedNext && (
-        <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm">
-          <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline">
+        <div className="rounded-[8px] border border-[#D5DFE3] bg-white p-4 text-sm flex flex-wrap items-center gap-2">
+          <Link href={`/hearings/${linkedNext.id}`} data-testid="linked-next-hearing" className="font-bold text-[#14566B] underline inline-flex items-center min-h-[44px]">
             الجلسة المرتبطة <bdi dir="ltr">{linkedNext.date}</bdi> ({HEARING_STATUS_LABELS[linkedNext.status]})
           </Link>
-          {' · '}
-          <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline">
+          <span aria-hidden="true">·</span>
+          <Link href={`/matters/${matterId}/proceedings/${proceedingId}`} className="text-[#14566B] underline inline-flex items-center min-h-[44px]">
             عرض الموعد أو تغييره من القيد
           </Link>
         </div>
@@ -454,7 +622,8 @@ export function HearingResultClient({
       {/* Correction Success Banner */}
       {correctionSuccess && (
         <div
-          role="alert"
+          role="status"
+          aria-live="polite"
           className="p-3 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 font-bold"
         >
           تم حفظ التصحيح بنجاح!
@@ -478,10 +647,14 @@ export function HearingResultClient({
                 type="button"
                 onClick={() => {
                   setIsCorrecting(true);
+                  setCorrectionReason('');
+                  setCorrectionSuccess(false);
+                  setCorrectionError(null);
                   setCorrectedDecision(latestResult?.decisionText || '');
+                  setCorrectedDecisionDocumentId(latestResult?.decisionDocumentId ?? '');
                 }}
                 data-testid="correct-result-button"
-                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px]"
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
               >
                 تصحيح نتيجة الجلسة
               </button>
@@ -497,6 +670,33 @@ export function HearingResultClient({
               {latestResult?.decisionText}
             </p>
           </div>
+
+          {canReadDocuments && latestResult?.decisionDocumentId && (
+            <div className="p-3 bg-[#F8FAFB] border border-[#D5DFE3] rounded-[6px] text-xs flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[#4D606A]">مستند القرار المرتبط:</span>
+              <Link
+                href={`/documents/${latestResult.decisionDocumentId}`}
+                data-testid="hearing-decision-document-link"
+                className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+              >
+                <bdi className="[overflow-wrap:anywhere]">
+                  {latestResult.decisionDocument?.title ?? 'عرض مستند القرار'}
+                </bdi>
+                {latestResult.decisionDocument && (
+                  <span className="text-[11px] text-[#4D606A]">
+                    ({DOCUMENT_TYPE_LABELS_AR[latestResult.decisionDocument.documentType]})
+                  </span>
+                )}
+                {latestResult.decisionDocument?.scanStatusLabel && (
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestResult.decisionDocument)}`}
+                  >
+                    {latestResult.decisionDocument.scanStatusLabel}
+                  </span>
+                )}
+              </Link>
+            </div>
+          )}
 
           {history.some((result) => result.revision < (latestResult?.revision ?? 0)) && (
             <details className="rounded-[6px] border border-[#D5DFE3] p-3 text-xs">
@@ -537,7 +737,7 @@ export function HearingResultClient({
                   value={correctionReason}
                   onChange={(e) => setCorrectionReason(e.target.value)}
                   disabled={correctionFieldsDisabled}
-                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
+                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
 
@@ -554,16 +754,66 @@ export function HearingResultClient({
                   value={correctedDecision}
                   onChange={(e) => setCorrectedDecision(e.target.value)}
                   disabled={correctionFieldsDisabled}
-                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
+                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
+
+              {canReadDocuments && (
+                <div className="space-y-1 text-xs">
+                  <label htmlFor="correction-decision-document-select" className="block font-bold text-[#172A35]">
+                    مستند القرار المرتبط (اختياري)
+                  </label>
+                  <select
+                    id="correction-decision-document-select"
+                    data-testid="hearing-decision-document-select"
+                    value={correctedDecisionDocumentId}
+                    onChange={(e) => setCorrectedDecisionDocumentId(e.target.value)}
+                    disabled={correctionFieldsDisabled}
+                    className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  >
+                    <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+                    {correctionSelectableDocuments.map((doc) => {
+                      const isArchivedPreserved =
+                        isPreservedDecisionDocExcluded &&
+                        doc.id === latestResult?.decisionDocument?.id;
+                      return (
+                        <option key={doc.id} value={doc.id}>
+                          {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                          {isArchivedPreserved ? ' (مؤرشف)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {docsError && (
+                    <div
+                      role="alert"
+                      data-testid="hearing-documents-load-error"
+                      className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                    >
+                      <span>{docsError}</span>
+                      <button
+                        type="button"
+                        disabled={isRetryingDocs}
+                        onClick={() => void retryLoadDocuments()}
+                        className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                      >
+                        {isRetryingDocs ? 'جارٍ التحميل...' : 'إعادة المحاولة'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsCorrecting(false)}
+                  onClick={() => {
+                    setIsCorrecting(false);
+                    setCorrectionReason('');
+                    setCorrectionError(null);
+                  }}
                   disabled={correctionFieldsDisabled}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-semibold rounded-[6px] min-h-[44px]"
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-xs font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   إلغاء
                 </button>
@@ -572,7 +822,7 @@ export function HearingResultClient({
                   onClick={handleSaveCorrection}
                   disabled={correctionSubmitting}
                   data-testid="save-correction-btn"
-                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
+                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   {correctionSubmitting ? 'جارٍ حفظ التصحيح...' : correctionFrozen ? 'إعادة محاولة حفظ التصحيح' : 'حفظ التصحيح'}
                 </button>
@@ -597,13 +847,13 @@ export function HearingResultClient({
           <div className="flex flex-wrap gap-2 pt-1">
             <Link
               href={`/hearings/${hearingId}`}
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] min-h-[40px] inline-flex items-center"
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white font-bold rounded-[6px] min-h-[44px] inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
             >
               العودة لتفاصيل الجلسة
             </Link>
             <Link
               href={`/matters/${matterId}/proceedings/${proceedingId}`}
-              className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px] inline-flex items-center"
+              className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] inline-flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
             >
               عرض القيد القضائي
             </Link>
@@ -635,28 +885,68 @@ export function HearingResultClient({
               onChange={(e) => setDecision(e.target.value)}
               disabled={resultFieldsDisabled}
               data-testid="hearing-decision-textarea"
-              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] leading-relaxed"
+              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] leading-relaxed"
             />
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
             <label className="space-y-1 font-semibold">
               <span>ملخص الجلسة (اختياري)</span>
-              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px] text-base sm:text-xs" />
             </label>
             <label className="space-y-1 font-semibold">
               <span>الحضور (اختياري)</span>
-              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2" />
+              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px] text-base sm:text-xs" />
             </label>
           </div>
+
+          {canReadDocuments && (
+            <div className="space-y-1 text-xs">
+              <label htmlFor="hearing-decision-document-select" className="block font-bold text-[#172A35]">
+                مستند القرار المرتبط (اختياري)
+              </label>
+              <select
+                id="hearing-decision-document-select"
+                data-testid="hearing-decision-document-select"
+                value={decisionDocumentId}
+                onChange={(e) => setDecisionDocumentId(e.target.value)}
+                disabled={resultFieldsDisabled}
+                className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              >
+                <option value="">بدون مستند قرار مرتبط (اختياري)</option>
+                {docsList.map((doc) => (
+                  <option key={doc.id} value={doc.id}>
+                    {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                  </option>
+                ))}
+              </select>
+              {docsError && (
+                <div
+                  role="alert"
+                  data-testid="hearing-documents-load-error"
+                  className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                >
+                  <span>{docsError}</span>
+                  <button
+                    type="button"
+                    disabled={isRetryingDocs}
+                    onClick={() => void retryLoadDocuments()}
+                    className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                  >
+                    {isRetryingDocs ? 'جارٍ التحميل...' : 'إعادة المحاولة'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {/* Next Date Radio Group */}
-          <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
-            <span className="block font-bold text-[#172A35]">
+          <fieldset className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs min-w-0">
+            <legend className="font-bold text-[#172A35] px-1">
               هل تقرر تأجيل الجلسة لموعد قادم؟ <span className="text-red-600">*</span>
-            </span>
+            </legend>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'KNOWN'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -675,7 +965,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'UNDETERMINED'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -694,7 +984,7 @@ export function HearingResultClient({
               </label>
 
               <label
-                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
+                className={`p-2.5 rounded-[6px] border text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5 min-h-[44px] focus-within:ring-2 focus-within:ring-[#14566B] focus-within:ring-offset-1 ${
                   nextDateDisposition === 'NONE'
                     ? 'bg-[#14566B] text-white border-[#14566B] font-bold'
                     : 'bg-white text-[#172A35] border-[#D5DFE3] hover:bg-gray-50'
@@ -723,27 +1013,28 @@ export function HearingResultClient({
                   id="next-hearing-date-input"
                   name="nextHearingDate"
                   type="date"
+                  dir="ltr"
                   required
                   value={nextHearingDate}
                   onChange={(e) => setNextHearingDate(e.target.value)}
                   disabled={resultFieldsDisabled}
                   min={hearingDate}
                   data-testid="next-hearing-date-input"
-                  className="w-full sm:w-64 p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  className="w-full sm:w-64 p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
                 <label className="mt-2 block font-bold text-[#172A35]">
                   وقت الجلسة القادمة (اختياري)
-                  <input type="time" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64" />
+                  <input type="time" dir="ltr" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64 text-base sm:text-xs" />
                 </label>
               </div>
             )}
-          </div>
+          </fieldset>
 
           {/* Follow-up Tasks Section */}
           <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-[6px] text-xs">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="space-y-0.5">
-                <h3 className="font-bold text-[#172A35]">مهام المتابعة الناتجة عن الجلسة (اختياري)</h3>
+                <h2 className="font-bold text-[#172A35]">مهام المتابعة الناتجة عن الجلسة (اختياري)</h2>
                 <p className="text-xs text-[#4D606A]">
                   مهام عمل تنشأ ذرياً وتكلف للمكتب لمتابعة إجراءات الجلسة
                 </p>
@@ -794,7 +1085,7 @@ export function HearingResultClient({
                           onChange={(e) => handleUpdateTaskTitle(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-title-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
 
@@ -805,12 +1096,13 @@ export function HearingResultClient({
                         <input
                           id={`task-due-${task.id}`}
                           type="date"
+                          dir="ltr"
                           name={`task_due_${idx}`}
                           value={task.dueDate}
                           onChange={(e) => handleUpdateTaskDue(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-due-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
                     </div>

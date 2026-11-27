@@ -10,6 +10,10 @@ import {
 } from './document-types';
 
 const SAFE_KEY_SEGMENT_RE = /^[a-zA-Z0-9._-]+$/;
+const READ_OPEN_FLAGS =
+  process.platform !== 'win32' && typeof fs.constants.O_NOFOLLOW === 'number'
+    ? fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW
+    : fs.constants.O_RDONLY;
 
 function getRuntimeCwd(): string {
   // Indirect lookup avoids Turbopack static-tracer whole-project bundling warnings on process.cwd()
@@ -104,8 +108,8 @@ export function resolveSafeStorageRoot(overrideRoot?: string): string {
   }
 
   if (
-    normalizeForComparison(realRoot) === normalizeForComparison(realAppRoot) ||
-    normalizeForComparison(rawRoot) === normalizeForComparison(runtimeCwd)
+    isSameOrInside(realAppRoot, realRoot) ||
+    isSameOrInside(runtimeCwd, rawRoot)
   ) {
     throw new DocumentStoragePathError(
       'يجب أن يكون مجلد تخزين المستندات في مجلد مخصص ومنفصل عن جذر التطبيق.'
@@ -175,6 +179,12 @@ export interface WriteQuarantineResult {
   sha256: string;
 }
 
+export interface StoredZoneFile {
+  key: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}
+
 export interface DocumentStorageAdapter {
   readonly rootDir: string;
   readonly quarantineDir: string;
@@ -195,6 +205,8 @@ export interface DocumentStorageAdapter {
   stat(zone: 'quarantine' | 'ready', key: string): Promise<{ sizeBytes: number } | null>;
   deleteQuarantine(quarantineKey: string): Promise<boolean>;
   deleteReady(readyKey: string): Promise<boolean>;
+  listKeys?(zone: 'quarantine' | 'ready'): Promise<StoredZoneFile[]>;
+  computeSha256?(zone: 'quarantine' | 'ready', key: string): Promise<string | null>;
 }
 
 /** FileHandle.write may write fewer bytes than requested; loop until the whole buffer is written. */
@@ -226,6 +238,26 @@ async function unlinkIfExists(filePath: string): Promise<boolean> {
       return false;
     }
     throw err;
+  }
+}
+
+async function ensurePrivateDir(dirPath: string, stopAtDir?: string): Promise<void> {
+  await fs.promises.mkdir(dirPath, { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') return;
+  let current = path.resolve(dirPath);
+  const boundary = stopAtDir ? path.resolve(stopAtDir) : null;
+  while (true) {
+    await fs.promises.chmod(current, 0o700).catch(() => {});
+    if (!boundary || current === boundary) break;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
+async function ensurePrivateFileMode(handle: fs.promises.FileHandle): Promise<void> {
+  if (process.platform !== 'win32') {
+    await handle.chmod(0o600);
   }
 }
 
@@ -274,7 +306,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
     ): Promise<WriteQuarantineResult> {
       const targetPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
       const targetDir = path.dirname(targetPath);
-      await fs.promises.mkdir(targetDir, { recursive: true });
+      await ensurePrivateDir(targetDir, rootDir);
 
       const tempPartPath = `${targetPath}.part-${crypto.randomUUID()}`;
       const hash = crypto.createHash('sha256');
@@ -282,7 +314,8 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       let handle: fs.promises.FileHandle | null = null;
 
       try {
-        handle = await fs.promises.open(tempPartPath, 'wx');
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
+        await ensurePrivateFileMode(handle);
 
         if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
           const buf = Buffer.isBuffer(source)
@@ -350,37 +383,45 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       maxBytes: number = MAX_DOCUMENT_BYTES
     ): Promise<Buffer> {
       const targetPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
-      let stat: fs.Stats;
+      let handle: fs.promises.FileHandle;
       try {
-        stat = await fs.promises.stat(targetPath);
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentValidationError('تعذر العثور على بيانات الملف المؤقتة في الحجر.');
         }
         throw err;
       }
-      if (!stat.isFile() || stat.size <= 0) {
-        throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size <= 0) {
+          throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+        }
+        if (stat.size > maxBytes) {
+          throw new DocumentValidationError(
+            'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+            { file: 'حجم الملف يتجاوز 25 ميجابايت' },
+            'PAYLOAD_TOO_LARGE'
+          );
+        }
+        return await handle.readFile();
+      } finally {
+        await handle.close().catch(() => {});
       }
-      if (stat.size > maxBytes) {
-        throw new DocumentValidationError(
-          'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
-          { file: 'حجم الملف يتجاوز 25 ميجابايت' },
-          'PAYLOAD_TOO_LARGE'
-        );
-      }
-      return await fs.promises.readFile(targetPath);
     },
 
     async writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void> {
       const destPath = resolveSafeKeyPath(readyDir, readyKey);
       const destDir = path.dirname(destPath);
-      await fs.promises.mkdir(destDir, { recursive: true });
+      await ensurePrivateDir(destDir, rootDir);
 
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
-        handle = await fs.promises.open(tempPartPath, 'wx');
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
+        await ensurePrivateFileMode(handle);
         await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
@@ -400,13 +441,37 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const srcPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
       const destPath = resolveSafeKeyPath(readyDir, readyKey);
       const destDir = path.dirname(destPath);
-      await fs.promises.mkdir(destDir, { recursive: true });
+      await ensurePrivateDir(destDir, rootDir);
+
+      let srcHandle: fs.promises.FileHandle;
+      try {
+        srcHandle = await fs.promises.open(srcPath, READ_OPEN_FLAGS);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+          throw new DocumentValidationError('تعذر العثور على بيانات الملف المؤقتة في الحجر.');
+        }
+        throw err;
+      }
 
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
-        await fs.promises.copyFile(srcPath, tempPartPath, fs.constants.COPYFILE_EXCL);
-        handle = await fs.promises.open(tempPartPath, 'r+');
+        const st = await srcHandle.stat();
+        if (!st.isFile() || st.size <= 0) {
+          throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
+        }
+        if (st.size > MAX_DOCUMENT_BYTES) {
+          throw new DocumentValidationError(
+            'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+            { file: 'حجم الملف يتجاوز 25 ميجابايت' },
+            'PAYLOAD_TOO_LARGE'
+          );
+        }
+        const bytes = await srcHandle.readFile();
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
+        await ensurePrivateFileMode(handle);
+        await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
         handle = null;
@@ -418,6 +483,8 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         }
         await unlinkIfExists(tempPartPath).catch(() => {});
         throw err;
+      } finally {
+        await srcHandle.close().catch(() => {});
       }
     },
 
@@ -425,10 +492,10 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
       let handle: fs.promises.FileHandle;
       try {
-        handle = await fs.promises.open(targetPath, 'r');
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ENOTDIR') {
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;
@@ -448,13 +515,25 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
 
     async readReadyBytes(readyKey: string): Promise<Buffer> {
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
+      let handle: fs.promises.FileHandle;
       try {
-        return await fs.promises.readFile(targetPath);
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;
+      }
+
+      try {
+        const st = await handle.stat();
+        if (!st.isFile() || st.size <= 0) {
+          throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
+        }
+        return await handle.readFile();
+      } finally {
+        await handle.close().catch(() => {});
       }
     },
 
@@ -487,6 +566,88 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
     async deleteReady(readyKey: string): Promise<boolean> {
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
       return await unlinkIfExists(targetPath);
+    },
+
+    async listKeys(zone: 'quarantine' | 'ready'): Promise<StoredZoneFile[]> {
+      const base = resolveRealPathWithSuffix(zoneBase(zone));
+      const results: StoredZoneFile[] = [];
+
+      async function walk(currentDir: string, relPrefix: string): Promise<void> {
+        let entries: fs.Dirent[];
+        try {
+          entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+          throw err;
+        }
+        for (const entry of entries) {
+          if (entry.isSymbolicLink()) continue;
+          const fullPath = path.join(currentDir, entry.name);
+          const relKey = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            await walk(fullPath, relKey);
+          } else if (entry.isFile()) {
+            let st: fs.Stats;
+            try {
+              st = await fs.promises.lstat(fullPath);
+            } catch (err) {
+              const code = (err as NodeJS.ErrnoException).code;
+              if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+              throw err;
+            }
+            if (st.isFile()) {
+              results.push({
+                key: relKey,
+                sizeBytes: st.size,
+                mtimeMs: st.mtimeMs,
+              });
+            }
+          }
+        }
+      }
+
+      await walk(base, '');
+      results.sort((a, b) => a.key.localeCompare(b.key));
+      return results;
+    },
+
+    async computeSha256(zone: 'quarantine' | 'ready', key: string): Promise<string | null> {
+      const targetPath = resolveSafeKeyPath(zoneBase(zone), key);
+      let handle: fs.promises.FileHandle;
+      try {
+        handle = await fs.promises.open(targetPath, READ_OPEN_FLAGS);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+          return null;
+        }
+        throw err;
+      }
+
+      try {
+        const st = await handle.stat();
+        if (!st.isFile()) {
+          return null;
+        }
+
+        return await new Promise<string | null>((resolve, reject) => {
+          const hash = crypto.createHash('sha256');
+          const stream = handle.createReadStream({ autoClose: true });
+          stream.on('data', (chunk) => hash.update(chunk));
+          stream.on('error', (err) => {
+            handle.close().catch(() => {});
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR' || code === 'ELOOP') {
+              resolve(null);
+              return;
+            }
+            reject(err);
+          });
+          stream.on('end', () => resolve(hash.digest('hex')));
+        });
+      } finally {
+        await handle.close().catch(() => {});
+      }
     },
   };
 }

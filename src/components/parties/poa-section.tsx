@@ -1,10 +1,14 @@
 'use client';
 
 import React, { useState, useLayoutEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
-import { useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
+import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import {
+  LinkableDocumentSummary,
   PoAType,
   PoAReviewStatus,
   PoASummaryDTO,
@@ -20,22 +24,35 @@ interface PoaSectionProps {
   ownerId: string;
   partyId: string;
   initialPoas: PoASummaryDTO[];
+  canReadDocuments?: boolean;
+  availableDocuments?: LinkableDocumentSummary[];
+  documentsLoadError?: string;
   readOnly?: boolean;
 }
 
 interface PoaDraft {
-  editing: Pick<PoASummaryDTO, 'id' | 'version'> | null;
+  editing: Pick<PoASummaryDTO, 'id' | 'version' | 'linkedDocument'> | null;
   poaNumberText: string;
   poaYearLabel: string;
   notarizationOffice: string;
   poaType: PoAType;
   issueDate: string;
+  documentId: string;
   humanReviewStatus: PoAReviewStatus;
   notes: string;
   pending: SavePowerOfAttorneyInput | null;
 }
 
-export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: PoaSectionProps) {
+export function PoaSection({
+  ownerId,
+  partyId,
+  initialPoas,
+  canReadDocuments = false,
+  availableDocuments = [],
+  documentsLoadError,
+  readOnly = false,
+}: PoaSectionProps) {
+  const router = useRouter();
   const draft = useFormDraft<PoaDraft>(ownerId, `/parties/${partyId}`);
   const restored = readOnly ? undefined : draft.restored;
   const [poas, setPoas] = useState<PoASummaryDTO[]>(initialPoas);
@@ -49,6 +66,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
   const [notarizationOffice, setNotarizationOffice] = useState(restored?.notarizationOffice ?? '');
   const [poaType, setPoaType] = useState<PoAType>(restored?.poaType ?? 'LITIGATION');
   const [issueDate, setIssueDate] = useState(restored?.issueDate ?? '');
+  const [documentId, setDocumentId] = useState(restored?.documentId ?? '');
   const [humanReviewStatus, setHumanReviewStatus] = useState<PoAReviewStatus>(restored?.humanReviewStatus ?? 'UNREVIEWED');
   const [notes, setNotes] = useState(restored?.notes ?? '');
 
@@ -58,7 +76,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
 
   const idempotencyKeyRef = useRef<string | null>(null);
   const [pending, setPending] = useState<SavePowerOfAttorneyInput | null>(restored?.pending ?? null);
-  const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, humanReviewStatus, notes };
+  const fields = { editing, poaNumberText, poaYearLabel, notarizationOffice, poaType, issueDate, documentId, humanReviewStatus, notes };
   useLayoutEffect(() => {
     if (readOnly || !draft.isCurrent()) return;
     if (isFormOpen && (isDirty || pending)) draft.keep({ ...fields, pending });
@@ -77,13 +95,14 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
   };
 
   const openForm = (record: PoASummaryDTO | null) => {
-    setEditing(record ? { id: record.id, version: record.version } : null);
+    setEditing(record ? { id: record.id, version: record.version, linkedDocument: record.linkedDocument } : null);
     setIsDirty(false);
     setPoaNumberText(record?.poaNumberText ?? '');
     setPoaYearLabel(record?.poaYearLabel ?? new Intl.DateTimeFormat('en', { year: 'numeric', timeZone: 'Africa/Cairo' }).format());
     setNotarizationOffice(record?.notarizationOffice ?? '');
     setPoaType(record?.poaType ?? 'LITIGATION');
     setIssueDate(record?.issueDate ?? '');
+    setDocumentId(record?.documentId ?? '');
     setHumanReviewStatus(record?.humanReviewStatus ?? 'UNREVIEWED');
     setNotes(record?.notes ?? '');
     setError(null);
@@ -105,6 +124,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     setNotarizationOffice('');
     setPoaType('LITIGATION');
     setIssueDate('');
+    setDocumentId('');
     setHumanReviewStatus('UNREVIEWED');
     setNotes('');
     setError(null);
@@ -141,6 +161,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
     const payload: SavePowerOfAttorneyInput = pending ?? {
       partyId,
       ...(editing ? { id: editing.id, expectedVersion: editing.version } : {}),
+      ...(canReadDocuments ? { documentId: documentId || null } : {}),
       poaNumberText: poaNumberText.trim(),
       poaYearLabel: poaYearLabel.trim(),
       notarizationOffice: notarizationOffice.trim(),
@@ -198,16 +219,28 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
       setPoaType('LITIGATION');
       setNotes('');
       setIssueDate('');
+      setDocumentId('');
       setHumanReviewStatus('UNREVIEWED');
       setIsFormOpen(false);
       idempotencyKeyRef.current = null;
       setIsSubmitting(false);
+      router.refresh();
     } catch {
       setPending(payload);
       setError('تعذر تأكيد الحفظ. أعد المحاولة بنفس البيانات.');
       setIsSubmitting(false);
     }
   };
+
+  const isPreservedDocExcluded =
+    Boolean(editing?.linkedDocument) &&
+    !documentsLoadError &&
+    !availableDocuments.some((doc) => doc.id === editing?.linkedDocument?.id);
+
+  const selectableDocuments =
+    editing?.linkedDocument && !availableDocuments.some((doc) => doc.id === editing.linkedDocument?.id)
+      ? [editing.linkedDocument, ...availableDocuments]
+      : availableDocuments;
 
   return (
     <section
@@ -231,7 +264,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
             data-testid="add-poa-button"
             onClick={() => (isFormOpen ? closeForm() : openForm(null))}
             disabled={isSubmitting || !!pending}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px]"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-[#E8EEF1] hover:bg-[#D5DFE3] text-[#14566B] rounded-[6px] transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
           >
             <span>{isFormOpen ? 'إلغاء' : '＋ إضافة توكيل رسمي'}</span>
           </button>
@@ -386,12 +419,58 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
             </div>
           </div>
 
+          {canReadDocuments && (
+            <div>
+              <label htmlFor="poaDocumentId" className="block text-xs font-semibold text-[#172A35] mb-1">
+                مستند التوكيل المرفوع (اختياري)
+              </label>
+              <select
+                id="poaDocumentId"
+                data-testid="poa-document-select"
+                value={documentId}
+                onChange={(e) => setDocumentId(e.target.value)}
+                className="w-full px-3 py-2 rounded-[6px] border border-[#A7B9C1] text-base sm:text-sm bg-white text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+              >
+                <option value="">بدون ربط بمستند مرفوع (اختياري)</option>
+                {selectableDocuments.map((doc) => {
+                  const isArchivedPreserved =
+                    isPreservedDocExcluded && doc.id === editing?.linkedDocument?.id;
+                  return (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                      {isArchivedPreserved ? ' (مؤرشف)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
+              {documentsLoadError && (
+                <div
+                  role="alert"
+                  data-testid="poa-documents-load-error"
+                  className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                >
+                  <span>{documentsLoadError}</span>
+                  <button
+                    type="button"
+                    onClick={() => router.refresh()}
+                    className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                  >
+                    إعادة المحاولة
+                  </button>
+                </div>
+              )}
+              <p className="text-[11px] text-[#4D606A] mt-1">
+                يرفق المستند الجاهز كمرجع للتوكيل فقط؛ وتظل حالة الفحص والمراجعة البشرية مستقلة ولا تتغير تلقائياً.
+              </p>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-2 border-t border-[#D5DFE3]">
             <button
               type="button"
               disabled={isSubmitting || !!pending}
               onClick={closeForm}
-              className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px]"
+              className="px-4 py-2 text-xs font-medium text-[#4D606A] hover:bg-slate-200 rounded min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
             >
               إلغاء
             </button>
@@ -399,7 +478,7 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
               type="submit"
               data-testid="save-poa-button"
               disabled={isSubmitting}
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded min-h-[44px]"
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white text-xs font-bold rounded min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
             >
               {isSubmitting ? 'جارٍ الحفظ...' : 'حفظ بيانات التوكيل'}
             </button>
@@ -413,12 +492,17 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="poa-session-login-link"
-                  className="min-h-[44px] inline-flex items-center px-3 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252]"
+                  className="min-h-[44px] inline-flex items-center px-3 py-2 bg-[#14566B] text-white text-xs font-semibold rounded-[6px] hover:bg-[#114252] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   فتح شاشة تسجيل الدخول في نافذة جديدة ↗
                 </a>
               )}
-              <button type="submit" className="min-h-[44px] px-3 font-semibold text-[#14566B]">إعادة محاولة الحفظ</button>
+              <button
+                type="submit"
+                className="min-h-[44px] px-3 font-semibold text-[#14566B] rounded-[6px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+              >
+                إعادة محاولة الحفظ
+              </button>
             </div>
           )}
         </form>
@@ -468,13 +552,39 @@ export function PoaSection({ ownerId, partyId, initialPoas, readOnly = false }: 
                       {statusConfig.label}
                     </span>
                     {!readOnly && (
-                      <button type="button" onClick={() => openForm(poa)} disabled={isFormOpen}
-                        className="mr-2 min-h-[44px] px-2 text-sm font-semibold text-[#14566B] disabled:opacity-50">
+                      <button
+                        type="button"
+                        onClick={() => openForm(poa)}
+                        disabled={isFormOpen}
+                        className="mr-2 min-h-[44px] px-2 text-sm font-semibold text-[#14566B] rounded-[6px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                      >
                         تعديل التوكيل
                       </button>
                     )}
                   </div>
                 </div>
+
+                {canReadDocuments && poa.documentId && (
+                  <div className="pt-1 border-t border-[#E8EEF1] flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-semibold text-[#4D606A]">مستند التوكيل:</span>
+                    <Link
+                      href={`/documents/${poa.documentId}`}
+                      data-testid={`poa-linked-document-${poa.id}`}
+                      className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1.5 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                    >
+                      <bdi className="[overflow-wrap:anywhere]">
+                        {poa.linkedDocument?.title ?? 'عرض المستند المرتبط'}
+                      </bdi>
+                      {poa.linkedDocument?.scanStatusLabel && (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(poa.linkedDocument)}`}
+                        >
+                          {poa.linkedDocument.scanStatusLabel}
+                        </span>
+                      )}
+                    </Link>
+                  </div>
+                )}
 
                 {poa.notes && (
                   <p className="text-xs text-[#4D606A] pt-1 border-t border-[#E8EEF1] leading-relaxed">

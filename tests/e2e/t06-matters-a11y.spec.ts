@@ -7,7 +7,7 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
   let owner: T04Owner;
   const prisma = getPrismaClient();
   const createdMatterIds: string[] = [];
-  const runId = Math.floor(1000 + Math.random() * 9000);
+  const runId = crypto.randomUUID().slice(0, 8);
   const seededFileCode = `2026/${runId}`;
 
   test.beforeAll(async () => {
@@ -160,6 +160,21 @@ test.describe('T06 Matters Accessibility, RTL & Viewport Ergonomics @a11y', () =
     await page.keyboard.press('Tab');
     const kindSelect = page.getByTestId('matter-kind-select');
     await expect(kindSelect).toBeFocused();
+
+    // Verify visible focus ring on focused control
+    const indicator = await kindSelect.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return {
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        outlineColor: style.outlineColor,
+        boxShadow: style.boxShadow,
+      };
+    });
+    const hasVisibleFocus =
+      (indicator.outlineStyle !== 'none' && parseFloat(indicator.outlineWidth) > 0) ||
+      (indicator.boxShadow !== 'none' && indicator.boxShadow !== '');
+    expect(hasVisibleFocus, `Expected visible focus indicator, got outline="${indicator.outlineStyle} ${indicator.outlineWidth}", boxShadow="${indicator.boxShadow}"`).toBe(true);
   });
 });
 

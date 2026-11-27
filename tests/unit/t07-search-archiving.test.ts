@@ -144,8 +144,8 @@ describe('T07 Search & Normalization Unit Tests', () => {
       expect(res.success).toBe(false);
     });
 
-    it('validates unifiedSearchParamsSchema with all allowed search types', () => {
-      for (const t of ['ALL', 'PARTY', 'MATTER', 'PROCEEDING'] as const) {
+    it('validates unifiedSearchParamsSchema with all allowed search types including DOCUMENT', () => {
+      for (const t of ['ALL', 'PARTY', 'MATTER', 'PROCEEDING', 'DOCUMENT'] as const) {
         const res = unifiedSearchParamsSchema.safeParse({
           query: 'أحمد',
           type: t,

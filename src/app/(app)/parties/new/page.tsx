@@ -19,7 +19,7 @@ export default async function NewPartyPage() {
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-3xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-3xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لإضافة أطراف جديدة.</p>
         </div>
@@ -36,7 +36,7 @@ export default async function NewPartyPage() {
           <Link href="/parties" className="hover:text-[#14566B] hover:underline">
             دليل الأطراف
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <span className="text-[#172A35] font-medium">إضافة طرف جديد</span>
         </nav>
         <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">
@@ -48,7 +48,7 @@ export default async function NewPartyPage() {
       </div>
 
       {/* Main Party Form */}
-      <PartyForm ownerId={actor.id} />
+      <PartyForm key={actor.id} ownerId={actor.id} />
     </div>
   );
 }

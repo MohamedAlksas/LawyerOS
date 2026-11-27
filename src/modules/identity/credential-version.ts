@@ -99,7 +99,10 @@ export function extractRawTokens(cookiePart: string): {
 } {
   const pair = cookiePart.split(';', 1)[0]?.trim() ?? '';
   const eqIdx = pair.indexOf('=');
-  const cookieVal = eqIdx !== -1 ? pair.slice(eqIdx + 1).trim() : '';
+  let cookieVal = eqIdx !== -1 ? pair.slice(eqIdx + 1).trim() : '';
+  if (cookieVal.length >= 2 && cookieVal.startsWith('"') && cookieVal.endsWith('"')) {
+    cookieVal = cookieVal.slice(1, -1);
+  }
 
   let decodedVal: string;
   try {

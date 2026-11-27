@@ -162,7 +162,7 @@ export function HearingList({
                     <span className="text-sm font-bold text-[#172A35]" data-testid={`hearing-date-${hearing.id}`}>
                       {formatHearingDateDisplay(hearing.hearingDate)}
                     </span>
-                    <span className="text-[#D5DFE3]">|</span>
+                    <span aria-hidden="true" className="text-[#D5DFE3]">|</span>
                     <span
                       data-testid={`hearing-time-${hearing.id}`}
                       className={`text-xs px-2 py-0.5 rounded font-medium ${
@@ -171,7 +171,7 @@ export function HearingList({
                           : 'bg-blue-50 text-blue-900 font-mono'
                       }`}
                     >
-                      {timeDisplay}
+                      {isUnknownTime ? timeDisplay : <bdi dir="ltr">{timeDisplay}</bdi>}
                     </span>
                     {hearing.rollNumber && (
                       <span className="text-xs bg-slate-100 text-[#172A35] px-2 py-0.5 rounded border border-slate-200 font-semibold">

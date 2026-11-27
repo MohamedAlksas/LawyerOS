@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GuardedLink } from '@/components/navigation-guard';
 import { IconBell, IconCheck, IconClock, IconRefresh, IconWarning } from '@/components/stitch-icons';
-import { generateClientRequestId } from '@/components/matters/matter-ui-types';
+import { generateClientRequestId, isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { formatCairoDateArabic } from '@/lib/cairo-date';
 import { markReminderReadAction } from '@/modules/reminders/reminder-actions';
 import type {
@@ -194,6 +194,9 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
         idempotencyKey: generateClientRequestId('header-read'),
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code) && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
         setMarkError(res.error || 'تعذر تأشير التنبيه كمقروء.');
         return;
       }
@@ -243,7 +246,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
           unreadCount > 0 ? `التنبيهات (${unreadCount} غير مقروءة)` : 'التنبيهات'
         }
         aria-expanded={isOpen}
-        aria-haspopup="dialog"
+        aria-controls={isOpen ? 'header-notifications-popover' : undefined}
         onClick={handleToggle}
         className="relative flex items-center justify-center min-h-[44px] min-w-[44px] rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] hover:bg-[#E9F2F5] text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
       >
@@ -267,7 +270,8 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
 
       {isOpen && (
         <div
-          role="dialog"
+          id="header-notifications-popover"
+          role="region"
           aria-label="قائمة التنبيهات"
           data-testid="header-notifications-popover"
           className="absolute left-3 sm:left-0 top-full mt-2 z-50 w-[min(22rem,calc(100vw-1.5rem))] bg-white border border-[#D5DFE3] rounded-[8px] shadow-xl overflow-hidden text-right"
@@ -278,7 +282,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
               <h2 className="text-sm font-bold text-[#172A35]">التنبيهات</h2>
               {unreadCount > 0 && (
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[#E9F2F5] text-[#14566B]">
-                  {unreadCount} غير مقروء
+                  {unreadCount === 1 ? 'تنبيه واحد غير مقروء' : `${unreadCount} غير مقروء`}
                 </span>
               )}
             </div>
@@ -384,7 +388,10 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
                           </span>
                         )}
                         {!item.isRead && (
-                          <span className="w-2 h-2 rounded-full bg-[#14566B]" aria-label="غير مقروء" />
+                          <>
+                            <span className="w-2 h-2 rounded-full bg-[#14566B]" aria-hidden="true" />
+                            <span className="sr-only">غير مقروء</span>
+                          </>
                         )}
                       </div>
                       {item.eventDate && (

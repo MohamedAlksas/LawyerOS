@@ -222,7 +222,7 @@ export function AppShell({ children }: AppShellProps) {
           {sessionStatus === 'expired' ? (
             <>
               <p role="alert">انتهت الجلسة. يرجى تسجيل الدخول مرة أخرى.</p>
-              <a className="font-semibold underline" href="/login" target="_blank" rel="noopener noreferrer">
+              <a className="font-semibold underline min-h-[44px] inline-flex items-center" href="/login" target="_blank" rel="noopener noreferrer">
                 فتح تسجيل الدخول في نافذة جديدة
               </a>
             </>
@@ -286,7 +286,7 @@ export function AppShell({ children }: AppShellProps) {
           </main>
 
           {/* Right Desktop Sidebar (232px) */}
-          <DesktopSidebar />
+          <DesktopSidebar userRole={viewUser?.role} />
         </div>
 
         {/* 6. Mobile Bottom Nav Bar */}
@@ -297,6 +297,7 @@ export function AppShell({ children }: AppShellProps) {
             drawerOpenerRef.current = opener;
             setIsDrawerOpen(true);
           }}
+          userRole={viewUser?.role}
         />
       </div>
 
@@ -305,6 +306,7 @@ export function AppShell({ children }: AppShellProps) {
         isOpen={isDrawerOpen}
         onClose={handleCloseDrawer}
         triggerRef={drawerOpenerRef}
+        userRole={viewUser?.role}
       />
       <div id="app-shell-modal-root" />
     </NavigationGuardProvider>

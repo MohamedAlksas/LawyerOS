@@ -36,6 +36,7 @@ html {
   font-family: "Noto Sans Arabic", Tahoma, Arial, sans-serif;
   color: var(--foreground);
   background-color: var(--background);
+  scroll-padding-top: var(--shell-top-height, 0px);
   scroll-padding-bottom: var(--mobile-nav-height, 0px);
 }
 
@@ -54,6 +55,36 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Print styles */
+@media print {
+  header,
+  nav,
+  aside,
+  [data-testid="app-header"],
+  [data-testid="desktop-sidebar"],
+  [data-testid="tablet-drawer"],
+  [data-testid="mobile-bottom-nav"],
+  [data-testid="drawer-backdrop"],
+  [data-testid="connectivity-banner"],
+  [data-testid="session-expired-alert"],
+  [data-testid="skip-to-content"],
+  button:not(.print-visible) {
+    display: none !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  #app-shell-content,
+  #main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
   }
 }
 

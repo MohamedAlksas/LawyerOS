@@ -130,6 +130,10 @@ const UNSUPPORTED_RELATIONSHIP_FIELDS = [
   'invoiceId',
 ];
 
+const UNSUPPORTED_POA_RELATIONSHIP_FIELDS = UNSUPPORTED_RELATIONSHIP_FIELDS.filter(
+  (field) => field !== 'documentId'
+);
+
 export const partyKindSchema = z.enum(['PERSON', 'ORGANIZATION'], {
   message: 'نوع الطرف يجب أن يكون فرداً أو منشأة/شركة.',
 });
@@ -310,6 +314,7 @@ export const savePowerOfAttorneySchema = z
   .object({
     id: z.string().uuid('معرف التوكيل غير صالح.').optional(),
     partyId: z.string().uuid('معرف الطرف غير صالح.'),
+    documentId: z.string().uuid('معرف المستند غير صالح.').nullable().optional(),
     poaNumberText: z
       .string()
       .trim()
@@ -359,12 +364,12 @@ export const savePowerOfAttorneySchema = z
         message: 'رقم الإصدار المتوقع (expectedVersion) مطلوب عند تعديل التوكيل.',
       });
     }
-    for (const field of UNSUPPORTED_RELATIONSHIP_FIELDS) {
+    for (const field of UNSUPPORTED_POA_RELATIONSHIP_FIELDS) {
       if (field in (data as Record<string, unknown>)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [field],
-          message: `الحقل '${field}' غير مدعوم في هذا الإصدار (T05 لا يدعم ربط القضايا أو المستندات).`,
+          message: `الحقل '${field}' غير مدعوم في هذا الإصدار (لا يدعم ربط هذا الكيان بالتوكيل).`,
         });
       }
     }

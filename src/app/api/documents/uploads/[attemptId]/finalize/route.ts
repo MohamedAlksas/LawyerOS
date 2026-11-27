@@ -13,11 +13,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ attemptId: string }> }
 ) {
-  const originRejection = verifyDocumentMutationOrigin(request);
-  if (originRejection) return originRejection;
-
   try {
-    const actor = await requireDocumentActor(request, 'WRITE_CLIENT_DATA');
+    const originRejection = verifyDocumentMutationOrigin(request);
+    if (originRejection) return originRejection;
+
+    const actor = await requireDocumentActor(request, 'WRITE_DOCUMENTS');
     const { attemptId } = await params;
 
     const rawContentType = request.headers.get('content-type');

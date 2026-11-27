@@ -5,7 +5,7 @@ import { GuardedLink as Link } from '@/components/navigation-guard';
 import { revealPartyIdentityAction } from '@/modules/parties/actions';
 import { getPartyMatterAssociationsAction } from '@/modules/matters/matter-actions';
 import { PartyMatterAssociationDTO } from '@/modules/matters/matter-types';
-import { ClientProfileDTO } from '@/modules/parties/types';
+import { ClientProfileDTO, LinkableDocumentSummary } from '@/modules/parties/types';
 import {
   isAuthRecoveryCode,
   MATTER_PARTY_ROLE_LABELS,
@@ -22,9 +22,18 @@ import { PoaSection } from './poa-section';
 interface PartyProfileClientProps {
   ownerId: string;
   party: ClientProfileDTO;
+  canReadDocuments?: boolean;
+  availablePoaDocuments?: LinkableDocumentSummary[];
+  poaDocumentsError?: string;
 }
 
-export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) {
+export function PartyProfileClient({
+  ownerId,
+  party,
+  canReadDocuments = false,
+  availablePoaDocuments = [],
+  poaDocumentsError,
+}: PartyProfileClientProps) {
   const isArchived = Boolean(party.archivedAt);
   const [revealedNumber, setRevealedNumber] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
@@ -306,7 +315,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                     </span>
                     {!revealedNumber ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-100 text-slate-800 border border-slate-200">
-                        •••• •••• •••• <bdi dir="ltr">{party.identityMask.lastFour}</bdi>
+                        <bdi dir="ltr">•••• •••• •••• {party.identityMask.lastFour}</bdi>
                       </span>
                     ) : (
                       <span
@@ -388,7 +397,15 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
       <CommunicationNotesSection ownerId={ownerId} partyId={party.id} initialNotes={party.communicationNotes} readOnly={isArchived} />
 
       {/* 4. Powers of Attorney Section */}
-      <PoaSection ownerId={ownerId} partyId={party.id} initialPoas={party.powersOfAttorney} readOnly={isArchived} />
+      <PoaSection
+        ownerId={ownerId}
+        partyId={party.id}
+        initialPoas={party.powersOfAttorney}
+        canReadDocuments={canReadDocuments}
+        availableDocuments={availablePoaDocuments}
+        documentsLoadError={poaDocumentsError}
+        readOnly={isArchived}
+      />
 
       {/* 5. Linked Matters Section */}
       <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 sm:p-6 shadow-xs space-y-4" data-testid="party-matters-section">
@@ -399,7 +416,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
           {!isArchived && (
             <Link
               href="/matters/new"
-              className="text-xs font-semibold text-[#14566B] hover:underline"
+              className="text-xs font-semibold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
             >
               + فتح ملف جديد
             </Link>
@@ -416,7 +433,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
             <button
               type="button"
               onClick={() => loadMatters(requestedMattersPage.current)}
-              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs"
+              className="px-2.5 py-1 bg-white hover:bg-red-100 text-[#A4262C] font-semibold border border-red-300 rounded text-xs min-h-[44px]"
             >
               إعادة المحاولة
             </button>
@@ -432,7 +449,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
               <div
                 key={m.matterPartyId}
                 data-testid={`linked-matter-${m.matterId}`}
-                className="py-3 flex items-center justify-between gap-3 text-xs"
+                className="py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
               >
                 <div className="space-y-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -458,7 +475,7 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
                       {MATTER_PARTY_ROLE_LABELS[m.role]}
                     </span>
                     {m.isPrimaryContact && (
-                      <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                      <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
                         جهة الاتصال الرئيسية
                       </span>
                     )}
@@ -508,13 +525,13 @@ export function PartyProfileClient({ ownerId, party }: PartyProfileClientProps) 
         )}
       </div>
 
-      {/* 6. Future Financial & Documents Modules Indicator */}
+      {/* 6. Future Financial Modules Indicator */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          الحسابات المالية والمستندات الرقمية
+          الحسابات المالية والأتعاب
         </span>
         <p>
-          وحدات المستندات الرقمية وحسابات الأتعاب والمصروفات
+          وحدات حسابات الأتعاب والمصروفات
           غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
         </p>
       </div>

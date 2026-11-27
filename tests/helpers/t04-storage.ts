@@ -240,7 +240,7 @@ function encodedVariants(value: string): Array<{ encoding: string; encoded: stri
   return variants;
 }
 
-export function findSensitiveValues(
+function findSensitiveValues(
   snapshot: StorageSnapshot,
   needles: SensitiveNeedle[]
 ): SensitiveFinding[] {

@@ -8,6 +8,7 @@ import { DocumentValidationError, MAX_DOCUMENT_BYTES } from './document-types';
 export const DOCUMENT_NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
 };
 
 export function documentHttpErrorResponse(error: unknown) {
@@ -27,6 +28,13 @@ export function verifyDocumentReadOrigin(request: Request): NextResponse | null 
   if (isCrossSiteRequest(request)) {
     return NextResponse.json(
       { success: false, code: 'FORBIDDEN', error: 'غير مصرح بالوصول من مصدر خارجي.' },
+      { status: 403, headers: DOCUMENT_NO_STORE_HEADERS }
+    );
+  }
+  const origin = request.headers.get('origin');
+  if (origin !== null && !getTrustedOrigins().has(origin)) {
+    return NextResponse.json(
+      { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },
       { status: 403, headers: DOCUMENT_NO_STORE_HEADERS }
     );
   }

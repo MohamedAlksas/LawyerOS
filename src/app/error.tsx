@@ -23,6 +23,7 @@ export default function ErrorBoundary({
         title="حدث خطأ غير متوقع"
         message="تعذر إتمام العملية المطلوبة. يرجى المحاولة مجدداً."
         onRetry={reset}
+        headingLevel="h1"
       />
     </div>
   );

@@ -121,14 +121,16 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
   });
 
   describe('recordHearingResultSchema', () => {
-    it('rejects proceeding status changes and document linkage from a hearing result', () => {
+    it('rejects proceeding status changes while validating optional decisionDocumentId', () => {
       const input = {
         hearingId: crypto.randomUUID(), expectedVersion: 1, decision: 'حكم تمهيدي',
         nextDateDisposition: 'NONE', idempotencyKey: crypto.randomUUID(),
       };
       expect(recordHearingResultSchema.safeParse(input).success).toBe(true);
       expect(recordHearingResultSchema.safeParse({ ...input, proceedingStatusUpdate: 'CLOSED' }).success).toBe(false);
-      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success).toBe(false);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: null }).success).toBe(true);
+      expect(recordHearingResultSchema.safeParse({ ...input, decisionDocumentId: 'not-a-uuid' }).success).toBe(false);
     });
 
     it('accepts valid result recording with next date and tasks', () => {
@@ -182,7 +184,7 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
   });
 
   describe('correctHearingResultSchema', () => {
-    it('requires a non-empty reason for corrections', () => {
+    it('requires a non-empty reason for corrections and validates optional decisionDocumentId', () => {
       const hearingId = crypto.randomUUID();
       const input = {
         hearingId,
@@ -192,6 +194,15 @@ describe('T08 Unit Tests: Scheduling Validation & Invariants', () => {
         idempotencyKey: 'correction-request',
       };
       expect(correctHearingResultSchema.safeParse(input).success).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: crypto.randomUUID() }).success
+      ).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: null }).success
+      ).toBe(true);
+      expect(
+        correctHearingResultSchema.safeParse({ ...input, decisionDocumentId: 'not-a-uuid' }).success
+      ).toBe(false);
       expect(correctHearingResultSchema.safeParse({ ...input, reason: ' ' }).success).toBe(false);
       expect(correctHearingResultSchema.safeParse({ ...input, expectedVersion: undefined }).success).toBe(false);
     });

@@ -636,42 +636,45 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
   // =========================================================================
   it('C07: reference-actions handleActionError maps CONCURRENCY_CONFLICT and NOT_FOUND without falling back to INTERNAL_ERROR', async () => {
     // Mock requireActor to simulate authenticated session in Action
-    vi.spyOn(requireActorModule, 'requireActor').mockResolvedValue(actor);
-
-    // Attempt updating non-existent reference item
-    const notFoundRes = await updateReferenceItemAction({
-      id: crypto.randomUUID(),
-      type: 'COURT',
-      expectedVersion: 1,
-      name: 'محكمة وهمية',
-      isActive: true,
-      idempotencyKey: `act-nf-${crypto.randomUUID()}`,
-    });
-    expect(notFoundRes.success).toBe(false);
-    if (!notFoundRes.success) {
-      expect(notFoundRes.code).toBe('NOT_FOUND');
-    }
-
-    // Create item and trigger concurrency conflict
-    const created = await createReferenceItemAction({
-      type: 'STORAGE_LOCATION',
-      name: `Ref Action Test ${crypto.randomUUID().slice(0, 6)}`,
-      idempotencyKey: `act-cr-${crypto.randomUUID()}`,
-    });
-    expect(created.success).toBe(true);
-    if (created.success) {
-      const conflictRes = await updateReferenceItemAction({
-        id: created.data.id,
-        type: 'STORAGE_LOCATION',
-        expectedVersion: 999, // Mismatched!
-        name: 'تعديل بنسخة خاطئة',
+    const spy = vi.spyOn(requireActorModule, 'requireActor').mockResolvedValue(actor);
+    try {
+      // Attempt updating non-existent reference item
+      const notFoundRes = await updateReferenceItemAction({
+        id: crypto.randomUUID(),
+        type: 'COURT',
+        expectedVersion: 1,
+        name: 'محكمة وهمية',
         isActive: true,
-        idempotencyKey: `act-cf-${crypto.randomUUID()}`,
+        idempotencyKey: `act-nf-${crypto.randomUUID()}`,
       });
-      expect(conflictRes.success).toBe(false);
-      if (!conflictRes.success) {
-        expect(conflictRes.code).toBe('CONCURRENCY_CONFLICT');
+      expect(notFoundRes.success).toBe(false);
+      if (!notFoundRes.success) {
+        expect(notFoundRes.code).toBe('NOT_FOUND');
       }
+
+      // Create item and trigger concurrency conflict
+      const created = await createReferenceItemAction({
+        type: 'STORAGE_LOCATION',
+        name: `Ref Action Test ${crypto.randomUUID().slice(0, 6)}`,
+        idempotencyKey: `act-cr-${crypto.randomUUID()}`,
+      });
+      expect(created.success).toBe(true);
+      if (created.success) {
+        const conflictRes = await updateReferenceItemAction({
+          id: created.data.id,
+          type: 'STORAGE_LOCATION',
+          expectedVersion: 999, // Mismatched!
+          name: 'تعديل بنسخة خاطئة',
+          isActive: true,
+          idempotencyKey: `act-cf-${crypto.randomUUID()}`,
+        });
+        expect(conflictRes.success).toBe(false);
+        if (!conflictRes.success) {
+          expect(conflictRes.code).toBe('CONCURRENCY_CONFLICT');
+        }
+      }
+    } finally {
+      spy.mockRestore();
     }
   });
 
@@ -1406,5 +1409,56 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
       where: { partyId: client.id, role: 'CLIENT' },
     });
     expect(totalMattersForClient).toBe(1);
+  });
+
+  // =========================================================================
+  // P3-2: updateProceeding rejects idempotencyKey reuse when parties[0].notes changes undefined -> null
+  // =========================================================================
+  it('P3-2: updateProceeding throws IdempotencyPayloadMismatchError on notes undefined vs null with same idempotencyKey', async () => {
+    const court = await makeCourt(`P3-2 Court ${crypto.randomUUID().slice(0, 6)}`);
+    const client = await makeParty('طرف فحص تطابق ملاحظات القيد');
+
+    const m = await openMatter(actor, {
+      title: 'ملف فحص عدم تطابق حمولة القيد P3-2',
+      kind: 'LITIGATION',
+      initialClientId: client.id,
+      idempotencyKey: `m-p3-2-${crypto.randomUUID()}`,
+    });
+    createdMatterIds.push(m.matter.id);
+    const clientMp = m.matter.parties![0];
+
+    const proc = await addProceeding(actor, {
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      parties: [{ matterPartyId: clientMp.id, capacityText: 'مدعي' }],
+      idempotencyKey: `proc-p3-2-${crypto.randomUUID()}`,
+    });
+
+    const sharedKey = `upd-proc-p3-2-${crypto.randomUUID()}`;
+    await updateProceeding(actor, {
+      id: proc.id,
+      matterId: m.matter.id,
+      courtId: court.id,
+      instance: 'FIRST_INSTANCE',
+      status: 'DRAFT',
+      expectedVersion: proc.version,
+      parties: [{ matterPartyId: clientMp.id, capacityText: 'مدعي', notes: undefined }],
+      idempotencyKey: sharedKey,
+    });
+
+    await expect(
+      updateProceeding(actor, {
+        id: proc.id,
+        matterId: m.matter.id,
+        courtId: court.id,
+        instance: 'FIRST_INSTANCE',
+        status: 'DRAFT',
+        expectedVersion: proc.version,
+        parties: [{ matterPartyId: clientMp.id, capacityText: 'مدعي', notes: null }],
+        idempotencyKey: sharedKey,
+      })
+    ).rejects.toThrow(idempotencyModule.IdempotencyPayloadMismatchError);
   });
 });

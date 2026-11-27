@@ -83,10 +83,10 @@ test.describe('T06 Matters & Proceedings Operational Lifecycle @matters', () => 
     await page.goto('/parties/new');
     await expect(page.locator('h1')).toContainText('إضافة طرف أو موكل جديد');
 
-    const runId = Math.random().toString(36).substring(2, 7);
+    const runId = crypto.randomUUID().slice(0, 5);
     const testClientName = `حسام عبد الرؤوف المنشاوي ${runId}`;
-    const testClientPhone = `010${Math.floor(10000000 + Math.random() * 90000000)}`;
-    const testPoaNumber = `${Math.floor(1000 + Math.random() * 9000)}/أ`;
+    const testClientPhone = `010${crypto.randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`;
+    const testPoaNumber = `${crypto.randomUUID().replace(/\D/g, '').slice(0, 4).padEnd(4, '5')}/أ`;
     await page.getByTestId('party-name-input').fill(testClientName);
     await page.getByTestId('party-phone-input').fill(testClientPhone);
     await page.getByTestId('submit-party-button').click();

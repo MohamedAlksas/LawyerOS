@@ -29,7 +29,7 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية للوصول إلى دليل الأطراف.</p>
         </div>
@@ -62,6 +62,7 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <PartyListClient
+        key={`${actor.id}:${validKind ?? 'ALL'}`}
         initialResult={initialResult}
         initialError={initialError}
         initialKind={validKind}

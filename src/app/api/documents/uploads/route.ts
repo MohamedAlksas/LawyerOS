@@ -10,11 +10,11 @@ import { beginUpload } from '@/modules/documents/document-service';
 import type { BeginUploadInput } from '@/modules/documents/document-types';
 
 export async function POST(request: Request) {
-  const originRejection = verifyDocumentMutationOrigin(request);
-  if (originRejection) return originRejection;
-
   try {
-    const actor = await requireDocumentActor(request, 'WRITE_CLIENT_DATA');
+    const originRejection = verifyDocumentMutationOrigin(request);
+    if (originRejection) return originRejection;
+
+    const actor = await requireDocumentActor(request, 'WRITE_DOCUMENTS');
     const body = await parseJsonMutationBody(request);
     const data = await beginUpload(actor, body as unknown as BeginUploadInput);
     return NextResponse.json(

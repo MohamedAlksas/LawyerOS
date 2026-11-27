@@ -8,7 +8,7 @@ import { normalizeArabicText } from '@/lib/normalization';
 test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () => {
   let owner: T04Owner;
   const prisma = getPrismaClient();
-  const runId = Math.random().toString(36).substring(2, 7);
+  const runId = crypto.randomUUID().slice(0, 5);
 
   const createdPartyIds: string[] = [];
   const createdMatterIds: string[] = [];
@@ -25,7 +25,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
   let retryMatterId = '';
   let testPartyId = '';
   let archivedPartyId = '';
-  const pageRunId = `pg_${Math.random().toString(36).substring(2, 7)}`;
+  const pageRunId = `pg_${crypto.randomUUID().slice(0, 5)}`;
 
   test.beforeAll(async () => {
     setupTestEncryptionKeys();
@@ -49,7 +49,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
         kind: 'PERSON',
         name: `فاروق السعيد المنشاوي ${runId}`,
         nameNormalized: normalizeArabicText(`فاروق السعيد المنشاوي ${runId}`),
-        primaryPhone: `010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        primaryPhone: `010${crypto.randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`,
         createdById: owner.id,
         updatedById: owner.id,
       },
@@ -63,7 +63,7 @@ test.describe('T07 Search, Normalization, Pagination & Safe Archiving @t07', () 
         kind: 'PERSON',
         name: `رشدي محفوظ المؤرشف ${runId}`,
         nameNormalized: normalizeArabicText(`رشدي محفوظ المؤرشف ${runId}`),
-        primaryPhone: `011${Math.floor(10000000 + Math.random() * 90000000)}`,
+        primaryPhone: `011${crypto.randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`,
         archivedAt: new Date(),
         createdById: owner.id,
         updatedById: owner.id,

@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import { getEnv, validateEnv } from '@/lib/env';
 import type { Actor } from '@/modules/identity/types';
+import {
+  SCAN_STATUS_BADGE_CLASSES,
+  getScanStatusBadgeClassFromLabel,
+} from '@/components/documents/document-ui-helpers';
 import {
   verifyDocumentReadOrigin,
   verifyDocumentMutationOrigin,
@@ -15,78 +18,34 @@ import {
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
+  DocumentNotFoundError,
   DocumentScanPolicyUnavailableError,
   DocumentStoragePathError,
   DocumentValidationError,
   MAX_DOCUMENT_BYTES,
   UNSCANNED_POLICY_NOTICE_AR,
   authorizeDownload,
+  beginVersionUploadSchema,
   createLocalDocumentStorage,
   documentError,
   documentStatusFromErrorCode,
   evaluateDocumentScanPolicy,
   inspectFileContent,
+  pinDocumentVersionsForBackup,
+  releaseBackupFilePins,
   resolveSafeKeyPath,
   resolveSafeStorageRoot,
   sanitizeDisplayFilename,
+  updateDocumentMetadataSchema,
 } from '@/modules/documents';
+import {
+  buildSyntheticJpeg,
+  buildSyntheticPdf,
+  buildSyntheticPng,
+  makePngChunk,
+} from '../helpers/synthetic-files';
 
-function buildSyntheticPdf(extraBytes = 0): Buffer {
-  const header = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n', 'ascii');
-  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
-  if (extraBytes <= 0) {
-    return Buffer.concat([header, footer]);
-  }
-  const pad = Buffer.alloc(extraBytes, 0x20);
-  return Buffer.concat([header, pad, footer]);
-}
-
-function buildSyntheticJpeg(entropyBytes: number[] = [0x11, 0x22, 0x33, 0x44]): Buffer {
-  return Buffer.from([
-    0xff, 0xd8, // SOI
-    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
-    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
-    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
-    ...entropyBytes,
-    0xff, 0xd9, // EOI
-  ]);
-}
-
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
-function buildSyntheticPng(): Buffer {
-  const ihdr = Buffer.from([
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00,
-  ]);
-  const idat = zlib.deflateSync(Buffer.from([0x00, 0xff, 0x00, 0x00]));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', idat),
-    makePngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003 Policy', () => {
+describe('T11 & T12 Unit Tests: Document Content Validation, Storage Safety & ADR 0003 Policy', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -333,6 +292,86 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         })
       ).toThrow(DocumentValidationError);
 
+      // PNG with width or height > 16,384 (MAX_PNG_DIMENSION) is rejected
+      const oversizedPngWidth = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        makePngChunk('IHDR', Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 8, 2, 0, 0, 0])),
+        makePngChunk('IDAT', Buffer.from([0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01])),
+        makePngChunk('IEND', Buffer.alloc(0)),
+      ]);
+      expect(() =>
+        inspectFileContent(oversizedPngWidth, {
+          originalFilename: 'oversized-width.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // Indexed-color PNG (colorType === 3) passes with valid PLTE chunk and rejects missing or invalid PLTE
+      const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const indexedIhdr = makePngChunk(
+        'IHDR',
+        Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 3, 0, 0, 0])
+      );
+      const indexedIdat = makePngChunk(
+        'IDAT',
+        Buffer.from([0x78, 0x9c, 0x63, 0x60, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01])
+      );
+      const iendChunk = makePngChunk('IEND', Buffer.alloc(0));
+
+      const validIndexedPng = Buffer.concat([
+        pngSig,
+        indexedIhdr,
+        makePngChunk('PLTE', Buffer.from([0x14, 0x56, 0x6b])),
+        indexedIdat,
+        iendChunk,
+      ]);
+      expect(
+        inspectFileContent(validIndexedPng, {
+          originalFilename: 'indexed-valid.png',
+          declaredMime: 'image/png',
+        }).detectedMime
+      ).toBe('image/png');
+
+      const missingPltePng = Buffer.concat([pngSig, indexedIhdr, indexedIdat, iendChunk]);
+      expect(() =>
+        inspectFileContent(missingPltePng, {
+          originalFilename: 'indexed-no-plte.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      for (const badPlteBytes of [Buffer.alloc(0), Buffer.alloc(4, 0x11), Buffer.alloc(771, 0x22)]) {
+        const badPltePng = Buffer.concat([
+          pngSig,
+          indexedIhdr,
+          makePngChunk('PLTE', badPlteBytes),
+          indexedIdat,
+          iendChunk,
+        ]);
+        expect(() =>
+          inspectFileContent(badPltePng, {
+            originalFilename: 'indexed-bad-plte.png',
+            declaredMime: 'image/png',
+          })
+        ).toThrow(DocumentValidationError);
+      }
+
+      // JPEG with 0x0 dimensions (height=0 or width=0) in SOF0 segment is rejected
+      const jpegZeroDim = Buffer.from([
+        0xff, 0xd8, // SOI
+        0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x00, 0x00, 0x00, 0x03, // SOF0 height=0, width=0
+        0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+        0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
+        0x11, 0x22,
+        0xff, 0xd9, // EOI
+      ]);
+      expect(() =>
+        inspectFileContent(jpegZeroDim, {
+          originalFilename: 'zero-dim.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
       // PDF without EOL after header version, without obj/endobj, or without startxref is rejected
       const pdfNoHeaderEol = Buffer.from(
         '%PDF-1.4<script>alert(1)</script>\n1 0 obj\n<<>>\nendobj\nstartxref\n9\n%%EOF\n',
@@ -341,6 +380,18 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(() =>
         inspectFileContent(pdfNoHeaderEol, {
           originalFilename: 'no-eol.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // PDF without ordered obj before endobj is rejected
+      const pdfReversedObj = Buffer.from(
+        '%PDF-1.4\nendobj\n1 0 obj\n<<>>\nstartxref\n9\n%%EOF\n',
+        'ascii'
+      );
+      expect(() =>
+        inspectFileContent(pdfReversedObj, {
+          originalFilename: 'reversed-obj.pdf',
           declaredMime: 'application/pdf',
         })
       ).toThrow(DocumentValidationError);
@@ -405,6 +456,7 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         'invoice\u202efdp.exe',
         'doc\u2066test\u2069.pdf',
         'dir\u200fmark.png',
+        'file\u061cmark.pdf',
       ];
       for (const name of unsafeNames) {
         expect(() => sanitizeDisplayFilename(name)).toThrow(DocumentValidationError);
@@ -675,6 +727,315 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         headers: { origin: trustedOrigin, 'sec-fetch-site': ' same-origin ' },
       });
       expect(verifyDocumentMutationOrigin(mutSameOriginPadded)).toBeNull();
+    });
+  });
+
+  describe('T12 version upload & paper-original metadata schemas', () => {
+    it('validates beginVersionUploadSchema and enforces strict types & positive bounds', () => {
+      const valid = beginVersionUploadSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedDocumentVersion: 1,
+        originalFilename: '  updated_contract_v2.pdf  ',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: 2048,
+        idempotencyKey: 'ver-begin-1',
+      });
+      expect(valid.success).toBe(true);
+      if (valid.success) {
+        expect(valid.data.originalFilename).toBe('updated_contract_v2.pdf');
+      }
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: 'not-uuid',
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k1',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 0,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k2',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: MAX_DOCUMENT_BYTES + 1,
+          idempotencyKey: 'k3',
+        }).success
+      ).toBe(false);
+
+      expect(
+        beginVersionUploadSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 1,
+          originalFilename: 'v2.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 100,
+          idempotencyKey: 'k4',
+          extraField: 'rejected',
+        }).success
+      ).toBe(false);
+    });
+
+    it('validates updateDocumentMetadataSchema for paper original state/location and metadata', () => {
+      const validOriginal = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 2,
+        idempotencyKey: 'meta-upd-1',
+        originalPresent: 'YES',
+        originalLocation: '  خزنة المكتب الرئيسية — رف 2  ',
+      });
+      expect(validOriginal.success).toBe(true);
+      if (validOriginal.success) {
+        expect(validOriginal.data.originalLocation).toBe('خزنة المكتب الرئيسية — رف 2');
+        expect(validOriginal.data.originalPresent).toBe('YES');
+      }
+
+      const validUnknownCleared = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 3,
+        idempotencyKey: 'meta-upd-2',
+        originalPresent: 'UNKNOWN',
+        originalLocation: null,
+        documentDate: '2026-11-26',
+      });
+      expect(validUnknownCleared.success).toBe(true);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 0,
+          idempotencyKey: 'meta-bad-ver',
+          originalPresent: 'NO',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-date',
+          documentDate: '2026-02-30',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-present',
+          originalPresent: 'MAYBE',
+        }).success
+      ).toBe(false);
+
+      expect(
+        updateDocumentMetadataSchema.safeParse({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          idempotencyKey: 'meta-bad-extra',
+          sha256: 'cannot-override-bytes',
+        }).success
+      ).toBe(false);
+
+      // Empty no-op payload without any mutable metadata field must reject
+      const emptyNoOp = updateDocumentMetadataSchema.safeParse({
+        documentId: crypto.randomUUID(),
+        expectedVersion: 1,
+        idempotencyKey: 'meta-empty-noop',
+      });
+      expect(emptyNoOp.success).toBe(false);
+    });
+
+    it('maps UI scan status labels to expected ADR 0003 badge classes', () => {
+      expect(getScanStatusBadgeClassFromLabel('بانتظار الفحص')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.PENDING
+      );
+      expect(getScanStatusBadgeClassFromLabel('قيد الفحص')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.PENDING
+      );
+      expect(getScanStatusBadgeClassFromLabel('مفحوص وسليم')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.CLEAN
+      );
+      expect(getScanStatusBadgeClassFromLabel('مرفوض أمنياً')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.INFECTED
+      );
+      expect(getScanStatusBadgeClassFromLabel('لم يُفحص ضد الفيروسات')).toBe(
+        SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY
+      );
+    });
+
+    it('validates backup pin & release inputs (backupId bounds, UUID version IDs, deduplication, audit, missing IDs & RESTORE_MODE)', async () => {
+      // Note: document-types.ts does not export Zod schemas for backup pins; validation is enforced
+      // directly in pinDocumentVersionsForBackup / releaseBackupFilePins via assertValidBackupId & assertUuidOrThrow.
+      const ownerActor: Actor = {
+        id: crypto.randomUUID(),
+        name: 'مالك اختبار',
+        email: 'owner.pin@office.eg',
+        role: 'OWNER',
+        sessionId: crypto.randomUUID(),
+        twoFactorVerified: true,
+      };
+
+      await expect(
+        pinDocumentVersionsForBackup({ backupId: '   ', documentVersionIds: [], actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        pinDocumentVersionsForBackup({
+          backupId: 'b'.repeat(129),
+          documentVersionIds: [],
+          actor: ownerActor,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        pinDocumentVersionsForBackup({
+          backupId: 'backup-valid-1',
+          documentVersionIds: ['not-a-uuid'],
+          actor: ownerActor,
+        })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        releaseBackupFilePins({ backupId: '', actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      await expect(
+        releaseBackupFilePins({ backupId: 'r'.repeat(129), actor: ownerActor })
+      ).rejects.toThrow(DocumentValidationError);
+
+      const verA = crypto.randomUUID();
+      const verB = crypto.randomUUID();
+      let capturedFindManyIds: string[] = [];
+      let capturedCreateManyIds: string[] = [];
+      const auditEvents: Array<{ action: string; entityType: string; entityId: string }> = [];
+
+      const mockTx = {
+        documentVersion: {
+          findMany: async (args: { where?: { id?: { in?: string[] } } }) => {
+            capturedFindManyIds = args.where?.id?.in ?? [];
+            return capturedFindManyIds.map((id) => ({ id }));
+          },
+        },
+        backupFilePin: {
+          createMany: async (args: { data: Array<{ documentVersionId: string }> }) => {
+            capturedCreateManyIds = args.data.map((d) => d.documentVersionId);
+            return { count: args.data.length };
+          },
+          updateMany: async (args: { where?: { releasedAt?: unknown } }) => ({
+            count: args?.where?.releasedAt === null ? 2 : 0,
+          }),
+        },
+        auditEvent: {
+          create: async (args: { data: { action: string; entityType: string; entityId: string } }) => {
+            auditEvents.push({
+              action: args.data.action,
+              entityType: args.data.entityType,
+              entityId: args.data.entityId,
+            });
+            return { id: crypto.randomUUID() };
+          },
+        },
+      };
+      const mockPrisma = {
+        $transaction: async <T>(fn: (tx: typeof mockTx) => Promise<T>) => fn(mockTx),
+      } as unknown as PrismaClient;
+
+      const pinRes = await pinDocumentVersionsForBackup(
+        {
+          backupId: '  backup-2026-11-26  ',
+          documentVersionIds: [verA, verB, verA],
+          actor: ownerActor,
+        },
+        { prismaOverride: mockPrisma, now: new Date('2026-11-26T00:00:00.000Z') }
+      );
+      expect(pinRes.backupId).toBe('backup-2026-11-26');
+      expect(pinRes.pinnedCount).toBe(2);
+      expect(pinRes.documentVersionIds).toEqual([verA, verB]);
+      expect(capturedFindManyIds).toEqual([verA, verB]);
+      expect(capturedCreateManyIds).toEqual([verA, verB]);
+
+      const relRes = await releaseBackupFilePins(
+        {
+          backupId: '  backup-2026-11-26  ',
+          actor: ownerActor,
+        },
+        { prismaOverride: mockPrisma, now: new Date('2026-11-26T01:00:00.000Z') }
+      );
+      expect(relRes.backupId).toBe('backup-2026-11-26');
+      expect(relRes.releasedCount).toBe(2);
+      expect(relRes.releasedAt).toBe('2026-11-26T01:00:00.000Z');
+      expect(auditEvents).toEqual([
+        {
+          action: 'PIN_DOCUMENT_VERSIONS_FOR_BACKUP',
+          entityType: 'BackupFilePin',
+          entityId: 'backup-2026-11-26',
+        },
+        {
+          action: 'RELEASE_BACKUP_FILE_PINS',
+          entityType: 'BackupFilePin',
+          entityId: 'backup-2026-11-26',
+        },
+      ]);
+
+      // Missing version ID in DB rejects with DocumentNotFoundError
+      const missingMockPrisma = {
+        $transaction: async <T>(
+          fn: (tx: {
+            documentVersion: { findMany: () => Promise<Array<{ id: string }>> };
+          }) => Promise<T>
+        ) =>
+          fn({
+            documentVersion: {
+              findMany: async () => [{ id: verA }],
+            },
+          }),
+      } as unknown as PrismaClient;
+      await expect(
+        pinDocumentVersionsForBackup(
+          {
+            backupId: 'backup-missing-ver',
+            documentVersionIds: [verA, verB],
+            actor: ownerActor,
+          },
+          { prismaOverride: missingMockPrisma }
+        )
+      ).rejects.toThrow(DocumentNotFoundError);
+
+      // RESTORE_MODE blocks pin & release
+      const prevRestore = process.env.RESTORE_MODE;
+      process.env.RESTORE_MODE = 'true';
+      try {
+        await expect(
+          pinDocumentVersionsForBackup(
+            { backupId: 'backup-restore-block', documentVersionIds: [verA], actor: ownerActor },
+            { prismaOverride: mockPrisma }
+          )
+        ).rejects.toThrow(DocumentValidationError);
+        await expect(
+          releaseBackupFilePins(
+            { backupId: 'backup-restore-block', actor: ownerActor },
+            { prismaOverride: mockPrisma }
+          )
+        ).rejects.toThrow(DocumentValidationError);
+      } finally {
+        if (prevRestore === undefined) delete process.env.RESTORE_MODE;
+        else process.env.RESTORE_MODE = prevRestore;
+      }
     });
   });
 });

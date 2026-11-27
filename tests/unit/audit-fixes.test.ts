@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Prisma } from '@prisma/client';
+import nextConfig from '../../next.config';
 import { extractRawTokens, getUserCredentialVersionByEmail } from '@/modules/identity/credential-version';
 import { sanitizeAuditPayload } from '@/lib/audit';
 import {
@@ -278,12 +279,104 @@ describe('Audit fixes unit regressions', () => {
       expect(isIdempotencyUniqueConflict(validCompositeP2002)).toBe(true);
     });
 
+    it('omits undefined properties while preserving null in canonicalizeJson, and throws on invalid Date', () => {
+      expect(canonicalizeJson({ a: undefined, b: 1 })).toBe('{"b":1}');
+      expect(canonicalizeJson({ a: null, b: 1 })).toBe('{"a":null,"b":1}');
+      expect(() => canonicalizeJson(new Date('invalid'))).toThrow(TypeError);
+    });
+
+    it('redacts storage keys, normalizes valid/invalid Dates, and handles circular references in sanitizeAuditPayload', () => {
+      const sanitizedKeys = sanitizeAuditPayload({
+        objectKey: 'doc/1/secret.pdf',
+        quarantineKey: 'quarantine/secret.pdf',
+        storageKey: 'storage/secret.pdf',
+        nested: { object_key: 'nested-key' },
+      }) as Record<string, unknown>;
+      expect(sanitizedKeys.objectKey).toBe('[REDACTED_SECRET]');
+      expect(sanitizedKeys.quarantineKey).toBe('[REDACTED_SECRET]');
+      expect(sanitizedKeys.storageKey).toBe('[REDACTED_SECRET]');
+      expect((sanitizedKeys.nested as Record<string, unknown>).object_key).toBe('[REDACTED_SECRET]');
+
+      const validDate = new Date('2026-11-26T12:00:00.000Z');
+      const invalidDate = new Date('invalid');
+      const sanitizedDates = sanitizeAuditPayload({
+        valid: validDate,
+        invalid: invalidDate,
+      }) as Record<string, unknown>;
+      expect(sanitizedDates.valid).toBe('2026-11-26T12:00:00.000Z');
+      expect(sanitizedDates.invalid).toBeNull();
+
+      const circularObj: Record<string, unknown> = { name: 'root' };
+      circularObj.self = circularObj;
+      const sanitizedCircular = sanitizeAuditPayload(circularObj) as Record<string, unknown>;
+      expect(sanitizedCircular.name).toBe('root');
+      expect(sanitizedCircular.self).toEqual({ circular: '[CIRCULAR]' });
+
+      const circularArrObj: Record<string, unknown> = { items: [1, 2] };
+      (circularArrObj.items as unknown[]).push(circularArrObj);
+      const sanitizedArr = sanitizeAuditPayload(circularArrObj) as Record<string, unknown>;
+      const items = sanitizedArr.items as unknown[];
+      expect(items[0]).toBe(1);
+      expect(items[1]).toBe(2);
+      expect(items[2]).toEqual({ circular: '[CIRCULAR]' });
+    });
+
     it('strips IPv6 brackets in host while preserving them in canonicalUrl in parseTargetUrl', () => {
       const parsed = parseTargetUrl(
         'postgresql://lawoffice_user:secret@[::1]:5432/lawoffice_test?sslmode=disable'
       );
       expect(parsed.host).toBe('::1');
       expect(parsed.canonicalUrl).toContain('@[::1]:5432/');
+    });
+
+    it('escapes $-prefixed keys in canonicalizeJson/computePayloadHash so { $bigint } cannot collide with BigInt', () => {
+      expect(canonicalizeJson({ $bigint: '42' })).toBe('{"$$bigint":"42"}');
+      expect(canonicalizeJson(BigInt(42))).toBe('{"$bigint":"42"}');
+      expect(canonicalizeJson({ $bigint: '42' })).not.toBe(canonicalizeJson(BigInt(42)));
+      expect(canonicalizeJson({ value: { $bigint: '42' } })).not.toBe(
+        canonicalizeJson({ value: BigInt(42) })
+      );
+
+      expect(computePayloadHash({ $bigint: '42' })).not.toBe(computePayloadHash(BigInt(42)));
+      expect(computePayloadHash({ value: { $bigint: '42' } })).not.toBe(
+        computePayloadHash({ value: BigInt(42) })
+      );
+    });
+
+    it('masks short <= 4-char number strings completely in sanitizeAuditPayload', () => {
+      const sanitized = sanitizeAuditPayload({
+        number: '123',
+        nested: { number: '1234', longer: { number: '123456' } },
+      }) as {
+        number: string;
+        nested: { number: string; longer: { number: string } };
+      };
+
+      expect(sanitized.number).toBe('****');
+      expect(sanitized.nested.number).toBe('****');
+      expect(sanitized.nested.longer.number).toBe('****3456');
+    });
+
+    it('configures page CSP (excluding /api/documents/:id/content) and CORP same-origin in next.config.ts headers()', async () => {
+      const rules = await nextConfig.headers!();
+      const globalRule = rules.find((r) => r.source === '/(.*)');
+      expect(globalRule?.headers).toContainEqual({
+        key: 'Cross-Origin-Resource-Policy',
+        value: 'same-origin',
+      });
+
+      const pageCspRule = rules.find((r) =>
+        r.headers.some((h) => h.key === 'Content-Security-Policy')
+      );
+      expect(pageCspRule).toBeDefined();
+      expect(pageCspRule!.source).toContain('!api/documents/[^/]+/content');
+      expect(pageCspRule!.source).not.toBe('/(.*)');
+
+      const contentFrameRule = rules.find((r) => r.source === '/api/documents/:id/content');
+      expect(contentFrameRule?.headers).toContainEqual({
+        key: 'X-Frame-Options',
+        value: 'SAMEORIGIN',
+      });
     });
   });
 });

@@ -22,6 +22,12 @@ import {
   IdempotencyConcurrentConflictError,
 } from '@/lib/idempotency';
 import {
+  CrossMatterLinkForbiddenError,
+  DocumentNotFoundError,
+  DocumentNotReadyError,
+  DocumentValidationError,
+} from '@/modules/documents/document-types';
+import {
   SavePartyInput,
   SavePartyResult,
   SearchPartiesParams,
@@ -44,12 +50,28 @@ export type ActionResult<T> =
     };
 
 function handleActionError(error: unknown): ActionResult<never> {
-  if (error instanceof ValidationError) {
+  if (error instanceof ValidationError || error instanceof DocumentValidationError) {
     return {
       success: false,
       error: error.message,
       code: 'VALIDATION_ERROR',
       fieldErrors: error.fieldErrors,
+    };
+  }
+
+  if (error instanceof CrossMatterLinkForbiddenError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'CROSS_MATTER_LINK_FORBIDDEN',
+    };
+  }
+
+  if (error instanceof DocumentNotReadyError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'DOCUMENT_NOT_READY',
     };
   }
 
@@ -77,7 +99,7 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
-  if (error instanceof NotFoundError) {
+  if (error instanceof NotFoundError || error instanceof DocumentNotFoundError) {
     return {
       success: false,
       error: error.message,
@@ -122,7 +144,7 @@ export async function savePartyAction(
   input: SavePartyInput
 ): Promise<ActionResult<SavePartyResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const result = await saveParty(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -134,7 +156,7 @@ export async function searchPartiesAction(
   params: SearchPartiesParams
 ): Promise<ActionResult<SearchPartiesResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const result = await searchParties(actor, params);
     return { success: true, data: result };
   } catch (error) {
@@ -146,7 +168,7 @@ export async function getClientProfileAction(
   partyId: string
 ): Promise<ActionResult<ClientProfileDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const result = await getClientProfile(actor, partyId);
     return { success: true, data: result };
   } catch (error) {
@@ -158,7 +180,7 @@ export async function addCommunicationNoteAction(
   input: AddCommunicationNoteInput
 ): Promise<ActionResult<CommunicationNoteSummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const result = await addCommunicationNote(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -170,7 +192,7 @@ export async function savePowerOfAttorneyAction(
   input: SavePowerOfAttorneyInput
 ): Promise<ActionResult<PoASummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const result = await savePowerOfAttorney(actor, input);
     return { success: true, data: result };
   } catch (error) {
@@ -183,7 +205,7 @@ export async function revealPartyIdentityAction(
   reason?: string
 ): Promise<ActionResult<{ identificationType: string; number: string }>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const result = await revealPartyIdentity(actor, partyId, reason);
     return { success: true, data: result };
   } catch (error) {
@@ -197,7 +219,7 @@ export async function checkPartyDuplicatesAction(
   excludePartyId?: string
 ): Promise<ActionResult<DuplicateWarningDTO[]>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     assertAuthorized(actor, 'READ_CLIENT_DATA');
     const prisma = getPrismaClient();
     const warnings = await findDuplicateWarnings(prisma, name, primaryPhone, excludePartyId);

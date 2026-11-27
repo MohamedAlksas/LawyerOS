@@ -3,6 +3,7 @@ import { getPrismaClient } from '@/lib/auth';
 import { seedT04Owner, deleteT04Owner, T04Owner, signInWithTotp } from '../helpers/t04-auth';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 
 /**
  * T08 E2E Browser Test Suite: Hearings, Results, Adjournments, and Follow-ups
@@ -14,10 +15,11 @@ import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matt
  * - T08-TC-05: Browser conflict presentation and result correction
  * - T08-TC-07: Keyboard accessibility, offline disconnection & in-memory recovery, and 200% text scale reflow
  */
+
 test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
   let owner: T04Owner;
   const prisma = getPrismaClient();
-  const runId = Math.random().toString(36).substring(2, 7);
+  const runId = crypto.randomUUID().slice(0, 5);
 
   const createdMatterIds: string[] = [];
   const createdPartyIds: string[] = [];
@@ -49,7 +51,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
         kind: 'PERSON',
         name: `مختار عبد العزيز المهدي ${runId}`,
         nameNormalized: `مختار عبد العزيز المهدي ${runId}`,
-        primaryPhone: `010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        primaryPhone: `010${crypto.randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`,
         createdById: owner.id,
         updatedById: owner.id,
       },
@@ -134,7 +136,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
-    const date = '2027-04-30';
+    const date = formatCairoOffsetYmd(150);
     await signInWithTotp(page, owner);
     await page.goto(`/matters/${matter.id}/proceedings/${proceeding.id}`);
     await expect(page.getByText('الرقم غير مستكمل').first()).toBeVisible();
@@ -217,10 +219,15 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
       },
     });
 
+    const origHearingDate = formatCairoOffsetYmd(-10);
+    const nextHearingDate = formatCairoOffsetYmd(15);
+    const rescheduleHearingDate = formatCairoOffsetYmd(25);
+    const taskDueDate = formatCairoOffsetYmd(23);
+
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date('2027-01-12T00:00:00.000Z'),
+        hearingDate: new Date(`${origHearingDate}T00:00:00.000Z`),
         hearingTime: '10:00',
         status: 'SCHEDULED',
         createdById: owner.id,
@@ -242,8 +249,8 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page.getByTestId('save-hearing-result-btn').click();
     await expect(page.getByRole('alert').filter({ hasText: 'حدد تاريخ الجلسة القادمة' })).toBeVisible();
 
-    // Fill next hearing date 2027-02-09
-    await page.getByLabel(/تاريخ الجلسة القادمة|الموعد القادم/i).fill('2027-02-09');
+    // Fill next hearing date
+    await page.getByLabel(/تاريخ الجلسة القادمة|الموعد القادم/i).fill(nextHearingDate);
 
     // Add 2 tasks
     const addTaskBtn = page.getByRole('button', { name: /إضافة مهمة|إضافة عمل مطلوب/i });
@@ -256,8 +263,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page.getByLabel('الحضور (اختياري)').fill('حضر وكيل المدعي');
 
     // Check pre-save mobile confirmation summary
-    // Literal specification: «هتسجل النتيجة، وتضيف جلسة بتاريخ 2027-02-09، و 2 مهام»
-    await expect(page.getByText(/هتسجل النتيجة، وتضيف جلسة بتاريخ.*2027-02-09.*2.*مهام/i)).toBeVisible();
+    await expect(page.getByText(new RegExp(`هتسجل النتيجة، وتضيف جلسة بتاريخ.*${nextHearingDate}.*2.*مهام`, 'i'))).toBeVisible();
 
     // Click save
     await page.getByRole('button', { name: /حفظ النتيجة|تأكيد وحفظ/i }).click();
@@ -265,10 +271,10 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     // Verify redirected or success state
     await expect(page.getByText('تم حفظ النتيجة بنجاح')).toBeVisible();
 
-    // Verify database state: original completed on Jan 12, next hearing on Feb 9
+    // Verify database state: original completed, next hearing scheduled
     const originalInDb = await prisma.hearing.findUnique({ where: { id: hearing.id } });
     expect(originalInDb?.status).toBe('COMPLETED');
-    expect(originalInDb?.hearingDate.toISOString().slice(0, 10)).toBe('2027-01-12');
+    expect(originalInDb?.hearingDate.toISOString().slice(0, 10)).toBe(origHearingDate);
 
     const nextHearingInDb = await prisma.hearing.findFirst({
       where: {
@@ -276,7 +282,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
         status: 'SCHEDULED',
       },
     });
-    expect(nextHearingInDb?.hearingDate.toISOString().slice(0, 10)).toBe('2027-02-09');
+    expect(nextHearingInDb?.hearingDate.toISOString().slice(0, 10)).toBe(nextHearingDate);
     expect(nextHearingInDb?.hearingTime).toBe('10:30');
     expect(await prisma.hearingResult.findFirst({
       where: { hearingId: hearing.id }, select: { summary: true, attendance: true },
@@ -292,20 +298,20 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await expect(page.getByTestId(`hearing-card-${nextId}`)).toBeVisible();
 
     await page.getByTestId(`reschedule-hearing-button-${nextId}`).click();
-    await page.getByTestId('reschedule-new-date-input').fill('2027-02-19');
+    await page.getByTestId('reschedule-new-date-input').fill(rescheduleHearingDate);
     await page.getByTestId('reschedule-reason-input').fill('تعديل الموعد لاختبار نقل مهمة واحدة');
     await page.getByRole('checkbox', { name: /نقل إعداد مذكرة الدفاع/ }).check();
-    await page.getByLabel(/الموعد الجديد لمهمة إعداد مذكرة الدفاع/).fill('2027-02-17');
+    await page.getByLabel(/الموعد الجديد لمهمة إعداد مذكرة الدفاع/).fill(taskDueDate);
     await page.getByTestId('reschedule-submit-button').click();
     await expect(page.getByTestId('hearings-count-badge')).toHaveText('3');
     const replacement = await prisma.hearing.findFirstOrThrow({ where: { supersedesHearingId: nextId } });
     const movedTasks = await prisma.task.findMany({ where: { hearingId: replacement.id } });
     expect(movedTasks.map(({ title }) => title)).toEqual(['إعداد مذكرة الدفاع بالدفوع الشكلية']);
-    expect(movedTasks[0].dueDate?.toISOString().slice(0, 10)).toBe('2027-02-17');
+    expect(movedTasks[0].dueDate?.toISOString().slice(0, 10)).toBe(taskDueDate);
     expect(await prisma.task.count({ where: { hearingId: hearing.id } })).toBe(1);
     await page.getByTestId(`correct-result-button-${hearing.id}`).click();
     await expect(page.getByTestId('linked-next-hearing')).toHaveAttribute('href', `/hearings/${replacement.id}`);
-    await expect(page.getByTestId('linked-next-hearing')).toContainText('2027-02-19');
+    await expect(page.getByTestId('linked-next-hearing')).toContainText(rescheduleHearingDate);
   });
 
   /**
@@ -348,7 +354,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date('2027-03-01T00:00:00.000Z'),
+        hearingDate: new Date(`${formatCairoOffsetYmd(-5)}T00:00:00.000Z`),
         status: 'SCHEDULED',
         createdById: owner.id,
         updatedById: owner.id,
@@ -360,7 +366,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     await page.getByLabel(/منطوق القرار|قرار المحكمة/i).fill('تأجيل للاطلاع وتبادل المستندات');
 
     await page.getByRole('radio', { name: /يوجد موعد قادم/ }).locator('..').click();
-    await page.getByTestId('next-hearing-date-input').fill('2027-03-20');
+    await page.getByTestId('next-hearing-date-input').fill(formatCairoOffsetYmd(10));
     await page.getByTestId('add-task-button').click();
     await page.getByTestId('task-title-0').fill('متابعة المستندات');
     const bodies: Array<string | null> = [];
@@ -428,7 +434,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date('2027-04-10T00:00:00.000Z'),
+        hearingDate: new Date(`${formatCairoOffsetYmd(-1)}T00:00:00.000Z`),
         status: 'SCHEDULED',
         version: 1,
         createdById: owner.id,
@@ -536,7 +542,7 @@ test.describe('T08 Hearings & Adjournments E2E Tests @t08', () => {
     const hearing = await prisma.hearing.create({
       data: {
         proceedingId: proceeding.id,
-        hearingDate: new Date('2027-05-20T00:00:00.000Z'),
+        hearingDate: new Date(`${formatCairoOffsetYmd(10)}T00:00:00.000Z`),
         hearingTime: null, // Unknown time
         status: 'SCHEDULED',
         createdById: owner.id,

@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { hashPassword } from 'better-auth/crypto';
@@ -9,6 +7,7 @@ import { seedT04Owner, deleteT04Owner, signInWithTotp, type T04Owner } from '../
 import { cleanupTrackedFixtures, createValidatedTestPool } from '../helpers/test-db';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import { formatCairoOffsetYmd } from '../helpers/cairo-test-date';
 import {
   expectNoElementOverflow,
   expectNoPageOverflow,
@@ -179,7 +178,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
   let testCourtId: string;
   let testPartyId: string;
 
-  const runId = Math.random().toString(36).slice(2, 7);
+  const runId = randomUUID().slice(0, 6);
   const createdMatterIds: string[] = [];
   const createdPartyIds: string[] = [];
   const createdCourtIds: string[] = [];
@@ -207,7 +206,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         kind: 'PERSON',
         name: `محمود عبد الحميد السري ${runId}`,
         nameNormalized: `محمود عبد الحميد السري ${runId}`,
-        primaryPhone: `010${Math.floor(10000000 + Math.random() * 90000000)}`,
+        primaryPhone: `010${randomUUID().replace(/\D/g, '').slice(0, 8).padEnd(8, '7')}`,
         createdById: owner.id,
         updatedById: owner.id,
       },
@@ -289,7 +288,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
     );
 
     // Fill date, missing source -> rejected
-    await page.getByTestId('deadline-date-input').fill('2027-05-15');
+    await page.getByTestId('deadline-date-input').fill(formatCairoOffsetYmd(30));
     await confirmBtn.click();
     await expect(page.getByTestId('deadline-form-error')).toContainText(
       'مصدر الموعد القانوني مطلوب للاعتماد'
@@ -333,7 +332,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
 
     const updated = await prisma.deadline.findUniqueOrThrow({ where: { id: draftDeadline.id } });
     expect(updated.status).toBe('CONFIRMED');
-    expect(updated.dueDate?.toISOString().slice(0, 10)).toBe('2027-05-15');
+    expect(updated.dueDate?.toISOString().slice(0, 10)).toBe(formatCairoOffsetYmd(30));
     expect(updated.confirmedById).toBe(owner.id);
     expect(updated.confirmedByName).toBe(owner.name);
     expect(updated.confirmedAt).not.toBeNull();
@@ -373,7 +372,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         matterId: matter.id,
         proceedingId: proceeding.id,
         title: `تقديم مذكرة الرد النهائية ${runId}`,
-        dueDate: new Date('2027-06-20T00:00:00.000Z'),
+        dueDate: new Date(`${formatCairoOffsetYmd(40)}T00:00:00.000Z`),
         dueTime: null,
         source: 'قرار المحكمة بالجلسة السابقة',
         basisNotes: 'أجل مسجل بمحضر الجلسة',
@@ -392,7 +391,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         jobType: 'REMINDER_DELIVERY',
         sourceType: 'Deadline',
         sourceId: confirmedDeadline.id,
-        scheduledAt: new Date('2027-06-20T00:00:00.000Z'),
+        scheduledAt: new Date(`${formatCairoOffsetYmd(40)}T00:00:00.000Z`),
         status: 'PENDING',
         deduplicationKey: `t09_tc03_${confirmedDeadline.id}`,
         payload: { deadlineId: confirmedDeadline.id },
@@ -464,7 +463,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       'تاريخ تنفيذ الإجراء القانوني مطلوب'
     );
 
-    await page.getByTestId('deadline-completion-date-input').fill('2027-06-15');
+    await page.getByTestId('deadline-completion-date-input').fill(formatCairoOffsetYmd(35));
     await page.getByTestId('deadline-completion-submit-button').click();
 
     await expect(completedSection.getByTestId(`deadline-card-${confirmedDeadline.id}`)).toBeVisible();
@@ -476,7 +475,7 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       where: { id: confirmedDeadline.id },
     });
     expect(finalDeadline.status).toBe('COMPLETED');
-    expect(finalDeadline.completedDate?.toISOString().slice(0, 10)).toBe('2027-06-15');
+    expect(finalDeadline.completedDate?.toISOString().slice(0, 10)).toBe(formatCairoOffsetYmd(35));
     expect(finalDeadline.completionDescription).toBe('تم إيداع المذكرة بالسكرتارية برقم 412');
     expect(finalDeadline.completedById).toBe(owner.id);
 
@@ -970,9 +969,6 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       });
       localTasks.push(seededTask.id);
 
-      const screenshotDir = path.resolve(process.cwd(), 'test-results/t09');
-      fs.mkdirSync(screenshotDir, { recursive: true });
-
       await signInWithTotp(page, owner);
 
       // 1. Populated Today & Agenda RTL layout + screenshots
@@ -991,9 +987,14 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
 
+      const todayScreenshotPath = testInfo.outputPath(`t09-${width}.png`);
       await page.screenshot({
-        path: path.join(screenshotDir, `t09-${width}.png`),
+        path: todayScreenshotPath,
         fullPage: true,
+      });
+      await testInfo.attach(`t09-${width}`, {
+        path: todayScreenshotPath,
+        contentType: 'image/png',
       });
 
       // Printable agenda check on desktop 1440
@@ -1001,9 +1002,14 @@ test.describe('T09 Deadlines, Tasks & Cairo Agenda E2E Tests', () => {
         await page.emulateMedia({ media: 'print' });
         await expect(page.getByText('مكتب المحامي — أجندة العمل اليومية')).toBeVisible();
         await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+        const printScreenshotPath = testInfo.outputPath('t09-agenda-print.png');
         await page.screenshot({
-          path: path.join(screenshotDir, 't09-agenda-print.png'),
+          path: printScreenshotPath,
           fullPage: true,
+        });
+        await testInfo.attach('t09-agenda-print', {
+          path: printScreenshotPath,
+          contentType: 'image/png',
         });
         await page.emulateMedia({ media: 'screen' });
       }

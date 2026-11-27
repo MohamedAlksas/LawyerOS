@@ -371,7 +371,7 @@ export interface SearchProceedingsResult {
   limit: number;
 }
 
-export type UnifiedSearchType = 'ALL' | 'PARTY' | 'MATTER' | 'PROCEEDING';
+export type UnifiedSearchType = 'ALL' | 'PARTY' | 'MATTER' | 'PROCEEDING' | 'DOCUMENT';
 
 export interface UnifiedSearchParams {
   query?: string;
@@ -382,7 +382,7 @@ export interface UnifiedSearchParams {
 }
 
 export interface UnifiedSearchResultItem {
-  entityType: 'PARTY' | 'MATTER' | 'PROCEEDING';
+  entityType: 'PARTY' | 'MATTER' | 'PROCEEDING' | 'DOCUMENT';
   id: string;
   title: string;
   subtitle?: string;
@@ -407,6 +407,7 @@ export interface UnifiedSearchResult {
     parties: number;
     matters: number;
     proceedings: number;
+    documents: number;
   };
 }
 
@@ -781,7 +782,7 @@ export const searchProceedingsParamsSchema = z
 export const unifiedSearchParamsSchema = z
   .object({
     query: z.string().max(200).optional(),
-    type: z.enum(['ALL', 'PARTY', 'MATTER', 'PROCEEDING']).optional(),
+    type: z.enum(['ALL', 'PARTY', 'MATTER', 'PROCEEDING', 'DOCUMENT']).optional(),
     includeArchived: z.boolean().optional(),
     page: z.number().int().min(1).max(MAX_SEARCH_PAGE).optional(),
     limit: z.number().int().min(1).max(50).optional(),

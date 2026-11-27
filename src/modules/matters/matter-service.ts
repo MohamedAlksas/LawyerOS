@@ -1,8 +1,9 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { getPrismaClient } from '@/lib/auth';
 import { Actor, Permission } from '@/modules/identity/types';
-import { assertAuthorized } from '@/modules/identity/authorize';
+import { assertAuthorized, authorize } from '@/modules/identity/authorize';
+import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
 import { recordAuditEvent } from '@/lib/audit';
 import { MAX_SEARCH_PAGE } from '@/lib/search-params';
 import { normalizeArabicDigits, normalizeArabicText, normalizePhone } from '@/lib/normalization';
@@ -14,7 +15,11 @@ import {
   type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
-import { cancelSourceReminderJobsBatch } from '@/modules/reminders/reminder-outbox';
+import { getCairoTodayDateString, parseCalendarDateToUtcDate } from '@/lib/cairo-date';
+import {
+  cancelSourceReminderJobsBatch,
+  enqueueMissingSourceReminderJobsBatch,
+} from '@/modules/reminders/reminder-outbox';
 import {
   MatterDTO,
   MatterPartySummaryDTO,
@@ -75,6 +80,7 @@ import {
   unifiedSearchParamsSchema,
   searchMatterClientsParamsSchema,
   parseCalendarDateToUtc,
+  validateStrictCalendarDate,
   UnauthorizedError,
   MatterValidationError,
   LastClientRequiredError,
@@ -659,6 +665,11 @@ export async function openMatter(
     throw err;
   }
 
+  const titleNormalized = normalizeArabicText(input.title);
+  if (!titleNormalized) {
+    throw new MatterValidationError('عنوان الملف لا يمكن أن يتكون من حركات أو تطويل فقط.');
+  }
+
   const rawStatus = (rawInput as unknown as Record<string, unknown>).status;
   if (rawStatus === 'ARCHIVED' || (input.status as string) === 'ARCHIVED') {
     throw new MatterValidationError('لا يمكن إنشاء ملف جديد بحالة مؤرشفة.');
@@ -671,13 +682,25 @@ export async function openMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
+  const payloadForIdempotency = {
+    title: input.title,
+    kind: input.kind,
+    status: input.status ?? null,
+    practiceAreaId: input.practiceAreaId ?? null,
+    openingDate: input.openingDate ?? null,
+    summary: input.summary ?? null,
+    notes: input.notes ?? null,
+    paperLocationId: input.paperLocationId ?? null,
+    initialClientId: input.initialClientId ?? null,
+  };
+
   return runMatterCommand(
     prisma,
     {
       actorId: actor.id,
       commandType: 'openMatter',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       // 1. Idempotency claim
@@ -685,7 +708,7 @@ export async function openMatter(
         actorId: actor.id,
         commandType: 'openMatter',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -705,10 +728,10 @@ export async function openMatter(
 
       // 3. Validate initial client if provided
       if (input.initialClientId) {
-        const party = await tx.party.findUnique({
-          where: { id: input.initialClientId },
-          select: { id: true, archivedAt: true },
-        });
+        const clientRows = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+          SELECT "id", "archivedAt" FROM "party" WHERE "id" = ${input.initialClientId} FOR NO KEY UPDATE;
+        `;
+        const party = clientRows[0];
         if (!party || party.archivedAt !== null) {
           throw new MatterValidationError('الموكل المحدد غير موجود أو مؤرشف.');
         }
@@ -841,7 +864,28 @@ export async function updateMatter(
     throw new UnsupportedTransitionError('الانتقال إلى الأرشفة أو الحذف غير مدعوم في هذا الإصدار.');
   }
 
+  if (input.title !== undefined) {
+    const titleNorm = normalizeArabicText(input.title);
+    if (!titleNorm) {
+      throw new MatterValidationError('عنوان الملف لا يمكن أن يتكون من حركات أو تطويل فقط.');
+    }
+  }
+
   const prisma = options.prismaOverride ?? getPrismaClient();
+
+  const payloadForIdempotency = {
+    id: input.id,
+    expectedVersion: input.expectedVersion,
+    title: input.title,
+    kind: input.kind,
+    status: input.status,
+    practiceAreaId: input.practiceAreaId,
+    openingDate: input.openingDate,
+    closingDate: input.closingDate,
+    summary: input.summary,
+    notes: input.notes,
+    paperLocationId: input.paperLocationId,
+  };
 
   return runMatterCommand(
     prisma,
@@ -849,14 +893,14 @@ export async function updateMatter(
       actorId: actor.id,
       commandType: 'updateMatter',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateMatter',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -1079,10 +1123,10 @@ export async function linkMatterParty(
         throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إضافة أطراف إليه.');
       }
 
-      const party = await tx.party.findUnique({
-        where: { id: input.partyId },
-        select: { id: true, archivedAt: true },
-      });
+      const partyRows = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+        SELECT "id", "archivedAt" FROM "party" WHERE "id" = ${input.partyId} FOR NO KEY UPDATE;
+      `;
+      const party = partyRows[0];
       if (!party) throw new NotFoundError('الطرف غير موجود.');
       if (party.archivedAt !== null) {
         throw new MatterValidationError('الطرف المحدد مؤرشف ولا يمكن ربطه بالملف.');
@@ -1319,6 +1363,17 @@ export async function updateMatterParty(
           throw new ClientPoaDependencyError('لا يمكن تغيير صفة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
         }
 
+        const poaDocumentDep = await tx.powerOfAttorney.findFirst({
+          where: {
+            partyId: existing.partyId,
+            document: { matterId: input.matterId },
+          },
+          select: { id: true },
+        });
+        if (poaDocumentDep) {
+          throw new ClientPoaDependencyError('لا يمكن تغيير صفة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
+        }
+
         if (matter.status === 'ACTIVE') {
           const otherClients = await tx.matterParty.count({
             where: { matterId: input.matterId, role: 'CLIENT', id: { not: input.id } },
@@ -1426,7 +1481,8 @@ export async function updateMatterParty(
 
 export async function unlinkMatterParty(
   actor: Actor,
-  rawInput: UnlinkMatterPartyInput
+  rawInput: UnlinkMatterPartyInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -1441,7 +1497,7 @@ export async function unlinkMatterParty(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -1501,6 +1557,17 @@ export async function unlinkMatterParty(
         });
         if (linkedPoas) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
+        }
+
+        const poaDocumentDep = await tx.powerOfAttorney.findFirst({
+          where: {
+            partyId: existing.partyId,
+            document: { matterId: input.matterId },
+          },
+          select: { id: true },
+        });
+        if (poaDocumentDep) {
+          throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
         }
 
         if (matter.status === 'ACTIVE') {
@@ -1820,20 +1887,42 @@ export async function updateProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
+  const payloadForIdempotency = {
+    id: input.id,
+    matterId: input.matterId,
+    expectedVersion: input.expectedVersion,
+    courtId: input.courtId,
+    instance: input.instance,
+    parentProceedingId: input.parentProceedingId,
+    registerType: input.registerType,
+    circuit: input.circuit,
+    numberText: input.numberText,
+    yearLabel: input.yearLabel,
+    filingDate: input.filingDate,
+    claimAmount: input.claimAmount,
+    status: input.status,
+    parties: input.parties?.map((p) => ({
+      matterPartyId: p.matterPartyId,
+      capacityText: p.capacityText ?? null,
+      legalCapacity: p.legalCapacity ?? null,
+      notes: p.notes,
+    })) ?? null,
+  };
+
   return runMatterCommand(
     prisma,
     {
       actorId: actor.id,
       commandType: 'updateProceeding',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateProceeding',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -2279,7 +2368,8 @@ export async function linkProceedingParty(
 
 export async function unlinkProceedingParty(
   actor: Actor,
-  rawInput: UnlinkProceedingPartyInput
+  rawInput: UnlinkProceedingPartyInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2294,7 +2384,7 @@ export async function unlinkProceedingParty(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2402,7 +2492,8 @@ export async function unlinkProceedingParty(
 
 export async function linkMatterAuthorization(
   actor: Actor,
-  rawInput: LinkMatterAuthorizationInput
+  rawInput: LinkMatterAuthorizationInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<MatterAuthorizationSummaryDTO> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2417,7 +2508,7 @@ export async function linkMatterAuthorization(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2459,6 +2550,10 @@ export async function linkMatterAuthorization(
         include: { party: true },
       });
       if (!poa) throw new NotFoundError('سند التوكيل غير موجود.');
+
+      if (poa.party.archivedAt !== null) {
+        throw new MatterValidationError('طرف سند التوكيل مؤرشف ولا يمكن ربطه بالملف.');
+      }
 
       // Invariant: POA party must be a CLIENT in MatterParty for this matter under the lock
       const clientRelation = await tx.matterParty.findFirst({
@@ -2553,7 +2648,8 @@ export async function linkMatterAuthorization(
 
 export async function unlinkMatterAuthorization(
   actor: Actor,
-  rawInput: UnlinkMatterAuthorizationInput
+  rawInput: UnlinkMatterAuthorizationInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2568,7 +2664,7 @@ export async function unlinkMatterAuthorization(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2931,6 +3027,14 @@ export async function searchMatterClients(
     }
     if (orClauses.length > 0) {
       where.OR = orClauses;
+    } else {
+      return {
+        clients: [],
+        total: 0,
+        page: 1,
+        totalPages: 1,
+        hasMore: false,
+      };
     }
   }
 
@@ -3340,6 +3444,62 @@ export async function reopenMatter(
         select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
       });
 
+      const now = new Date();
+      const todayUtc = parseCalendarDateToUtcDate(getCairoTodayDateString(now))!;
+      const openTasks = await tx.task.findMany({
+        where: {
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          dueDate: { gte: todayUtc },
+          AND: [
+            {
+              OR: [
+                { matterId: input.matterId },
+                { proceeding: { matterId: input.matterId } },
+              ],
+            },
+            {
+              OR: [
+                { proceedingId: null },
+                { proceeding: { archivedAt: null } },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          version: true,
+          matterId: true,
+          proceedingId: true,
+          dueDate: true,
+          dueTime: true,
+          createdById: true,
+        },
+      });
+      await enqueueMissingSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks
+          .filter((t): t is typeof t & { dueDate: Date } => t.dueDate !== null)
+          .map((t) => {
+            const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+            return {
+              sourceId: t.id,
+              sourceVersion: t.version,
+              eventDateYmd: dueDateStr,
+              deduplicationKey: `task_reminder_${t.id}_v${t.version}_reopen_m${updated.version}`,
+              payload: {
+                taskId: t.id,
+                matterId: t.matterId,
+                proceedingId: t.proceedingId,
+                dueDate: dueDateStr,
+                dueTime: t.dueTime,
+                sourceVersion: t.version,
+                recipientUserId: t.createdById,
+              },
+            };
+          })
+      );
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'REOPEN_MATTER',
@@ -3736,6 +3896,49 @@ export async function reopenProceeding(
         WHERE "id" = ${input.matterId};
       `;
 
+      const now = new Date();
+      const todayUtc = parseCalendarDateToUtcDate(getCairoTodayDateString(now))!;
+      const openTasks = await tx.task.findMany({
+        where: {
+          proceedingId: input.proceedingId,
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          dueDate: { gte: todayUtc },
+        },
+        select: {
+          id: true,
+          version: true,
+          matterId: true,
+          proceedingId: true,
+          dueDate: true,
+          dueTime: true,
+          createdById: true,
+        },
+      });
+      await enqueueMissingSourceReminderJobsBatch(
+        tx,
+        'Task',
+        openTasks
+          .filter((t): t is typeof t & { dueDate: Date } => t.dueDate !== null)
+          .map((t) => {
+            const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+            return {
+              sourceId: t.id,
+              sourceVersion: t.version,
+              eventDateYmd: dueDateStr,
+              deduplicationKey: `task_reminder_${t.id}_v${t.version}_reopen_p${updated.version}`,
+              payload: {
+                taskId: t.id,
+                matterId: t.matterId,
+                proceedingId: t.proceedingId,
+                dueDate: dueDateStr,
+                dueTime: t.dueTime,
+                sourceVersion: t.version,
+                recipientUserId: t.createdById,
+              },
+            };
+          })
+      );
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'REOPEN_PROCEEDING',
@@ -3865,33 +4068,33 @@ export async function searchProceedings(
 
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const rawPage = params.page ?? (params.offset ? Math.floor(params.offset / limit) + 1 : 1);
-  const page = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const requestedPage = Number.isFinite(rawPage) ? Math.min(MAX_SEARCH_PAGE, Math.max(1, Math.trunc(rawPage))) : 1;
+  const total = await prisma.proceeding.count({ where });
+  const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
+  const page = Math.min(requestedPage, totalPages);
   const skip = (page - 1) * limit;
 
-  const [proceedings, total] = await Promise.all([
-    prisma.proceeding.findMany({
-      where,
-      select: {
-        id: true,
-        matterId: true,
-        courtId: true,
-        instance: true,
-        registerType: true,
-        circuit: true,
-        numberText: true,
-        yearLabel: true,
-        status: true,
-        archivedAt: true,
-        updatedAt: true,
-        court: { select: { name: true } },
-        matter: { select: { title: true, fileCode: true } },
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit,
-      skip,
-    }),
-    prisma.proceeding.count({ where }),
-  ]);
+  const proceedings = await prisma.proceeding.findMany({
+    where,
+    select: {
+      id: true,
+      matterId: true,
+      courtId: true,
+      instance: true,
+      registerType: true,
+      circuit: true,
+      numberText: true,
+      yearLabel: true,
+      status: true,
+      archivedAt: true,
+      updatedAt: true,
+      court: { select: { name: true } },
+      matter: { select: { title: true, fileCode: true } },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit,
+    skip,
+  });
 
   return {
     proceedings: proceedings.map((p) => ({
@@ -3912,7 +4115,7 @@ export async function searchProceedings(
     })),
     total,
     page,
-    totalPages: Math.ceil(total / limit) || 1,
+    totalPages,
     limit,
   };
 }
@@ -3992,10 +4195,10 @@ function mapProceedingToUnifiedItem(p: {
   archivedAt: Date | null;
   updatedAt: Date;
   court: { name: string };
-  matter: { title: string; fileCode: string; archivedAt?: Date | null };
+  matter: { title: string; fileCode: string; status?: string; archivedAt?: Date | null };
 }): UnifiedSearchResultItem {
   const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
-  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt);
+  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt) || p.matter.status === 'ARCHIVED';
   const badge = isArchived
     ? 'مؤرشف'
     : (UNIFIED_PROCEEDING_STATUS_LABELS[p.status] ?? p.status);
@@ -4008,6 +4211,56 @@ function mapProceedingToUnifiedItem(p: {
     href: `/matters/${p.matterId}/proceedings/${p.id}`,
     isArchived,
     updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
+const DOCUMENT_UNIFIED_SELECT = {
+  id: true,
+  title: true,
+  documentType: true,
+  matterId: true,
+  partyId: true,
+  archivedAt: true,
+  updatedAt: true,
+  matter: { select: { id: true, fileCode: true, title: true, status: true, archivedAt: true } },
+  party: { select: { id: true, name: true, archivedAt: true } },
+  proceeding: { select: { archivedAt: true } },
+  hearing: { select: { proceeding: { select: { archivedAt: true } } } },
+} satisfies Prisma.DocumentSelect;
+
+function mapDocumentToUnifiedItem(d: {
+  id: string;
+  title: string;
+  documentType: DocumentType;
+  matterId: string | null;
+  partyId: string | null;
+  archivedAt: Date | null;
+  updatedAt: Date;
+  matter: { id: string; fileCode: string; title: string; status: string; archivedAt: Date | null } | null;
+  party: { id: string; name: string; archivedAt: Date | null } | null;
+  proceeding: { archivedAt: Date | null } | null;
+  hearing: { proceeding: { archivedAt: Date | null } } | null;
+}): UnifiedSearchResultItem {
+  const isArchived =
+    Boolean(d.archivedAt) ||
+    Boolean(d.matter?.archivedAt) ||
+    d.matter?.status === 'ARCHIVED' ||
+    Boolean(d.party?.archivedAt) ||
+    Boolean(d.proceeding?.archivedAt) ||
+    Boolean(d.hearing?.proceeding?.archivedAt);
+  const subtitle = d.matter
+    ? `${d.matter.fileCode} • ${d.matter.title}`
+    : d.party?.name;
+  return {
+    id: d.id,
+    entityType: 'DOCUMENT',
+    title: d.title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(d.matter?.fileCode ? { code: d.matter.fileCode } : {}),
+    badge: DOCUMENT_TYPE_LABELS_AR[d.documentType] ?? d.documentType,
+    href: `/documents/${d.id}`,
+    isArchived,
+    updatedAt: d.updatedAt.toISOString(),
   };
 }
 
@@ -4125,25 +4378,85 @@ export async function unifiedSearch(
     procWhere.OR = orClauses;
   }
 
+  // 4. Document metadata where clause (only when actor has READ_DOCUMENTS)
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  const docWhere: Prisma.DocumentWhereInput = {
+    currentVersion: {
+      is: {
+        uploadStatus: 'READY',
+        scanStatus: { in: ['NOT_SCANNED_POLICY', 'CLEAN'] },
+      },
+    },
+  };
+  if (!includeArchived) {
+    docWhere.archivedAt = null;
+    docWhere.AND = [
+      { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
+      { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+      { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+      { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
+    ];
+  }
+  if (query) {
+    const qDigits = normalizeArabicDigits(query);
+    const normQuery = normalizeArabicText(query);
+    const variants = expandSearchVariants(query);
+    const tagCandidates = Array.from(new Set([query, normQuery, ...variants].filter(Boolean)));
+
+    const orClauses: Prisma.DocumentWhereInput[] = [];
+    if (normQuery) {
+      orClauses.push({ titleNormalized: { contains: normQuery, mode: 'insensitive' } });
+      orClauses.push({ matter: { titleNormalized: { contains: normQuery, mode: 'insensitive' } } });
+      orClauses.push({ party: { nameNormalized: { contains: normQuery, mode: 'insensitive' } } });
+    }
+    for (const v of variants) {
+      orClauses.push({ title: { contains: v, mode: 'insensitive' } });
+      orClauses.push({ matter: { title: { contains: v, mode: 'insensitive' } } });
+      orClauses.push({ matter: { fileCode: { contains: v, mode: 'insensitive' } } });
+      orClauses.push({ party: { name: { contains: v, mode: 'insensitive' } } });
+    }
+    if (tagCandidates.length > 0) {
+      orClauses.push({ tags: { hasSome: tagCandidates } });
+    }
+    if (validateStrictCalendarDate(qDigits)) {
+      const parsedDate = parseCalendarDateToUtc(qDigits);
+      if (parsedDate) {
+        orClauses.push({ documentDate: parsedDate });
+      }
+    }
+    for (const [docType, label] of Object.entries(DOCUMENT_TYPE_LABELS_AR)) {
+      const normLabel = normalizeArabicText(label);
+      if ((normQuery && normLabel.includes(normQuery)) || docType.toLowerCase() === query.toLowerCase()) {
+        orClauses.push({ documentType: docType as DocumentType });
+      }
+    }
+    if (orClauses.length > 0) {
+      docWhere.OR = orClauses;
+    }
+  }
+
   // Always compute accurate counts for all categories regardless of active tab
-  const [partiesCount, mattersCount, proceedingsCount] = await Promise.all([
+  const [partiesCount, mattersCount, proceedingsCount, documentsCount] = await Promise.all([
     prisma.party.count({ where: partyWhere }),
     prisma.matter.count({ where: matterWhere }),
     prisma.proceeding.count({ where: procWhere }),
+    canReadDocuments ? prisma.document.count({ where: docWhere }) : Promise.resolve(0),
   ]);
-  const totalAll = mattersCount + proceedingsCount + partiesCount;
+  const totalAll = mattersCount + proceedingsCount + partiesCount + documentsCount;
 
   const counts = {
     all: totalAll,
     parties: partiesCount,
     matters: mattersCount,
     proceedings: proceedingsCount,
+    documents: documentsCount,
   };
 
   let total: number;
   if (searchType === 'PARTY') total = partiesCount;
   else if (searchType === 'MATTER') total = mattersCount;
   else if (searchType === 'PROCEEDING') total = proceedingsCount;
+  else if (searchType === 'DOCUMENT') total = documentsCount;
   else total = totalAll;
 
   const totalPages = Math.min(MAX_SEARCH_PAGE, Math.ceil(total / limit) || 1);
@@ -4212,7 +4525,7 @@ export async function unifiedSearch(
           archivedAt: true,
           updatedAt: true,
           court: { select: { name: true } },
-          matter: { select: { title: true, fileCode: true, archivedAt: true } },
+          matter: { select: { title: true, fileCode: true, status: true, archivedAt: true } },
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
@@ -4220,12 +4533,24 @@ export async function unifiedSearch(
       });
       items = proceedings.map(mapProceedingToUnifiedItem);
     }
+  } else if (searchType === 'DOCUMENT') {
+    if (canReadDocuments && skip < documentsCount) {
+      const documents = await prisma.document.findMany({
+        where: docWhere,
+        select: DOCUMENT_UNIFIED_SELECT,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take: limit,
+      });
+      items = documents.map(mapDocumentToUnifiedItem);
+    }
   } else {
     // searchType === 'ALL'
     if (skip < totalAll) {
       const s1 = mattersCount;
       const s2 = proceedingsCount;
       const s3 = partiesCount;
+      const s4 = documentsCount;
 
       let take1 = 0;
       let skip1 = 0;
@@ -4250,7 +4575,15 @@ export async function unifiedSearch(
         take3 = Math.min(rem2, s3 - skip3);
       }
 
-      const [matters, proceedings, parties] = await Promise.all([
+      let take4 = 0;
+      let skip4 = 0;
+      const rem3 = rem2 - take3;
+      if (rem3 > 0 && skip < s1 + s2 + s3 + s4) {
+        skip4 = Math.max(0, skip - (s1 + s2 + s3));
+        take4 = Math.min(rem3, s4 - skip4);
+      }
+
+      const [matters, proceedings, parties, documents] = await Promise.all([
         take1 > 0
           ? prisma.matter.findMany({
               where: matterWhere,
@@ -4290,7 +4623,7 @@ export async function unifiedSearch(
                 archivedAt: true,
                 updatedAt: true,
                 court: { select: { name: true } },
-                matter: { select: { title: true, fileCode: true, archivedAt: true } },
+                matter: { select: { title: true, fileCode: true, status: true, archivedAt: true } },
               },
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               skip: skip2,
@@ -4313,12 +4646,22 @@ export async function unifiedSearch(
               take: take3,
             })
           : [],
+        canReadDocuments && take4 > 0
+          ? prisma.document.findMany({
+              where: docWhere,
+              select: DOCUMENT_UNIFIED_SELECT,
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              skip: skip4,
+              take: take4,
+            })
+          : [],
       ]);
 
       items = [
         ...matters.map(mapMatterToUnifiedItem),
         ...proceedings.map(mapProceedingToUnifiedItem),
         ...parties.map(mapPartyToUnifiedItem),
+        ...documents.map(mapDocumentToUnifiedItem),
       ];
     }
   }

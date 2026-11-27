@@ -3,6 +3,7 @@ import {
   ALLOWED_DOCUMENT_MIMES,
   DOCUMENT_TYPE_LABELS_AR,
   DOWNLOAD_DEVICE_RETENTION_NOTICE_AR,
+  DocumentActionResult,
   DocumentOriginalPresence,
   DocumentScanStatus,
   DocumentSensitivity,
@@ -28,24 +29,75 @@ export interface SelectablePartyOption {
   kind: string;
 }
 
+export const DOCUMENT_INPUT_CLASS =
+  'w-full max-w-full min-w-0 min-h-[44px] px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70';
+export const DOCUMENT_MESSAGE_CLASS = 'min-w-0 break-words [overflow-wrap:anywhere]';
+export const DOCUMENT_FIELD_ERROR_CLASS = `text-xs text-[#A4262C] mt-1 font-medium ${DOCUMENT_MESSAGE_CLASS}`;
+
+export const DOCUMENT_SESSION_EXPIRED_MESSAGE =
+  'انتهت الجلسة. البيانات لم تُحفظ، يرجى إعادة تسجيل الدخول والمحاولة.';
+export const DOCUMENT_NETWORK_ERROR_MESSAGE = 'الاتصال انقطع، البيانات لسه ما اتحفظتش';
+export const DOCUMENT_SIZE_EXCEEDED_MESSAGE =
+  'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).';
+
+export const RETRYABLE_UPLOAD_CONFLICT_CODES = new Set<string>([
+  'CONCURRENCY_CONFLICT',
+  'IDEMPOTENCY_CONCURRENT_CONFLICT',
+]);
+
+export type DocumentFailureBody = Extract<DocumentActionResult<unknown>, { success: false }>;
+
+/** Conflicts and server/session faults keep the attempt (and its idempotency keys) for a safe replay. */
+export function classifyUploadFailure(
+  httpStatus: number,
+  body: DocumentFailureBody | null,
+  fallback: string
+): { status: 'INCOMPLETE' | 'REJECTED'; message: string; isConcurrencyConflict: boolean } {
+  const message = body?.error ?? fallback;
+  if (httpStatus === 401) {
+    return {
+      status: 'INCOMPLETE',
+      message: DOCUMENT_SESSION_EXPIRED_MESSAGE,
+      isConcurrencyConflict: false,
+    };
+  }
+  if (httpStatus === 409 && body && RETRYABLE_UPLOAD_CONFLICT_CODES.has(body.code)) {
+    return {
+      status: 'INCOMPLETE',
+      message,
+      isConcurrencyConflict: body.code === 'CONCURRENCY_CONFLICT',
+    };
+  }
+  if (httpStatus >= 500 && body?.code !== 'SCAN_POLICY_UNAVAILABLE') {
+    return { status: 'INCOMPLETE', message, isConcurrencyConflict: false };
+  }
+  if (httpStatus === 413) {
+    return {
+      status: 'REJECTED',
+      message: DOCUMENT_SIZE_EXCEEDED_MESSAGE,
+      isConcurrencyConflict: false,
+    };
+  }
+  return { status: 'REJECTED', message, isConcurrencyConflict: false };
+}
+
 export const DOCUMENT_TYPE_OPTIONS: Array<{ value: DocumentType; label: string }> = (
   Object.entries(DOCUMENT_TYPE_LABELS_AR) as Array<[DocumentType, string]>
 ).map(([value, label]) => ({ value, label }));
 
 export const ORIGINAL_PRESENCE_LABELS: Record<DocumentOriginalPresence, string> = {
-  YES: 'نعم — الأصل محفوظ بالمكتب',
-  NO: 'لا — نسخة إلكترونية فقط',
-  UNKNOWN: 'غير محدد',
+  YES: 'موجود بالمكتب',
+  NO: 'غير موجود بالمكتب',
+  UNKNOWN: 'غير معروف',
 };
 
 export const ORIGINAL_PRESENCE_OPTIONS: Array<{
   value: DocumentOriginalPresence;
   label: string;
-}> = [
-  { value: 'UNKNOWN', label: 'غير محدد' },
-  { value: 'YES', label: 'نعم — الأصل محفوظ بالمكتب' },
-  { value: 'NO', label: 'لا — نسخة إلكترونية فقط' },
-];
+}> = (['UNKNOWN', 'YES', 'NO'] as const).map((value) => ({
+  value,
+  label: ORIGINAL_PRESENCE_LABELS[value],
+}));
 
 export const SENSITIVITY_LABELS: Record<DocumentSensitivity, string> = {
   CONFIDENTIAL: 'سري',
@@ -119,6 +171,50 @@ export const SCAN_STATUS_BADGE_CLASSES: Record<DocumentScanStatus, string> = {
   TIMEOUT: 'bg-red-50 text-[#A4262C] border-red-300',
   STALE_DEFINITIONS: 'bg-red-50 text-[#A4262C] border-red-300',
 };
+
+const ERROR_SCAN_STATUS_LABELS = new Set([
+  'مرفوض أمنياً',
+  'فشل الفحص',
+  'انتهت مهلة الفحص',
+  'تعريفات الفحص قديمة',
+  'غير جاهز',
+]);
+
+export function getScanStatusBadgeClassFromLabel(label: string): string {
+  const trimmed = label.trim();
+  if (trimmed === 'مفحوص وسليم' || trimmed === 'نظيف') {
+    return SCAN_STATUS_BADGE_CLASSES.CLEAN;
+  }
+  if (trimmed === 'بانتظار الفحص' || trimmed === 'قيد الفحص') {
+    return SCAN_STATUS_BADGE_CLASSES.PENDING;
+  }
+  if (
+    ERROR_SCAN_STATUS_LABELS.has(trimmed) ||
+    trimmed.startsWith('مرفوض') ||
+    trimmed.startsWith('فشل') ||
+    trimmed.startsWith('انتهت مهلة')
+  ) {
+    return SCAN_STATUS_BADGE_CLASSES.INFECTED;
+  }
+  if (trimmed === UNSCANNED_POLICY_NOTICE_AR || trimmed.includes('لم يُفحص')) {
+    return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+  }
+  return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+}
+
+export function getLinkableDocumentScanBadgeClass(doc?: {
+  scanStatus?: DocumentScanStatus;
+  scanStatusLabel?: string;
+} | null): string {
+  if (!doc) return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+  if (doc.scanStatus && doc.scanStatus in SCAN_STATUS_BADGE_CLASSES) {
+    return SCAN_STATUS_BADGE_CLASSES[doc.scanStatus];
+  }
+  if (doc.scanStatusLabel) {
+    return getScanStatusBadgeClassFromLabel(doc.scanStatusLabel);
+  }
+  return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+}
 
 export function formatFileSizeArabic(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 بايت';

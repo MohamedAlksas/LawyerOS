@@ -75,6 +75,7 @@ import {
   MatterArchivedError,
   ProceedingArchivedError,
   ActiveObligationError,
+  UnauthorizedError,
 } from './matter-types';
 import {
   IdempotencyPayloadMismatchError,
@@ -204,6 +205,14 @@ function handleActionError(error: unknown): ActionResult<never> {
     };
   }
 
+  if (error instanceof UnauthorizedError) {
+    return {
+      success: false,
+      error: error.message || 'المستخدم غير مصرح له.',
+      code: 'UNAUTHENTICATED',
+    };
+  }
+
   if (error instanceof AuthorizationError) {
     return {
       success: false,
@@ -239,7 +248,7 @@ export async function openMatterAction(
   input: OpenMatterInput
 ): Promise<ActionResult<OpenMatterResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await openMatter(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -251,7 +260,7 @@ export async function updateMatterAction(
   input: UpdateMatterInput
 ): Promise<ActionResult<UpdateMatterResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await updateMatter(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -263,7 +272,7 @@ export async function linkMatterPartyAction(
   input: LinkMatterPartyInput
 ): Promise<ActionResult<MatterPartySummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await linkMatterParty(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -275,7 +284,7 @@ export async function updateMatterPartyAction(
   input: UpdateMatterPartyInput
 ): Promise<ActionResult<MatterPartySummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await updateMatterParty(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -287,7 +296,7 @@ export async function unlinkMatterPartyAction(
   input: UnlinkMatterPartyInput
 ): Promise<ActionResult<{ success: true }>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     await unlinkMatterParty(actor, input);
     return { success: true, data: { success: true } };
   } catch (error) {
@@ -299,7 +308,7 @@ export async function addProceedingAction(
   input: AddProceedingInput
 ): Promise<ActionResult<ProceedingSummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await addProceeding(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -311,7 +320,7 @@ export async function updateProceedingAction(
   input: UpdateProceedingInput
 ): Promise<ActionResult<ProceedingSummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await updateProceeding(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -323,7 +332,7 @@ export async function linkProceedingPartyAction(
   input: LinkProceedingPartyInput
 ): Promise<ActionResult<ProceedingPartySummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await linkProceedingParty(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -335,7 +344,7 @@ export async function unlinkProceedingPartyAction(
   input: UnlinkProceedingPartyInput
 ): Promise<ActionResult<{ success: true }>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     await unlinkProceedingParty(actor, input);
     return { success: true, data: { success: true } };
   } catch (error) {
@@ -347,7 +356,7 @@ export async function linkMatterAuthorizationAction(
   input: LinkMatterAuthorizationInput
 ): Promise<ActionResult<MatterAuthorizationSummaryDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     const data = await linkMatterAuthorization(actor, input);
     return { success: true, data };
   } catch (error) {
@@ -359,7 +368,7 @@ export async function unlinkMatterAuthorizationAction(
   input: UnlinkMatterAuthorizationInput
 ): Promise<ActionResult<{ success: true }>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('WRITE_CLIENT_DATA');
     await unlinkMatterAuthorization(actor, input);
     return { success: true, data: { success: true } };
   } catch (error) {
@@ -371,7 +380,7 @@ export async function getMatterAction(
   matterId: string
 ): Promise<ActionResult<MatterDTO>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await getMatter(matterId, actor);
     return { success: true, data };
   } catch (error) {
@@ -392,7 +401,7 @@ export async function searchMattersAction(
   params: SearchMattersParams
 ): Promise<ActionResult<SearchMattersResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await searchMatters(params, actor);
     return { success: true, data };
   } catch (error) {
@@ -404,7 +413,7 @@ export async function getPartyMatterAssociationsAction(
   params: GetPartyMatterAssociationsParams
 ): Promise<ActionResult<PartyMatterAssociationsResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await getPartyMatterAssociations(actor, params);
     return { success: true, data };
   } catch (error) {
@@ -416,7 +425,7 @@ export async function findSimilarProceedingsAction(
   params: FindSimilarProceedingsParams
 ): Promise<ActionResult<FindSimilarProceedingsResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await findSimilarProceedings(actor, params);
     return { success: true, data };
   } catch (error) {
@@ -488,7 +497,7 @@ export async function searchProceedingsAction(
   params: SearchProceedingsParams
 ): Promise<ActionResult<SearchProceedingsResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await searchProceedings(params, actor);
     return { success: true, data };
   } catch (error) {
@@ -500,7 +509,7 @@ export async function unifiedSearchAction(
   params: UnifiedSearchParams
 ): Promise<ActionResult<UnifiedSearchResult>> {
   try {
-    const actor = await verifyActionSecurity();
+    const actor = await verifyActionSecurity('READ_CLIENT_DATA');
     const data = await unifiedSearch(params, actor);
     return { success: true, data };
   } catch (error) {

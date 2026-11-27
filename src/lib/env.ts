@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 /**
@@ -185,6 +186,76 @@ export function areDatabaseIdentitiesEqual(url1: string, url2: string): boolean 
 }
 
 const LOOPBACK_BETTER_AUTH_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
+const TRUSTED_PROXY_PREFIX_RE = /^[1-9]\d*$/;
+
+function isIpv4MappedIpv6(ip: string): boolean {
+  const halves = ip.split('::');
+  if (halves.length > 2) return false;
+  const parsePart = (part: string): number[] | null => {
+    if (!part) return [];
+    const tokens = part.split(':');
+    const out: number[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]!;
+      if (tok.includes('.')) {
+        if (i !== tokens.length - 1) return null;
+        const octets = tok.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+          return null;
+        }
+        out.push((octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!);
+      } else {
+        const val = Number.parseInt(tok, 16);
+        if (Number.isNaN(val)) return null;
+        out.push(val);
+      }
+    }
+    return out;
+  };
+  const left = parsePart(halves[0]!);
+  const right = halves.length === 2 ? parsePart(halves[1]!) : [];
+  if (!left || !right) return false;
+  const missing = halves.length === 2 ? 8 - (left.length + right.length) : 0;
+  if (missing < 0 || (halves.length === 1 && left.length !== 8)) return false;
+  const groups = [...left, ...new Array<number>(missing).fill(0), ...right];
+  return (
+    groups.length === 8 &&
+    groups[0] === 0 &&
+    groups[1] === 0 &&
+    groups[2] === 0 &&
+    groups[3] === 0 &&
+    groups[4] === 0 &&
+    groups[5] === 0xffff
+  );
+}
+
+export function isValidTrustedProxyIpOrCidr(entry: string): boolean {
+  if (!entry) return false;
+  const slashIdx = entry.indexOf('/');
+  if (slashIdx === -1) {
+    return isIP(entry) !== 0;
+  }
+
+  const ipPart = entry.slice(0, slashIdx);
+  const prefixPart = entry.slice(slashIdx + 1);
+  const ipVersion = isIP(ipPart);
+  if (ipVersion === 0 || !TRUSTED_PROXY_PREFIX_RE.test(prefixPart)) {
+    return false;
+  }
+  if (ipVersion === 6 && isIpv4MappedIpv6(ipPart)) {
+    return false;
+  }
+
+  const prefix = Number(prefixPart);
+  const maxPrefix = ipVersion === 4 ? 32 : 128;
+  return prefix >= 1 && prefix <= maxPrefix;
+}
+
+function parseTrustedProxyEntries(raw: string): { entries: string[]; hasInvalid: boolean } {
+  const entries = raw.split(',').map((entry) => entry.trim());
+  const hasInvalid = entries.some((entry) => !isValidTrustedProxyIpOrCidr(entry));
+  return { entries, hasInvalid };
+}
 
 /**
  * Server-only environment schema for LawOffice OS.
@@ -253,6 +324,8 @@ const baseEnvSchema = z.object({
     }),
   PARTY_IDENTITY_ENCRYPTION_KEY: z.string().optional(),
   PARTY_IDENTITY_KEY_ID: z.string().optional(),
+  PARTY_IDENTITY_PREVIOUS_KEYS: z.string().optional(),
+  TRUSTED_PROXY_IPS: z.string().optional(),
   RESTORE_MODE: z.string().optional(),
   REMINDER_DISPATCH_DISABLED: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().optional(),
@@ -260,6 +333,18 @@ const baseEnvSchema = z.object({
   DOCUMENT_SCAN_POLICY_MODE: z
     .enum(['INITIAL_DEFERRED', 'REQUIRED'])
     .default('INITIAL_DEFERRED'),
+}).superRefine((env, ctx) => {
+  if (env.TRUSTED_PROXY_IPS !== undefined && env.TRUSTED_PROXY_IPS.trim().length > 0) {
+    const { hasInvalid } = parseTrustedProxyEntries(env.TRUSTED_PROXY_IPS);
+    if (hasInvalid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['TRUSTED_PROXY_IPS'],
+        message:
+          'TRUSTED_PROXY_IPS must be a comma-separated list of valid IPv4/IPv6 addresses or CIDR blocks (e.g. 127.0.0.1,::1,10.0.0.0/8)',
+      });
+    }
+  }
 });
 
 export type AppEnv = z.infer<typeof baseEnvSchema>;
@@ -454,10 +539,25 @@ export function isWorkerDispatchDisabled(
   );
 }
 
+export function parseTrustedProxyIps(raw?: string): string[] {
+  if (!raw || raw.trim().length === 0) {
+    return ['127.0.0.1', '::1'];
+  }
+  const { entries, hasInvalid } = parseTrustedProxyEntries(raw);
+  if (hasInvalid) {
+    throw new EnvironmentValidationError(
+      'Environment validation failed.\nInvalid environment variable(s): TRUSTED_PROXY_IPS\nTRUSTED_PROXY_IPS must be a comma-separated list of valid IPv4/IPv6 addresses or CIDR blocks.\nConsult .env.example for required configuration. Secret values are redacted.',
+      [],
+      ['TRUSTED_PROXY_IPS']
+    );
+  }
+  return entries;
+}
+
 /**
  * Sanitizes error messages before persistence or UI/log exposure.
  * Strips connection strings, credentials, bearer tokens, JWTs, hex/base64 blobs,
- * and truncates length so secrets or document bytes never leak.
+ * OS file paths, and truncates length so secrets or document bytes never leak.
  */
 export function redactErrorMessage(error: unknown, maxLength = 300): string {
   const raw =
@@ -473,6 +573,12 @@ export function redactErrorMessage(error: unknown, maxLength = 300): string {
     .replace(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+/g, '[REDACTED_URL]')
     // Basic user:pass@host fragments without protocol
     .replace(/[^\s/:@]+:[^\s/@]+@[^\s/:]+/g, '[REDACTED_CREDENTIALS]')
+    // Windows and POSIX system/app paths
+    .replace(/\b[A-Za-z]:\\[^\s"'`<>|*?]+/g, '[REDACTED_PATH]')
+    .replace(
+      /(?:^|(?<=[\s"'(=:,]))\/(?:var|home|srv|app|tmp|opt|etc)(?:\/[^\s"'`<>|*),;\]}]+)+/g,
+      '[REDACTED_PATH]'
+    )
     // Bearer / Basic / JWT tokens
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 [REDACTED_TOKEN]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')

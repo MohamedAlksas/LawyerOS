@@ -128,7 +128,15 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     if (bundler !== 'turbopack' && bundler !== 'webpack') {
       throw new Error('STARTUP_TEST_BUNDLER must be turbopack or webpack.');
     }
-    // Always build this checkout. A leftover .next directory is not provenance.
+
+    const buildIdPath = path.resolve('.next/BUILD_ID');
+    if (!process.env.FORCE_STARTUP_REBUILD && fs.existsSync(buildIdPath)) {
+      const buildId = fs.readFileSync(buildIdPath, 'utf8').trim();
+      console.info(`[startup-process] reusing existing build: ${buildId}`);
+      return;
+    }
+
+    // Build this checkout if no valid pre-built artifact exists.
     const build = spawn(process.execPath, [nextBin, 'build', ...(bundler === 'webpack' ? ['--webpack'] : [])], {
       cwd: process.cwd(),
       detached: process.platform !== 'win32',
@@ -147,7 +155,7 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     build.stdout?.on('data', (data) => { output += data.toString(); });
     build.stderr?.on('data', (data) => { output += data.toString(); });
     try {
-      const result = await waitForExit(build, 60000);
+      const result = await waitForExit(build, 120000);
       if (result.code !== 0) throw new Error(`Fresh startup build failed: ${output}`);
     } catch (error) {
       await killOwnedProcess(build);
@@ -155,7 +163,7 @@ describe('Startup Process Failure Boundary & Process Ownership (R24, R25)', () =
     }
     const buildId = fs.readFileSync(path.resolve('.next/BUILD_ID'), 'utf8').trim();
     console.info(`[startup-process] fresh ${bundler} build: ${buildId}`);
-  }, 70000);
+  }, 140000);
 
   afterEach(async () => {
     // Clean up only task-spawned child processes

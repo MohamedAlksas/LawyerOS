@@ -115,6 +115,12 @@ describe('T05-02: Party Search & Duplicate Warnings (Integration)', () => {
     expect(paged.page).toBe(1);
     expect(paged.totalCount).toBeGreaterThanOrEqual(3);
     expect(paged.totalPages).toBe(Math.ceil(paged.totalCount / 2));
+
+    const outOfRange = await searchParties(actor, { page: 99, limit: 2 });
+    expect(outOfRange.page).toBe(outOfRange.totalPages);
+    expect(outOfRange.parties.length).toBeGreaterThan(0);
+    const lastPage = await searchParties(actor, { page: outOfRange.totalPages, limit: 2 });
+    expect(outOfRange.parties.map((p) => p.id)).toEqual(lastPage.parties.map((p) => p.id));
   });
 
   it('preserves original Arabic-Indic phone digits and matches bidirectional cross-digit queries (SPEC-03)', async () => {
@@ -163,5 +169,4 @@ describe('T05-02: Party Search & Duplicate Warnings (Integration)', () => {
     expect(phoneWarning?.matchType).toBe('PHONE');
   });
 });
-
 

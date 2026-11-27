@@ -142,7 +142,7 @@ export function PartyListClient({
       </div>
 
       {/* 2. Filters & Search Section */}
-      <div className="bg-white p-4 rounded-[6px] border border-[#D5DFE3] space-y-4 shadow-xs">
+      <div className="bg-white p-4 rounded-[6px] border border-[#D5DFE3] space-y-4 shadow-xs print:hidden">
         <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 relative">
             <label htmlFor="party-search-input" className="sr-only">
@@ -170,7 +170,7 @@ export function PartyListClient({
 
         {/* Kind Filters */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#E8EEF1]">
-          <div className="flex items-center gap-2" role="group" aria-label="تصفية حسب نوع الطرف">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="تصفية حسب نوع الطرف">
             <span className="text-xs font-semibold text-[#4D606A] ml-1">التصنيف:</span>
 
             <button
@@ -230,6 +230,7 @@ export function PartyListClient({
           title="تعذر تحميل دليل الأطراف"
           message={error}
           onRetry={() => fetchParties(appliedQuery, selectedKind, page)}
+          headingLevel="h2"
         />
       ) : parties.length === 0 ? (
         hasActiveFilters ? (

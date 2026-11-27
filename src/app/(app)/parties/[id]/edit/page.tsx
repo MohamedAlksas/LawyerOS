@@ -1,4 +1,5 @@
 import React from 'react';
+import { notFound } from 'next/navigation';
 import { GuardedLink as Link } from '@/components/navigation-guard';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
@@ -15,6 +16,8 @@ interface PartyEditPageProps {
 
 export const metadata = { title: 'تعديل بيانات الطرف — LawOffice OS' };
 
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
 export default async function PartyEditPage({ params }: PartyEditPageProps) {
   const { id } = await params;
   let actor;
@@ -26,13 +29,17 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لتعديل بيانات هذا الطرف.</p>
         </div>
       );
     }
     throw error;
+  }
+
+  if (!UUID_REGEX.test(id)) {
+    notFound();
   }
 
   let party;
@@ -44,6 +51,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
         <div className="max-w-3xl mx-auto py-12">
           <EmptyStateContainer
             icon=""
+            headingLevel="h1"
             title="الطرف غير موجود"
             description="لم يتم العثور على الطرف المطلوب لتعديله."
             action={
@@ -67,6 +75,7 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
       <div className="max-w-3xl mx-auto py-12" dir="rtl" lang="ar-EG">
         <EmptyStateContainer
           icon=""
+          headingLevel="h1"
           title="الطرف مؤرشف"
           description="لا يمكن تعديل بيانات طرف مؤرشف. يتاح الاطلاع على بياناته فقط في وضع القراءة."
           action={
@@ -90,11 +99,11 @@ export default async function PartyEditPage({ params }: PartyEditPageProps) {
           <Link href="/parties" className="hover:text-[#14566B] hover:underline">
             دليل الأطراف
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <Link href={`/parties/${party.id}`} className="hover:text-[#14566B] hover:underline">
             {party.name}
           </Link>
-          <span aria-hidden="true">&gt;</span>
+          <span aria-hidden="true">/</span>
           <span className="text-[#172A35] font-medium">تعديل البيانات</span>
         </nav>
         <h1 className="text-2xl font-bold text-[#172A35] tracking-tight">

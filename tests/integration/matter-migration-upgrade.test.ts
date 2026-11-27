@@ -354,7 +354,8 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         await confirmOwnerProvisioning(ownerResult.user.id, validTotp);
 
         // Authenticate via Next.js auth endpoint to issue genuine signed session
-        const signInReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+        const authBase = getEnv().BETTER_AUTH_URL;
+        const signInReq = new NextRequest(`${authBase}/api/auth/sign-in/email`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -369,7 +370,7 @@ describe('T06-15: Schema Migrations & Upgrade Safety (Integration)', () => {
         expect(tfCookie).toBeDefined();
 
         const freshCode = await generateTotpCode(ownerResult.totpSecret);
-        const verifyTotpReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+        const verifyTotpReq = new NextRequest(`${authBase}/api/auth/two-factor/verify-totp`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',

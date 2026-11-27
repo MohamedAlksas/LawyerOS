@@ -21,7 +21,7 @@ export interface T04Owner {
   backupCodes: string[];
 }
 
-export const T04_LONG_OWNER_NAME =
+const T04_LONG_OWNER_NAME =
   'أحمد محمود عبد الرحمن السيد الشربيني عبد الله حسن محمد الطويل الشهير بأبو محمود';
 
 function createTotpSecret(): string {
@@ -139,20 +139,6 @@ export async function signInWithTotp(page: Page, owner: T04Owner): Promise<void>
   // cannot expire while unrelated assertions run.
   const code = await currentTotp(owner.totpSecret);
   await page.locator('#totpCode').fill(code);
-  await page.locator('button[type="submit"]').click();
-
-  await expect(page).not.toHaveURL(/\/(?:login|verify)(?:[/?]|$)/);
-}
-
-export async function signInWithBackupCode(page: Page, owner: T04Owner, code: string): Promise<void> {
-  await page.goto('/login');
-  await page.locator('#email').fill(owner.email);
-  await page.locator('#password').fill(owner.password);
-  await page.locator('button[type="submit"]').click();
-
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('التحقق الثنائي');
-  await page.getByRole('button', { name: /رمز استرداد للطوارئ/ }).click();
-  await page.locator('#backupCode').fill(code);
   await page.locator('button[type="submit"]').click();
 
   await expect(page).not.toHaveURL(/\/(?:login|verify)(?:[/?]|$)/);

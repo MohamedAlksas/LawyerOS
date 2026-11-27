@@ -50,9 +50,11 @@ export function normalizePhone(input: string | null | undefined): string {
   if (!input) return '';
   let digits = normalizeArabicDigits(input).replace(/\D/g, '');
   if (digits.startsWith('0020')) {
-    digits = '0' + digits.slice(4);
+    const rest = digits.slice(4);
+    digits = rest.startsWith('0') ? rest : '0' + rest;
   } else if (digits.startsWith('20') && digits.length >= 11) {
-    digits = '0' + digits.slice(2);
+    const rest = digits.slice(2);
+    digits = rest.startsWith('0') ? rest : '0' + rest;
   }
   return digits;
 }

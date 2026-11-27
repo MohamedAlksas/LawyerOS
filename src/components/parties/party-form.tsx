@@ -254,9 +254,9 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
         >
           <div className="flex items-start gap-3">
             <div>
-              <h3 className="text-sm font-bold text-rose-900">
+              <h2 className="text-sm font-bold text-rose-900">
                 تم تعديل البيانات من شاشة أخرى
-              </h3>
+              </h2>
               <p className="text-xs text-rose-800 mt-1 leading-relaxed">
                 قام مستخدم آخر أو شاشة أخرى بتحديث بيانات هذا الطرف أثناء تحريرك لها.
                 تم الاحتفاظ بتعديلاتك الحالية في الصفحة حتى لا تفقدها، ولكن لا يمكن الحفظ
@@ -287,9 +287,9 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
         >
           <div className="flex items-start gap-3">
             <div>
-              <h3 className="text-sm font-bold text-amber-900">
+              <h2 className="text-sm font-bold text-amber-900">
                 تنبيه استرشادي: يوجد أطراف مسجلة مسبقاً ببيانات مشابهة
-              </h3>
+              </h2>
               <p className="text-xs text-amber-800 mt-1 leading-relaxed">
                 يوجد طرف أو أكثر مسجل مسبقاً يتشابه في الاسم أو رقم الهاتف المدخل. لم يتم إنشاء أي طرف جديد حتى الآن. يمكنك استعراض الملف المسجل مسبقاً دون إنشاء تكرار، أو تأكيد الحفظ كطرف مستقل:
               </p>
@@ -312,7 +312,7 @@ export function PartyForm({ ownerId, party }: PartyFormProps) {
                     <Link
                       href={`/parties/${dup.id}`}
                       data-testid={`view-existing-duplicate-${dup.id}`}
-                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs inline-flex items-center gap-1"
+                      className="text-amber-900 underline font-semibold hover:text-amber-950 text-xs inline-flex items-center gap-1 min-h-[44px]"
                     >
                       <span>فتح الملف الموجود</span>
                       <span aria-hidden="true">↗</span>

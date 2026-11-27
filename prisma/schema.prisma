@@ -212,6 +212,7 @@ model CommunicationNote {
 model PowerOfAttorney {
   id                 String          @id @default(uuid())
   partyId            String
+  documentId         String?         @map("document_id")
   poaNumberText      String          // Case/record number preserving leading zeros
   poaYearLabel       String          // e.g. "2026"
   notarizationOffice String          // Issuing Real Estate Registration / Notarization office
@@ -228,9 +229,11 @@ model PowerOfAttorney {
   updatedById        String
 
   party              Party           @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  document           Document?       @relation("PoaDocument", fields: [documentId], references: [id], onDelete: SetNull)
   matterAuthorizations MatterAuthorization[]
 
   @@index([partyId])
+  @@index([documentId])
   @@index([poaNumberText, poaYearLabel])
   @@map("power_of_attorney")
 }
@@ -660,6 +663,7 @@ model Hearing {
 model HearingResult {
   id                   String              @id @default(uuid())
   hearingId            String              @map("hearing_id")
+  decisionDocumentId   String?             @map("decision_document_id")
   decisionText         String              @map("decision_text")
   summary              String?             @map("summary")
   attendance           String?             @map("attendance")
@@ -675,10 +679,12 @@ model HearingResult {
   updatedById          String              @map("updated_by_id")
 
   hearing              Hearing             @relation(fields: [hearingId], references: [id], onDelete: Cascade)
+  decisionDocument     Document?           @relation("HearingResultDecisionDocument", fields: [decisionDocumentId], references: [id], onDelete: SetNull)
   supersededBy         HearingResult[]     @relation("HearingResultSupersedes")
   supersedesResult     HearingResult?      @relation("HearingResultSupersedes", fields: [supersedesResultId], references: [id])
 
   @@index([hearingId])
+  @@index([decisionDocumentId])
   @@unique([hearingId, revision])
   @@map("hearing_result")
 }
@@ -762,11 +768,13 @@ model Deadline {
 
   matter                Matter         @relation(fields: [matterId], references: [id], onDelete: Cascade)
   proceeding            Proceeding?    @relation(fields: [proceedingId], references: [id], onDelete: SetNull)
+  sourceDocument        Document?      @relation("DeadlineSourceDocument", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
   tasks                 Task[]
 
   @@index([status, dueDate])
   @@index([matterId, status])
   @@index([proceedingId, status])
+  @@index([sourceDocumentId])
   @@map("deadline")
 }
 
@@ -945,7 +953,10 @@ model Document {
   hearing          Hearing?                 @relation(fields: [hearingId], references: [id], onDelete: SetNull)
   versions         DocumentVersion[]        @relation("DocumentVersions")
   currentVersion   DocumentVersion?         @relation("DocumentCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  uploadAttempts   UploadAttempt[]
+  uploadAttempts         UploadAttempt[]
+  powersOfAttorney       PowerOfAttorney[]        @relation("PoaDocument")
+  hearingResultDecisions HearingResult[]          @relation("HearingResultDecisionDocument")
+  deadlineSources        Deadline[]               @relation("DeadlineSourceDocument")
 
   @@index([matterId, createdAt])
   @@index([partyId, createdAt])
@@ -990,6 +1001,7 @@ model UploadAttempt {
   id                      String                   @id @default(uuid()) @map("id")
   documentId              String?                  @map("document_id")
   targetDocumentVersionId String?                  @unique @map("target_document_version_id")
+  expectedDocumentVersion Int?                     @map("expected_document_version")
   idempotencyRecordId     String                   @unique @map("idempotency_record_id")
   actorId                 String                   @map("actor_id")
   matterId                String?                  @map("matter_id")
@@ -1020,6 +1032,7 @@ model UploadAttempt {
   document                Document?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
   targetDocumentVersion   DocumentVersion?         @relation(fields: [targetDocumentVersionId], references: [id], onDelete: SetNull)
 
+  @@index([documentId])
   @@index([status, expiresAt])
   @@index([actorId, createdAt])
   @@map("upload_attempt")
@@ -1035,6 +1048,6 @@ model BackupFilePin {
   documentVersion   DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
 
   @@unique([backupId, documentVersionId])
-  @@index([documentVersionId])
+  @@index([documentVersionId, releasedAt])
   @@map("backup_file_pin")
 }

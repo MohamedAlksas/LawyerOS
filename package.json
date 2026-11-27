@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts && playwright test --config=playwright.t05.config.ts && playwright test --config=playwright.t06.config.ts && playwright test --config=playwright.t07.config.ts && playwright test --config=playwright.t08.config.ts && playwright test --config=playwright.t09.config.ts && playwright test --config=playwright.t10.config.ts && playwright test --config=playwright.t11.config.ts",
+    "test:e2e": "playwright test && playwright test --config=playwright.t04.config.ts && playwright test --config=playwright.t05.config.ts && playwright test --config=playwright.t06.config.ts && playwright test --config=playwright.t07.config.ts && playwright test --config=playwright.t08.config.ts && playwright test --config=playwright.t09.config.ts && playwright test --config=playwright.t10.config.ts && playwright test --config=playwright.t11.config.ts && playwright test --config=playwright.t12.config.ts",
     "test:e2e:t03": "playwright test",
     "test:e2e:t04": "playwright test --config=playwright.t04.config.ts",
     "test:e2e:t05": "playwright test --config=playwright.t05.config.ts",
@@ -20,6 +20,7 @@
     "test:e2e:t09": "playwright test --config=playwright.t09.config.ts",
     "test:e2e:t10": "playwright test --config=playwright.t10.config.ts",
     "test:e2e:t11": "playwright test --config=playwright.t11.config.ts",
+    "test:e2e:t12": "playwright test --config=playwright.t12.config.ts",
     "postinstall": "prisma generate",
     "auth:provision-owner": "tsx src/cli/provision-owner.ts",
     "worker": "tsx src/worker/index.ts"

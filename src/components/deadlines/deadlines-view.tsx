@@ -17,8 +17,11 @@ import type {
   ConfirmDeadlineInput,
   CreateDeadlineInput,
   DeadlineDTO,
+  LinkableDocumentSummary,
   UpdateDeadlineDraftInput,
 } from '@/modules/scheduling/deadline-types';
+import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic, getCairoTodayDateString } from '@/lib/cairo-date';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -37,6 +40,10 @@ interface DeadlinesViewProps {
   actorId: string;
   initialDeadlines: DeadlineDTO[];
   selectableMatters: SelectableMatterOptionDTO[];
+  canReadDocuments?: boolean;
+  matterDocuments?: LinkableDocumentSummary[];
+  initialDocumentsByMatter?: Record<string, LinkableDocumentSummary[]>;
+  documentsLoadError?: string;
   initialError?: string;
   initialReviewDeadlineId?: string;
   lockedMatterId?: string;
@@ -67,6 +74,10 @@ export function DeadlinesView({
   actorId,
   initialDeadlines,
   selectableMatters,
+  canReadDocuments = false,
+  matterDocuments,
+  initialDocumentsByMatter,
+  documentsLoadError,
   initialError,
   initialReviewDeadlineId,
   lockedMatterId,
@@ -186,6 +197,19 @@ export function DeadlinesView({
       ? restoredDraftOp.confirmPayload.basisNotes ?? initialDraftTarget?.basisNotes ?? ''
       : initialDraftTarget?.basisNotes ?? ''
   );
+  const [sourceDocumentId, setSourceDocumentId] = useState(
+    restoredDraftOp?.kind === 'createDraft' || restoredDraftOp?.kind === 'updateDraft' || restoredDraftOp?.kind === 'confirm'
+      ? restoredDraftOp.payload.sourceDocumentId ?? initialDraftTarget?.sourceDocumentId ?? ''
+      : restoredDraftOp?.kind === 'createAndConfirm'
+      ? restoredDraftOp.createPayload.sourceDocumentId ?? ''
+      : restoredDraftOp?.kind === 'updateAndConfirm'
+      ? restoredDraftOp.confirmPayload.sourceDocumentId ?? initialDraftTarget?.sourceDocumentId ?? ''
+      : initialDraftTarget?.sourceDocumentId ?? ''
+  );
+  const [fetchedDocsByMatter, setFetchedDocsByMatter] = useState<Record<string, LinkableDocumentSummary[]>>({});
+  const [docsLoadErrorByMatter, setDocsLoadErrorByMatter] = useState<Record<string, string>>({});
+  const [ssrDocsLoadError, setSsrDocsLoadError] = useState<string | null | undefined>(documentsLoadError);
+  const [docsFetchNonce, setDocsFetchNonce] = useState(0);
   const [lawyerReviewed, setLawyerReviewed] = useState(
     restoredDraftOp?.kind === 'confirm' ||
       restoredDraftOp?.kind === 'createAndConfirm' ||
@@ -275,7 +299,7 @@ export function DeadlinesView({
     isFrozenDraftRetry ||
     isFrozenDateRetry ||
     isFrozenCompleteRetry ||
-    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes)) ||
+    (isDraftModalOpen && Boolean(title || dueDate || dueTime || source || basisNotes || sourceDocumentId)) ||
     (Boolean(changeDateTarget) && Boolean(dateChangeReason)) ||
     (Boolean(completeTarget) && Boolean(completionNotes));
 
@@ -384,6 +408,9 @@ export function DeadlinesView({
         throw new Error(body && !body.success ? body.error : 'تعذر تحميل قائمة المواعيد القانونية.');
       }
       setDeadlines(body.data);
+      setFetchedDocsByMatter({});
+      setDocsLoadErrorByMatter({});
+      setDocsFetchNonce((n) => n + 1);
       setDraftConflictError(null);
       setDateChangeConflict(null);
       setCompleteConflict(null);
@@ -401,8 +428,83 @@ export function DeadlinesView({
     }
   }, [lockedMatterId]);
 
+  useEffect(() => {
+    const activeMatterId = lockedMatterId || matterId;
+    if (!canReadDocuments || !isDraftModalOpen || !activeMatterId) return;
+    if (lockedMatterId && matterDocuments !== undefined) return;
+    if (initialDocumentsByMatter && activeMatterId in initialDocumentsByMatter) return;
+    if (activeMatterId in fetchedDocsByMatter) return;
+    if (activeMatterId in docsLoadErrorByMatter) return;
+
+    const controller = new AbortController();
+    fetch(`/api/documents?matterId=${encodeURIComponent(activeMatterId)}&limit=100`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (res.status === 401 && typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        }
+        const body = (await res.json().catch(() => null)) as
+          | { success: true; data: { documents: DocumentDTO[] } }
+          | { success: false; error?: string }
+          | null;
+        if (controller.signal.aborted) return;
+        if (!res.ok || !body || !body.success) {
+          const message =
+            res.status === 401
+              ? 'انتهت الجلسة. يرجى إعادة تسجيل الدخول ثم إعادة تحميل مستندات القضية.'
+              : (body && !body.success && body.error) || 'تعذر تحميل مستندات القضية المرتبطة.';
+          setDocsLoadErrorByMatter((prev) => ({ ...prev, [activeMatterId]: message }));
+          return;
+        }
+        const docs: LinkableDocumentSummary[] = body.data.documents
+          .filter((d) => !d.archivedAt && d.currentVersionId && d.currentVersion?.isReady)
+          .map((d) => ({
+            id: d.id,
+            title: d.title,
+            documentType: d.documentType,
+            currentVersionId: d.currentVersionId,
+            scanStatus: d.currentVersion!.scanStatus,
+            scanStatusLabel: d.currentVersion!.scanStatusLabel,
+            proceedingId: d.proceedingId,
+            hearingId: d.hearingId,
+          }));
+        setDocsLoadErrorByMatter((prev) => {
+          if (!(activeMatterId in prev)) return prev;
+          const next = { ...prev };
+          delete next[activeMatterId];
+          return next;
+        });
+        setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: docs }));
+        setSsrDocsLoadError(null);
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return;
+        setDocsLoadErrorByMatter((prev) => ({
+          ...prev,
+          [activeMatterId]: 'تعذر تحميل مستندات القضية بسبب انقطاع الاتصال.',
+        }));
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    canReadDocuments,
+    isDraftModalOpen,
+    lockedMatterId,
+    matterId,
+    matterDocuments,
+    initialDocumentsByMatter,
+    fetchedDocsByMatter,
+    docsLoadErrorByMatter,
+    docsFetchNonce,
+  ]);
+
   const openNewDeadlineModal = () => {
     setStatusNotice(null);
+    setDocsLoadErrorByMatter({});
     const pending = pendingDraftOpRef.current;
     if (pending && (pending.kind === 'createDraft' || pending.kind === 'createAndConfirm')) {
       setIsDraftModalOpen(true);
@@ -423,12 +525,14 @@ export function DeadlinesView({
     setDueTime('');
     setSource('');
     setBasisNotes('');
+    setSourceDocumentId('');
     setLawyerReviewed(false);
     setIsDraftModalOpen(true);
   };
 
   const openExistingDraftModal = (deadline: DeadlineDTO) => {
     setStatusNotice(null);
+    setDocsLoadErrorByMatter({});
     const pending = pendingDraftOpRef.current;
     const pendingId =
       pending?.kind === 'updateDraft' || pending?.kind === 'confirm'
@@ -455,6 +559,7 @@ export function DeadlinesView({
     setDueTime(deadline.dueTime ?? '');
     setSource(deadline.source ?? '');
     setBasisNotes(deadline.basisNotes ?? '');
+    setSourceDocumentId(deadline.sourceDocumentId ?? '');
     setLawyerReviewed(false);
     setIsDraftModalOpen(true);
   };
@@ -462,6 +567,45 @@ export function DeadlinesView({
   const selectedMatterProceedings = lockedMatterId
     ? (lockedMatterProceedings ?? [])
     : (selectableMatters.find((m) => m.id === matterId)?.proceedings ?? []);
+
+  const activeDocsMatterId = lockedMatterId || matterId;
+  const hasPreloadedDocs =
+    (Boolean(lockedMatterId) && matterDocuments !== undefined) ||
+    Boolean(initialDocumentsByMatter && activeDocsMatterId in initialDocumentsByMatter);
+  const docsLoadError =
+    !hasPreloadedDocs && activeDocsMatterId
+      ? (docsLoadErrorByMatter[activeDocsMatterId] ?? null)
+      : null;
+  const isLoadingMatterDocs =
+    isDraftModalOpen &&
+    Boolean(activeDocsMatterId) &&
+    !hasPreloadedDocs &&
+    !(activeDocsMatterId in fetchedDocsByMatter) &&
+    !docsLoadError;
+  const rawMatterDocs =
+    lockedMatterId && matterDocuments !== undefined
+      ? matterDocuments
+      : activeDocsMatterId
+      ? (initialDocumentsByMatter?.[activeDocsMatterId] ?? fetchedDocsByMatter[activeDocsMatterId] ?? [])
+      : [];
+  const isProceedingCompatible = (doc: LinkableDocumentSummary) =>
+    !doc.proceedingId || !proceedingId || doc.proceedingId === proceedingId;
+  const scopedMatterDocs = rawMatterDocs.filter(isProceedingCompatible);
+  const existingSourceDoc = editingDeadline?.sourceDocument ?? null;
+  const isExistingSourceDocMissingFromRaw =
+    Boolean(existingSourceDoc) &&
+    !isLoadingMatterDocs &&
+    !docsLoadError &&
+    (hasPreloadedDocs || activeDocsMatterId in fetchedDocsByMatter) &&
+    !rawMatterDocs.some((doc) => doc.id === existingSourceDoc?.id);
+  const shouldPreserveExistingSourceDoc =
+    Boolean(existingSourceDoc) &&
+    (isProceedingCompatible(existingSourceDoc!) || sourceDocumentId === existingSourceDoc!.id) &&
+    !scopedMatterDocs.some((doc) => doc.id === existingSourceDoc!.id);
+  const availableSourceDocs =
+    shouldPreserveExistingSourceDoc && existingSourceDoc
+      ? [existingSourceDoc, ...scopedMatterDocs]
+      : scopedMatterDocs;
 
   const executePendingDraftOp = async (op: PendingDeadlineDraftOp) => {
     setIsSubmittingDraftModal(true);
@@ -485,6 +629,9 @@ export function DeadlinesView({
               dueTime: activeOp.createPayload.dueTime ?? null,
               source: activeOp.createPayload.source!,
               basisNotes: activeOp.createPayload.basisNotes!,
+              ...(activeOp.createPayload.sourceDocumentId !== undefined
+                ? { sourceDocumentId: activeOp.createPayload.sourceDocumentId }
+                : {}),
               lawyerReviewed: true,
               confirmationAccepted: true,
               idempotencyKey: activeOp.confirmIdempotencyKey,
@@ -524,6 +671,9 @@ export function DeadlinesView({
 
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setDraftSessionExpired(true);
           setIsFrozenDraftRetry(true);
           setDraftFormError('انتهت صلاحية الجلسة أو يلزم استكمال التحقق. أُبقيت العملية مجمّدة بنفس المفتاح.');
@@ -613,6 +763,7 @@ export function DeadlinesView({
             dueTime: trimmedTime || null,
             source: source.trim() || null,
             basisNotes: basisNotes.trim() || null,
+            ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
             idempotencyKey: generateClientRequestId('dl-draft'),
           },
         }
@@ -626,6 +777,7 @@ export function DeadlinesView({
             dueTime: trimmedTime || null,
             source: source.trim() || null,
             basisNotes: basisNotes.trim() || null,
+            ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
             idempotencyKey: generateClientRequestId('dl-create'),
           },
         };
@@ -702,6 +854,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
           idempotencyKey: generateClientRequestId('dl-create-pre'),
         },
         confirmIdempotencyKey: generateClientRequestId('dl-confirm'),
@@ -717,6 +870,7 @@ export function DeadlinesView({
           expectedVersion: editingDeadline.version,
           title: trimmedTitle,
           proceedingId: proceedingId ? proceedingId : null,
+          ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
           idempotencyKey: generateClientRequestId('dl-upd-pre'),
         },
         confirmPayload: {
@@ -725,6 +879,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
           lawyerReviewed: true,
           confirmationAccepted: true,
           idempotencyKey: generateClientRequestId('dl-confirm'),
@@ -740,6 +895,7 @@ export function DeadlinesView({
           dueTime: trimmedTime || null,
           source: trimmedSource,
           basisNotes: trimmedBasis,
+          ...(canReadDocuments ? { sourceDocumentId: sourceDocumentId || null } : {}),
           lawyerReviewed: true,
           confirmationAccepted: true,
           idempotencyKey: generateClientRequestId('dl-confirm'),
@@ -807,6 +963,9 @@ export function DeadlinesView({
       const res = await changeDeadlineDateAction(pendingDateOpRef.current);
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setDateChangeSessionExpired(true);
           setIsFrozenDateRetry(true);
           setDateChangeError('انتهت صلاحية الجلسة أو يلزم التحقق. أُبقي طلب تعديل التاريخ مجمّداً بنفس المفتاح.');
@@ -893,6 +1052,9 @@ export function DeadlinesView({
       const res = await completeDeadlineAction(pendingCompleteOpRef.current);
       if (!res.success) {
         if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
           setCompleteSessionExpired(true);
           setIsFrozenCompleteRetry(true);
           setCompleteError('انتهت صلاحية الجلسة أو يلزم التحقق. أُبقي طلب الإتمام مجمّداً بنفس المفتاح.');
@@ -954,6 +1116,11 @@ export function DeadlinesView({
         idempotencyKey,
       });
       if (!res.success) {
+        if (isAuthRecoveryCode(res.code)) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          }
+        }
         if (!isUncertainMutationOutcome(res.code)) {
           pendingCancelKeysRef.current.delete(opKey);
         }
@@ -1043,6 +1210,33 @@ export function DeadlinesView({
           <span className="text-[#172A35]">{d.source || 'غير محدد بعد'}</span>
         </div>
       </div>
+
+      {canReadDocuments && d.sourceDocumentId && (
+        <div className="flex flex-wrap items-center gap-2 text-sm bg-[#F9FBFC] px-3 py-2 rounded-[6px] border border-[#E8EEF1]">
+          <span className="font-semibold text-[#4D606A]">المستند المصدري:</span>
+          <Link
+            href={`/documents/${d.sourceDocumentId}`}
+            data-testid={`deadline-source-document-link-${d.id}`}
+            className="inline-flex flex-wrap items-center gap-2 px-2.5 py-1 rounded-[6px] bg-white border border-[#D5DFE3] text-[#14566B] hover:bg-[#E8EEF1] font-semibold min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+          >
+            <bdi className="[overflow-wrap:anywhere]">
+              {d.sourceDocument?.title ?? 'عرض المستند المصدري'}
+            </bdi>
+            {d.sourceDocument && (
+              <span className="text-xs text-[#4D606A]">
+                ({DOCUMENT_TYPE_LABELS_AR[d.sourceDocument.documentType]})
+              </span>
+            )}
+            {d.sourceDocument?.scanStatusLabel && (
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-xs font-semibold border ${getLinkableDocumentScanBadgeClass(d.sourceDocument)}`}
+              >
+                {d.sourceDocument.scanStatusLabel}
+              </span>
+            )}
+          </Link>
+        </div>
+      )}
 
       {d.basisNotes && (
         <div className="text-sm bg-[#F9FBFC] p-3 rounded-[6px] border border-[#E8EEF1]">
@@ -1181,7 +1375,7 @@ export function DeadlinesView({
             data-testid="deadlines-refresh-button"
             onClick={refreshDeadlines}
             disabled={isLoading}
-            className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50"
+            className="px-4 py-2 bg-white hover:bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
           >
             تحديث
           </button>
@@ -1190,7 +1384,7 @@ export function DeadlinesView({
               type="button"
               data-testid="new-deadline-button"
               onClick={openNewDeadlineModal}
-              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] shadow-xs min-h-[44px] flex items-center gap-1.5 focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
+              className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] shadow-xs min-h-[44px] flex items-center gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
             >
               <span>موعد قانوني جديد</span>
             </button>
@@ -1266,12 +1460,24 @@ export function DeadlinesView({
             type="button"
             onClick={() => setStatusNotice(null)}
             aria-label="إغلاق التنبيه"
-            className="px-2 py-1 font-bold min-h-[36px]"
+            className="px-2 py-1 font-bold min-h-[44px] min-w-[44px] flex items-center justify-center rounded-[6px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#176449]"
           >
             ✕
           </button>
         </div>
       )}
+
+      {canReadDocuments &&
+        ssrDocsLoadError &&
+        (lockedMatterId ? !(lockedMatterId in fetchedDocsByMatter) : Object.keys(fetchedDocsByMatter).length === 0) && (
+          <div
+            role="alert"
+            data-testid="deadline-ssr-docs-warning"
+            className="p-3 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] text-sm font-medium"
+          >
+            {ssrDocsLoadError} سيتم إعادة محاولة تحميل مستندات الملف تلقائياً عند فتح نموذج الموعد.
+          </div>
+        )}
 
       {isLoading ? (
         <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-8">
@@ -1293,7 +1499,7 @@ export function DeadlinesView({
               <button
                 type="button"
                 onClick={openNewDeadlineModal}
-                className="px-4 py-2 bg-[#14566B] text-white text-sm font-semibold rounded-[6px] min-h-[44px]"
+                className="px-4 py-2 bg-[#14566B] text-white text-sm font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
               >
                 إضافة موعد قانوني
               </button>
@@ -1319,7 +1525,7 @@ export function DeadlinesView({
           {/* Confirmed Section */}
           <section data-testid="deadlines-confirmed-section" className="space-y-3" aria-labelledby="confirmed-deadlines-heading">
             <h2 id="confirmed-deadlines-heading" className="text-lg font-bold text-[#14566B] flex items-center gap-2">
-              <span>✓</span>
+              <span aria-hidden="true">✓</span>
               <span>مواعيد قانونية مؤكدة ({confirmedList.length})</span>
             </h2>
             {confirmedList.length === 0 ? (
@@ -1366,7 +1572,7 @@ export function DeadlinesView({
               aria-labelledby="deadline-modal-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-[#E8EEF1]">
                 <h2 id="deadline-modal-title" className="text-lg font-bold text-[#172A35]">
@@ -1377,7 +1583,7 @@ export function DeadlinesView({
                   onClick={closeDraftModal}
                   disabled={isSubmittingDraftModal}
                   aria-label="إغلاق النافذة"
-                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   ✕
                 </button>
@@ -1390,7 +1596,7 @@ export function DeadlinesView({
                     href="/login"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px]"
+                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     فتح تسجيل الدخول في نافذة جديدة ↗
                   </a>
@@ -1410,7 +1616,7 @@ export function DeadlinesView({
                       closeDraftModal();
                       refreshDeadlines();
                     }}
-                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] shrink-0"
+                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     تحديث البيانات
                   </button>
@@ -1458,6 +1664,7 @@ export function DeadlinesView({
                       onChange={(e) => {
                         setMatterId(e.target.value);
                         setProceedingId('');
+                        setSourceDocumentId('');
                       }}
                       disabled={Boolean(editingDeadline) || isSubmittingDraftModal || isFrozenDraftRetry}
                       aria-invalid={Boolean(draftFieldErrors.matterId)}
@@ -1482,7 +1689,23 @@ export function DeadlinesView({
                       id="deadline-proceeding-select"
                       data-testid="deadline-proceeding-select"
                       value={proceedingId}
-                      onChange={(e) => setProceedingId(e.target.value)}
+                      onChange={(e) => {
+                        const nextProceedingId = e.target.value;
+                        setProceedingId(nextProceedingId);
+                        if (sourceDocumentId && nextProceedingId) {
+                          const selectedDoc =
+                            rawMatterDocs.find((d) => d.id === sourceDocumentId) ??
+                            (editingDeadline?.sourceDocument?.id === sourceDocumentId
+                              ? editingDeadline.sourceDocument
+                              : undefined);
+                          if (
+                            selectedDoc?.proceedingId &&
+                            selectedDoc.proceedingId !== nextProceedingId
+                          ) {
+                            setSourceDocumentId('');
+                          }
+                        }
+                      }}
                       disabled={isSubmittingDraftModal || isFrozenDraftRetry}
                       className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                     >
@@ -1506,6 +1729,7 @@ export function DeadlinesView({
                       id="deadline-date-input"
                       data-testid="deadline-date-input"
                       type="date"
+                      dir="ltr"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
                       disabled={isSubmittingDraftModal || isFrozenDraftRetry}
@@ -1522,6 +1746,7 @@ export function DeadlinesView({
                       id="deadline-time-input"
                       data-testid="deadline-time-input"
                       type="time"
+                      dir="ltr"
                       value={dueTime}
                       onChange={(e) => setDueTime(e.target.value)}
                       disabled={isSubmittingDraftModal || isFrozenDraftRetry}
@@ -1548,6 +1773,81 @@ export function DeadlinesView({
                     className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   />
                 </div>
+
+                {canReadDocuments && (
+                  <div className="space-y-1">
+                    <label htmlFor="deadline-source-document-select" className="block text-sm font-bold text-[#172A35]">
+                      المستند المصدري المرتبط (اختياري)
+                    </label>
+                    <select
+                      id="deadline-source-document-select"
+                      data-testid="deadline-source-document-select"
+                      value={sourceDocumentId}
+                      onChange={(e) => setSourceDocumentId(e.target.value)}
+                      disabled={isSubmittingDraftModal || isFrozenDraftRetry}
+                      aria-invalid={Boolean(draftFieldErrors.sourceDocumentId)}
+                      aria-describedby={
+                        draftFieldErrors.sourceDocumentId
+                          ? 'deadline-source-document-error'
+                          : docsLoadError
+                          ? 'deadline-source-docs-error'
+                          : undefined
+                      }
+                      className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                    >
+                      <option value="">بدون مستند مصدري مرتبط (اختياري)</option>
+                      {availableSourceDocs.map((doc) => {
+                        const isArchivedPreserved =
+                          isExistingSourceDocMissingFromRaw && doc.id === existingSourceDoc?.id;
+                        return (
+                          <option key={doc.id} value={doc.id}>
+                            {doc.title} — {DOCUMENT_TYPE_LABELS_AR[doc.documentType]}
+                            {isArchivedPreserved ? ' (مؤرشف)' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {draftFieldErrors.sourceDocumentId && (
+                      <p
+                        id="deadline-source-document-error"
+                        className="text-xs text-[#A4262C] font-medium mt-1"
+                      >
+                        {draftFieldErrors.sourceDocumentId}
+                      </p>
+                    )}
+                    {isLoadingMatterDocs && (
+                      <p role="status" aria-live="polite" className="text-xs text-[#4D606A]">
+                        جارٍ تحميل مستندات الملف الجاهزة...
+                      </p>
+                    )}
+                    {docsLoadError && (
+                      <div
+                        id="deadline-source-docs-error"
+                        role="alert"
+                        data-testid="deadline-source-docs-error"
+                        className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs text-[#A4262C]"
+                      >
+                        <span>{docsLoadError}</span>
+                        <button
+                          type="button"
+                          data-testid="deadline-source-docs-retry"
+                          onClick={() => {
+                            if (!activeDocsMatterId) return;
+                            setDocsLoadErrorByMatter((prev) => {
+                              const next = { ...prev };
+                              delete next[activeDocsMatterId];
+                              return next;
+                            });
+                            setDocsFetchNonce((n) => n + 1);
+                          }}
+                          className="px-3 py-1.5 bg-[#14566B] hover:bg-[#0F4354] text-white font-semibold rounded-[6px] min-h-[44px] shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                        >
+                          إعادة المحاولة
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label htmlFor="deadline-basis-input" className="block text-sm font-bold text-[#172A35]">
@@ -1589,7 +1889,7 @@ export function DeadlinesView({
                     type="button"
                     onClick={closeDraftModal}
                     disabled={isSubmittingDraftModal}
-                    className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
+                    className="px-4 py-2 bg-[#F4F6F7] hover:bg-[#E8EEF1] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     إلغاء
                   </button>
@@ -1598,7 +1898,7 @@ export function DeadlinesView({
                     data-testid="save-deadline-draft-button"
                     disabled={isSubmittingDraftModal}
                     onClick={handleSaveDraft}
-                    className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-[#7A4A00] text-sm font-bold rounded-[6px] border border-amber-300 min-h-[44px] disabled:opacity-50"
+                    className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-[#7A4A00] text-sm font-bold rounded-[6px] border border-amber-300 min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     {isSubmittingDraftModal
                       ? 'جارٍ الحفظ...'
@@ -1610,7 +1910,7 @@ export function DeadlinesView({
                     data-modal-retry={isFrozenDraftRetry ? 'true' : undefined}
                     disabled={isSubmittingDraftModal}
                     onClick={handleConfirmDeadline}
-                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                   >
                     {isSubmittingDraftModal
                       ? 'جارٍ الاعتماد...'
@@ -1643,7 +1943,7 @@ export function DeadlinesView({
               aria-labelledby="change-deadline-date-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="change-deadline-date-title" className="text-lg font-bold text-[#172A35]">
@@ -1654,7 +1954,7 @@ export function DeadlinesView({
                   onClick={closeChangeDateModal}
                   disabled={isSubmittingDateChange}
                   aria-label="إغلاق النافذة"
-                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   ✕
                 </button>
@@ -1673,7 +1973,7 @@ export function DeadlinesView({
                     href="/login"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px]"
+                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     فتح تسجيل الدخول في نافذة جديدة ↗
                   </a>
@@ -1693,7 +1993,7 @@ export function DeadlinesView({
                       closeChangeDateModal();
                       refreshDeadlines();
                     }}
-                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start"
+                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     تحديث البيانات
                   </button>
@@ -1721,10 +2021,11 @@ export function DeadlinesView({
                       id="change-dl-date"
                       data-testid="deadline-date-input"
                       type="date"
+                      dir="ltr"
                       value={newDueDate}
                       onChange={(e) => setNewDueDate(e.target.value)}
                       disabled={isSubmittingDateChange || isFrozenDateRetry}
-                      className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px]"
+                      className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1735,10 +2036,11 @@ export function DeadlinesView({
                       id="change-dl-time"
                       data-testid="deadline-time-input"
                       type="time"
+                      dir="ltr"
                       value={newDueTime}
                       onChange={(e) => setNewDueTime(e.target.value)}
                       disabled={isSubmittingDateChange || isFrozenDateRetry}
-                      className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px]"
+                      className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                     />
                   </div>
                 </div>
@@ -1765,7 +2067,7 @@ export function DeadlinesView({
                     type="button"
                     onClick={closeChangeDateModal}
                     disabled={isSubmittingDateChange}
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     إلغاء
                   </button>
@@ -1773,7 +2075,7 @@ export function DeadlinesView({
                     type="submit"
                     data-testid="save-deadline-date-change-button"
                     disabled={isSubmittingDateChange}
-                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                   >
                     {isSubmittingDateChange
                       ? 'جارٍ الحفظ...'
@@ -1806,7 +2108,7 @@ export function DeadlinesView({
               aria-labelledby="complete-deadline-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="complete-deadline-title" className="text-lg font-bold text-[#172A35]">
@@ -1817,7 +2119,7 @@ export function DeadlinesView({
                   onClick={closeCompleteModal}
                   disabled={isSubmittingComplete}
                   aria-label="إغلاق النافذة"
-                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   ✕
                 </button>
@@ -1834,7 +2136,7 @@ export function DeadlinesView({
                     href="/login"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px]"
+                    className="inline-flex items-center px-4 py-2 bg-[#14566B] text-white font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     فتح تسجيل الدخول في نافذة جديدة ↗
                   </a>
@@ -1854,7 +2156,7 @@ export function DeadlinesView({
                       closeCompleteModal();
                       refreshDeadlines();
                     }}
-                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start"
+                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     تحديث البيانات
                   </button>
@@ -1881,10 +2183,11 @@ export function DeadlinesView({
                     id="deadline-completion-date-input"
                     data-testid="deadline-completion-date-input"
                     type="date"
+                    dir="ltr"
                     value={completionDate}
                     onChange={(e) => setCompletionDate(e.target.value)}
                     disabled={isSubmittingComplete || isFrozenCompleteRetry}
-                    className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px]"
+                    className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   />
                 </div>
 
@@ -1910,7 +2213,7 @@ export function DeadlinesView({
                     type="button"
                     onClick={closeCompleteModal}
                     disabled={isSubmittingComplete}
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     إلغاء
                   </button>
@@ -1918,7 +2221,7 @@ export function DeadlinesView({
                     type="submit"
                     data-testid="deadline-completion-submit-button"
                     disabled={isSubmittingComplete}
-                    className="px-5 py-2 bg-[#176449] hover:bg-[#114D38] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                    className="px-5 py-2 bg-[#176449] hover:bg-[#114D38] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#176449] focus-visible:ring-offset-2"
                   >
                     {isSubmittingComplete
                       ? 'جارٍ الحفظ...'
@@ -1951,7 +2254,7 @@ export function DeadlinesView({
               aria-labelledby="cancel-deadline-title"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md p-6 space-y-4 text-right"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-4 text-right my-auto"
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
                 <h2 id="cancel-deadline-title" className="text-lg font-bold text-[#172A35]">
@@ -1962,7 +2265,7 @@ export function DeadlinesView({
                   onClick={closeCancelModal}
                   disabled={isSubmittingCancel}
                   aria-label="إغلاق النافذة"
-                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="p-2 text-[#4D606A] hover:text-[#172A35] rounded-[6px] min-h-[44px] min-w-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   ✕
                 </button>
@@ -1985,7 +2288,7 @@ export function DeadlinesView({
                       closeCancelModal();
                       refreshDeadlines();
                     }}
-                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start"
+                    className="px-3 py-2 bg-[#14566B] text-white font-bold rounded-[6px] min-h-[44px] self-start focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     تحديث البيانات
                   </button>
@@ -2012,7 +2315,7 @@ export function DeadlinesView({
                     onChange={(e) => setCancelReason(e.target.value)}
                     disabled={isSubmittingCancel}
                     placeholder="اكتب سبب إلغاء الموعد القانوني..."
-                    className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px]"
+                    className="w-full px-3 py-2 text-base bg-white border border-[#7B909B] rounded-[6px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   />
                 </div>
 
@@ -2021,7 +2324,7 @@ export function DeadlinesView({
                     type="button"
                     onClick={closeCancelModal}
                     disabled={isSubmittingCancel}
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] text-sm font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     رجوع
                   </button>
@@ -2029,7 +2332,7 @@ export function DeadlinesView({
                     type="submit"
                     data-testid="confirm-cancel-deadline-button"
                     disabled={isSubmittingCancel}
-                    className="px-5 py-2 bg-[#A4262C] hover:bg-[#881D22] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                    className="px-5 py-2 bg-[#A4262C] hover:bg-[#881D22] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#A4262C] focus-visible:ring-offset-2"
                   >
                     {isSubmittingCancel ? 'جارٍ الإلغاء...' : 'تأكيد إلغاء الموعد'}
                   </button>

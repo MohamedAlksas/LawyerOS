@@ -45,6 +45,11 @@ function formatCairoDate(isoStr: string) {
 export default function SecurityClient({ initialSessions, actor }: SecurityClientProps) {
   const router = useRouter();
   const [sessions, setSessions] = useState<SessionItem[]>(initialSessions);
+  const [prevInitialSessions, setPrevInitialSessions] = useState<SessionItem[]>(initialSessions);
+  if (prevInitialSessions !== initialSessions) {
+    setPrevInitialSessions(initialSessions);
+    setSessions(initialSessions);
+  }
   const [passwordForCodes, setPasswordForCodes] = useState('');
   const [showRegenModal, setShowRegenModal] = useState(false);
   const [newCodes, setNewCodes] = useState<string[] | null>(null);
@@ -104,12 +109,12 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
         const lastElement = focusable[focusable.length - 1];
 
         if (e.shiftKey) {
-          if (document.activeElement === firstElement) {
+          if (document.activeElement === firstElement || !dialogRef.current.contains(document.activeElement)) {
             e.preventDefault();
             lastElement.focus();
           }
         } else {
-          if (document.activeElement === lastElement) {
+          if (document.activeElement === lastElement || !dialogRef.current.contains(document.activeElement)) {
             e.preventDefault();
             firstElement.focus();
           }
@@ -268,14 +273,14 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
           >
             <div>
               <div className="font-bold text-sm">تنبيه أمني: إعداد المصادقة الثنائية غير مكتمل</div>
-              <div className="text-xs text-[#7A4100]/80">
+              <div className="text-xs text-[#7A4100]">
                 حسابك في وضع الإعداد المعلق. يلزم إدخال رمز التحقق من تطبيق المصادقة لإتمام تأكيد الحيازة.
               </div>
             </div>
             <button
               type="button"
               onClick={() => router.push('/verify')}
-              className="px-3.5 py-1.5 text-xs font-semibold text-white bg-[#7A4100] hover:bg-[#623400] rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#7A4100]"
+              className="px-3.5 py-2 text-xs font-semibold text-white bg-[#7A4100] hover:bg-[#623400] rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#7A4100] min-h-[44px]"
             >
               استكمال التحقق الآن
             </button>
@@ -292,7 +297,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
             <button
               type="button"
               onClick={() => setActionSuccess(null)}
-              className="text-xs text-[#176449] hover:underline focus:outline-none focus:ring-1 focus:ring-[#176449] px-1"
+              className="text-xs text-[#176449] hover:underline focus:outline-none focus:ring-1 focus:ring-[#176449] px-2 min-h-[44px]"
             >
               إغلاق
             </button>
@@ -311,7 +316,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
             <button
               type="button"
               onClick={() => setActionError(null)}
-              className="text-xs text-[#A4262C] hover:underline focus:outline-none focus:ring-1 focus:ring-[#A4262C] px-1"
+              className="text-xs text-[#A4262C] hover:underline focus:outline-none focus:ring-1 focus:ring-[#A4262C] px-2 min-h-[44px]"
             >
               إغلاق
             </button>
@@ -361,7 +366,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 setPasswordForCodes('');
                 setShowRegenModal(true);
               }}
-              className="px-4 py-2 text-sm font-medium text-[#14566B] bg-white border border-[#14566B] hover:bg-slate-50 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              className="px-4 py-2 text-sm font-medium text-[#14566B] bg-white border border-[#14566B] hover:bg-slate-50 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
             >
               إعادة توليد رموز الاسترداد
             </button>
@@ -383,7 +388,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 type="button"
                 disabled={isProcessing}
                 onClick={handleRevokeOthers}
-                className="px-3.5 py-1.5 text-sm font-medium text-[#A4262C] bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
+                className="px-3.5 py-2 text-sm font-medium text-[#A4262C] bg-red-50 hover:bg-red-100 border border-red-200 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C] min-h-[44px]"
               >
                 إنهاء جميع الجلسات الأخرى
               </button>
@@ -418,7 +423,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                       عنوان IP: <bdi dir="ltr" className="break-all">{session.ipAddress}</bdi>
                     </span>
                     <span>
-                      آخر نشاط (توقيت القاهرة): {formatCairoDate(session.updatedAt)}
+                      آخر نشاط (توقيت القاهرة): <bdi>{formatCairoDate(session.updatedAt)}</bdi>
                     </span>
                   </div>
                 </div>
@@ -428,7 +433,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     type="button"
                     disabled={isProcessing}
                     onClick={handleLogoutCurrentSession}
-                    className="px-3 py-1.5 text-xs font-medium text-[#A4262C] hover:bg-red-50 border border-[#D5DFE3] hover:border-red-300 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
+                    className="px-3 py-2 text-xs font-medium text-[#A4262C] hover:bg-red-50 border border-[#D5DFE3] hover:border-red-300 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C] min-h-[44px]"
                   >
                     تسجيل الخروج
                   </button>
@@ -437,7 +442,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     type="button"
                     disabled={isProcessing}
                     onClick={() => handleRevoke(session.id)}
-                    className="px-3 py-1.5 text-xs font-medium text-[#A4262C] hover:bg-red-50 border border-[#D5DFE3] hover:border-red-300 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C]"
+                    className="px-3 py-2 text-xs font-medium text-[#A4262C] hover:bg-red-50 border border-[#D5DFE3] hover:border-red-300 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#A4262C] min-h-[44px]"
                   >
                     إنهاء الجلسة
                   </button>
@@ -480,7 +485,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                 type="button"
                 onClick={closeRegenModal}
                 aria-label="إغلاق النافذة"
-                className="text-gray-400 hover:text-gray-600 rounded p-1 focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="text-[#4D606A] hover:text-[#172A35] rounded p-1 min-h-[44px] min-w-[44px] flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 ✕
               </button>
@@ -514,7 +519,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     autoFocus={!newCodes}
                     value={passwordForCodes}
                     onChange={(e) => setPasswordForCodes(e.target.value)}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   />
                 </div>
 
@@ -522,14 +527,14 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                   <button
                     type="button"
                     onClick={closeRegenModal}
-                    className="px-4 py-2 text-sm text-[#4D606A] hover:bg-slate-100 rounded focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    className="px-4 py-2 text-sm text-[#4D606A] hover:bg-slate-100 rounded min-h-[44px] focus:outline-none focus:ring-2 focus:ring-slate-400"
                   >
                     إلغاء
                   </button>
                   <button
                     type="submit"
                     disabled={isProcessing}
-                    className="px-4 py-2 text-sm text-white bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 font-medium rounded focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                    className="px-4 py-2 text-sm text-white bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 font-medium rounded min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   >
                     {isProcessing ? 'جارٍ التحقق...' : 'توليد رموز جديدة'}
                   </button>
@@ -567,7 +572,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
                     ref={dismissCodesButtonRef}
                     type="button"
                     onClick={closeRegenModal}
-                    className="px-4 py-2 text-sm text-white bg-[#14566B] hover:bg-[#0f4354] rounded font-medium focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                    className="px-4 py-2 text-sm text-white bg-[#14566B] hover:bg-[#0f4354] rounded font-medium min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   >
                     تم الحفظ والإغلاق
                   </button>
@@ -576,7 +581,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
             )}
           </div>
         </div>,
-        document.body
+        document.getElementById('app-shell-modal-root') ?? document.body
       )}
     </>
   );

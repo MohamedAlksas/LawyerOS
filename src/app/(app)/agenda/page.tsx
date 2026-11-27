@@ -30,7 +30,7 @@ export default async function AgendaPage({ searchParams }: AgendaPageProps) {
     }
     if (error instanceof AuthorizationError) {
       return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]">
+        <div role="alert" className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]">
           <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
           <p>لا تمتلك الصلاحيات الكافية لاستعراض الأجندة.</p>
         </div>
@@ -74,7 +74,7 @@ export default async function AgendaPage({ searchParams }: AgendaPageProps) {
 
   return (
     <AgendaView
-      key={actor.sessionId}
+      key={`${actor.sessionId}:${view}:${anchorDate}:${courtId ?? ''}:${itemType ?? ''}:${includeCompleted ? '1' : '0'}`}
       initialAgenda={initialAgenda}
       initialError={initialError}
       initialGeneratedAtIso={new Date().toISOString()}

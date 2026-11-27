@@ -143,6 +143,73 @@ describe('Historical identity data upgrade (R14 retained-data evidence)', () => 
       if (mode === 'managed-deploy') {
         const deployed = runPrismaCli(['migrate','deploy'], db.url);
         expect(deployed.status, deployed.stderr).toBe(0);
+
+        const t12Mig = await db.pool.query(
+          `SELECT migration_name, finished_at FROM _prisma_migrations WHERE migration_name IN ($1, $2) ORDER BY migration_name`,
+          ['20261126000000_t12_document_versions_and_links', '20261126010000_t12_fk_index_hygiene']
+        );
+        expect(t12Mig.rows).toHaveLength(2);
+        expect(t12Mig.rows[0].migration_name).toBe('20261126000000_t12_document_versions_and_links');
+        expect(t12Mig.rows[0].finished_at).not.toBeNull();
+        expect(t12Mig.rows[1].migration_name).toBe('20261126010000_t12_fk_index_hygiene');
+        expect(t12Mig.rows[1].finished_at).not.toBeNull();
+
+        const t12Cols = await db.pool.query(`
+          SELECT table_name, column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND (
+              (table_name = 'power_of_attorney' AND column_name = 'document_id')
+              OR (table_name = 'hearing_result' AND column_name = 'decision_document_id')
+              OR (table_name = 'upload_attempt' AND column_name = 'expected_document_version')
+            )
+          ORDER BY table_name, column_name;
+        `);
+        expect(t12Cols.rows).toEqual([
+          { table_name: 'hearing_result', column_name: 'decision_document_id' },
+          { table_name: 'power_of_attorney', column_name: 'document_id' },
+          { table_name: 'upload_attempt', column_name: 'expected_document_version' },
+        ]);
+
+        const t12Constraints = await db.pool.query(`
+          SELECT conname, contype::text AS contype
+          FROM pg_constraint
+          WHERE conname IN (
+            'upload_attempt_expected_document_version_check',
+            'power_of_attorney_document_id_fkey',
+            'hearing_result_decision_document_id_fkey',
+            'deadline_source_document_id_fkey'
+          )
+          ORDER BY conname;
+        `);
+        expect(t12Constraints.rows).toEqual([
+          { conname: 'deadline_source_document_id_fkey', contype: 'f' },
+          { conname: 'hearing_result_decision_document_id_fkey', contype: 'f' },
+          { conname: 'power_of_attorney_document_id_fkey', contype: 'f' },
+          { conname: 'upload_attempt_expected_document_version_check', contype: 'c' },
+        ]);
+
+        const t12Indexes = await db.pool.query(`
+          SELECT indexname
+          FROM pg_indexes
+          WHERE schemaname = 'public'
+            AND indexname IN (
+              'power_of_attorney_document_id_idx',
+              'hearing_result_decision_document_id_idx',
+              'deadline_source_document_id_idx',
+              'backup_file_pin_document_version_id_released_at_idx',
+              'upload_attempt_document_id_idx',
+              'backup_file_pin_document_version_id_idx'
+            )
+          ORDER BY indexname;
+        `);
+        expect(t12Indexes.rows.map((r: { indexname: string }) => r.indexname)).toEqual([
+          'backup_file_pin_document_version_id_released_at_idx',
+          'deadline_source_document_id_idx',
+          'hearing_result_decision_document_id_idx',
+          'power_of_attorney_document_id_idx',
+          'upload_attempt_document_id_idx',
+        ]);
       }
       expect((await runIdentityBaseline({ targetUrl: db.url, silent: true })).success).toBe(true);
       expect(runPrismaCli(['migrate','deploy'], db.url).status).toBe(0);
@@ -363,7 +430,8 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
     await confirmOwnerProvisioning(ownerResult.user.id, validCode);
 
     // 3. Authenticate via protocol endpoints
-    const signInReq = new NextRequest('http://127.0.0.1:3000/api/auth/sign-in/email', {
+    const authBase = getEnv().BETTER_AUTH_URL;
+    const signInReq = new NextRequest(`${authBase}/api/auth/sign-in/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -382,7 +450,7 @@ describe('Supported Non-Destructive Migration Upgrade & Baseline Verification (T
 
     // 4. Complete 2FA via /api/auth/two-factor/verify-totp
     const freshCode = await generateTotpCode(ownerResult.totpSecret);
-    const verifyTotpReq = new NextRequest('http://127.0.0.1:3000/api/auth/two-factor/verify-totp', {
+    const verifyTotpReq = new NextRequest(`${authBase}/api/auth/two-factor/verify-totp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

@@ -225,7 +225,7 @@ export function AgendaView({
 
             {h.hearingTime ? (
               <span className="text-xs font-bold px-2.5 py-1 rounded bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2]">
-                {h.timeLabel}
+                <bdi dir="ltr">{h.timeLabel}</bdi>
               </span>
             ) : (
               <span
@@ -247,7 +247,7 @@ export function AgendaView({
           <div className="flex flex-wrap gap-2 print:hidden">
             <Link
               href={`/hearings/${h.id}/result`}
-              className="text-sm font-bold text-[#14566B] hover:underline"
+              className="text-sm font-bold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center"
             >
               تسجيل النتيجة ←
             </Link>
@@ -298,7 +298,7 @@ export function AgendaView({
           </div>
 
           <div className="print:hidden">
-            <Link href="/deadlines" className="text-sm font-bold text-[#14566B] hover:underline">
+            <Link href="/deadlines" className="text-sm font-bold text-[#14566B] hover:underline min-h-[44px] inline-flex items-center">
               فتح شاشة المواعيد القانونية ←
             </Link>
           </div>
@@ -460,19 +460,11 @@ export function AgendaView({
             size: A4;
             margin: 14mm;
           }
-          body, html {
-            background: #FFFFFF !important;
-            color: #000000 !important;
+          thead {
+            display: table-header-group;
           }
-          [data-testid="desktop-sidebar"],
-          [data-testid="app-header"],
-          [data-testid="mobile-bottom-nav"],
-          [data-testid="connectivity-banner"] {
-            display: none !important;
-          }
-          #main-content {
-            margin: 0 !important;
-            padding: 0 !important;
+          tr {
+            break-inside: avoid;
           }
         }
       `}</style>
@@ -518,13 +510,13 @@ export function AgendaView({
               <table className="w-full border-collapse border border-black text-xs text-black">
                 <thead>
                   <tr className="bg-[#EFEFEF]">
-                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">التاريخ والوقت</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">المحكمة والدائرة</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">رقم القيد</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية والموكل</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">الحفظ الورقي</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">المطلوب / القرار</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">التاريخ والوقت</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">المحكمة والدائرة</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">رقم القيد</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية والموكل</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">الحفظ الورقي</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">المطلوب / القرار</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -568,12 +560,12 @@ export function AgendaView({
               <table className="w-full border-collapse border border-black text-xs text-black">
                 <thead>
                   <tr className="bg-[#EFEFEF]">
-                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">الحالة</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">البيان والإجراء القانوني</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">المصدر وسند الاحتساب</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">الحالة</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">البيان والإجراء القانوني</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">المصدر وسند الاحتساب</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -622,11 +614,11 @@ export function AgendaView({
               <table className="w-full border-collapse border border-black text-xs text-black">
                 <thead>
                   <tr className="bg-[#EFEFEF]">
-                    <th className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">الأولوية والحالة</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">بيان المهمة</th>
-                    <th className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold w-8">م</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">تاريخ الاستحقاق</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">الأولوية والحالة</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">بيان المهمة</th>
+                    <th scope="col" className="border border-black px-2 py-1.5 text-right font-bold">ملف القضية</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -969,7 +961,7 @@ function AgendaResultsSection({
         </span>
         {agenda.rangeEnd !== agenda.rangeStart && (
           <>
-            <span>—</span>
+            <span aria-hidden="true">—</span>
             <span className="text-[#172A35]">
               {formatCairoDateArabic(agenda.rangeEnd)} (<bdi dir="ltr">{agenda.rangeEnd}</bdi>)
             </span>
@@ -1120,7 +1112,7 @@ function AgendaResultsSection({
                       type="button"
                       aria-label={formatCairoDateArabic(dateStr)}
                       onClick={() => onSelectDay(dateStr)}
-                      className={`text-sm font-bold px-2 py-1 rounded-[6px] min-h-[36px] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
+                      className={`text-sm font-bold px-2 py-1 rounded-[6px] min-h-[44px] min-w-[44px] hover:bg-[#E8EEF1] focus:outline-none focus:ring-2 focus:ring-[#14566B] ${
                         isToday ? 'bg-[#14566B] text-white hover:bg-[#0F4354]' : 'text-[#172A35]'
                       }`}
                     >

@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import zlib from 'node:zlib';
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import nextConfig from '../../next.config';
@@ -53,60 +52,7 @@ import {
 } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
 import { createDedicatedTestDatabase } from '../helpers/test-db';
-
-function buildSyntheticPdf(marker: string, padBytes = 0): Buffer {
-  const header = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Marker (${marker}) >>\nendobj\n`, 'ascii');
-  const footer = Buffer.from('\ntrailer\n<< /Root 1 0 R >>\nstartxref\n9\n%%EOF\n', 'ascii');
-  if (padBytes <= 0) {
-    return Buffer.concat([header, footer]);
-  }
-  return Buffer.concat([header, Buffer.alloc(padBytes, 0x20), footer]);
-}
-
-function buildSyntheticJpeg(marker: number): Buffer {
-  return Buffer.from([
-    0xff, 0xd8, // SOI
-    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
-    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
-    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
-    marker & 0xff, (marker >> 8) & 0xff, 0x11, 0x22, // entropy
-    0xff, 0xd9, // EOI
-  ]);
-}
-
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
-function buildSyntheticPng(markerByte: number): Buffer {
-  const ihdr = Buffer.from([
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00,
-  ]);
-  const idat = zlib.deflateSync(Buffer.from([0x00, markerByte & 0xff, 0x10, 0x20]));
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', idat),
-    makePngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
+import { buildSyntheticJpeg, buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files';
 
 function signSessionTokenCookie(token: string, secret: string): string {
   const sig = crypto.createHmac('sha256', secret).update(token).digest('base64');
@@ -448,7 +394,11 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
         path.join(preT11MigrationsDir, 'migration_lock.toml')
       );
       for (const entry of fs.readdirSync(migrationsSrc)) {
-        if (entry === 'migration_lock.toml' || entry === '20261124120000_t11_private_documents_and_uploads') {
+        if (
+          entry === 'migration_lock.toml' ||
+          entry === '20261124120000_t11_private_documents_and_uploads' ||
+          entry >= '20261126000000'
+        ) {
           continue;
         }
         const full = path.join(migrationsSrc, entry);
@@ -708,6 +658,20 @@ describe('T11 Integration Tests: Private Upload, ADR 0003 Validation, Atomic Fin
     expect(listJson.data.documents.map((d) => d.id)).not.toContain(pngDoc.id);
     const listedPdf = listJson.data.documents.find((d) => d.id === pdfDoc.id)!;
     expect(Object.hasOwn(listedPdf, 'versions')).toBe(false);
+
+    // Out-of-range page clamps to totalPages and returns the last page's items
+    const outOfRangeList = await listDocuments(owner, { matterId: matterAId, page: 99, limit: 1 });
+    expect(outOfRangeList.totalPages).toBeGreaterThanOrEqual(2);
+    expect(outOfRangeList.page).toBe(outOfRangeList.totalPages);
+    expect(outOfRangeList.documents.length).toBeGreaterThan(0);
+    const explicitLastPage = await listDocuments(owner, {
+      matterId: matterAId,
+      page: outOfRangeList.totalPages,
+      limit: 1,
+    });
+    expect(outOfRangeList.documents.map((d) => d.id)).toEqual(
+      explicitLastPage.documents.map((d) => d.id)
+    );
 
     const docMetaRes = await getDocumentRoute(
       new Request(`${trustedOrigin}/api/documents/${pdfDoc.id}`, {

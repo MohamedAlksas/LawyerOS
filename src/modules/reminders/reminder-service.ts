@@ -15,10 +15,11 @@ import {
   formatUtcDateToIsoDate,
   getCairoTodayDateString,
   isCairoDateOverdue,
+  parseCalendarDateToUtcDate,
 } from '@/lib/cairo-date';
 import { assertAuthorized } from '@/modules/identity/authorize';
 import type { Actor, Permission } from '@/modules/identity/types';
-import { ensureDefaultReminderRules } from './reminder-outbox';
+import { enqueueMissingSourceReminderJobsBatch, ensureDefaultReminderRules } from './reminder-outbox';
 import {
   ConcurrencyConflictError,
   FailedReminderJobDTO,
@@ -572,6 +573,7 @@ export async function retryFailedReminderJob(
         SELECT "id", "status", "source_type", "source_id"
         FROM "job_run"
         WHERE "id" = ${input.jobRunId}
+          AND "job_type" = 'REMINDER_DELIVERY'
         FOR UPDATE
       `;
 
@@ -715,34 +717,32 @@ async function loadActiveSourceEventDates(
     return { byId, maxTaskJobVersionById };
   }
 
-  const [tasks, maxTaskVersions] = await Promise.all([
-    tx.task.findMany({
-      where: {
-        id: { in: sourceIds },
-        status: { in: ['OPEN', 'IN_PROGRESS'] },
-        dueDate: { not: null },
-        AND: [
-          {
-            OR: [
-              { matterId: null },
-              { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } },
-            ],
-          },
-          { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
-        ],
-      },
-      select: { id: true, dueDate: true, version: true },
-    }),
-    tx.jobRun.groupBy({
-      by: ['sourceId'],
-      where: {
-        jobType: 'REMINDER_DELIVERY',
-        sourceType: 'Task',
-        sourceId: { in: sourceIds },
-      },
-      _max: { sourceVersion: true },
-    }),
-  ]);
+  const tasks = await tx.task.findMany({
+    where: {
+      id: { in: sourceIds },
+      status: { in: ['OPEN', 'IN_PROGRESS'] },
+      dueDate: { not: null },
+      AND: [
+        {
+          OR: [
+            { matterId: null },
+            { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } },
+          ],
+        },
+        { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+      ],
+    },
+    select: { id: true, dueDate: true, version: true },
+  });
+  const maxTaskVersions = await tx.jobRun.groupBy({
+    by: ['sourceId'],
+    where: {
+      jobType: 'REMINDER_DELIVERY',
+      sourceType: 'Task',
+      sourceId: { in: sourceIds },
+    },
+    _max: { sourceVersion: true },
+  });
   for (const t of tasks) {
     const ymd = formatUtcDateToIsoDate(t.dueDate);
     if (ymd) byId.set(t.id, { eventDateYmd: ymd, version: t.version });
@@ -825,21 +825,24 @@ async function reschedulePendingReminderJobs(
     cursorId = batch[batch.length - 1]!.id;
 
     const sourceIds = Array.from(new Set(batch.map((j) => j.sourceId)));
-    const [{ byId: activeSources, maxTaskJobVersionById }, existingDeliveries] = await Promise.all([
-      loadActiveSourceEventDates(tx, sourceType, sourceIds),
-      tx.reminderDelivery.findMany({
-        where: {
-          sourceType,
-          sourceId: { in: sourceIds },
-          channel: 'IN_APP',
-        },
-        select: {
-          sourceId: true,
-          sourceVersion: true,
-          ruleKey: true,
-        },
-      }),
-    ]);
+    const { byId: activeSources, maxTaskJobVersionById } = await loadActiveSourceEventDates(
+      tx,
+      sourceType,
+      sourceIds
+    );
+    const existingDeliveries = await tx.reminderDelivery.findMany({
+      where: {
+        sourceType,
+        sourceId: { in: sourceIds },
+        channel: 'IN_APP',
+        status: 'SENT',
+      },
+      select: {
+        sourceId: true,
+        sourceVersion: true,
+        ruleKey: true,
+      },
+    });
 
     const deliveredRuleKeysBySourceVer = new Map<string, Set<string>>();
     for (const del of existingDeliveries) {
@@ -858,6 +861,7 @@ async function reschedulePendingReminderJobs(
 
       const payload = asJobPayload(job.payload);
       if (sourceType === 'Hearing') {
+        if (source.version !== job.sourceVersion) continue;
         if (typeof payload.sourceVersion === 'number' && source.version !== payload.sourceVersion) {
           continue;
         }
@@ -1016,7 +1020,7 @@ export async function updateReminderRule(
         FROM "reminder_rule"
         WHERE "event_type" = ${target.eventType}::"ReminderEventType"
         ORDER BY "id" ASC
-        FOR UPDATE
+        FOR NO KEY UPDATE
       `;
 
       const locked = lockedRules.find((r) => r.id === input.ruleId);
@@ -1073,6 +1077,147 @@ export async function updateReminderRule(
         nextEnabled !== locked.enabled
       ) {
         await reschedulePendingReminderJobs(tx, locked.event_type, new Date());
+      }
+
+      if (nextEnabled && !locked.enabled) {
+        const now = new Date();
+        const todayUtc = parseCalendarDateToUtcDate(getCairoTodayDateString(now))!;
+        if (locked.event_type === 'TASK') {
+          const tasks = await tx.task.findMany({
+            where: {
+              status: { in: ['OPEN', 'IN_PROGRESS'] },
+              dueDate: { gte: todayUtc },
+              AND: [
+                {
+                  OR: [
+                    { matterId: null },
+                    { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } },
+                  ],
+                },
+                { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+              ],
+            },
+            select: {
+              id: true,
+              version: true,
+              matterId: true,
+              proceedingId: true,
+              dueDate: true,
+              dueTime: true,
+              createdById: true,
+            },
+          });
+          await enqueueMissingSourceReminderJobsBatch(
+            tx,
+            'Task',
+            tasks
+              .filter((task): task is typeof task & { dueDate: Date } => task.dueDate !== null)
+              .map((task) => {
+                const dueDateStr = task.dueDate.toISOString().slice(0, 10);
+                return {
+                  sourceId: task.id,
+                  sourceVersion: task.version,
+                  eventDateYmd: dueDateStr,
+                  deduplicationKey: `reminder_reenable_Task_${task.id}_v${task.version}_rule_${locked.id}_v${nextVersion}`,
+                  payload: {
+                    taskId: task.id,
+                    matterId: task.matterId,
+                    proceedingId: task.proceedingId,
+                    dueDate: dueDateStr,
+                    dueTime: task.dueTime,
+                    sourceVersion: task.version,
+                    recipientUserId: task.createdById,
+                  },
+                };
+              })
+          );
+        } else if (locked.event_type === 'HEARING') {
+          const hearings = await tx.hearing.findMany({
+            where: {
+              status: 'SCHEDULED',
+              hearingDate: { gte: todayUtc },
+              proceeding: {
+                archivedAt: null,
+                matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+              },
+            },
+            select: {
+              id: true,
+              version: true,
+              proceedingId: true,
+              hearingDate: true,
+              hearingTime: true,
+              createdById: true,
+            },
+          });
+          await enqueueMissingSourceReminderJobsBatch(
+            tx,
+            'Hearing',
+            hearings.map((h) => {
+              const hDateStr = h.hearingDate.toISOString().slice(0, 10);
+              return {
+                sourceId: h.id,
+                sourceVersion: h.version,
+                eventDateYmd: hDateStr,
+                deduplicationKey: `reminder_reenable_Hearing_${h.id}_v${h.version}_rule_${locked.id}_v${nextVersion}`,
+                payload: {
+                  hearingId: h.id,
+                  proceedingId: h.proceedingId,
+                  hearingDate: hDateStr,
+                  hearingTime: h.hearingTime,
+                  sourceVersion: h.version,
+                  recipientUserId: h.createdById,
+                },
+              };
+            })
+          );
+        } else if (locked.event_type === 'DEADLINE') {
+          const deadlines = await tx.deadline.findMany({
+            where: {
+              status: 'CONFIRMED',
+              completedAt: null,
+              dueDate: { gte: todayUtc },
+              matter: { archivedAt: null, status: { not: 'ARCHIVED' } },
+              OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }],
+            },
+            select: {
+              id: true,
+              version: true,
+              matterId: true,
+              proceedingId: true,
+              dueDate: true,
+              dueTime: true,
+              createdById: true,
+              updatedById: true,
+              confirmedById: true,
+            },
+          });
+          await enqueueMissingSourceReminderJobsBatch(
+            tx,
+            'Deadline',
+            deadlines
+              .filter((d): d is typeof d & { dueDate: Date } => d.dueDate !== null)
+              .map((d) => {
+                const dDateStr = d.dueDate.toISOString().slice(0, 10);
+                return {
+                  sourceId: d.id,
+                  sourceVersion: d.version,
+                  eventDateYmd: dDateStr,
+                  deduplicationKey: `reminder_reenable_Deadline_${d.id}_v${d.version}_rule_${locked.id}_v${nextVersion}`,
+                  payload: {
+                    deadlineId: d.id,
+                    matterId: d.matterId,
+                    proceedingId: d.proceedingId,
+                    dueDate: dDateStr,
+                    dueTime: d.dueTime,
+                    version: d.version,
+                    sourceVersion: d.version,
+                    recipientUserId: d.confirmedById ?? d.updatedById ?? d.createdById,
+                  },
+                };
+              })
+          );
+        }
       }
 
       await recordAuditEvent(tx, {

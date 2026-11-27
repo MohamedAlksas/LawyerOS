@@ -79,10 +79,10 @@ export const PROCEEDING_STATUS_CLASSES: Record<ProceedingStatus, string> = {
 
 export const POA_REVIEW_STATUS_LABELS: Record<string, string> = {
   UNREVIEWED: 'قيد المراجعة',
-  VALID: 'ساري ومعتمد',
-  EXPIRED: 'منتهي الصلاحية',
-  REVOKED: 'ملغى / مفسوخ',
-  DEFECTIVE: 'معيب / غير صالح',
+  VALID: 'سارٍ ومعتمد',
+  EXPIRED: 'منتهٍ',
+  REVOKED: 'ملغى رسمياً',
+  DEFECTIVE: 'معيب / يحتاج استيفاء',
 };
 
 export const POA_REVIEW_STATUS_CLASSES: Record<string, string> = {

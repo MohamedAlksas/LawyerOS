@@ -1,25 +1,23 @@
 ﻿'use client';
 
 import React from 'react';
+import type { UserRole } from '@/modules/identity/types';
 import { GuardedLink as Link } from './navigation-guard';
 
 interface UserInfo {
   name?: string;
   email?: string;
+  role?: UserRole;
 }
 
 export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
   const name = user?.name || 'الأستاذ المحامي';
   const email = user?.email || '';
   const initial = name.trim().charAt(0) || 'م';
+  const isMaintainer = user?.role === 'MAINTAINER';
 
-  return (
-    <Link
-      href="/settings/security"
-      data-testid="user-identity-badge"
-      aria-label="حساب المستخدم"
-      className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] hover:bg-[#E9F2F5] text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] max-w-[130px] sm:max-w-[210px] md:max-w-[270px] shrink"
-    >
+  const content = (
+    <>
       <span
         className="w-7 h-7 rounded-[4px] bg-[#14566B] text-white flex items-center justify-center font-bold text-xs shrink-0 select-none"
         aria-hidden="true"
@@ -35,9 +33,33 @@ export function UserIdentityBadge({ user }: { user?: UserInfo | null }) {
             {email}
           </bdi>
         ) : (
-          <span className="text-[11px] text-[#4D606A] leading-tight truncate block">إدارة الحساب</span>
+          <span className="text-[11px] text-[#4D606A] leading-tight truncate block">
+            {isMaintainer ? 'صيانة النظام' : 'إدارة الحساب'}
+          </span>
         )}
       </div>
+    </>
+  );
+
+  if (isMaintainer) {
+    return (
+      <div
+        data-testid="user-identity-badge"
+        className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] text-[#172A35] min-h-[44px] max-w-[130px] sm:max-w-[210px] md:max-w-[270px] shrink"
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href="/settings/security"
+      data-testid="user-identity-badge"
+      aria-label="حساب المستخدم"
+      className="flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5 rounded-[6px] border border-[#D5DFE3] bg-[#F8FAFB] hover:bg-[#E9F2F5] text-[#172A35] transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px] max-w-[130px] sm:max-w-[210px] md:max-w-[270px] shrink"
+    >
+      {content}
     </Link>
   );
 }
