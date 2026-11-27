@@ -219,7 +219,10 @@ export function FinanceWorkspace({
     initialFocusRef: closeReceiptBtnRef,
   });
 
-  const refreshOverview = async (matterFilter: string) => {
+  const refreshOverview = async (
+    matterFilter: string,
+    activeStatementClientId: string | null = loadedStatement?.scope.clientMatterPartyId ?? null
+  ) => {
     setIsLoadingOverview(true);
     setActionError(null);
     try {
@@ -241,6 +244,16 @@ export function FinanceWorkspace({
       if (!lockedMatterId && next.openCharges.length > 0 && !payMatterId) {
         setPayMatterId(next.openCharges[0].matterId);
         setPayClientId(next.openCharges[0].clientMatterPartyId);
+      }
+      if (activeStatementClientId) {
+        const stmtRes = await fetch(
+          `/api/finance/statement?clientMatterPartyId=${encodeURIComponent(activeStatementClientId)}`,
+          { cache: 'no-store' }
+        );
+        const stmtJson = await stmtRes.json().catch(() => null);
+        if (stmtRes.ok && stmtJson?.success) {
+          setLoadedStatement(stmtJson.data as ClientStatementDTO);
+        }
       }
     } catch {
       setActionError('تعذر الاتصال بالخادم لتحديث البيانات المالية.');
@@ -311,6 +324,9 @@ export function FinanceWorkspace({
         return;
       }
       if (!res.ok || !json?.success) {
+        if (res.status < 500) {
+          setDraftIdempotencyKey(createClientIdempotencyKey());
+        }
         setActionError(json?.error || 'تعذر حفظ مسودة اتفاق الأتعاب.');
         return;
       }
@@ -393,6 +409,9 @@ export function FinanceWorkspace({
         return;
       }
       if (!res.ok || !json?.success) {
+        if (res.status < 500) {
+          setApproveIdempotencyKey(createClientIdempotencyKey());
+        }
         setActionError(json?.error || 'تعذر اعتماد اتفاق الأتعاب.');
         return;
       }
@@ -436,7 +455,7 @@ export function FinanceWorkspace({
     0n
   );
   const previewRemainingAfter =
-    parsedPaymentAmount !== null ? BigInt(activeTotals.feesDuePiastres) - parsedPaymentAmount : null;
+    parsedPaymentAmount !== null ? totalEligibleDue - parsedPaymentAmount : null;
 
   const submitPaymentRequest = async (payload: Record<string, unknown>) => {
     setIsPostingPayment(true);
@@ -608,7 +627,7 @@ export function FinanceWorkspace({
                   setDraftClientId(firstCid);
                 }
                 setLoadedStatement(null);
-                void refreshOverview(nextId);
+                void refreshOverview(nextId, null);
               }}
               className="px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
             >
@@ -689,7 +708,7 @@ export function FinanceWorkspace({
               <span>الأتعاب</span>
             </SectionHeading>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-[#E9F2F5] text-[#14566B]">
-              مفعّل (T13)
+              مفعّل
             </span>
           </div>
           <dl className="space-y-1.5 text-xs pt-1">
@@ -723,14 +742,14 @@ export function FinanceWorkspace({
               مصاريف القضايا
             </SectionHeading>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
-              المرحلة T14
+              قيد التفعيل لاحقاً
             </span>
           </div>
           <p className="text-sm font-bold text-[#172A35]" data-testid="expenses-due-value">
             <bdi dir="ltr">{formatEgp(activeTotals.expensesDuePiastres)}</bdi>
           </p>
           <p className="text-xs text-[#4D606A] leading-relaxed">
-            مصاريف القضايا القابلة للاسترداد منفصلة تماماً عن الأتعاب ومفعّلة في T14 (مصروفات تشغيل المكتب مستبعدة وفق ADR 0004).
+            مصاريف القضايا القابلة للاسترداد منفصلة تماماً عن الأتعاب وسيتم تفعيل تسجيلها في مرحلة لاحقة (مصروفات تشغيل المكتب غير مشمولة بالنظام).
           </p>
         </div>
 
@@ -743,14 +762,14 @@ export function FinanceWorkspace({
               أموال الموكل (العُهد)
             </SectionHeading>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
-              المرحلة T14
+              قيد التفعيل لاحقاً
             </span>
           </div>
           <p className="text-sm font-bold text-[#172A35]" data-testid="advances-available-value">
             <bdi dir="ltr">{formatEgp(activeTotals.advanceAvailablePiastres)}</bdi>
           </p>
           <p className="text-xs text-[#4D606A] leading-relaxed">
-            أمانات الصرف المخصصة للقضايا تبقى منفصلة ولا تُحتسب إيراداً أو أتعاباً. يتم تفعيلها في T14.
+            أمانات الصرف المخصصة للقضايا تبقى منفصلة ولا تُحتسب إيراداً أو أتعاباً، وسيتم تفعيلها في مرحلة لاحقة.
           </p>
         </div>
       </section>
@@ -1354,7 +1373,7 @@ export function FinanceWorkspace({
                 >
                   {previewRemainingAfter < 0n ? (
                     <span className="text-[#A4262C]">
-                      تنبيه: المبلغ المدخل يتجاوز إجمالي الأتعاب المستحقة ({formatEgp(activeTotals.feesDuePiastres)}) ولن يتم ترحيله كدفعة مقدمة تلقائياً.
+                      تنبيه: المبلغ المدخل يتجاوز إجمالي الأتعاب المستحقة على الموكل المحدد ({formatEgp(totalEligibleDue)}) ولن يتم ترحيله كدفعة مقدمة تلقائياً.
                     </span>
                   ) : (
                     <span>
@@ -1538,7 +1557,7 @@ export function FinanceWorkspace({
                 lastFocusRef.current?.focus();
               }
             }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-transparent print:p-0 print:block"
           >
             <div
               ref={receiptModalRef}
@@ -1548,7 +1567,7 @@ export function FinanceWorkspace({
               data-testid="finance-receipt-dialog"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 shadow-xl space-y-4 my-auto"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 shadow-xl space-y-4 my-auto print:shadow-none print:border-0 print:max-w-none print:p-0"
             >
               <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#E8EEF1]">
                 <div>

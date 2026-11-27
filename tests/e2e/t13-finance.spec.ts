@@ -161,8 +161,8 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     // Filter to seeded matter so totals start cleanly at 0
     await page.getByTestId('finance-matter-filter').selectOption(fixture.matterId);
     await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
-    await expect(page.getByTestId('finance-card-expenses')).toContainText('T14');
-    await expect(page.getByTestId('finance-card-advances')).toContainText('T14');
+    await expect(page.getByTestId('finance-card-expenses')).toContainText('قيد التفعيل لاحقاً');
+    await expect(page.getByTestId('finance-card-advances')).toContainText('قيد التفعيل لاحقاً');
 
     // 1. Save 15,000 EGP draft fee agreement -> confirm draft creates ZERO debt
     await page.getByTestId('toggle-draft-agreement-button').click();
@@ -212,6 +212,14 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(page.getByTestId('fees-collected-value')).toContainText('5,000 ج.م.');
     await expect(page.getByTestId('fees-due-value')).toContainText('10,000 ج.م.');
 
+    // Open detailed single-client statement BEFORE the next payment and verify auto-refresh after retry payment
+    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
+    const statementSummary = page.getByTestId('client-statement-summary');
+    await expect(statementSummary).toBeVisible();
+    await expect(statementSummary).toContainText('15,000 ج.م.');
+    await expect(statementSummary).toContainText('5,000 ج.م.');
+    await expect(statementSummary).toContainText('10,000 ج.م.');
+
     // 4. T13-TC-03: Simulate lost response after server commit -> retry with frozen idempotency key
     await page.getByTestId('pay-amount-egp-input').fill('1000');
     await page.getByTestId('allocation-amount-0').fill('1000');
@@ -251,14 +259,16 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await page.getByTestId('close-receipt-dialog-button').click();
     await expect(receiptDialog).toBeHidden();
 
-    // Load detailed single-client statement and verify reconciliation & totals
-    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
-    const statementSummary = page.getByTestId('client-statement-summary');
+    // Open client statement summary must have auto-refreshed to 6,000 / 9,000 without re-clicking
     await expect(statementSummary).toBeVisible();
     await expect(statementSummary).toContainText('مطابق حسابياً مع القيود المرحلة');
     await expect(statementSummary).toContainText('15,000 ج.م.');
     await expect(statementSummary).toContainText('6,000 ج.م.');
     await expect(statementSummary).toContainText('9,000 ج.م.');
+
+    // Visiting /finance?matterId=<missing-uuid> must render clean 404 (not 500)
+    const missingRes = await page.goto(`/finance?matterId=${randomUUID()}`);
+    expect(missingRes?.status()).toBe(404);
   });
 
   test('T13-TC-06: MAINTAINER is excluded from navigation and denied 403 on /finance and /api/finance @t13 @finance', async ({

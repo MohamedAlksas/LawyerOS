@@ -233,7 +233,8 @@ async function computeNetAllocatedMap(
 
 async function loadFeeAgreementsDTO(
   tx: Prisma.TransactionClient | PrismaClient,
-  where: Prisma.FeeAgreementWhereInput
+  where: Prisma.FeeAgreementWhereInput,
+  pagination?: { skip?: number; take?: number }
 ): Promise<FeeAgreementDTO[]> {
   const rows = await tx.feeAgreement.findMany({
     where,
@@ -250,6 +251,8 @@ async function loadFeeAgreementsDTO(
       },
     },
     orderBy: [{ createdAt: 'desc' }],
+    ...(pagination?.skip !== undefined ? { skip: pagination.skip } : {}),
+    ...(pagination?.take !== undefined ? { take: pagination.take } : {}),
   });
 
   const receivableLineIds = rows.flatMap((ag) => ag.charges.map((c) => c.receivableLineId));
@@ -1454,6 +1457,9 @@ export async function getClientStatement(
     if (!mp) {
       throw new NotFoundError('ارتباط الموكل بالملف غير موجود.');
     }
+    if (mp.role !== 'CLIENT') {
+      throw new ScopeMismatchError('الطرف المحدد لا يحمل صفة موكل في هذا الملف.');
+    }
     if (matterId && mp.matterId !== matterId) {
       throw new ScopeMismatchError('الموكل المحدد لا يتبع ملف القضية المطلوب.');
     }
@@ -1620,17 +1626,35 @@ export async function listFinanceOverview(
   const params = parsed.data;
   const prisma = getDb(options);
 
-  const postedLines = await prisma.moneyLine.findMany({
-    where: {
-      transaction: { status: 'POSTED' },
-      ...(params.matterId ? { matterId: params.matterId } : {}),
-    },
-    include: { account: { select: { type: true } } },
-  });
+  const selectedMatterSummary = params.matterId
+    ? await computeMatterFinanceSummaryInternal(prisma, params.matterId)
+    : null;
 
-  const bucket = emptyBucket();
-  for (const l of postedLines) {
-    applyLineToBucket(bucket, l.account.type, l.side, l.amountPiastres);
+  let totals: FinanceOverviewDTO['totals'];
+  if (selectedMatterSummary) {
+    totals = {
+      feesChargedPiastres: selectedMatterSummary.feesChargedPiastres,
+      feesCollectedPiastres: selectedMatterSummary.feesCollectedPiastres,
+      feesDuePiastres: selectedMatterSummary.feesDuePiastres,
+      expensesDuePiastres: selectedMatterSummary.expensesDuePiastres,
+      advanceAvailablePiastres: selectedMatterSummary.advanceAvailablePiastres,
+    };
+  } else {
+    const postedLines = await prisma.moneyLine.findMany({
+      where: { transaction: { status: 'POSTED' } },
+      include: { account: { select: { type: true } } },
+    });
+    const bucket = emptyBucket();
+    for (const l of postedLines) {
+      applyLineToBucket(bucket, l.account.type, l.side, l.amountPiastres);
+    }
+    totals = {
+      feesChargedPiastres: bucket.feeReceivableDebit.toString(),
+      feesCollectedPiastres: bucket.feeReceivableCredit.toString(),
+      feesDuePiastres: (bucket.feeReceivableDebit - bucket.feeReceivableCredit).toString(),
+      expensesDuePiastres: (bucket.expenseReceivableDebit - bucket.expenseReceivableCredit).toString(),
+      advanceAvailablePiastres: (bucket.clientAdvanceCredit - bucket.clientAdvanceDebit).toString(),
+    };
   }
 
   const matterRows = await prisma.matter.findMany({
@@ -1687,38 +1711,35 @@ export async function listFinanceOverview(
       : {}),
   };
 
-  const totalAgreements = await prisma.feeAgreement.count({ where: agreementWhere });
-  const agreementsAll = await loadFeeAgreementsDTO(prisma, agreementWhere);
-  const start = (params.page - 1) * params.limit;
-  const agreements = agreementsAll.slice(start, start + params.limit);
+  const skip = (params.page - 1) * params.limit;
+  let totalAgreements: number;
+  let agreements: FeeAgreementDTO[];
+  let openCharges: FeeChargeDTO[];
 
-  const openCharges = agreementsAll
-    .filter((ag) => ag.status === 'APPROVED')
-    .flatMap((ag) => ag.charges)
-    .filter((c) => BigInt(c.remainingPiastres) > 0n);
+  if (selectedMatterSummary && !params.q) {
+    totalAgreements = selectedMatterSummary.agreements.length;
+    agreements = selectedMatterSummary.agreements.slice(skip, skip + params.limit);
+    openCharges = selectedMatterSummary.charges.filter((c) => BigInt(c.remainingPiastres) > 0n);
+  } else {
+    const [count, pagedAgreements, approvedAgreements] = await Promise.all([
+      prisma.feeAgreement.count({ where: agreementWhere }),
+      loadFeeAgreementsDTO(prisma, agreementWhere, { skip, take: params.limit }),
+      loadFeeAgreementsDTO(prisma, { ...agreementWhere, status: 'APPROVED' }),
+    ]);
+    totalAgreements = count;
+    agreements = pagedAgreements;
+    openCharges = approvedAgreements
+      .flatMap((ag) => ag.charges)
+      .filter((c) => BigInt(c.remainingPiastres) > 0n);
+  }
 
-  const recentTransactions = await loadTransactionsDTO(
-    prisma,
-    {
-      status: 'POSTED',
-      ...(params.matterId ? { matterId: params.matterId } : {}),
-    },
-    30
-  );
-
-  const selectedMatterSummary = params.matterId
-    ? await computeMatterFinanceSummaryInternal(prisma, params.matterId)
-    : null;
+  const recentTransactions = selectedMatterSummary
+    ? selectedMatterSummary.transactions.slice(0, 30)
+    : await loadTransactionsDTO(prisma, { status: 'POSTED' }, 30);
 
   return {
     currency: EGP_CURRENCY,
-    totals: {
-      feesChargedPiastres: bucket.feeReceivableDebit.toString(),
-      feesCollectedPiastres: bucket.feeReceivableCredit.toString(),
-      feesDuePiastres: (bucket.feeReceivableDebit - bucket.feeReceivableCredit).toString(),
-      expensesDuePiastres: (bucket.expenseReceivableDebit - bucket.expenseReceivableCredit).toString(),
-      advanceAvailablePiastres: (bucket.clientAdvanceCredit - bucket.clientAdvanceDebit).toString(),
-    },
+    totals,
     selectableMatters,
     agreements,
     openCharges,

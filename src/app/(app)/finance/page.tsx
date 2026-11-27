@@ -1,9 +1,11 @@
 import React from 'react';
+import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { authorize } from '@/modules/identity/authorize';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { listFinanceOverview } from '@/modules/finance/finance-service';
+import { NotFoundError } from '@/modules/finance/finance-types';
 import { readParam } from '@/lib/search-params';
 import { FinanceWorkspace } from '@/components/finance/finance-workspace';
 
@@ -43,7 +45,15 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
   const rawMatterId = readParam(params, 'matterId')?.trim();
   const matterId = rawMatterId && UUID_REGEX.test(rawMatterId) ? rawMatterId : undefined;
-  const overview = await listFinanceOverview(actor, { matterId });
+  let overview;
+  try {
+    overview = await listFinanceOverview(actor, { matterId });
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      notFound();
+    }
+    throw error;
+  }
   const canWriteFinance = authorize(actor, 'WRITE_FINANCE');
 
   return (

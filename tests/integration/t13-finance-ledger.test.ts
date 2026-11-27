@@ -6,17 +6,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getAuth, getPrismaClient } from '@/lib/auth';
 import { closeDbPool } from '@/lib/db';
 import { getEnv } from '@/lib/env';
-import { openMatter, linkMatterParty } from '@/modules/matters/matter-service';
+import { openMatter, linkMatterParty, unlinkMatterParty } from '@/modules/matters/matter-service';
+import { ActiveObligationError } from '@/modules/matters/matter-types';
 import {
   ConcurrencyConflictError,
   ExcessAllocationError,
   FinanceValidationError,
   ImmutablePostedRecordError,
+  NotFoundError,
   ScopeMismatchError,
   UnsupportedTransactionKindError,
   approveFeeAgreement,
   deletePostedTransaction,
+  getClientStatement,
   getMatterFinanceSummary,
+  listFinanceOverview,
   postTransaction,
   saveFeeAgreementDraft,
   updatePostedTransaction,
@@ -972,5 +976,42 @@ describe('T13 Integration Tests: Balanced Ledger, Fee Agreements, Payments & Rec
     expect(rejected).toHaveLength(1);
     const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string };
     expect(reason.code).not.toBe('40P01');
+  });
+
+  it('T13-REVIEW-GUARDS: unlinkMatterParty blocks financial links cleanly, statement rejects non-CLIENT, and missing matterId throws NotFoundError', async () => {
+    const draftForUnlink = await saveFeeAgreementDraft(owner, {
+      matterId: matter1Id,
+      clientMatterPartyId: matter1ClientBMpId,
+      description: 'اتفاق يمنع فك ارتباط الموكل',
+      totalAmountPiastres: '100000',
+      agreementDate: '2026-11-27',
+      chargingMethod: 'FIXED',
+      idempotencyKey: `unlink-guard-draft-${crypto.randomUUID()}`,
+    });
+    expect(draftForUnlink.status).toBe('DRAFT');
+
+    await expect(
+      unlinkMatterParty(owner, {
+        matterId: matter1Id,
+        id: matter1ClientBMpId,
+        expectedVersion: 1,
+        idempotencyKey: `unlink-guard-${crypto.randomUUID()}`,
+      })
+    ).rejects.toThrow(ActiveObligationError);
+
+    const opponentMp = await linkMatterParty(owner, {
+      matterId: matter2Id,
+      partyId: thirdPartyPayerId,
+      role: 'OPPONENT',
+      idempotencyKey: `opponent-stmt-${crypto.randomUUID()}`,
+    });
+
+    await expect(
+      getClientStatement(owner, { clientMatterPartyId: opponentMp.id })
+    ).rejects.toThrow(ScopeMismatchError);
+
+    await expect(
+      listFinanceOverview(owner, { matterId: crypto.randomUUID() })
+    ).rejects.toThrow(NotFoundError);
   });
 });

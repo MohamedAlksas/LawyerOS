@@ -80,6 +80,10 @@ body {
     color: #000000 !important;
   }
 
+  #app-shell-content[aria-hidden="true"] {
+    display: none !important;
+  }
+
   #app-shell-content,
   #main-content {
     margin: 0 !important;

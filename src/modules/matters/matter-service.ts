@@ -1549,25 +1549,43 @@ export async function unlinkMatterParty(
       }
 
       if (existing.role === 'CLIENT') {
-        const linkedPoas = await tx.matterAuthorization.findFirst({
-          where: {
-            matterId: input.matterId,
-            powerOfAttorney: { partyId: existing.partyId },
-          },
-        });
+        const [linkedPoas, poaDocumentDep, linkedFeeAgreement, linkedMoneyAccount, linkedMoneyLine] =
+          await Promise.all([
+            tx.matterAuthorization.findFirst({
+              where: {
+                matterId: input.matterId,
+                powerOfAttorney: { partyId: existing.partyId },
+              },
+              select: { id: true },
+            }),
+            tx.powerOfAttorney.findFirst({
+              where: {
+                partyId: existing.partyId,
+                document: { matterId: input.matterId },
+              },
+              select: { id: true },
+            }),
+            tx.feeAgreement.findFirst({
+              where: { clientMatterPartyId: input.id },
+              select: { id: true },
+            }),
+            tx.moneyAccount.findFirst({
+              where: { clientMatterPartyId: input.id },
+              select: { id: true },
+            }),
+            tx.moneyLine.findFirst({
+              where: { clientMatterPartyId: input.id },
+              select: { id: true },
+            }),
+          ]);
         if (linkedPoas) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
         }
-
-        const poaDocumentDep = await tx.powerOfAttorney.findFirst({
-          where: {
-            partyId: existing.partyId,
-            document: { matterId: input.matterId },
-          },
-          select: { id: true },
-        });
         if (poaDocumentDep) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
+        }
+        if (linkedFeeAgreement || linkedMoneyAccount || linkedMoneyLine) {
+          throw new ActiveObligationError('لا يمكن إزالة الموكل لوجود اتفاقات أتعاب أو قيود مالية مرتبطة به في هذا الملف.');
         }
 
         if (matter.status === 'ACTIVE') {

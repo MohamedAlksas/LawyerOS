@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import NextLink from 'next/link';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -94,6 +94,37 @@ export function MatterDetailClient({
   const [activeTab, setActiveTab] = useState<
     'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'finance' | 'summary'
   >('parties');
+  const financeInitialOverview = useMemo<FinanceOverviewDTO | null>(() => {
+    if (!initialFinanceSummary) return null;
+    return {
+      currency: 'EGP',
+      totals: {
+        feesChargedPiastres: initialFinanceSummary.feesChargedPiastres,
+        feesCollectedPiastres: initialFinanceSummary.feesCollectedPiastres,
+        feesDuePiastres: initialFinanceSummary.feesDuePiastres,
+        expensesDuePiastres: initialFinanceSummary.expensesDuePiastres,
+        advanceAvailablePiastres: initialFinanceSummary.advanceAvailablePiastres,
+      },
+      selectableMatters: [
+        {
+          matterId: matter.id,
+          fileCode: matter.fileCode,
+          title: matter.title,
+          status: matter.status,
+          clients: initialFinanceSummary.clients,
+        },
+      ],
+      agreements: initialFinanceSummary.agreements,
+      openCharges: initialFinanceSummary.charges.filter(
+        (c) => BigInt(c.remainingPiastres) > 0n
+      ),
+      recentTransactions: initialFinanceSummary.transactions,
+      selectedMatterSummary: initialFinanceSummary,
+      page: 1,
+      limit: 20,
+      totalAgreements: initialFinanceSummary.agreements.length,
+    };
+  }, [initialFinanceSummary, matter.id, matter.fileCode, matter.title, matter.status]);
   const tabRefs = useRef<Partial<Record<'parties' | 'proceedings' | 'authorizations' | 'tasksDeadlines' | 'finance' | 'summary', HTMLButtonElement | null>>>({});
 
   const handleMatterTabKeyDown = (
@@ -2696,36 +2727,9 @@ export function MatterDetailClient({
             <div role="alert" className="p-4 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold">
               {financeError}
             </div>
-          ) : initialFinanceSummary ? (
+          ) : financeInitialOverview ? (
             <FinanceWorkspace
-              initialOverview={{
-                currency: 'EGP',
-                totals: {
-                  feesChargedPiastres: initialFinanceSummary.feesChargedPiastres,
-                  feesCollectedPiastres: initialFinanceSummary.feesCollectedPiastres,
-                  feesDuePiastres: initialFinanceSummary.feesDuePiastres,
-                  expensesDuePiastres: initialFinanceSummary.expensesDuePiastres,
-                  advanceAvailablePiastres: initialFinanceSummary.advanceAvailablePiastres,
-                },
-                selectableMatters: [
-                  {
-                    matterId: matter.id,
-                    fileCode: matter.fileCode,
-                    title: matter.title,
-                    status: matter.status,
-                    clients: initialFinanceSummary.clients,
-                  },
-                ],
-                agreements: initialFinanceSummary.agreements,
-                openCharges: initialFinanceSummary.charges.filter(
-                  (c) => BigInt(c.remainingPiastres) > 0n
-                ),
-                recentTransactions: initialFinanceSummary.transactions,
-                selectedMatterSummary: initialFinanceSummary,
-                page: 1,
-                limit: 20,
-                totalAgreements: initialFinanceSummary.agreements.length,
-              } satisfies FinanceOverviewDTO}
+              initialOverview={financeInitialOverview}
               lockedMatterId={matter.id}
               isReadOnly={isMatterArchived}
               canWriteFinance={canWriteFinance}
