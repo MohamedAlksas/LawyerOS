@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
+import { financeError } from '@/modules/finance/finance-errors';
+import { statusFromFinanceErrorCode } from '@/modules/finance/finance-http';
 import {
   approveFeeAgreementSchema,
   formatEgpPiastres,
@@ -225,5 +228,37 @@ describe('T13 Unit Tests: Finance Validation, Arabic/Latin Digits & BigInt Piast
     // Empty statement scope rejected
     expect(getClientStatementSchema.safeParse({}).success).toBe(false);
     expect(getClientStatementSchema.safeParse({ matterId }).success).toBe(true);
+  });
+
+  it('maps PostgreSQL deadlock SQLSTATE 40P01 and lock contention to CONCURRENCY_CONFLICT (409)', () => {
+    const rawPgDeadlock = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+    expect(financeError(rawPgDeadlock)).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+
+    const prismaRawDeadlock = new Prisma.PrismaClientKnownRequestError('Raw query failed', {
+      code: 'P2010',
+      clientVersion: '7.10.1',
+      meta: {
+        code: '40P01',
+        driverAdapterError: { cause: { originalCode: '40P01' } },
+      },
+    });
+    expect(financeError(prismaRawDeadlock)).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+
+    const prismaWriteConflict = new Prisma.PrismaClientKnownRequestError('Transaction deadlock', {
+      code: 'P2034',
+      clientVersion: '7.10.1',
+    });
+    expect(financeError(prismaWriteConflict)).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+
+    expect(statusFromFinanceErrorCode('CONCURRENCY_CONFLICT')).toBe(409);
   });
 });

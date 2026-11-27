@@ -760,6 +760,41 @@ export async function approveFeeAgreement(
       payload: intent,
     },
     async (tx, idempotencyRecordId) => {
+      // Non-locking scope discovery first so locks strictly follow: matter -> matter_party -> fee_agreement
+      const scopeRows = await tx.$queryRaw<
+        Array<{ matter_id: string; client_matter_party_id: string }>
+      >`
+        SELECT "matter_id", "client_matter_party_id"
+        FROM public."fee_agreement"
+        WHERE "id" = ${input.feeAgreementId}
+      `;
+      const scope = scopeRows[0];
+      if (!scope) {
+        throw new NotFoundError('اتفاق الأتعاب المطلوب غير موجود.');
+      }
+
+      const matters = await tx.$queryRaw<Array<{ id: string; status: string; archivedAt: Date | null }>>`
+        SELECT "id", "status", "archivedAt" FROM public."matter" WHERE "id" = ${scope.matter_id} FOR UPDATE
+      `;
+      const matter = matters[0];
+      if (!matter) {
+        throw new NotFoundError('ملف القضية غير موجود.');
+      }
+      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
+        throw new MatterArchivedError();
+      }
+
+      const clientLinks = await tx.$queryRaw<Array<{ id: string; matterId: string; role: string }>>`
+        SELECT "id", "matterId", "role"
+        FROM public."matter_party"
+        WHERE "id" = ${scope.client_matter_party_id}
+        FOR UPDATE
+      `;
+      const clientLink = clientLinks[0];
+      if (!clientLink || clientLink.matterId !== scope.matter_id || clientLink.role !== 'CLIENT') {
+        throw new ScopeMismatchError('الموكل المسؤول لم يعد صالحاً في هذا الملف.');
+      }
+
       const agRows = await tx.$queryRaw<
         Array<{
           id: string;
@@ -776,7 +811,7 @@ export async function approveFeeAgreement(
         SELECT "id", "matter_id", "client_matter_party_id", "description",
                "total_amount_piastres", "agreement_date", "charging_method"::text,
                "status"::text, "version"
-        FROM "fee_agreement"
+        FROM public."fee_agreement"
         WHERE "id" = ${input.feeAgreementId}
         FOR UPDATE
       `;
@@ -793,27 +828,11 @@ export async function approveFeeAgreement(
       if (ag.version !== input.expectedVersion) {
         throw new ConcurrencyConflictError();
       }
-
-      const matters = await tx.$queryRaw<Array<{ id: string; status: string; archivedAt: Date | null }>>`
-        SELECT "id", "status", "archivedAt" FROM "matter" WHERE "id" = ${ag.matter_id} FOR UPDATE
-      `;
-      const matter = matters[0];
-      if (!matter) {
-        throw new NotFoundError('ملف القضية غير موجود.');
-      }
-      if (matter.status === 'ARCHIVED' || matter.archivedAt !== null) {
-        throw new MatterArchivedError();
-      }
-
-      const clientLinks = await tx.$queryRaw<Array<{ id: string; matterId: string; role: string }>>`
-        SELECT "id", "matterId", "role"
-        FROM "matter_party"
-        WHERE "id" = ${ag.client_matter_party_id}
-        FOR UPDATE
-      `;
-      const clientLink = clientLinks[0];
-      if (!clientLink || clientLink.matterId !== ag.matter_id || clientLink.role !== 'CLIENT') {
-        throw new ScopeMismatchError('الموكل المسؤول لم يعد صالحاً في هذا الملف.');
+      if (
+        ag.matter_id !== scope.matter_id ||
+        ag.client_matter_party_id !== scope.client_matter_party_id
+      ) {
+        throw new ConcurrencyConflictError();
       }
 
       const agreementTotal = BigInt(ag.total_amount_piastres);

@@ -1369,7 +1369,7 @@ export function FinanceWorkspace({
                   type="submit"
                   data-testid="submit-payment-button"
                   disabled={isPostingPayment}
-                  className="px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                  className="px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                 >
                   {isPostingPayment ? 'جارٍ الترحيل...' : 'حفظ وتسجيل الدفعة وإصدار الإيصال'}
                 </button>
@@ -1444,7 +1444,7 @@ export function FinanceWorkspace({
                   <button
                     type="button"
                     onClick={() => void handleLoadClientStatement(cl.clientMatterPartyId)}
-                    className="px-2.5 py-1 text-[#14566B] border border-[#14566B]/30 rounded-[6px] font-semibold min-h-[44px] print:hidden"
+                    className="px-2.5 py-1 text-[#14566B] border border-[#14566B]/30 rounded-[6px] font-semibold min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                   >
                     عرض الكشف المفصل
                   </button>
@@ -1513,7 +1513,7 @@ export function FinanceWorkspace({
                         data-testid={`reprint-receipt-button-${tx.receiptId}`}
                         disabled={isLoadingReceipt}
                         onClick={(e) => void handleOpenReceipt(tx.receiptId!, e.currentTarget)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] font-bold rounded-[6px] min-h-[44px] print:hidden"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                       >
                         <IconPrint className="w-4 h-4" />
                         <span>إعادة طباعة الإيصال</span>
@@ -1570,7 +1570,7 @@ export function FinanceWorkspace({
                     setActiveReceipt(null);
                     lastFocusRef.current?.focus();
                   }}
-                  className="px-3 py-2 text-xs text-[#4D606A] hover:text-[#172A35] border border-[#D5DFE3] rounded-[6px] min-h-[44px] print:hidden"
+                  className="px-3 py-2 text-xs text-[#4D606A] hover:text-[#172A35] border border-[#D5DFE3] rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
                 >
                   ✕ إغلاق
                 </button>
@@ -1640,7 +1640,7 @@ export function FinanceWorkspace({
                   type="button"
                   data-testid="print-receipt-button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px]"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                 >
                   <IconDocument className="w-4 h-4" />
                   <span>طباعة الإيصال</span>

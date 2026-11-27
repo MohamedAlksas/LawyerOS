@@ -727,6 +727,28 @@ describe('T13 Integration Tests: Balanced Ledger, Fee Agreements, Payments & Rec
     expect((await delRes.json()).code).toBe('IMMUTABLE_POSTED_RECORD');
 
     // Direct SQL immutability & balanced constraint triggers
+    const approvedAgreement = m1Summary.agreements.find((a) => a.status === 'APPROVED')!;
+    await expect(
+      dedicated.pool.query(
+        `UPDATE public."fee_agreement" SET "status" = 'DRAFT' WHERE "id" = $1`,
+        [approvedAgreement.id]
+      )
+    ).rejects.toThrow(/approval status|immutable|cannot be modified/i);
+
+    await expect(
+      dedicated.pool.query(
+        `UPDATE public."fee_agreement" SET "approved_at" = NOW() + interval '1 day' WHERE "id" = $1`,
+        [approvedAgreement.id]
+      )
+    ).rejects.toThrow(/approval status|immutable|cannot be modified/i);
+
+    await expect(
+      dedicated.pool.query(
+        `UPDATE public."fee_agreement" SET "approved_by_id" = $2 WHERE "id" = $1`,
+        [approvedAgreement.id, crypto.randomUUID()]
+      )
+    ).rejects.toThrow(/approval status|immutable|cannot be modified/i);
+
     await expect(
       dedicated.pool.query(
         `UPDATE public."money_transaction" SET "description" = 'sql tamper' WHERE "id" = $1`,
@@ -912,5 +934,43 @@ describe('T13 Integration Tests: Balanced Ledger, Fee Agreements, Payments & Rec
       })
     );
     expect(untrustedPost.status).toBe(403);
+  });
+
+  it('T13-TC-04b: Concurrent saveFeeAgreementDraft and approveFeeAgreement follow aligned lock hierarchy without deadlock', async () => {
+    const draft = await saveFeeAgreementDraft(owner, {
+      matterId: matter2Id,
+      clientMatterPartyId: matter2ClientBMpId,
+      description: 'مسودة لاختبار ترتيب الأقفال',
+      totalAmountPiastres: '200000',
+      agreementDate: '2026-11-27',
+      chargingMethod: 'FIXED',
+      idempotencyKey: 'tc04b-create-draft',
+    });
+
+    const raceResults = await Promise.allSettled([
+      saveFeeAgreementDraft(owner, {
+        feeAgreementId: draft.id,
+        expectedVersion: draft.version,
+        matterId: matter2Id,
+        clientMatterPartyId: matter2ClientBMpId,
+        description: 'تحديث متزامن للمسودة',
+        totalAmountPiastres: '250000',
+        agreementDate: '2026-11-27',
+        chargingMethod: 'FIXED',
+        idempotencyKey: 'tc04b-race-update',
+      }),
+      approveFeeAgreement(owner, {
+        feeAgreementId: draft.id,
+        expectedVersion: draft.version,
+        idempotencyKey: 'tc04b-race-approve',
+      }),
+    ]);
+
+    const fulfilled = raceResults.filter((r) => r.status === 'fulfilled');
+    const rejected = raceResults.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const reason = (rejected[0] as PromiseRejectedResult).reason as { code?: string };
+    expect(reason.code).not.toBe('40P01');
   });
 });

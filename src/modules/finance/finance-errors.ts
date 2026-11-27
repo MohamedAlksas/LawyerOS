@@ -22,6 +22,31 @@ import {
   type FinanceActionResult,
 } from './finance-types';
 
+const PG_CONCURRENCY_SQLSTATES = new Set(['40P01', '40001', '55P03']);
+
+function isPgConcurrencyOrDeadlockError(error: unknown, depth = 0): boolean {
+  if (!error || typeof error !== 'object' || depth > 5) return false;
+  const record = error as Record<string, unknown>;
+
+  if (typeof record.code === 'string') {
+    if (record.code === 'P2034' || PG_CONCURRENCY_SQLSTATES.has(record.code)) {
+      return true;
+    }
+  }
+  if (typeof record.originalCode === 'string' && PG_CONCURRENCY_SQLSTATES.has(record.originalCode)) {
+    return true;
+  }
+  if (typeof record.sqlState === 'string' && PG_CONCURRENCY_SQLSTATES.has(record.sqlState)) {
+    return true;
+  }
+
+  return (
+    isPgConcurrencyOrDeadlockError(record.cause, depth + 1) ||
+    isPgConcurrencyOrDeadlockError(record.meta, depth + 1) ||
+    isPgConcurrencyOrDeadlockError(record.driverAdapterError, depth + 1)
+  );
+}
+
 export function financeError(error: unknown): FinanceActionResult<never> {
   if (error instanceof UnsupportedTransactionKindError) {
     return {
@@ -84,11 +109,14 @@ export function financeError(error: unknown): FinanceActionResult<never> {
     };
   }
 
-  if (error instanceof ConcurrencyConflictError) {
+  if (error instanceof ConcurrencyConflictError || isPgConcurrencyOrDeadlockError(error)) {
     return {
       success: false,
-      error: error.message,
-      code: error.code,
+      error:
+        error instanceof ConcurrencyConflictError
+          ? error.message
+          : 'تعذر إتمام العملية بسبب تعارض تزامن في قاعدة البيانات. يرجى إعادة التحميل والمحاولة مرة أخرى.',
+      code: 'CONCURRENCY_CONFLICT',
     };
   }
 

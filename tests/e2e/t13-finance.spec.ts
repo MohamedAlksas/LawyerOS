@@ -17,7 +17,9 @@ import {
   expectNoPageOverflow,
   expectShellReady,
   expectTouchTarget,
+  expectVisibleFocus,
   nextPaint,
+  tabToTestId,
 } from '../helpers/t04-layout';
 import {
   expectNoSensitiveValues,
@@ -246,6 +248,17 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     const reprintedNum = (await page.getByTestId('receipt-number').innerText()).trim();
     expect(reprintedNum).toBe(firstReceiptNumber);
     await expect(page.getByTestId('fees-due-value')).toContainText('9,000 ج.م.');
+    await page.getByTestId('close-receipt-dialog-button').click();
+    await expect(receiptDialog).toBeHidden();
+
+    // Load detailed single-client statement and verify reconciliation & totals
+    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
+    const statementSummary = page.getByTestId('client-statement-summary');
+    await expect(statementSummary).toBeVisible();
+    await expect(statementSummary).toContainText('مطابق حسابياً مع القيود المرحلة');
+    await expect(statementSummary).toContainText('15,000 ج.م.');
+    await expect(statementSummary).toContainText('6,000 ج.م.');
+    await expect(statementSummary).toContainText('9,000 ج.م.');
   });
 
   test('T13-TC-06: MAINTAINER is excluded from navigation and denied 403 on /finance and /api/finance @t13 @finance', async ({
@@ -320,6 +333,8 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await page.getByTestId('submit-payment-button').click();
     const receiptDialog = page.getByTestId('finance-receipt-dialog');
     await expect(receiptDialog).toBeVisible();
+    const firstReceiptNumber = (await page.getByTestId('receipt-number').innerText()).trim();
+    expect(firstReceiptNumber).toMatch(/^RCP-\d{4}-\d{4}$/);
     await expect(page.getByTestId('fees-due-value')).toContainText('10,000 ج.م.');
 
     const shot = await page.screenshot({ fullPage: true });
@@ -328,8 +343,31 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
       contentType: 'image/png',
     });
 
-    // Keyboard Escape closes receipt modal
+    // Keyboard Tab traversal inside receipt modal + visible focus, then Escape dismisses cleanly
+    expect(await tabToTestId(page, 'print-receipt-button', 6)).toBe(true);
+    await expectVisibleFocus(page, page.getByTestId('print-receipt-button'));
     await page.keyboard.press('Escape');
+    await expect(receiptDialog).toBeHidden();
+
+    // Load detailed single-client statement across all 3 viewports without horizontal overflow
+    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
+    const statementSummary = page.getByTestId('client-statement-summary');
+    await expect(statementSummary).toBeVisible();
+    await expect(statementSummary).toContainText('مطابق حسابياً مع القيود المرحلة');
+    await expect(statementSummary).toContainText('15,000 ج.م.');
+    await expect(statementSummary).toContainText('5,000 ج.م.');
+    await expect(statementSummary).toContainText('10,000 ج.م.');
+    await expectNoPageOverflow(page);
+
+    // Reprint receipt across all 3 viewports: identical number, remaining balance unchanged
+    const reprintBtn = page.locator('[data-testid^="reprint-receipt-button-"]').first();
+    await reprintBtn.click();
+    await expect(receiptDialog).toBeVisible();
+    expect((await page.getByTestId('receipt-number').innerText()).trim()).toBe(firstReceiptNumber);
+    await expect(page.getByTestId('receipt-remaining-after')).toContainText('10,000 ج.م.');
+    await expect(page.getByTestId('fees-collected-value')).toContainText('5,000 ج.م.');
+    await expect(page.getByTestId('fees-due-value')).toContainText('10,000 ج.م.');
+    await page.getByTestId('close-receipt-dialog-button').click();
     await expect(receiptDialog).toBeHidden();
 
     // 200% text scaling reflow check
