@@ -18,6 +18,7 @@ import { generateClientRequestId } from '@/components/matters/matter-ui-types';
 import { GuardedLink as Link, useLeaveGuard } from '@/components/navigation-guard';
 import {
   IconCheck,
+  IconClock,
   IconDocument,
   IconDownload,
   IconRefresh,
@@ -153,7 +154,7 @@ function formatShortSha256(sha256: string | null): string {
 
 export function DocumentDetailView({
   document: initialDocument,
-  canWriteDocuments = true,
+  canWriteDocuments = false,
 }: DocumentDetailViewProps) {
   const router = useRouter();
   const propStamp = `${initialDocument.version}:${initialDocument.updatedAt}`;
@@ -809,10 +810,6 @@ export function DocumentDetailView({
       delete next[key];
       return next;
     });
-    if (frozenMetadataRequest) {
-      setFrozenMetadataRequest(null);
-      setMetadataIdempotencyKey(generateClientRequestId('doc-meta'));
-    }
   };
 
   const handleResetMetadataDraft = () => {
@@ -1217,21 +1214,43 @@ export function DocumentDetailView({
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-1 min-w-0">
-            <h2 id="document-preview-heading" className="text-lg font-bold text-[#172A35] scroll-mt-24">
+            <h2 id="document-preview-heading" className="text-lg font-bold text-[#172A35]">
               المعاينة والتحميل المصرح به
             </h2>
             {previewVersion && (
-              <p
-                data-testid="preview-active-version-label"
-                className="text-xs text-[#4D606A] break-words [overflow-wrap:anywhere]"
-              >
-                يتم عرض الإصدار رقم{' '}
-                <strong className="text-[#172A35]">{previewVersion.versionNumber}</strong>{' '}
-                {previewVersion.id === docState.currentVersionId
-                  ? '(الإصدار الحالي)'
-                  : '(إصدار سابق)'}{' '}
-                — <bdi dir="ltr">{previewVersion.originalFilename}</bdi>
-              </p>
+              <div className="space-y-1">
+                <p
+                  data-testid="preview-active-version-label"
+                  className="text-xs text-[#4D606A] break-words [overflow-wrap:anywhere]"
+                >
+                  يتم عرض الإصدار رقم{' '}
+                  <strong className="text-[#172A35]">{previewVersion.versionNumber}</strong>{' '}
+                  {previewVersion.id === docState.currentVersionId
+                    ? '(الإصدار الحالي)'
+                    : '(إصدار سابق)'}{' '}
+                  — <bdi dir="ltr">{previewVersion.originalFilename}</bdi>
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span
+                    data-testid="preview-version-scan-badge"
+                    className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-[4px] text-xs font-semibold border ${
+                      SCAN_STATUS_BADGE_CLASSES[previewVersion.scanStatus]
+                    }`}
+                  >
+                    {previewVersion.scanStatus === 'CLEAN' ? (
+                      <IconCheck className="w-3.5 h-3.5 shrink-0" />
+                    ) : previewVersion.scanStatus === 'PENDING' ? (
+                      <IconClock className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <IconWarning className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{previewVersion.scanStatusLabel}</span>
+                  </span>
+                  <span className="text-xs text-[#7A4A00]">
+                    (<bdi dir="ltr">ADR 0003</bdi>: {UNSCANNED_POLICY_NOTICE_AR})
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 

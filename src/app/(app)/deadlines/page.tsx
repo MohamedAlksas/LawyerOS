@@ -70,6 +70,7 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
               title: d.title,
               documentType: d.documentType,
               currentVersionId: d.currentVersionId,
+              scanStatus: d.currentVersion!.scanStatus,
               scanStatusLabel: d.currentVersion!.scanStatusLabel,
               proceedingId: d.proceedingId,
               hearingId: d.hearingId,
@@ -88,7 +89,7 @@ export default async function DeadlinesPage({ searchParams }: DeadlinesPageProps
   return (
     <div className="max-w-5xl mx-auto">
       <DeadlinesView
-        key={actor.id}
+        key={`${actor.id}:${reviewId ?? ''}`}
         actorId={actor.id}
         initialDeadlines={initialDeadlines}
         selectableMatters={selectableMatters}

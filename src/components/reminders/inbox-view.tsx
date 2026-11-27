@@ -836,7 +836,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
             </h2>
           </div>
           <span className="text-xs text-[#4D606A]">
-            التذكير يحدد وقت التنبيه فقط ولا يغير وقت الجلسة المجهول
+            التذكير يحدد وقت التنبيه فقط ولا يغير وقت الجلسة المجدول
           </span>
         </div>
 

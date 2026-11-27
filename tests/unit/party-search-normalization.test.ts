@@ -75,6 +75,7 @@ describe('T05-02: Party Search Normalization (Unit)', () => {
       expect(normalizePhone('00201012345678')).toBe('01012345678');
       expect(normalizePhone('+20 10 1234 5678')).toBe('01012345678');
       expect(normalizePhone('0020 10 1234 5678')).toBe('01012345678');
+      expect(normalizePhone('+20 (0)1012345678')).toBe('01012345678');
     });
 
     it('handles Egyptian landline numbers with area codes', () => {

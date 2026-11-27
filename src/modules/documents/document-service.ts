@@ -635,6 +635,17 @@ export async function beginUpload(
           hearingId: parsed.hearingId,
         });
 
+        let effectiveProceedingId = parsed.proceedingId ?? null;
+        if (!effectiveProceedingId && parsed.hearingId) {
+          const h = await tx.hearing.findUnique({
+            where: { id: parsed.hearingId },
+            select: { proceedingId: true },
+          });
+          if (h?.proceedingId) {
+            effectiveProceedingId = h.proceedingId;
+          }
+        }
+
         const idemRecord = await tx.idempotencyRecord.findUniqueOrThrow({
           where: {
             actorId_commandType_key: {
@@ -657,7 +668,7 @@ export async function beginUpload(
             actorId: actor.id,
             matterId: parsed.matterId ?? null,
             partyId: parsed.partyId ?? null,
-            proceedingId: parsed.proceedingId ?? null,
+            proceedingId: effectiveProceedingId,
             hearingId: parsed.hearingId ?? null,
             title: parsed.title,
             documentType: parsed.documentType,
@@ -1180,11 +1191,20 @@ export async function finalizeUpload(
     );
   }
 
+  if (attempt.status === 'FAILED' && attempt.bytesWritten === 0) {
+    throw new DocumentValidationError(
+      'فشلت محاولة الرفع السابقة قبل كتابة أي بيانات. يرجى إعادة محاولة رفع الملف أولاً.'
+    );
+  }
+
   // Atomically claim VALIDATING before reading quarantine bytes to eliminate TOCTOU races
   const claimValidating = await db.uploadAttempt.updateMany({
     where: {
       id: attempt.id,
-      status: { in: ['UPLOADED', 'FAILED'] },
+      OR: [
+        { status: 'UPLOADED' },
+        { status: 'FAILED', bytesWritten: { gt: 0 } },
+      ],
       quarantineKey: attempt.quarantineKey,
       expiresAt: { gt: now },
     },
@@ -1597,13 +1617,24 @@ export async function finalizeUpload(
             };
           }
 
+          let finalProceedingId = lockedAttempt.proceedingId;
+          if (!finalProceedingId && lockedAttempt.hearingId) {
+            const h = await tx.hearing.findUnique({
+              where: { id: lockedAttempt.hearingId },
+              select: { proceedingId: true },
+            });
+            if (h?.proceedingId) {
+              finalProceedingId = h.proceedingId;
+            }
+          }
+
           // Re-validate and lock parent links inside the DB transaction (matter -> proceeding)
           await assertValidParentLinks(
             tx,
             {
               matterId: lockedAttempt.matterId,
               partyId: lockedAttempt.partyId,
-              proceedingId: lockedAttempt.proceedingId,
+              proceedingId: finalProceedingId,
               hearingId: lockedAttempt.hearingId,
             },
             { lockParents: true }
@@ -1614,7 +1645,7 @@ export async function finalizeUpload(
               id: documentId,
               matterId: lockedAttempt.matterId,
               partyId: lockedAttempt.partyId,
-              proceedingId: lockedAttempt.proceedingId,
+              proceedingId: finalProceedingId,
               hearingId: lockedAttempt.hearingId,
               title: lockedAttempt.title,
               titleNormalized,
@@ -1787,6 +1818,17 @@ export async function finalizeUpload(
         .catch(() => ({ count: 0 }));
       if (terminalRejected && updated.count > 0) {
         await storage.deleteQuarantine(attempt.quarantineKey).catch(() => false);
+        await recordAuditEvent(db, {
+          userId: actor.id,
+          action: 'REJECT_DOCUMENT_UPLOAD',
+          entityType: 'UploadAttempt',
+          entityId: attempt.id,
+          changedFields: {
+            status: 'REJECTED',
+            documentId: attempt.documentId ?? null,
+            failureReason: toSafeFailureReason(err),
+          },
+        }).catch(() => false);
       }
     }
 
@@ -1842,7 +1884,7 @@ export async function authorizeDownload(
   }
 
   const fileStat = await storage.stat('ready', targetVersion.objectKey);
-  if (!fileStat) {
+  if (!fileStat || fileStat.sizeBytes <= 0) {
     throw new DocumentNotFoundError('تعذر العثور على ملف المستند في التخزين الخاص.');
   }
 
@@ -1910,37 +1952,59 @@ export async function listDocuments(
 
   const normalizedQuery = parsed.q ? normalizeArabicText(parsed.q) : '';
 
+  if (parsed.q?.trim() && !normalizedQuery) {
+    return {
+      documents: [],
+      total: 0,
+      page: parsed.page,
+      totalPages: 1,
+      limit: parsed.limit,
+    };
+  }
+
+  const andClauses: Prisma.DocumentWhereInput[] = [];
+  if (!parsed.includeArchived) {
+    andClauses.push({
+      archivedAt: null,
+      AND: [
+        { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
+        { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
+        { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
+        { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
+      ],
+    });
+  }
+
+  if (parsed.proceedingId) {
+    andClauses.push({
+      OR: [
+        { proceedingId: parsed.proceedingId },
+        { hearing: { proceedingId: parsed.proceedingId } },
+      ],
+    });
+  }
+
+  if (normalizedQuery) {
+    andClauses.push({
+      OR: [
+        { titleNormalized: { contains: normalizedQuery } },
+        {
+          currentVersion: {
+            is: {
+              originalFilename: { contains: parsed.q!.trim(), mode: 'insensitive' },
+            },
+          },
+        },
+      ],
+    });
+  }
+
   const where: Prisma.DocumentWhereInput = {
-    ...(parsed.includeArchived
-      ? {}
-      : {
-          archivedAt: null,
-          AND: [
-            { OR: [{ matterId: null }, { matter: { archivedAt: null, status: { not: 'ARCHIVED' } } }] },
-            { OR: [{ partyId: null }, { party: { archivedAt: null } }] },
-            { OR: [{ proceedingId: null }, { proceeding: { archivedAt: null } }] },
-            { OR: [{ hearingId: null }, { hearing: { proceeding: { archivedAt: null } } }] },
-          ],
-        }),
+    ...(andClauses.length > 0 ? { AND: andClauses } : {}),
     ...(parsed.matterId ? { matterId: parsed.matterId } : {}),
     ...(parsed.partyId ? { partyId: parsed.partyId } : {}),
-    ...(parsed.proceedingId ? { proceedingId: parsed.proceedingId } : {}),
     ...(parsed.hearingId ? { hearingId: parsed.hearingId } : {}),
     ...(parsed.documentType ? { documentType: parsed.documentType } : {}),
-    ...(normalizedQuery
-      ? {
-          OR: [
-            { titleNormalized: { contains: normalizedQuery } },
-            {
-              currentVersion: {
-                is: {
-                  originalFilename: { contains: parsed.q!.trim(), mode: 'insensitive' },
-                },
-              },
-            },
-          ],
-        }
-      : {}),
   };
 
   const skip = (parsed.page - 1) * parsed.limit;
@@ -2354,6 +2418,7 @@ export async function assertLinkableDocument(
     proceedingId: doc.proceedingId ?? null,
     hearingId: doc.hearingId ?? null,
     currentVersionId: doc.currentVersionId,
+    scanStatus: ver.scanStatus,
     scanStatusLabel: getScanStatusLabel(ver.scanStatus),
   };
 }
@@ -2426,9 +2491,7 @@ export async function pinDocumentVersionsForBackup(
   const now = options?.now ?? new Date();
 
   const targetIds = await db.$transaction(async (tx) => {
-    const versionClient =
-      (tx as unknown as { documentVersion?: PrismaClient['documentVersion'] }).documentVersion ??
-      db.documentVersion;
+    const versionClient = tx.documentVersion;
 
     let resolvedIds: string[];
     if (requestedIds !== undefined) {
@@ -2913,18 +2976,48 @@ export async function reconcileAndCleanupDocumentStorage(
     ],
   };
 
-  const [protectedVersionRows, activeAttemptRows] = await Promise.all([
-    db.documentVersion.findMany({
-      where: protectedVersionWhere,
-      select: { objectKey: true },
-    }),
-    db.uploadAttempt.findMany({
-      where: activeAttemptWhere,
-      select: { quarantineKey: true },
-    }),
+  async function loadAllProtectedVersionKeys(): Promise<Set<string>> {
+    const keys = new Set<string>();
+    let cursorId: string | undefined;
+    while (true) {
+      const rows = await db.documentVersion.findMany({
+        where: cursorId
+          ? { AND: [protectedVersionWhere, { id: { gt: cursorId } }] }
+          : protectedVersionWhere,
+        select: { id: true, objectKey: true },
+        orderBy: { id: 'asc' },
+        take: 500,
+      });
+      for (const r of rows) keys.add(r.objectKey);
+      if (rows.length < 500) break;
+      cursorId = rows[rows.length - 1].id;
+    }
+    return keys;
+  }
+
+  async function loadAllActiveQuarantineKeys(): Promise<Set<string>> {
+    const keys = new Set<string>();
+    let cursorId: string | undefined;
+    while (true) {
+      const rows = await db.uploadAttempt.findMany({
+        where: cursorId
+          ? { AND: [activeAttemptWhere, { id: { gt: cursorId } }] }
+          : activeAttemptWhere,
+        select: { id: true, quarantineKey: true },
+        orderBy: { id: 'asc' },
+        take: 500,
+      });
+      for (const r of rows) keys.add(r.quarantineKey);
+      if (rows.length < 500) break;
+      cursorId = rows[rows.length - 1].id;
+    }
+    return keys;
+  }
+
+  const [protectedVersionKeySet, activeQuarantineKeySet] = await Promise.all([
+    loadAllProtectedVersionKeys(),
+    loadAllActiveQuarantineKeys(),
   ]);
-  const protectedVersionKeySet = new Set(protectedVersionRows.map((v) => v.objectKey));
-  const activeQuarantineKeySet = new Set(activeAttemptRows.map((a) => a.quarantineKey));
 
   const deletedKeys = [...cleanupRes.deletedKeys];
   let deletedQuarantineCount = cleanupRes.deletedQuarantineCount;
@@ -2951,7 +3044,14 @@ export async function reconcileAndCleanupDocumentStorage(
       },
       select: { id: true },
     });
-    return Boolean(attemptMatch);
+    if (attemptMatch) return true;
+    const versionMatch = await db.documentVersion.findFirst({
+      where: {
+        AND: [{ objectKey: key }, protectedVersionWhere],
+      },
+      select: { id: true },
+    });
+    return Boolean(versionMatch);
   }
 
   async function recordProtectedFile(zone: 'quarantine' | 'ready', key: string): Promise<void> {
@@ -2990,7 +3090,7 @@ export async function reconcileAndCleanupDocumentStorage(
 
       const isInitiallyProtected =
         (zone === 'ready' && protectedVersionKeySet.has(file.key)) ||
-        (zone === 'quarantine' && activeQuarantineKeySet.has(file.key));
+        (zone === 'quarantine' && (activeQuarantineKeySet.has(file.key) || protectedVersionKeySet.has(file.key)));
       if (isInitiallyProtected) {
         await recordProtectedFile(zone, file.key);
         continue;

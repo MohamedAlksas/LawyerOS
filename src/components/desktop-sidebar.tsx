@@ -52,7 +52,7 @@ export function DesktopSidebar() {
   const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
   const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
   const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
-  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search/');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');

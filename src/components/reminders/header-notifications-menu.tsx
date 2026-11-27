@@ -267,7 +267,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
 
       {isOpen && (
         <div
-          role="dialog"
+          role="region"
           aria-label="قائمة التنبيهات"
           data-testid="header-notifications-popover"
           className="absolute left-3 sm:left-0 top-full mt-2 z-50 w-[min(22rem,calc(100vw-1.5rem))] bg-white border border-[#D5DFE3] rounded-[8px] shadow-xl overflow-hidden text-right"
@@ -278,7 +278,7 @@ export function HeaderNotificationsMenu({ enabled }: HeaderNotificationsMenuProp
               <h2 className="text-sm font-bold text-[#172A35]">التنبيهات</h2>
               {unreadCount > 0 && (
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[#E9F2F5] text-[#14566B]">
-                  {unreadCount} غير مقروء
+                  {unreadCount === 1 ? 'تنبيه واحد غير مقروء' : `${unreadCount} غير مقروء`}
                 </span>
               )}
             </div>

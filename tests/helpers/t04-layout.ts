@@ -111,6 +111,48 @@ export async function expectNotCovered(page: Page, locator: Locator): Promise<vo
   expect(result.hitOk, 'A sticky/overlapping layer covers the focused control').toBe(true);
 }
 
+/**
+ * Waits for a smooth scroll transition to settle and verifies the target element
+ * is visible, below any sticky header, and not covered by an overlay,
+ * WITHOUT calling scrollIntoViewIfNeeded() or .focus() on non-focusable elements.
+ */
+export async function expectScrollSettledAndNotCovered(
+  page: Page,
+  locator: Locator,
+  headerSelector = '[data-testid="app-header"]'
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        return locator.evaluate((element, hdrSel) => {
+          const rect = element.getBoundingClientRect();
+          const header = document.querySelector(hdrSel) || document.querySelector('header');
+          const headerBottom = header ? header.getBoundingClientRect().bottom : 0;
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + Math.min(rect.height / 2, 20);
+          const hit = document.elementFromPoint(x, y);
+          const hitOk = hit === element || (hit !== null && element.contains(hit));
+          return {
+            topBelowHeader: rect.top >= headerBottom - 1,
+            inViewport: rect.top < window.innerHeight && rect.bottom > 0,
+            hitOk,
+          };
+        }, headerSelector);
+      },
+      {
+        message: 'Expected scrolled element to settle below header and remain uncovered',
+        intervals: [100, 200, 300],
+        timeout: 10_000,
+      }
+    )
+    .toEqual({
+      topBelowHeader: true,
+      inViewport: true,
+      hitOk: true,
+    });
+}
+
+
 function indicatorScript(): FocusIndicator {
   const element = document.activeElement as HTMLElement | null;
   if (!element) {

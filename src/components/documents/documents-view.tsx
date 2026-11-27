@@ -26,7 +26,9 @@ import {
   IconRefresh,
   IconSearch,
   IconWarning,
+  IconClock,
 } from '@/components/stitch-icons';
+import { bindSearchSession, writeSearchHistory } from '@/lib/search-session-store';
 import { DocumentUploadForm } from './document-upload-form';
 import {
   DOCUMENT_TYPE_LABELS_AR,
@@ -35,6 +37,7 @@ import {
   SENSITIVITY_BADGE_CLASSES,
   SENSITIVITY_LABELS,
   UNSCANNED_POLICY_NOTICE_AR,
+  DOWNLOAD_DEVICE_RETENTION_NOTICE_AR,
   formatFileSizeArabic,
   type SelectablePartyOption,
 } from './document-ui-helpers';
@@ -46,6 +49,8 @@ export interface DocumentsViewProps {
   initialTotalPages: number;
   selectableMatters: SelectableMatterOptionDTO[];
   selectableParties: SelectablePartyOption[];
+  canWriteDocuments?: boolean;
+  sessionId?: string;
   initialFilters: {
     matterId?: string;
     partyId?: string;
@@ -69,19 +74,22 @@ const SELECT_CLASS =
 const LINK_CLASS =
   'text-[#14566B] hover:underline font-medium rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]';
 
-function syncUrl(filters: DocumentFilters, page: number) {
+function syncUrl(filters: DocumentFilters, page: number, sessionId?: string) {
   const sp = new URLSearchParams();
-  if (filters.q) sp.set('q', filters.q);
   if (filters.documentType) sp.set('documentType', filters.documentType);
   if (filters.matterId) sp.set('matterId', filters.matterId);
   if (filters.partyId) sp.set('partyId', filters.partyId);
   if (page > 1) sp.set('page', String(page));
-  const qs = sp.toString();
-  window.history.replaceState(
-    window.history.state,
-    '',
-    qs ? `${window.location.pathname}?${qs}` : window.location.pathname
-  );
+  if (sessionId) {
+    writeSearchHistory(sessionId, { query: filters.q }, sp);
+  } else {
+    const qs = sp.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    );
+  }
 }
 
 export function DocumentsView({
@@ -91,6 +99,8 @@ export function DocumentsView({
   initialTotalPages,
   selectableMatters,
   selectableParties,
+  canWriteDocuments = false,
+  sessionId,
   initialFilters,
   initialError,
 }: DocumentsViewProps) {
@@ -117,6 +127,12 @@ export function DocumentsView({
   const documentsRef = useRef<DocumentDTO[]>(initialDocuments);
   const abortRef = useRef<AbortController | null>(null);
   const reqSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (sessionId) {
+      bindSearchSession(sessionId);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     documentsRef.current = documents;
@@ -175,7 +191,7 @@ export function DocumentsView({
       setPage(body.data.page);
       setTotalPages(Math.max(1, body.data.totalPages));
       setAppliedFilters(applied);
-      syncUrl(applied, body.data.page);
+      syncUrl(applied, body.data.page, sessionId);
     } catch (err) {
       if (controller.signal.aborted || seq !== reqSeqRef.current) return;
       setLoadError(
@@ -189,7 +205,7 @@ export function DocumentsView({
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [sessionId]);
 
   const currentInputFilters = (): DocumentFilters => ({
     q: query,
@@ -280,17 +296,19 @@ export function DocumentsView({
             <span>تحديث</span>
           </button>
 
-          <button
-            type="button"
-            data-testid="open-upload-form-button"
-            aria-expanded={isUploadOpen}
-            aria-controls="document-upload-section"
-            onClick={handleToggleUpload}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
-          >
-            <IconPlus className="w-4 h-4" />
-            <span>{isUploadOpen ? 'إخفاء نموذج الرفع' : 'رفع مستند جديد'}</span>
-          </button>
+          {canWriteDocuments && (
+            <button
+              type="button"
+              data-testid="open-upload-form-button"
+              aria-expanded={isUploadOpen}
+              aria-controls="document-upload-section"
+              onClick={handleToggleUpload}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-semibold rounded-[6px] shadow-xs min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
+            >
+              <IconPlus className="w-4 h-4" />
+              <span>{isUploadOpen ? 'إخفاء نموذج الرفع' : 'رفع مستند جديد'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -307,7 +325,7 @@ export function DocumentsView({
       </div>
 
       {/* Expandable Upload Form */}
-      {isUploadOpen && (
+      {canWriteDocuments && isUploadOpen && (
         <DocumentUploadForm
           selectableMatters={selectableMatters}
           selectableParties={selectableParties}
@@ -500,7 +518,7 @@ export function DocumentsView({
               >
                 مسح الفلاتر
               </button>
-            ) : (
+            ) : canWriteDocuments ? (
               <button
                 type="button"
                 onClick={() => setIsUploadOpen(true)}
@@ -509,7 +527,7 @@ export function DocumentsView({
                 <IconPlus className="w-4 h-4" />
                 <span>رفع مستند جديد</span>
               </button>
-            )
+            ) : null
           }
         />
       )}
@@ -559,6 +577,8 @@ export function DocumentsView({
                       >
                         {ver?.scanStatus === 'CLEAN' ? (
                           <IconCheck className="w-3.5 h-3.5 shrink-0" />
+                        ) : ver?.scanStatus === 'PENDING' ? (
+                          <IconClock className="w-3.5 h-3.5 shrink-0" />
                         ) : (
                           <IconWarning className="w-3.5 h-3.5 shrink-0" />
                         )}
@@ -643,6 +663,14 @@ export function DocumentsView({
                     </span>
                   </div>
                 </div>
+
+                <p
+                  role="note"
+                  data-testid={`document-device-retention-notice-${doc.id}`}
+                  className="text-xs text-[#4D606A] bg-[#F8FAFB] border border-[#D5DFE3] rounded-[4px] p-2 leading-relaxed"
+                >
+                  {doc.downloadDeviceNotice || DOWNLOAD_DEVICE_RETENTION_NOTICE_AR}
+                </p>
               </article>
             );
           })}

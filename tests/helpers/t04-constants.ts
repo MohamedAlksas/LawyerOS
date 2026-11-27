@@ -27,7 +27,6 @@ export const T04_TEST_IDS = {
   sessionExpiredAlert: 'session-expired-alert',
   navHome: 'nav-link-home',
   navToday: 'nav-link-today',
-  navInbox: 'nav-link-inbox',
   navAgenda: 'nav-link-agenda',
   navTasks: 'nav-link-tasks',
   navDeadlines: 'nav-link-deadlines',

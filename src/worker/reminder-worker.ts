@@ -310,8 +310,8 @@ async function evaluateLiveSourceEligibility(
       return { eligible: false, reason: 'source_ineligible' };
     }
     if (
-      typeof job.payload.sourceVersion === 'number' &&
-      hearing.version !== job.payload.sourceVersion
+      (job.sourceVersion !== null && hearing.version !== job.sourceVersion) ||
+      (typeof job.payload.sourceVersion === 'number' && hearing.version !== job.payload.sourceVersion)
     ) {
       return { eligible: false, reason: 'stale_version' };
     }
@@ -579,21 +579,26 @@ export async function processClaimedReminderJob(
       live.sourceOwnerId
     );
 
+    const existingDeliveries = await tx.reminderDelivery.findMany({
+      where: {
+        sourceType: lockedJob.source_type,
+        sourceId: lockedJob.source_id,
+        sourceVersion: lockedJob.source_version,
+        channel: 'IN_APP',
+        recipientUserId,
+      },
+    });
+    const deliveriesByRuleKey = new Map(existingDeliveries.map((d) => [d.ruleKey, d]));
+    const deliveriesByRuleAndRecipient = new Map(
+      existingDeliveries.map((d) => [`${d.ruleId}:${d.recipientUserId}`, d])
+    );
+
     const deliveredIds: string[] = [];
     for (const { rule, instant } of dueRules) {
       const ruleKey = `offset_${rule.dayOffset}`;
-      const existing = await tx.reminderDelivery.findUnique({
-        where: {
-          sourceType_sourceId_sourceVersion_ruleKey_channel_recipientUserId: {
-            sourceType: lockedJob.source_type,
-            sourceId: lockedJob.source_id,
-            sourceVersion: lockedJob.source_version,
-            ruleKey,
-            channel: 'IN_APP',
-            recipientUserId,
-          },
-        },
-      });
+      const existing =
+        deliveriesByRuleKey.get(ruleKey) ??
+        deliveriesByRuleAndRecipient.get(`${rule.id}:${recipientUserId}`);
 
       if (!existing) {
         const created = await tx.reminderDelivery.create({
@@ -617,6 +622,19 @@ export async function processClaimedReminderJob(
           select: { id: true },
         });
         deliveredIds.push(created.id);
+        const savedRecord = {
+          id: created.id,
+          sourceType: lockedJob.source_type,
+          sourceId: lockedJob.source_id,
+          sourceVersion: lockedJob.source_version,
+          ruleId: rule.id,
+          ruleKey,
+          channel: 'IN_APP',
+          recipientUserId,
+          status: 'SENT',
+        } as unknown as (typeof existingDeliveries)[number];
+        deliveriesByRuleKey.set(ruleKey, savedRecord);
+        deliveriesByRuleAndRecipient.set(`${rule.id}:${recipientUserId}`, savedRecord);
       } else if (existing.status === 'PENDING' || existing.status === 'PROCESSING') {
         await tx.reminderDelivery.update({
           where: { id: existing.id },
@@ -624,6 +642,11 @@ export async function processClaimedReminderJob(
             status: 'SENT',
             deliveredAt: now,
             jobRunId: lockedJob.id,
+            title: live.title!,
+            body: live.body!,
+            scheduledAt: instant,
+            ruleId: rule.id,
+            matterId: live.matterId ?? null,
           },
         });
         deliveredIds.push(existing.id);
@@ -649,19 +672,9 @@ export async function processClaimedReminderJob(
     // Chain the next future enabled rule that has not yet been delivered
     for (const { rule, instant } of futureRules) {
       const ruleKey = `offset_${rule.dayOffset}`;
-      const alreadySent = await tx.reminderDelivery.findUnique({
-        where: {
-          sourceType_sourceId_sourceVersion_ruleKey_channel_recipientUserId: {
-            sourceType: lockedJob.source_type,
-            sourceId: lockedJob.source_id,
-            sourceVersion: lockedJob.source_version,
-            ruleKey,
-            channel: 'IN_APP',
-            recipientUserId,
-          },
-        },
-        select: { id: true },
-      });
+      const alreadySent =
+        deliveriesByRuleKey.get(ruleKey) ??
+        deliveriesByRuleAndRecipient.get(`${rule.id}:${recipientUserId}`);
       if (alreadySent) continue;
 
       const nextDedupKey = `reminder_${lockedJob.source_type}_${lockedJob.source_id}_v${lockedJob.source_version}_r${rule.dayOffset}`;

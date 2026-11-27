@@ -39,23 +39,13 @@ import {
   updateDocumentMetadataSchema,
 } from '@/modules/documents';
 import {
+  buildSyntheticJpeg,
   buildSyntheticPdf,
   buildSyntheticPng,
   makePngChunk,
 } from '../helpers/synthetic-files';
 
-function buildSyntheticJpeg(entropyBytes: number[] = [0x11, 0x22, 0x33, 0x44]): Buffer {
-  return Buffer.from([
-    0xff, 0xd8, // SOI
-    0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03,
-    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, // SOF0
-    0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
-    ...entropyBytes,
-    0xff, 0xd9, // EOI
-  ]);
-}
-
-describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003 Policy', () => {
+describe('T11 & T12 Unit Tests: Document Content Validation, Storage Safety & ADR 0003 Policy', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -302,6 +292,36 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         })
       ).toThrow(DocumentValidationError);
 
+      // PNG with width or height > 16,384 (MAX_PNG_DIMENSION) is rejected
+      const oversizedPngWidth = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        makePngChunk('IHDR', Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 8, 2, 0, 0, 0])),
+        makePngChunk('IDAT', Buffer.from([0x78, 0x9c, 0x63, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01])),
+        makePngChunk('IEND', Buffer.alloc(0)),
+      ]);
+      expect(() =>
+        inspectFileContent(oversizedPngWidth, {
+          originalFilename: 'oversized-width.png',
+          declaredMime: 'image/png',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // JPEG with 0x0 dimensions (height=0 or width=0) in SOF0 segment is rejected
+      const jpegZeroDim = Buffer.from([
+        0xff, 0xd8, // SOI
+        0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x00, 0x00, 0x00, 0x03, // SOF0 height=0, width=0
+        0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+        0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x00, 0x3f, 0x00, // SOS
+        0x11, 0x22,
+        0xff, 0xd9, // EOI
+      ]);
+      expect(() =>
+        inspectFileContent(jpegZeroDim, {
+          originalFilename: 'zero-dim.jpg',
+          declaredMime: 'image/jpeg',
+        })
+      ).toThrow(DocumentValidationError);
+
       // PDF without EOL after header version, without obj/endobj, or without startxref is rejected
       const pdfNoHeaderEol = Buffer.from(
         '%PDF-1.4<script>alert(1)</script>\n1 0 obj\n<<>>\nendobj\nstartxref\n9\n%%EOF\n',
@@ -310,6 +330,18 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
       expect(() =>
         inspectFileContent(pdfNoHeaderEol, {
           originalFilename: 'no-eol.pdf',
+          declaredMime: 'application/pdf',
+        })
+      ).toThrow(DocumentValidationError);
+
+      // PDF without ordered obj before endobj is rejected
+      const pdfReversedObj = Buffer.from(
+        '%PDF-1.4\nendobj\n1 0 obj\n<<>>\nstartxref\n9\n%%EOF\n',
+        'ascii'
+      );
+      expect(() =>
+        inspectFileContent(pdfReversedObj, {
+          originalFilename: 'reversed-obj.pdf',
           declaredMime: 'application/pdf',
         })
       ).toThrow(DocumentValidationError);
@@ -374,6 +406,7 @@ describe('T11 Unit Tests: Document Content Validation, Storage Safety & ADR 0003
         'invoice\u202efdp.exe',
         'doc\u2066test\u2069.pdf',
         'dir\u200fmark.png',
+        'file\u061cmark.pdf',
       ];
       for (const name of unsafeNames) {
         expect(() => sanitizeDisplayFilename(name)).toThrow(DocumentValidationError);

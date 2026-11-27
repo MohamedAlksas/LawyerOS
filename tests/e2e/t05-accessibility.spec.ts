@@ -74,7 +74,7 @@ test.describe('T05 Arabic RTL UI & Accessibility Verification', () => {
     await page.goto('/parties/new');
 
     const syntheticSecretNationalId = '29911223344556';
-    const uniquePartyName = `خالد عبد الله محمود ${Math.random().toString(36).slice(2, 7)}`;
+    const uniquePartyName = `خالد عبد الله محمود ${crypto.randomUUID().slice(0, 5)}`;
 
     // Fill and submit party with secret national ID
     await page.getByTestId('kind-person').click();
@@ -144,6 +144,10 @@ test.describe('T05 Arabic RTL UI & Accessibility Verification', () => {
     await page.evaluate(() => {
       document.documentElement.style.fontSize = '200%';
     });
+    const hasHorizontalOverflowZoomed = await page.evaluate(() => {
+      return document.documentElement.scrollWidth > document.documentElement.clientWidth;
+    });
+    expect(hasHorizontalOverflowZoomed, 'Document must not overflow horizontally at 200% font zoom').toBe(false);
 
     await expect(submitBtn).toBeVisible();
     const zoomedBox = await submitBtn.boundingBox();

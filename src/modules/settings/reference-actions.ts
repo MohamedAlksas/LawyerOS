@@ -19,6 +19,7 @@ import {
   ReferenceValidationError,
   ConcurrencyConflictError,
   NotFoundError,
+  UnauthorizedError,
 } from './reference-types';
 import {
   IdempotencyPayloadMismatchError,
@@ -49,6 +50,14 @@ function handleActionError(error: unknown): ActionResult<never> {
       success: false,
       error: error.message,
       code: error.code,
+    };
+  }
+
+  if (error instanceof UnauthorizedError) {
+    return {
+      success: false,
+      error: error.message,
+      code: 'UNAUTHENTICATED',
     };
   }
 

@@ -32,15 +32,40 @@ function clearAuthCookie(res: NextResponse, name: string): void {
   });
 }
 
+function isHttpsAuthUrl(): boolean {
+  return new URL(getEnv().BETTER_AUTH_URL).protocol === 'https:';
+}
+
 function getActiveTwoFactorCookieName(): '__Secure-better-auth.two_factor' | 'better-auth.two_factor' {
-  return new URL(getEnv().BETTER_AUTH_URL).protocol === 'https:'
+  return isHttpsAuthUrl()
     ? '__Secure-better-auth.two_factor'
     : 'better-auth.two_factor';
 }
 
+function getActiveSessionCookieName():
+  | '__Secure-better-auth.session_token'
+  | 'better-auth.session_token' {
+  return isHttpsAuthUrl()
+    ? '__Secure-better-auth.session_token'
+    : 'better-auth.session_token';
+}
+
+function unquoteCookieValue(val: string): string {
+  if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
+    return val.slice(1, -1);
+  }
+  return val;
+}
+
 function findNonEmptyCookieEntries(cookies: string[], name: string): string[] {
-  const prefix = `${name}=`;
-  return cookies.filter((c) => c.startsWith(prefix) && c.slice(prefix.length).trim().length > 0);
+  return cookies.filter((c) => {
+    const eqIdx = c.indexOf('=');
+    if (eqIdx === -1) return false;
+    const key = c.slice(0, eqIdx).trim();
+    if (key !== name) return false;
+    const rawVal = c.slice(eqIdx + 1).trim();
+    return unquoteCookieValue(rawVal).trim().length > 0;
+  });
 }
 
 async function auditIdentityOutcome(userId: string, action: string) {
@@ -98,9 +123,14 @@ async function handleAuthSecurityGuards(request: NextRequest): Promise<NextRespo
     }
   }
 
+  const isSignOutOrSignIn =
+    request.method === 'POST' &&
+    /(?:\/sign-out|\/sign-in(?:\/[^/]+)?)\/?$/.test(pathname);
+
   // B1 / B2: Resolve verified session authoritatively through provider without refresh/cache
   const cookieHeader = request.headers.get('cookie');
   if (
+    !isSignOutOrSignIn &&
     cookieHeader &&
     (cookieHeader.includes('better-auth.session_token') ||
       cookieHeader.includes('__Secure-better-auth.session_token'))
@@ -212,6 +242,9 @@ async function privateAuthResponse(response: Response): Promise<Response> {
 }
 
 export async function GET(request: NextRequest) {
+  if (request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site') {
+    return noStoreJson({ error: 'غير مصرح بالوصول من مصدر خارجي.' }, { status: 403 });
+  }
   const blocked = await handleAuthSecurityGuards(request);
   if (blocked) return blocked;
   return privateAuthResponse(await auth.handler(request));
@@ -374,15 +407,18 @@ export async function POST(request: NextRequest) {
   let mfaRawToken: string | null = null;
 
   if (
-    pathname.includes('/two-factor/verify-totp') ||
-    pathname.includes('/two-factor/verify-backup-code')
+    /(?:\/two-factor\/verify-totp|\/two-factor\/verify-backup-code)\/?$/.test(pathname)
   ) {
     const cookieHeader = request.headers.get('cookie');
     if (cookieHeader) {
       const cookies = cookieHeader.split(';').map((c) => c.trim());
       const standardTfCookies = findNonEmptyCookieEntries(cookies, 'better-auth.two_factor');
       const secureTfCookies = findNonEmptyCookieEntries(cookies, '__Secure-better-auth.two_factor');
-      if (standardTfCookies.length > 0 && secureTfCookies.length > 0) {
+      if (
+        standardTfCookies.length > 1 ||
+        secureTfCookies.length > 1 ||
+        (standardTfCookies.length > 0 && secureTfCookies.length > 0)
+      ) {
         const errRes = noStoreJson(
           { error: 'جلسة التحقق الثنائي غير صالحة أو متعارضة. يرجى تسجيل الدخول مجدداً.' },
           { status: 401 }
@@ -487,8 +523,6 @@ export async function POST(request: NextRequest) {
   let passwordChangeActorId: string | undefined;
 
   if (pathname.includes('/change-password')) {
-    const actor = await requireActor({ headers: request.headers, touchSession: false }).catch(() => null);
-    passwordChangeActorId = actor?.id;
     let parsedBody: unknown;
     try {
       parsedBody = await request.clone().json();
@@ -498,6 +532,24 @@ export async function POST(request: NextRequest) {
     if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
       return noStoreJson({ error: 'صيغة الطلب غير صالحة.' }, { status: 400 });
     }
+
+    try {
+      const actor = await requireActor({ headers: request.headers, touchSession: false });
+      passwordChangeActorId = actor.id;
+    } catch (err) {
+      if (err instanceof AuthenticationError) {
+        const status = err.code === 'MFA_REQUIRED' ? 403 : 401;
+        return noStoreJson({ error: err.message }, { status });
+      }
+      if (err instanceof AuthorizationError) {
+        return noStoreJson({ error: err.message }, { status: 403 });
+      }
+      return noStoreJson(
+        { error: 'حدث خطأ غير متوقع أثناء التحقق من أمان الجلسة.' },
+        { status: 500 }
+      );
+    }
+
     const nextHeaders = new Headers(request.headers);
     nextHeaders.delete('content-length');
     reqToExecute = new NextRequest(request.url, {
@@ -597,11 +649,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Also if a direct session was issued without 2FA:
+    const activeSessionPrefix = `${getActiveSessionCookieName()}=`;
     const sessionCookie = setCookies.find(
-      (c) =>
-        (c.startsWith('better-auth.session_token=') ||
-          c.startsWith('__Secure-better-auth.session_token=')) &&
-        !c.includes('Max-Age=0')
+      (c) => c.startsWith(activeSessionPrefix) && !/\bmax-age=0\b/i.test(c)
     );
     if (sessionCookie) {
       let directSessionId: string | null = null;
@@ -653,8 +703,7 @@ export async function POST(request: NextRequest) {
   // When MFA succeeds, assert user's version hasn't rotated while completing;
   // verify newly issued session.credentialVersion in PostgreSQL matches expectedCredVer.
   if (
-    (pathname.includes('/two-factor/verify-totp') ||
-      pathname.includes('/two-factor/verify-backup-code')) &&
+    /(?:\/two-factor\/verify-totp|\/two-factor\/verify-backup-code)\/?$/.test(pathname) &&
     response.status === 200
   ) {
     let newSessionId: string | null = null;
@@ -663,10 +712,9 @@ export async function POST(request: NextRequest) {
       const setCookies = response.headers.getSetCookie?.() || [
         response.headers.get('set-cookie') || '',
       ];
+      const activeSessionPrefix = `${getActiveSessionCookieName()}=`;
       const sessionCookie = setCookies.find(
-        (c) =>
-          c.startsWith('better-auth.session_token=') ||
-          c.startsWith('__Secure-better-auth.session_token=')
+        (c) => c.startsWith(activeSessionPrefix) && !/\bmax-age=0\b/i.test(c)
       );
       if (sessionCookie) {
         const { rawToken, candidateIdentifiers } = extractRawTokens(sessionCookie);
@@ -742,7 +790,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (targetUserId && /(verify-totp|verify-backup-code)$/.test(pathname)) {
+  if (targetUserId && /(verify-totp|verify-backup-code)\/?$/.test(pathname)) {
     await auditSignInMfa(targetUserId, response.ok);
   }
   return privateAuthResponse(response);

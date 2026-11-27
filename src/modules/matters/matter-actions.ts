@@ -75,6 +75,7 @@ import {
   MatterArchivedError,
   ProceedingArchivedError,
   ActiveObligationError,
+  UnauthorizedError,
 } from './matter-types';
 import {
   IdempotencyPayloadMismatchError,
@@ -201,6 +202,14 @@ function handleActionError(error: unknown): ActionResult<never> {
       success: false,
       error: error.message,
       code: error.code,
+    };
+  }
+
+  if (error instanceof UnauthorizedError) {
+    return {
+      success: false,
+      error: error.message || 'المستخدم غير مصرح له.',
+      code: 'UNAUTHENTICATED',
     };
   }
 

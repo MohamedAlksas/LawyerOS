@@ -7,6 +7,7 @@ import type { DocumentType } from '@prisma/client';
 import { test, expect } from '@playwright/test';
 import { hashPassword } from 'better-auth/crypto';
 import { getPrismaClient } from '@/lib/auth';
+import { normalizeArabicText } from '@/lib/normalization';
 import {
   ADR_0003_POLICY_CODE,
   ADR_0003_POLICY_VERSION,
@@ -21,6 +22,7 @@ import {
   expectNoElementOverflow,
   expectNoPageOverflow,
   expectNotCovered,
+  expectScrollSettledAndNotCovered,
   expectShellReady,
   expectTouchTarget,
   expectVisibleFocus,
@@ -38,16 +40,16 @@ import { buildSyntheticPdf, buildSyntheticPng } from '../helpers/synthetic-files
 
 const prisma = getPrismaClient();
 
-function buildValidSyntheticPng(r: number, g: number, b: number, width = 100, height = 70): Buffer {
-  return buildSyntheticPng({ r, g, b, width, height });
-}
-
 function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
   return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 function resolveE2EStorageRoot(): string {
-  return process.env.DOCUMENTS_STORAGE_ROOT || path.join(os.tmpdir(), 'lawoffice-t12-e2e');
+  return (
+    process.env.T12_E2E_STORAGE_ROOT ||
+    process.env.DOCUMENTS_STORAGE_ROOT ||
+    path.join(os.tmpdir(), 'lawoffice-t12-e2e')
+  );
 }
 
 function sha256Hex(buffer: Buffer): string {
@@ -76,7 +78,7 @@ async function seedReadyDocumentInDb(opts: {
       partyId: opts.partyId ?? null,
       proceedingId: opts.proceedingId ?? null,
       title: opts.title,
-      titleNormalized: opts.title,
+      titleNormalized: normalizeArabicText(opts.title),
       documentType: opts.documentType ?? 'CONTRACT',
       originalPresent: opts.originalPresent ?? 'UNKNOWN',
       originalLocation: opts.originalLocation ?? null,
@@ -322,7 +324,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
 
       const v1Bytes = buildSyntheticPdf(`T12-E2E-V1-${runId}`);
       const v1Hash = sha256Hex(v1Bytes);
-      const v2Bytes = buildValidSyntheticPng(20, 100, 130);
+      const v2Bytes = buildSyntheticPng({ r: 20, g: 100, b: 130 });
       const v2Hash = sha256Hex(v2Bytes);
 
       const seeded = await seedReadyDocumentInDb({
@@ -371,6 +373,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       // Preview & download v1 explicitly from history
       await page.getByTestId('version-preview-btn-1').click();
       await expect(page.getByTestId('preview-active-version-label')).toContainText('الإصدار رقم 1');
+      await expect(page.getByTestId('preview-version-scan-badge')).toContainText(UNSCANNED_POLICY_NOTICE_AR);
       await expect(page.getByTestId('document-preview-iframe')).toHaveAttribute(
         'src',
         new RegExp(`versionId=${v1Id}`)
@@ -410,6 +413,46 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       const v2DownloadRes = await page.request.get(v2Href!);
       expect(v2DownloadRes.status()).toBe(200);
       expect(sha256Hex(Buffer.from(await v2DownloadRes.body()))).toBe(v2Hash);
+
+      // Browser 409 conflict UX test on DocumentDetailView:
+      // Edit metadata fields, simulate CONCURRENCY_CONFLICT 409 on PATCH, verify error banner and preserved inputs, then recover with metadata-conflict-refresh
+      let triggerConflictOnce = true;
+      await page.route(`**/api/documents/${seeded.documentId}`, async (route) => {
+        if (triggerConflictOnce && route.request().method() === 'PATCH') {
+          triggerConflictOnce = false;
+          await route.fulfill({
+            status: 409,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              success: false,
+              code: 'CONCURRENCY_CONFLICT',
+              error: 'تم تعديل بيانات المستند من جلسة أخرى. حدّث بيانات المستند ثم أعد المحاولة.',
+            }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      const conflictTitle = `عنوان معدل أثناء التعارض ${runId}`;
+      const conflictLocation = `خزينة النزاع رقم 9 — ${runId}`;
+      await page.getByTestId('metadata-title-input').fill(conflictTitle);
+      await page.getByTestId('metadata-original-location-input').fill(conflictLocation);
+      await page.getByTestId('metadata-save-button').click();
+
+      await expect(page.getByTestId('metadata-save-error')).toBeVisible();
+      await expect(page.getByTestId('metadata-save-error')).toContainText(
+        'تم تعديل بيانات المستند من جلسة أخرى'
+      );
+      // Verify unsaved form inputs are preserved
+      await expect(page.getByTestId('metadata-title-input')).toHaveValue(conflictTitle);
+      await expect(page.getByTestId('metadata-original-location-input')).toHaveValue(conflictLocation);
+
+      const conflictRefreshBtn = page.getByTestId('metadata-conflict-refresh');
+      await expect(conflictRefreshBtn).toBeVisible();
+      await conflictRefreshBtn.click();
+      await expect(page.getByTestId('metadata-save-error')).toHaveCount(0);
+      await page.unroute(`**/api/documents/${seeded.documentId}`);
 
       // Duplicate-confirm retry after INCOMPLETE failure preserves confirmDuplicate: true & same idempotencyKey
       await page.getByTestId('version-file-input').setInputFiles({
@@ -525,7 +568,20 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       expect(resultsText).not.toContain('quarantineKey');
       expect(resultsText).not.toContain('t12-e2e');
 
+      // 1b) Owner visits /documents, performs filter search, verify ?q= is kept OUT of browser URL
+      await page.goto('/documents');
+      await expectShellReady(page);
+      await expect(page.getByTestId('open-upload-form-button')).toBeVisible();
+      const docsSearchInput = page.getByTestId('documents-search-input');
+      await docsSearchInput.fill(docTitle);
+      await page.getByTestId('documents-filter-submit').click();
+      await expect(page.getByTestId(`document-card-${seeded.documentId}`)).toBeVisible();
+      expect(page.url()).not.toContain('?q=');
+      expect(page.url()).not.toContain('&q=');
+
       // 2) PDF-body-only phrase returns zero results
+      await page.goto('/search');
+      await expectShellReady(page);
       await page.getByTestId('unified-search-input').fill(bodyOnlyPhrase);
       await page.getByTestId('search-submit-button').click();
       await expect(page.getByTestId('empty-search-container')).toBeVisible();
@@ -606,6 +662,11 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
         await expect(maintPage.getByText('وصول مرفوض')).toBeVisible();
         await expect(maintPage.getByText('لا تمتلك الصلاحيات الكافية لاستخدام البحث الموحد.')).toBeVisible();
         await expect(maintPage.getByTestId(`search-result-${seeded.documentId}`)).toHaveCount(0);
+
+        // MAINTAINER visits /documents: open-upload-form-button is hidden because !canWriteDocuments
+        await maintPage.goto('/documents');
+        await expectShellReady(maintPage);
+        await expect(maintPage.getByTestId('open-upload-form-button')).toHaveCount(0);
       } finally {
         await maintCtx.close();
       }
@@ -1082,7 +1143,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       localMatterIds.push(matter2.id);
 
       const v1Bytes = buildSyntheticPdf(`T12-TC07-V1-${tag}`);
-      const v2Bytes = buildValidSyntheticPng(15, 95, 115);
+      const v2Bytes = buildSyntheticPng({ r: 15, g: 95, b: 115 });
       const docTitle = `مستند سجل الإصدارات المتجاوب ${tag}`;
       const seeded = await seedReadyDocumentInDb({
         ownerId: owner.id,
@@ -1169,7 +1230,7 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       // Verify preview scroll (scroll-padding-top) keeps #document-preview-heading uncovered by sticky header
       await previewV1Btn.click();
       await nextPaint(page);
-      await expectNotCovered(page, previewHeading);
+      await expectScrollSettledAndNotCovered(page, previewHeading);
 
       // Failed version candidate INCOMPLETE -> retry recovery to v3 READY
       let abortBeginOnce = true;
@@ -1226,9 +1287,14 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       // Normal scale overflow check + screenshot
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
+      const detailScreenshot = testInfo.outputPath(`t12-document-detail-${width}.png`);
       await page.screenshot({
-        path: testInfo.outputPath(`t12-document-detail-${width}.png`),
+        path: detailScreenshot,
         fullPage: true,
+      });
+      await testInfo.attach(`t12-document-detail-${width}`, {
+        path: detailScreenshot,
+        contentType: 'image/png',
       });
 
       // 200% text scaling check with zero overflow, uncovered controls, and screenshot
@@ -1247,9 +1313,14 @@ test.describe('T12 E2E: Document Versions, Paper Originals, Links & Search', () 
       await expectNoElementOverflow(page.getByTestId('main-content'));
       await expectNotCovered(page, previewV1Btn);
       await expectNotCovered(page, saveMetaBtn);
+      const zoomScreenshot = testInfo.outputPath(`t12-document-detail-zoom200-${width}.png`);
       await page.screenshot({
-        path: testInfo.outputPath(`t12-document-detail-zoom200-${width}.png`),
+        path: zoomScreenshot,
         fullPage: true,
+      });
+      await testInfo.attach(`t12-document-detail-zoom200-${width}`, {
+        path: zoomScreenshot,
+        contentType: 'image/png',
       });
 
       // DeadlinesView doc-load 503 failure + retry disappears error, plus network error branch

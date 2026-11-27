@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { hashPassword } from 'better-auth/crypto';
@@ -31,6 +29,10 @@ import {
  * - T10-TC-07: Inbox with unread, overdue, and worker-failed states at 390/768/1440px, 200% zoom,
  *              loss of connectivity + stale refresh retry, Arabic closed-app/offline limits notice, and browser privacy
  */
+
+function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
+  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 const prisma = getPrismaClient();
 
@@ -194,7 +196,7 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           matterId: matter.id,
           proceedingId: proceeding.id,
           title: `موعد مذكرة استئناف حاسم ${runId}`,
-          dueDate: new Date('2027-08-15T00:00:00.000Z'),
+          dueDate: new Date(`${formatOffsetYmd(60)}T00:00:00.000Z`),
           source: 'قرار المحكمة بالجلسة',
           basisNotes: 'اعتماد يدوي',
           status: 'CONFIRMED',
@@ -214,7 +216,7 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           proceedingId: proceeding.id,
           deadlineId: deadline.id,
           title: `مهمة إعداد المذكرة المرتبطة ${runId}`,
-          dueDate: new Date('2027-08-10T00:00:00.000Z'),
+          dueDate: new Date(`${formatOffsetYmd(55)}T00:00:00.000Z`),
           status: 'OPEN',
           createdById: owner.id,
           updatedById: owner.id,
@@ -228,8 +230,8 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           sourceType: 'Deadline',
           sourceId: deadline.id,
           sourceVersion: deadline.version,
-          scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
-          availableAt: new Date('2027-08-08T06:00:00.000Z'),
+          scheduledAt: new Date(`${formatOffsetYmd(53)}T06:00:00.000Z`),
+          availableAt: new Date(`${formatOffsetYmd(53)}T06:00:00.000Z`),
           status: 'FAILED',
           attemptCount: 5,
           maxAttempts: 5,
@@ -247,14 +249,14 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           sourceId: deadline.id,
           sourceVersion: deadline.version,
           ruleKey: 'offset_7',
-          scheduledAt: new Date('2027-08-08T06:00:00.000Z'),
+          scheduledAt: new Date(`${formatOffsetYmd(53)}T06:00:00.000Z`),
           channel: 'IN_APP',
           recipientUserId: owner.id,
           status: 'SENT',
           title: `تذكير بموعد قانوني مؤكد — ${matter.fileCode}`,
           body: `${deadline.title} • ${matter.title} (الساعة غير محددة)`,
           matterId: matter.id,
-          deliveredAt: new Date('2027-08-08T06:00:05.000Z'),
+          deliveredAt: new Date(`${formatOffsetYmd(53)}T06:00:05.000Z`),
           readAt: null,
         },
       });
@@ -463,8 +465,6 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
     const tag = `${runId}-w${width}`;
     const secretMatterTitle = `ملف سري لاختبار الصندوق ${tag}`;
     const secretOverdueTitle = `موعد متأخر سري ${tag}`;
-    const screenshotDir = path.resolve(process.cwd(), 'test-results/t10');
-    fs.mkdirSync(screenshotDir, { recursive: true });
 
     const localMatterIds: string[] = [];
     const localDeadlineIds: string[] = [];
@@ -503,7 +503,7 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           matterId: matter.id,
           proceedingId: proceeding.id,
           title: secretOverdueTitle,
-          dueDate: new Date('2026-04-20T00:00:00.000Z'),
+          dueDate: new Date(`${formatOffsetYmd(-10)}T00:00:00.000Z`),
           source: 'قرار المحكمة',
           basisNotes: 'تاريخ منقضي للاختبار',
           status: 'CONFIRMED',
@@ -522,14 +522,14 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           sourceId: overdueDeadline.id,
           sourceVersion: 1,
           ruleKey: 'offset_1',
-          scheduledAt: new Date('2026-04-19T07:00:00.000Z'),
+          scheduledAt: new Date(`${formatOffsetYmd(-11)}T07:00:00.000Z`),
           channel: 'IN_APP',
           recipientUserId: owner.id,
           status: 'SENT',
           title: `تذكير بموعد قانوني متأخر — ${matter.fileCode}`,
           body: `${secretOverdueTitle} • ${secretMatterTitle}`,
           matterId: matter.id,
-          deliveredAt: new Date('2026-04-20T12:00:00.000Z'), // late delivery -> missed & overdue
+          deliveredAt: new Date(`${formatOffsetYmd(-10)}T12:00:00.000Z`), // late delivery -> missed & overdue
           readAt: null,
         },
       });
@@ -541,8 +541,8 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           sourceType: 'Deadline',
           sourceId: overdueDeadline.id,
           sourceVersion: 1,
-          scheduledAt: new Date('2026-04-13T07:00:00.000Z'),
-          availableAt: new Date('2026-04-13T07:00:00.000Z'),
+          scheduledAt: new Date(`${formatOffsetYmd(-17)}T07:00:00.000Z`),
+          availableAt: new Date(`${formatOffsetYmd(-17)}T07:00:00.000Z`),
           status: 'FAILED',
           attemptCount: 5,
           maxAttempts: 5,
@@ -619,9 +619,14 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
 
+      const inboxScreenshotPath = testInfo.outputPath(`t10-inbox-${width}.png`);
       await page.screenshot({
-        path: path.join(screenshotDir, `t10-inbox-${width}.png`),
+        path: inboxScreenshotPath,
         fullPage: true,
+      });
+      await testInfo.attach(`t10-inbox-${width}`, {
+        path: inboxScreenshotPath,
+        contentType: 'image/png',
       });
 
       // 200% font scale reflow check
@@ -744,7 +749,7 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           matterId: matter.id,
           proceedingId: proceeding.id,
           title: `موعد تذكير الجرس ${tag}`,
-          dueDate: new Date('2027-09-10T00:00:00.000Z'),
+          dueDate: new Date(`${formatOffsetYmd(45)}T00:00:00.000Z`),
           source: 'قرار المحكمة',
           basisNotes: 'اختبار قائمة الهيدر',
           status: 'CONFIRMED',
@@ -763,14 +768,14 @@ test.describe('T10 E2E: In-App Reminder Inbox, Worker Failures & Arabic RTL Stat
           sourceId: deadline.id,
           sourceVersion: 1,
           ruleKey: 'offset_1',
-          scheduledAt: new Date('2027-09-09T06:00:00.000Z'),
+          scheduledAt: new Date(`${formatOffsetYmd(44)}T06:00:00.000Z`),
           channel: 'IN_APP',
           recipientUserId: owner.id,
           status: 'SENT',
           title: `تذكير عبر الجرس — ${matter.fileCode}`,
           body: `${deadline.title} • ${matter.title}`,
           matterId: matter.id,
-          deliveredAt: new Date('2027-09-09T06:00:05.000Z'),
+          deliveredAt: new Date(`${formatOffsetYmd(44)}T06:00:05.000Z`),
           readAt: null,
         },
       });

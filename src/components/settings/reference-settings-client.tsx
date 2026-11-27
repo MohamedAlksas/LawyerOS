@@ -27,6 +27,7 @@ interface ReferenceSettingsClientProps {
   initialPracticeAreas: ReferenceItemDTO[];
   initialStorageLocations: ReferenceItemDTO[];
   initialLookupError?: boolean;
+  canWriteSettings?: boolean;
 }
 
 type ReferenceTab = 'office' | 'courts' | 'practice_areas' | 'storage_locations';
@@ -47,6 +48,7 @@ export function ReferenceSettingsClient({
   initialPracticeAreas,
   initialStorageLocations,
   initialLookupError,
+  canWriteSettings = true,
 }: ReferenceSettingsClientProps) {
   const router = useRouter();
   const draft = useFormDraft<ReferenceDraft>(ownerId, '/settings/reference');
@@ -774,9 +776,11 @@ export function ReferenceSettingsClient({
 
       {/* Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-1" aria-label="أقسام الإعدادات">
+        <nav className="flex flex-wrap gap-x-2 sm:gap-x-4 gap-y-1" aria-label="أقسام الإعدادات" role="tablist">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'office'}
             data-testid="tab-office-profile"
             onClick={() => setActiveTab('office')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -790,6 +794,8 @@ export function ReferenceSettingsClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'courts'}
             data-testid="tab-courts"
             onClick={() => setActiveTab('courts')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -803,6 +809,8 @@ export function ReferenceSettingsClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'practice_areas'}
             data-testid="tab-practice-areas"
             onClick={() => setActiveTab('practice_areas')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -816,6 +824,8 @@ export function ReferenceSettingsClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'storage_locations'}
             data-testid="tab-storage-locations"
             onClick={() => setActiveTab('storage_locations')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -831,7 +841,7 @@ export function ReferenceSettingsClient({
 
       {/* Tab 1: Office Profile */}
       {activeTab === 'office' && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel">
           {officeMessage && (
             <div
               role="status"
@@ -1093,11 +1103,12 @@ export function ReferenceSettingsClient({
                   <input
                     id="office-tax-input"
                     type="text"
+                    dir="ltr"
                     value={taxNumber}
                     onChange={(e) => setTaxNumber(e.target.value)}
                     placeholder="الرقم الضريبي"
                     data-testid="office-tax-input"
-                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
                   />
                 </div>
               </div>
@@ -1110,14 +1121,14 @@ export function ReferenceSettingsClient({
                 </div>
                 <div>
                   <span className="font-semibold text-[#172A35]">النطاق الزمني: </span>
-                  <span>توقيت القاهرة (Africa/Cairo)</span>
+                  <span>توقيت القاهرة (<bdi dir="ltr">Africa/Cairo</bdi>)</span>
                 </div>
               </div>
 
               <div className="flex justify-end pt-2">
                 <button
                   type="submit"
-                  disabled={isSavingOffice || isReconcilingOffice || officePending || officeConflictPending}
+                  disabled={isSavingOffice || isReconcilingOffice || officePending || officeConflictPending || !canWriteSettings}
                   data-testid="save-office-button"
                   className="px-6 py-2.5 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-sm rounded-[6px] min-h-[44px] shadow-xs"
                 >
@@ -1131,7 +1142,7 @@ export function ReferenceSettingsClient({
 
       {/* Tabs 2, 3, 4: Generic Reference Items Section */}
       {activeTab !== 'office' && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel">
           {itemSuccessMessage && (
             <div
               role="status"
@@ -1308,7 +1319,20 @@ export function ReferenceSettingsClient({
           )}
 
           {/* Add Item Form */}
-          <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-4">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (isCreatingItem || itemPending || !newItemName.trim() || !canWriteSettings) return;
+              const type: ReferenceItemType =
+                activeTab === 'courts'
+                  ? 'COURT'
+                  : activeTab === 'practice_areas'
+                  ? 'PRACTICE_AREA'
+                  : 'STORAGE_LOCATION';
+              handleCreateItem(type);
+            }}
+            className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-4"
+          >
             <h3 className="text-sm font-bold text-[#172A35] pb-2 border-b border-[#E8EEF1]">
               {activeTab === 'courts'
                 ? '+ إضافة محكمة أو جهة قضائية جديدة'
@@ -1317,7 +1341,7 @@ export function ReferenceSettingsClient({
                 : '+ إضافة مكان حفظ ورقي جديد'}
             </h3>
 
-            <fieldset disabled={isCreatingItem || itemPending} className="space-y-3 border-0 p-0 m-0 min-w-0">
+            <fieldset disabled={isCreatingItem || itemPending || !canWriteSettings} className="space-y-3 border-0 p-0 m-0 min-w-0">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1 sm:col-span-2">
                   <label htmlFor="reference-item-name-input" className="block text-xs font-bold text-[#172A35]">
@@ -1358,6 +1382,7 @@ export function ReferenceSettingsClient({
                   <input
                     id="reference-item-code-input"
                     type="text"
+                    dir="ltr"
                     value={newItemCode}
                     onChange={(e) => {
                       setNewItemCode(e.target.value);
@@ -1365,32 +1390,23 @@ export function ReferenceSettingsClient({
                     }}
                     placeholder="مثال: CRT-GIZA-01"
                     data-testid="reference-item-code-input"
-                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
                   />
                 </div>
               </div>
 
               <div className="flex justify-end pt-1">
                 <button
-                  type="button"
-                  disabled={isCreatingItem || itemPending || !newItemName.trim()}
+                  type="submit"
+                  disabled={isCreatingItem || itemPending || !newItemName.trim() || !canWriteSettings}
                   data-testid="add-reference-item-button"
-                  onClick={() => {
-                    const type: ReferenceItemType =
-                      activeTab === 'courts'
-                        ? 'COURT'
-                        : activeTab === 'practice_areas'
-                        ? 'PRACTICE_AREA'
-                        : 'STORAGE_LOCATION';
-                    handleCreateItem(type);
-                  }}
-                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-xs rounded-[6px] min-h-[40px]"
+                  className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold text-xs rounded-[6px] min-h-[44px]"
                 >
                   {isCreatingItem ? 'جارٍ الإضافة...' : 'إضافة للقائمة المرجعية'}
                 </button>
               </div>
             </fieldset>
-          </div>
+          </form>
 
           {/* List of Items */}
           <div className="bg-white rounded-[6px] border border-[#D5DFE3] overflow-hidden shadow-xs space-y-3 p-4">
@@ -1517,7 +1533,7 @@ export function ReferenceSettingsClient({
               aria-modal="true"
               aria-labelledby="edit-reference-title"
               data-testid="reference-item-modal"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 space-y-4 shadow-lg text-xs max-h-[90vh] overflow-y-auto"
               dir="rtl"
               lang="ar-EG"
             >
@@ -1630,10 +1646,11 @@ export function ReferenceSettingsClient({
                   <input
                     id="edit-reference-code-input"
                     type="text"
+                    dir="ltr"
                     value={editItemCode}
                     onChange={(e) => setEditItemCode(e.target.value)}
                     data-testid="edit-reference-item-code-input"
-                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+                    className="w-full px-3 py-2 text-sm border border-[#D5DFE3] rounded-[6px] min-h-[44px] font-mono text-left"
                   />
                 </div>
 
@@ -1670,7 +1687,7 @@ export function ReferenceSettingsClient({
                     type="button"
                     onClick={handleCloseEditModal}
                     data-testid="modal-cancel-button"
-                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[40px]"
+                    className="px-4 py-2 bg-[#F4F6F7] text-[#172A35] font-semibold rounded-[6px] border border-[#D5DFE3] min-h-[44px]"
                   >
                     إلغاء
                   </button>
@@ -1678,7 +1695,7 @@ export function ReferenceSettingsClient({
                     type="submit"
                     disabled={isSavingEditItem || editItemPending || !editItemName.trim()}
                     data-testid="save-edit-reference-item-button"
-                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[40px]"
+                    className="px-5 py-2 bg-[#14566B] hover:bg-[#0F4354] disabled:opacity-50 text-white font-bold rounded-[6px] min-h-[44px]"
                   >
                     {isSavingEditItem ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
                   </button>

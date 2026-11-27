@@ -73,6 +73,52 @@ export function parseKeyBuffer(raw: string | Buffer): Buffer {
   throw new CryptoConfigurationError('Invalid encryption key format. Expected 32 bytes as 64-char hex or 44-char base64 string.');
 }
 
+function parsePreviousKeysEnv(raw: string | undefined): Record<string, string> {
+  if (!raw || !raw.trim()) {
+    return {};
+  }
+
+  const trimmed = raw.trim();
+  const parsedMap: Record<string, string> = {};
+
+  if (trimmed.startsWith('{')) {
+    let json: unknown;
+    try {
+      json = JSON.parse(trimmed);
+    } catch {
+      throw new CryptoConfigurationError('Invalid PARTY_IDENTITY_PREVIOUS_KEYS JSON format.');
+    }
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      throw new CryptoConfigurationError('PARTY_IDENTITY_PREVIOUS_KEYS must be a JSON object mapping keyId to key.');
+    }
+    for (const [k, v] of Object.entries(json as Record<string, unknown>)) {
+      const cleanId = k.trim();
+      if (!cleanId || typeof v !== 'string' || !v.trim()) {
+        throw new CryptoConfigurationError('PARTY_IDENTITY_PREVIOUS_KEYS entries must have non-empty string keyId and key.');
+      }
+      parsedMap[cleanId] = v.trim();
+    }
+    return parsedMap;
+  }
+
+  for (const part of trimmed.split(',')) {
+    const entry = part.trim();
+    if (!entry) continue;
+    const colonIdx = entry.indexOf(':');
+    if (colonIdx <= 0) {
+      throw new CryptoConfigurationError('Invalid PARTY_IDENTITY_PREVIOUS_KEYS entry; expected keyId:key.');
+    }
+    const cleanId = entry.slice(0, colonIdx).trim();
+    const keyVal = entry.slice(colonIdx + 1).trim();
+    if (!cleanId || !keyVal) {
+      throw new CryptoConfigurationError('Invalid PARTY_IDENTITY_PREVIOUS_KEYS entry; expected non-empty keyId and key.');
+    }
+    parsedMap[cleanId] = keyVal;
+  }
+
+  return parsedMap;
+}
+
 /**
  * Resolves the active encryption key and keyId from explicit overrides or environment.
  */
@@ -89,12 +135,16 @@ export function resolveEncryptionKey(
   const envKey = process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
   const envKeyId = process.env.PARTY_IDENTITY_KEY_ID || 'k2026_01';
 
-  if (!envKey) {
-    throw new CryptoConfigurationError('Missing required encryption key: PARTY_IDENTITY_ENCRYPTION_KEY is not configured.');
+  if (targetKeyId && targetKeyId !== envKeyId) {
+    const previousKeys = parsePreviousKeysEnv(process.env.PARTY_IDENTITY_PREVIOUS_KEYS);
+    if (Object.hasOwn(previousKeys, targetKeyId)) {
+      return { keyBuffer: parseKeyBuffer(previousKeys[targetKeyId]), keyId: targetKeyId };
+    }
+    throw new CryptoConfigurationError(`Key ID '${targetKeyId}' is not available in current key configuration.`);
   }
 
-  if (targetKeyId && targetKeyId !== envKeyId) {
-    throw new CryptoConfigurationError(`Key ID '${targetKeyId}' is not available in current key configuration.`);
+  if (!envKey) {
+    throw new CryptoConfigurationError('Missing required encryption key: PARTY_IDENTITY_ENCRYPTION_KEY is not configured.');
   }
 
   const keyBuffer = parseKeyBuffer(envKey);
@@ -175,7 +225,7 @@ export function decryptPartyIdentity(params: DecryptIdentityParams): string {
   }
 
   let keyBuffer: Buffer;
-  if (overrideKeys && overrideKeys[keyId]) {
+  if (overrideKeys && Object.hasOwn(overrideKeys, keyId) && overrideKeys[keyId]) {
     keyBuffer = parseKeyBuffer(overrideKeys[keyId]);
   } else {
     try {

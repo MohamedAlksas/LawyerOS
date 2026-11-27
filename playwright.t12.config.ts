@@ -23,7 +23,10 @@ import { validateTestEnvironment } from './tests/helpers/test-db';
 const PORT = 3212;
 const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${PORT}`;
-const T12_E2E_STORAGE_ROOT = path.join(os.tmpdir(), 'lawoffice-t12-e2e');
+const T12_E2E_STORAGE_ROOT = (process.env.T12_E2E_STORAGE_ROOT ??= path.join(
+  os.tmpdir(),
+  `lawoffice-t12-e2e-${process.pid}-${Date.now()}`
+));
 
 const env = validateTestEnvironment();
 Object.assign(process.env, {

@@ -181,22 +181,37 @@ const ERROR_SCAN_STATUS_LABELS = new Set([
 ]);
 
 export function getScanStatusBadgeClassFromLabel(label: string): string {
-  if (label.includes('مفحوص وسليم') || label.includes('سليم') || label.includes('نظيف')) {
+  const trimmed = label.trim();
+  if (trimmed === 'مفحوص وسليم' || trimmed === 'نظيف') {
     return SCAN_STATUS_BADGE_CLASSES.CLEAN;
   }
-  if (label.includes('بانتظار الفحص') || label.includes('قيد الفحص')) {
+  if (trimmed === 'بانتظار الفحص' || trimmed === 'قيد الفحص') {
     return SCAN_STATUS_BADGE_CLASSES.PENDING;
   }
   if (
-    ERROR_SCAN_STATUS_LABELS.has(label) ||
-    label.includes('مرفوض') ||
-    label.includes('فشل') ||
-    label.includes('انتهت مهلة')
+    ERROR_SCAN_STATUS_LABELS.has(trimmed) ||
+    trimmed.startsWith('مرفوض') ||
+    trimmed.startsWith('فشل') ||
+    trimmed.startsWith('انتهت مهلة')
   ) {
     return SCAN_STATUS_BADGE_CLASSES.INFECTED;
   }
-  if (label === UNSCANNED_POLICY_NOTICE_AR || label.includes('لم يُفحص')) {
+  if (trimmed === UNSCANNED_POLICY_NOTICE_AR || trimmed.includes('لم يُفحص')) {
     return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+  }
+  return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+}
+
+export function getLinkableDocumentScanBadgeClass(doc?: {
+  scanStatus?: DocumentScanStatus;
+  scanStatusLabel?: string;
+} | null): string {
+  if (!doc) return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
+  if (doc.scanStatus && doc.scanStatus in SCAN_STATUS_BADGE_CLASSES) {
+    return SCAN_STATUS_BADGE_CLASSES[doc.scanStatus];
+  }
+  if (doc.scanStatusLabel) {
+    return getScanStatusBadgeClassFromLabel(doc.scanStatusLabel);
   }
   return SCAN_STATUS_BADGE_CLASSES.NOT_SCANNED_POLICY;
 }

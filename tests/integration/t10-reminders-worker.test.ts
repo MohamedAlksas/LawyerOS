@@ -1397,7 +1397,8 @@ describe('T10 Integration Tests: Durable Reminders, Leases, Retries & Inbox (PG)
         where: { sourceType: 'Hearing', sourceId: h1.id },
         orderBy: { scheduledAt: 'asc' },
       });
-      expect(deliveries.map((d) => d.ruleKey)).toEqual(['offset_7', 'offset_5', 'offset_3']);
+      // Wave 1 deduplication by ruleId:recipientUserId ensures rule7 is not delivered twice after being updated
+      expect(deliveries.map((d) => d.ruleKey)).toEqual(['offset_7', 'offset_3']);
 
       const runningAfterTicks = await prisma.jobRun.findUniqueOrThrow({ where: { id: runningJobBefore.id } });
       expect(runningAfterTicks.status).toBe('RUNNING');

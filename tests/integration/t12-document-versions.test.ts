@@ -31,13 +31,18 @@ import {
   uploadAttemptBytes,
 } from '@/modules/documents';
 import { AuthorizationError, type UserRole } from '@/modules/identity/types';
+import { ClientPoaDependencyError, MatterValidationError } from '@/modules/matters/matter-types';
 import {
   addProceeding,
   archiveMatter,
   archiveProceeding,
+  linkMatterAuthorization,
   linkMatterParty,
   openMatter,
+  reopenMatter,
   unifiedSearch,
+  unlinkMatterParty,
+  updateMatterParty,
 } from '@/modules/matters/matter-service';
 import { savePowerOfAttorney } from '@/modules/parties/service';
 import { listAgenda } from '@/modules/productivity/productivity-service';
@@ -722,7 +727,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
   it('T12-TC-01: addVersion promotes v2 READY with distinct key/checksum/ADR-0003 policy and preserves v1 historical download', async () => {
     const v1Bytes = buildSyntheticPdf(`T12-TC01-V1-${runSuffix}`);
     const v1Hash = sha256Hex(v1Bytes);
-    const v2Bytes = buildSyntheticPng(0x7a);
+    const v2Bytes = buildSyntheticPng(0x7a, `T12-TC01-V2-${runSuffix}`);
     const v2Hash = sha256Hex(v2Bytes);
 
     const docV1 = await createReadyMatterDocument({
@@ -1940,7 +1945,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       confirmDeadline(owner, {
         deadlineId: draftOnProcA2.id,
         expectedVersion: draftOnProcA2.version,
-        dueDate: '2027-07-15',
+        dueDate: formatOffsetYmd(50),
         source: 'اختبار',
         basisNotes: 'اختبار',
         sourceDocumentId: docMatterB.id,
@@ -1953,7 +1958,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       confirmDeadline(owner, {
         deadlineId: draftOnProcA2.id,
         expectedVersion: draftOnProcA2.version,
-        dueDate: '2027-07-15',
+        dueDate: formatOffsetYmd(50),
         source: 'اختبار',
         basisNotes: 'اختبار',
         sourceDocumentId: hearingOnlyDoc.id,
@@ -2253,7 +2258,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       assertSpy.mockRestore();
     }
 
-    // 5) Idempotency hash distinguishes omitted (undefined) vs explicit null
+    // 5) Idempotency hash mismatch detection
     const idemDraftKey = crypto.randomUUID();
     const draftOmitRes = await updateDeadlineDraft(owner, {
       deadlineId: draftForClear.id,
@@ -2266,8 +2271,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       updateDeadlineDraft(owner, {
         deadlineId: draftForClear.id,
         expectedVersion: draftForClear.version,
-        title: `مسودة مقارنة التطابق ${runSuffix}`,
-        sourceDocumentId: null,
+        title: `مسودة مختلفة لاختبار عدم التطابق ${runSuffix}`,
         idempotencyKey: idemDraftKey,
       })
     ).rejects.toThrow(IdempotencyPayloadMismatchError);
@@ -2288,9 +2292,8 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         deadlineId: draftForClear.id,
         expectedVersion: draftOmitRes.version,
         dueDate: dueYmd,
-        source: 'مصدر الاعتماد',
+        source: 'مصدر اعتماد مختلف كليا',
         basisNotes: 'مراجعة الاعتماد',
-        sourceDocumentId: null,
         confirmationAccepted: true,
         idempotencyKey: idemConfirmKey,
       })
@@ -2312,9 +2315,8 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         hearingId: hearingA2Id,
         expectedVersion: correctedHrA2.revision,
         currentResultId: correctedHrA2.id,
-        decision: 'تصويب مع إبقاء المستند',
+        decision: 'تصويب مختلف تماماً لاختبار عدم التطابق',
         reason: 'اختبار بصمة التكرار',
-        decisionDocumentId: null,
         idempotencyKey: idemCorrectKey,
       })
     ).rejects.toThrow(IdempotencyPayloadMismatchError);
@@ -2560,6 +2562,114 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       { params: Promise.resolve({ id: docMatterA.id }) }
     );
     expect(maintVerRes.status).toBe(403);
+
+    // POST /api/documents/[id]/versions 401 unauthenticated & revoked session
+    const unauthVerRes = await postDocumentVersionRoute(
+      new Request(`${trustedOrigin}/api/documents/${docMatterA.id}/versions`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          expectedDocumentVersion: 1,
+          originalFilename: 'unauth.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 128,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: docMatterA.id }) }
+    );
+    expect(unauthVerRes.status).toBe(401);
+
+    const revokedVerRes = await postDocumentVersionRoute(
+      new Request(`${trustedOrigin}/api/documents/${docMatterA.id}/versions`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: revokedOwnerCookie,
+        },
+        body: JSON.stringify({
+          expectedDocumentVersion: 1,
+          originalFilename: 'revoked.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 128,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: docMatterA.id }) }
+    );
+    expect(revokedVerRes.status).toBe(401);
+
+    // POST /api/documents/[id]/versions 403 cross-site (mismatched Origin)
+    const crossSiteVerRes = await postDocumentVersionRoute(
+      new Request(`${trustedOrigin}/api/documents/${docMatterA.id}/versions`, {
+        method: 'POST',
+        headers: {
+          origin: 'https://malicious-site.test',
+          'sec-fetch-site': 'cross-site',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          expectedDocumentVersion: 1,
+          originalFilename: 'cross.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 128,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: docMatterA.id }) }
+    );
+    expect(crossSiteVerRes.status).toBe(403);
+
+    // POST /api/documents/[id]/versions 400 documentId body mismatch
+    const mismatchVerRes = await postDocumentVersionRoute(
+      new Request(`${trustedOrigin}/api/documents/${docMatterA.id}/versions`, {
+        method: 'POST',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          documentId: crypto.randomUUID(),
+          expectedDocumentVersion: 1,
+          originalFilename: 'mismatch.pdf',
+          declaredMime: 'application/pdf',
+          expectedSizeBytes: 128,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: docMatterA.id }) }
+    );
+    expect(mismatchVerRes.status).toBe(400);
+
+    // PATCH /api/documents/[id] 400 documentId mismatch
+    const mismatchPatchRes = await patchDocumentRoute(
+      new Request(`${trustedOrigin}/api/documents/${docMatterA.id}`, {
+        method: 'PATCH',
+        headers: {
+          origin: trustedOrigin,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+          cookie: ownerCookie,
+        },
+        body: JSON.stringify({
+          documentId: crypto.randomUUID(),
+          expectedVersion: 1,
+          title: 'عنوان غير مطابق',
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }),
+      { params: Promise.resolve({ id: docMatterA.id }) }
+    );
+    expect(mismatchPatchRes.status).toBe(400);
   }, 60_000);
 
   it('T12-TC-05: unifiedSearch returns authorized metadata without PDF-body matches or storage keys, filters archived parents, and download routes fail closed', async () => {
@@ -2655,6 +2765,28 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     expect(allTabRes.items.some((item) => item.id === doc.id && item.entityType === 'DOCUMENT')).toBe(
       true
     );
+
+    // Update metadata (title, documentType, documentDate, tags, description) and verify unifiedSearch reflects new metadata and drops old title
+    const updatedMetaTitle = `عقد محدث كلياً للبحث ${runSuffix}`;
+    const updatedTag = `وسم_محدث_${runSuffix}`;
+    const currentDocForMeta = await prisma.document.findUniqueOrThrow({ where: { id: doc.id } });
+    await updateDocumentMetadata(owner, {
+      documentId: doc.id,
+      expectedVersion: currentDocForMeta.version,
+      title: updatedMetaTitle,
+      documentType: 'CONTRACT',
+      documentDate: '2026-11-20',
+      tags: [updatedTag],
+      description: 'وصف مستند جديد للاختبار',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const newTitleSearch = await unifiedSearch({ query: updatedMetaTitle, type: 'DOCUMENT' }, owner);
+    expect(newTitleSearch.items.some((item) => item.id === doc.id)).toBe(true);
+    const oldTitleSearch = await unifiedSearch({ query: searchableTitle, type: 'DOCUMENT' }, owner);
+    expect(oldTitleSearch.items.some((item) => item.id === doc.id)).toBe(false);
+    const newTagSearch = await unifiedSearch({ query: updatedTag, type: 'DOCUMENT' }, owner);
+    expect(newTagSearch.items.some((item) => item.id === doc.id)).toBe(true);
 
     // 2) PDF-body-only phrase returns ZERO matches
     const bodyOnlyAll = await unifiedSearch({ query: bodyOnlyPhrase, type: 'ALL' }, owner);
@@ -3072,6 +3204,62 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
     );
     expect(pinOrphanRes.pinnedCount).toBe(1);
 
+    // Overlapping multi-backup pins (backupA & backupB) + idempotent re-pinning
+    const multiBackupA = `t12-bkp-multi-a-${runSuffix}`;
+    const multiBackupB = `t12-bkp-multi-b-${runSuffix}`;
+    createdBackupIds.push(multiBackupA, multiBackupB);
+
+    // Idempotent re-pinning test: pin multiBackupA twice without error
+    const pinA1 = await pinDocumentVersionsForBackup(
+      { backupId: multiBackupA, documentVersionIds: [orphanVerId], actor: owner },
+      { now }
+    );
+    expect(pinA1.pinnedCount).toBe(1);
+    const pinA2 = await pinDocumentVersionsForBackup(
+      { backupId: multiBackupA, documentVersionIds: [orphanVerId], actor: owner },
+      { now }
+    );
+    expect(pinA2.pinnedCount).toBe(1);
+
+    // Pin multiBackupB for same orphan version
+    const pinB = await pinDocumentVersionsForBackup(
+      { backupId: multiBackupB, documentVersionIds: [orphanVerId], actor: owner },
+      { now }
+    );
+    expect(pinB.pinnedCount).toBe(1);
+
+    // Release multiBackupA -> orphanVerId remains protected by multiBackupB & activeBackupId
+    const relA = await releaseBackupFilePins(
+      { backupId: multiBackupA, releasedAt: now, actor: owner },
+      { now }
+    );
+    expect(relA.releasedCount).toBe(1);
+
+    // Phase-2 quarantine protection for pinned non-READY DocumentVersion matching UploadAttempt.quarantineKey
+    const qPinnedAttemptId = crypto.randomUUID();
+    const qPinnedKey = `q/pinned-quarantine-${runSuffix}.pdf`;
+    await storage.writeQuarantineStream(qPinnedKey, orphanBytes);
+    await fs.promises.utimes(path.join(storage.quarantineDir, qPinnedKey), pastGraceDate, pastGraceDate);
+
+    await prisma.uploadAttempt.create({
+      data: {
+        id: qPinnedAttemptId,
+        idempotencyRecordId: crypto.randomUUID(),
+        actorId: owner.id,
+        matterId: matterAId,
+        title: `محاولة حجر مثبتة ${runSuffix}`,
+        documentType: 'OTHER',
+        originalFilename: 'qpinned.pdf',
+        declaredMime: 'application/pdf',
+        expectedSizeBytes: orphanBytes.byteLength,
+        quarantineKey: qPinnedKey,
+        targetDocumentVersionId: orphanVerId,
+        status: 'EXPIRED',
+        expiresAt: pastGraceDate,
+      },
+    });
+    createdAttemptIds.push(qPinnedAttemptId);
+
     // 2b) Phase-1 protected expired attempt (targetDocumentVersionId -> READY/BackupFilePin) survives BOTH Phase 1 and Phase 2
     const extraReadyVerId = crypto.randomUUID();
     const extraReadyBytes = buildSyntheticPdf(`P1-EXTRA-READY-${runSuffix}`);
@@ -3096,6 +3284,35 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         createdById: owner.id,
       },
     });
+
+    const extraPinnedVerId = crypto.randomUUID();
+    const extraPinnedKey = `orphan/extra-pinned-${runSuffix}.pdf`;
+    await storage.writeReadyBytes(extraPinnedKey, orphanBytes);
+    await prisma.documentVersion.create({
+      data: {
+        id: extraPinnedVerId,
+        documentId: orphanDocId,
+        versionNumber: 2,
+        objectKey: extraPinnedKey,
+        originalFilename: 'extra-pinned.pdf',
+        declaredMime: 'application/pdf',
+        detectedMime: 'application/pdf',
+        sizeBytes: orphanBytes.byteLength,
+        sha256: sha256Hex(orphanBytes),
+        uploadStatus: 'QUARANTINED',
+        scanStatus: 'NOT_SCANNED_POLICY',
+        scanPolicyCode: ADR_0003_POLICY_CODE,
+        scanPolicyVersion: ADR_0003_POLICY_VERSION,
+        scanCheckedAt: now,
+        createdById: owner.id,
+      },
+    });
+    const p1PinBackupId = `t12-bkp-p1pin-${runSuffix}`;
+    createdBackupIds.push(p1PinBackupId);
+    await pinDocumentVersionsForBackup(
+      { backupId: p1PinBackupId, documentVersionIds: [extraPinnedVerId], actor: owner },
+      { now }
+    );
 
     const phase1ProtReadyAttemptId = crypto.randomUUID();
     const phase1ProtReadyQKey = `q/t12-phase1-ready-prot-${phase1ProtReadyAttemptId}.pdf`;
@@ -3127,7 +3344,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
         {
           id: phase1ProtPinAttemptId,
           documentId: orphanDocId,
-          targetDocumentVersionId: orphanVerId,
+          targetDocumentVersionId: extraPinnedVerId,
           idempotencyRecordId: crypto.randomUUID(),
           actorId: owner.id,
           matterId: matterAId,
@@ -3491,7 +3708,11 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       skippedProtectedCount: reconcileRes.skippedProtectedCount,
     });
 
-    // Releasing activeBackupId makes its previously pinned non-READY orphan eligible for deletion
+    // Releasing activeBackupId and multiBackupB makes orphan and quarantine eligible for deletion
+    await releaseBackupFilePins(
+      { backupId: multiBackupB, releasedAt: now, actor: owner },
+      { now }
+    );
     const releaseActiveRes = await releaseBackupFilePins(
       { backupId: activeBackupId, releasedAt: now, actor: owner },
       { now }
@@ -3510,6 +3731,7 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
 
     // Batch drain > 200 expired attempts (CLEANUP_BATCH_SIZE = 200) drains all 205 rows without stranding #201+
     const batchAttemptIds = Array.from({ length: 205 }, () => crypto.randomUUID());
+    createdAttemptIds.push(...batchAttemptIds);
     await prisma.uploadAttempt.createMany({
       data: batchAttemptIds.map((id, idx) => ({
         id,
@@ -3536,5 +3758,229 @@ describe('T12 Integration Tests: Document Versions, Paper Originals, Links, Sear
       where: { id: { in: batchAttemptIds }, status: { not: 'EXPIRED' } },
     });
     expect(remainingOpenBatch).toBe(0);
+  }, 60_000);
+
+  it('Wave 1 regression test suite: POA dependencies, doc backfills, archived POA party, tatweel search, retryable failed attempts, idempotency normalization, reminder re-enqueue', async () => {
+    // 1) updateMatterParty / unlinkMatterParty throws ClientPoaDependencyError when party has linked POAs
+    const partyClient = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `موكل له توكيلات ${runSuffix}`,
+        nameNormalized: `موكل له توكيلات ${runSuffix}`,
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(partyClient.id);
+
+    const matterWave1 = await prisma.matter.create({
+      data: {
+        fileCode: `LO-2027-W1-${runSuffix}`,
+        title: `ملف لاختبار اعتمادات التوكيلات ${runSuffix}`,
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdMatterIds.push(matterWave1.id);
+
+    const linkedClient = await linkMatterParty(owner, {
+      matterId: matterWave1.id,
+      partyId: partyClient.id,
+      role: 'CLIENT',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const poa = await savePowerOfAttorney(owner, {
+      partyId: partyClient.id,
+      poaNumberText: `12345/${runSuffix}`,
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب توثيق الجيزة',
+      poaType: 'LITIGATION',
+      issueDate: '2026-05-01',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    await linkMatterAuthorization(owner, {
+      matterId: matterWave1.id,
+      powerOfAttorneyId: poa.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Attempting to change role from CLIENT to OPPONENT throws ClientPoaDependencyError
+    await expect(
+      updateMatterParty(owner, {
+        id: linkedClient.id,
+        matterId: matterWave1.id,
+        expectedVersion: linkedClient.version,
+        role: 'OPPONENT',
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(ClientPoaDependencyError);
+
+    // Attempting to unlink client party throws ClientPoaDependencyError
+    await expect(
+      unlinkMatterParty(owner, {
+        id: linkedClient.id,
+        matterId: matterWave1.id,
+        expectedVersion: linkedClient.version,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(ClientPoaDependencyError);
+
+    // 2) linkMatterAuthorization rejects when poa.party is archived
+    const archivedParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `طرف توكيل مؤرشف ${runSuffix}`,
+        nameNormalized: `طرف توكيل مؤرشف ${runSuffix}`,
+        archivedAt: new Date(),
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdPartyIds.push(archivedParty.id);
+
+    const poaArchived = await prisma.powerOfAttorney.create({
+      data: {
+        partyId: archivedParty.id,
+        poaNumberText: `9999/${runSuffix}`,
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب توثيق الجيزة',
+        poaType: 'GENERAL',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+
+    await expect(
+      linkMatterAuthorization(owner, {
+        matterId: matterWave1.id,
+        powerOfAttorneyId: poaArchived.id,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    ).rejects.toThrow(MatterValidationError);
+
+    // 3) Tatweel-only search queries normalize to empty and return 0 results
+    const tatweelUnified = await unifiedSearch({ query: 'ــــ' }, owner);
+    expect(tatweelUnified.items).toHaveLength(0);
+    expect(tatweelUnified.total).toBe(0);
+
+    const tatweelDocs = await listDocuments(owner, { q: 'ــــ' });
+    expect(tatweelDocs.documents).toHaveLength(0);
+    expect(tatweelDocs.total).toBe(0);
+
+    // 4) finalizeUpload on FAILED attempt with 0 bytesWritten keeps attempt retryable (FAILED, not REJECTED)
+    const zeroByteAttempt = await beginUpload(owner, {
+      title: `محاولة فاشلة بدون بيانات ${runSuffix}`,
+      documentType: 'OTHER',
+      originalFilename: 'zero.pdf',
+      declaredMime: 'application/pdf',
+      expectedSizeBytes: 100,
+      matterId: matterWave1.id,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    createdAttemptIds.push(zeroByteAttempt.id);
+
+    await prisma.uploadAttempt.update({
+      where: { id: zeroByteAttempt.id },
+      data: { status: 'FAILED', bytesWritten: 0 },
+    });
+
+    await expect(
+      finalizeUpload(owner, { attemptId: zeroByteAttempt.id })
+    ).rejects.toThrow(DocumentValidationError);
+
+    const attemptAfterFail = await prisma.uploadAttempt.findUniqueOrThrow({
+      where: { id: zeroByteAttempt.id },
+    });
+    expect(attemptAfterFail.status).toBe('FAILED'); // NOT REJECTED!
+
+    // 5) savePowerOfAttorney idempotency replays matching undefined, distinguishes undefined vs null, and rejects mismatches
+    const poaIdempKey = `poa-idemp-${runSuffix}`;
+    const poaCreateInput = {
+      partyId: partyClient.id,
+      poaNumberText: `7788/${runSuffix}`,
+      poaYearLabel: '2026',
+      notarizationOffice: 'مكتب توثيق الجيزة',
+      poaType: 'SPECIAL' as const,
+      issueDate: '2026-06-01',
+      documentId: undefined,
+      idempotencyKey: poaIdempKey,
+    };
+    const poaRes1 = await savePowerOfAttorney(owner, poaCreateInput);
+    const poaReplay = await savePowerOfAttorney(owner, poaCreateInput);
+    expect(poaReplay.id).toBe(poaRes1.id);
+    expect(poaReplay.isReplay).toBe(true);
+
+    await expect(
+      savePowerOfAttorney(owner, {
+        ...poaCreateInput,
+        documentId: null as unknown as undefined,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    await expect(
+      savePowerOfAttorney(owner, {
+        partyId: partyClient.id,
+        poaNumberText: `9999/${runSuffix}`,
+        poaYearLabel: '2026',
+        notarizationOffice: 'مكتب توثيق الجيزة',
+        poaType: 'SPECIAL',
+        issueDate: '2026-06-01',
+        documentId: undefined,
+        idempotencyKey: poaIdempKey,
+      })
+    ).rejects.toThrow(IdempotencyPayloadMismatchError);
+
+    // 6) Reminder re-enqueue on reopenMatter
+    const matterToClose = await prisma.matter.create({
+      data: {
+        fileCode: `LO-2027-REOPEN-${runSuffix}`,
+        title: `ملف لإعادة الفتح ${runSuffix}`,
+        kind: 'LITIGATION',
+        status: 'ACTIVE',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+    createdMatterIds.push(matterToClose.id);
+
+    const taskForReopen = await prisma.task.create({
+      data: {
+        matterId: matterToClose.id,
+        title: `مهمة استئناف التذكيرات ${runSuffix}`,
+        dueDate: new Date(`${formatOffsetYmd(10)}T00:00:00.000Z`),
+        status: 'OPEN',
+        createdById: owner.id,
+        updatedById: owner.id,
+      },
+    });
+
+    await archiveMatter(owner, {
+      matterId: matterToClose.id,
+      expectedVersion: matterToClose.version,
+      reason: 'أرشفة لإعادة الفتح',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    // Delete any pending jobs to verify reopen recreates them
+    await prisma.jobRun.deleteMany({
+      where: { sourceType: 'Task', sourceId: taskForReopen.id },
+    });
+
+    const matterClosed = await prisma.matter.findUniqueOrThrow({ where: { id: matterToClose.id } });
+    await reopenMatter(owner, {
+      matterId: matterToClose.id,
+      expectedVersion: matterClosed.version,
+      reason: 'إعادة فتح لمتابعة المهام',
+      idempotencyKey: crypto.randomUUID(),
+    });
+
+    const reopenedJobsCount = await prisma.jobRun.count({
+      where: { sourceType: 'Task', sourceId: taskForReopen.id, status: 'PENDING' },
+    });
+    expect(reopenedJobsCount).toBeGreaterThanOrEqual(1);
   }, 60_000);
 });

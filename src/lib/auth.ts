@@ -5,7 +5,7 @@ import { createAuthMiddleware } from 'better-auth/api';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { getDbPool } from './db';
-import { getEnv } from './env';
+import { getEnv, parseTrustedProxyIps } from './env';
 
 declare global {
   var __lawoffice_prisma: PrismaClient | undefined;
@@ -91,6 +91,9 @@ function createAuthInstance() {
       ...(env.NODE_ENV === 'production'
         ? { disableOriginCheck: false, disableCSRFCheck: false }
         : {}),
+      ipAddress: {
+        trustedProxies: parseTrustedProxyIps(env.TRUSTED_PROXY_IPS),
+      },
       defaultCookieAttributes: {
         httpOnly: true,
         sameSite: 'lax',

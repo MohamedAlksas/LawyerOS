@@ -15,7 +15,7 @@ import {
   type ClaimReplayResult,
 } from '@/lib/idempotency';
 import { allocateFileCode } from './file-code-allocator';
-import { cancelSourceReminderJobsBatch } from '@/modules/reminders/reminder-outbox';
+import { cancelSourceReminderJobsBatch, enqueueSourceReminderJob } from '@/modules/reminders/reminder-outbox';
 import {
   MatterDTO,
   MatterPartySummaryDTO,
@@ -661,6 +661,11 @@ export async function openMatter(
     throw err;
   }
 
+  const titleNormalized = normalizeArabicText(input.title);
+  if (!titleNormalized) {
+    throw new MatterValidationError('عنوان الملف لا يمكن أن يتكون من حركات أو تطويل فقط.');
+  }
+
   const rawStatus = (rawInput as unknown as Record<string, unknown>).status;
   if (rawStatus === 'ARCHIVED' || (input.status as string) === 'ARCHIVED') {
     throw new MatterValidationError('لا يمكن إنشاء ملف جديد بحالة مؤرشفة.');
@@ -673,13 +678,25 @@ export async function openMatter(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
+  const payloadForIdempotency = {
+    title: input.title,
+    kind: input.kind,
+    status: input.status ?? null,
+    practiceAreaId: input.practiceAreaId ?? null,
+    openingDate: input.openingDate ?? null,
+    summary: input.summary ?? null,
+    notes: input.notes ?? null,
+    paperLocationId: input.paperLocationId ?? null,
+    initialClientId: input.initialClientId ?? null,
+  };
+
   return runMatterCommand(
     prisma,
     {
       actorId: actor.id,
       commandType: 'openMatter',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       // 1. Idempotency claim
@@ -687,7 +704,7 @@ export async function openMatter(
         actorId: actor.id,
         commandType: 'openMatter',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -707,10 +724,10 @@ export async function openMatter(
 
       // 3. Validate initial client if provided
       if (input.initialClientId) {
-        const party = await tx.party.findUnique({
-          where: { id: input.initialClientId },
-          select: { id: true, archivedAt: true },
-        });
+        const clientRows = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+          SELECT "id", "archivedAt" FROM "party" WHERE "id" = ${input.initialClientId} FOR NO KEY UPDATE;
+        `;
+        const party = clientRows[0];
         if (!party || party.archivedAt !== null) {
           throw new MatterValidationError('الموكل المحدد غير موجود أو مؤرشف.');
         }
@@ -843,7 +860,28 @@ export async function updateMatter(
     throw new UnsupportedTransitionError('الانتقال إلى الأرشفة أو الحذف غير مدعوم في هذا الإصدار.');
   }
 
+  if (input.title !== undefined) {
+    const titleNorm = normalizeArabicText(input.title);
+    if (!titleNorm) {
+      throw new MatterValidationError('عنوان الملف لا يمكن أن يتكون من حركات أو تطويل فقط.');
+    }
+  }
+
   const prisma = options.prismaOverride ?? getPrismaClient();
+
+  const payloadForIdempotency = {
+    id: input.id,
+    expectedVersion: input.expectedVersion,
+    title: input.title,
+    kind: input.kind,
+    status: input.status,
+    practiceAreaId: input.practiceAreaId ?? null,
+    openingDate: input.openingDate ?? null,
+    closingDate: input.closingDate ?? null,
+    summary: input.summary ?? null,
+    notes: input.notes ?? null,
+    paperLocationId: input.paperLocationId ?? null,
+  };
 
   return runMatterCommand(
     prisma,
@@ -851,14 +889,14 @@ export async function updateMatter(
       actorId: actor.id,
       commandType: 'updateMatter',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateMatter',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -1081,10 +1119,10 @@ export async function linkMatterParty(
         throw new MatterArchivedError('ملف القضية مؤرشف ولا يمكن إضافة أطراف إليه.');
       }
 
-      const party = await tx.party.findUnique({
-        where: { id: input.partyId },
-        select: { id: true, archivedAt: true },
-      });
+      const partyRows = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+        SELECT "id", "archivedAt" FROM "party" WHERE "id" = ${input.partyId} FOR NO KEY UPDATE;
+      `;
+      const party = partyRows[0];
       if (!party) throw new NotFoundError('الطرف غير موجود.');
       if (party.archivedAt !== null) {
         throw new MatterValidationError('الطرف المحدد مؤرشف ولا يمكن ربطه بالملف.');
@@ -1321,6 +1359,17 @@ export async function updateMatterParty(
           throw new ClientPoaDependencyError('لا يمكن تغيير صفة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
         }
 
+        const poaDocumentDep = await tx.powerOfAttorney.findFirst({
+          where: {
+            partyId: existing.partyId,
+            document: { matterId: input.matterId },
+          },
+          select: { id: true },
+        });
+        if (poaDocumentDep) {
+          throw new ClientPoaDependencyError('لا يمكن تغيير صفة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
+        }
+
         if (matter.status === 'ACTIVE') {
           const otherClients = await tx.matterParty.count({
             where: { matterId: input.matterId, role: 'CLIENT', id: { not: input.id } },
@@ -1428,7 +1477,8 @@ export async function updateMatterParty(
 
 export async function unlinkMatterParty(
   actor: Actor,
-  rawInput: UnlinkMatterPartyInput
+  rawInput: UnlinkMatterPartyInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -1443,7 +1493,7 @@ export async function unlinkMatterParty(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -1503,6 +1553,17 @@ export async function unlinkMatterParty(
         });
         if (linkedPoas) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
+        }
+
+        const poaDocumentDep = await tx.powerOfAttorney.findFirst({
+          where: {
+            partyId: existing.partyId,
+            document: { matterId: input.matterId },
+          },
+          select: { id: true },
+        });
+        if (poaDocumentDep) {
+          throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
         }
 
         if (matter.status === 'ACTIVE') {
@@ -1822,20 +1883,42 @@ export async function updateProceeding(
 
   const prisma = options.prismaOverride ?? getPrismaClient();
 
+  const payloadForIdempotency = {
+    id: input.id,
+    matterId: input.matterId,
+    expectedVersion: input.expectedVersion,
+    courtId: input.courtId,
+    instance: input.instance,
+    parentProceedingId: input.parentProceedingId ?? null,
+    registerType: input.registerType ?? null,
+    circuit: input.circuit ?? null,
+    numberText: input.numberText ?? null,
+    yearLabel: input.yearLabel ?? null,
+    filingDate: input.filingDate ?? null,
+    claimAmount: input.claimAmount ?? null,
+    status: input.status,
+    parties: input.parties?.map((p) => ({
+      matterPartyId: p.matterPartyId,
+      capacityText: p.capacityText ?? null,
+      legalCapacity: p.legalCapacity ?? null,
+      notes: p.notes ?? null,
+    })) ?? null,
+  };
+
   return runMatterCommand(
     prisma,
     {
       actorId: actor.id,
       commandType: 'updateProceeding',
       key: input.idempotencyKey,
-      payload: input,
+      payload: payloadForIdempotency,
     },
     async (tx) => {
       const claim = await claimIdempotencyKey(tx, {
         actorId: actor.id,
         commandType: 'updateProceeding',
         key: input.idempotencyKey,
-        payload: input,
+        payload: payloadForIdempotency,
       });
 
       if (claim.isReplay) {
@@ -2281,7 +2364,8 @@ export async function linkProceedingParty(
 
 export async function unlinkProceedingParty(
   actor: Actor,
-  rawInput: UnlinkProceedingPartyInput
+  rawInput: UnlinkProceedingPartyInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2296,7 +2380,7 @@ export async function unlinkProceedingParty(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2404,7 +2488,8 @@ export async function unlinkProceedingParty(
 
 export async function linkMatterAuthorization(
   actor: Actor,
-  rawInput: LinkMatterAuthorizationInput
+  rawInput: LinkMatterAuthorizationInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<MatterAuthorizationSummaryDTO> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2419,7 +2504,7 @@ export async function linkMatterAuthorization(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2461,6 +2546,10 @@ export async function linkMatterAuthorization(
         include: { party: true },
       });
       if (!poa) throw new NotFoundError('سند التوكيل غير موجود.');
+
+      if (poa.party.archivedAt !== null) {
+        throw new MatterValidationError('طرف سند التوكيل مؤرشف ولا يمكن ربطه بالملف.');
+      }
 
       // Invariant: POA party must be a CLIENT in MatterParty for this matter under the lock
       const clientRelation = await tx.matterParty.findFirst({
@@ -2555,7 +2644,8 @@ export async function linkMatterAuthorization(
 
 export async function unlinkMatterAuthorization(
   actor: Actor,
-  rawInput: UnlinkMatterAuthorizationInput
+  rawInput: UnlinkMatterAuthorizationInput,
+  options: ServiceExecutionOptions = {}
 ): Promise<void> {
   assertActorAuthorized(actor, 'WRITE_CLIENT_DATA');
 
@@ -2570,7 +2660,7 @@ export async function unlinkMatterAuthorization(
     throw err;
   }
 
-  const prisma = getPrismaClient();
+  const prisma = options.prismaOverride ?? getPrismaClient();
 
   return runMatterCommand(
     prisma,
@@ -2933,6 +3023,14 @@ export async function searchMatterClients(
     }
     if (orClauses.length > 0) {
       where.OR = orClauses;
+    } else {
+      return {
+        clients: [],
+        total: 0,
+        page: 1,
+        totalPages: 1,
+        hasMore: false,
+      };
     }
   }
 
@@ -3342,6 +3440,47 @@ export async function reopenMatter(
         select: { id: true, version: true, status: true, archivedAt: true, updatedAt: true },
       });
 
+      const now = new Date();
+      const openTasks = await tx.task.findMany({
+        where: {
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          dueDate: { gte: now },
+          OR: [
+            { matterId: input.matterId },
+            { proceeding: { matterId: input.matterId } },
+          ],
+        },
+        select: {
+          id: true,
+          version: true,
+          matterId: true,
+          proceedingId: true,
+          dueDate: true,
+          dueTime: true,
+          createdById: true,
+        },
+      });
+      for (const t of openTasks) {
+        if (!t.dueDate) continue;
+        const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+        await enqueueSourceReminderJob(tx, {
+          sourceType: 'Task',
+          sourceId: t.id,
+          sourceVersion: t.version,
+          eventDateYmd: dueDateStr,
+          deduplicationKey: `task_reminder_${t.id}_v${t.version}`,
+          payload: {
+            taskId: t.id,
+            matterId: t.matterId,
+            proceedingId: t.proceedingId,
+            dueDate: dueDateStr,
+            dueTime: t.dueTime,
+            sourceVersion: t.version,
+            recipientUserId: t.createdById,
+          },
+        });
+      }
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'REOPEN_MATTER',
@@ -3738,6 +3877,44 @@ export async function reopenProceeding(
         WHERE "id" = ${input.matterId};
       `;
 
+      const now = new Date();
+      const openTasks = await tx.task.findMany({
+        where: {
+          proceedingId: input.proceedingId,
+          status: { in: ['OPEN', 'IN_PROGRESS'] },
+          dueDate: { gte: now },
+        },
+        select: {
+          id: true,
+          version: true,
+          matterId: true,
+          proceedingId: true,
+          dueDate: true,
+          dueTime: true,
+          createdById: true,
+        },
+      });
+      for (const t of openTasks) {
+        if (!t.dueDate) continue;
+        const dueDateStr = t.dueDate.toISOString().slice(0, 10);
+        await enqueueSourceReminderJob(tx, {
+          sourceType: 'Task',
+          sourceId: t.id,
+          sourceVersion: t.version,
+          eventDateYmd: dueDateStr,
+          deduplicationKey: `task_reminder_${t.id}_v${t.version}`,
+          payload: {
+            taskId: t.id,
+            matterId: t.matterId,
+            proceedingId: t.proceedingId,
+            dueDate: dueDateStr,
+            dueTime: t.dueTime,
+            sourceVersion: t.version,
+            recipientUserId: t.createdById,
+          },
+        });
+      }
+
       await recordAuditEvent(tx, {
         userId: actor.id,
         action: 'REOPEN_PROCEEDING',
@@ -3994,10 +4171,10 @@ function mapProceedingToUnifiedItem(p: {
   archivedAt: Date | null;
   updatedAt: Date;
   court: { name: string };
-  matter: { title: string; fileCode: string; archivedAt?: Date | null };
+  matter: { title: string; fileCode: string; status?: string; archivedAt?: Date | null };
 }): UnifiedSearchResultItem {
   const docket = `${p.numberText ?? 'بدون رقم'}/${p.yearLabel ?? ''}`;
-  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt);
+  const isArchived = Boolean(p.archivedAt) || Boolean(p.matter.archivedAt) || p.matter.status === 'ARCHIVED';
   const badge = isArchived
     ? 'مؤرشف'
     : (UNIFIED_PROCEEDING_STATUS_LABELS[p.status] ?? p.status);
@@ -4324,7 +4501,7 @@ export async function unifiedSearch(
           archivedAt: true,
           updatedAt: true,
           court: { select: { name: true } },
-          matter: { select: { title: true, fileCode: true, archivedAt: true } },
+          matter: { select: { title: true, fileCode: true, status: true, archivedAt: true } },
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip,
@@ -4422,7 +4599,7 @@ export async function unifiedSearch(
                 archivedAt: true,
                 updatedAt: true,
                 court: { select: { name: true } },
-                matter: { select: { title: true, fileCode: true, archivedAt: true } },
+                matter: { select: { title: true, fileCode: true, status: true, archivedAt: true } },
               },
               orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               skip: skip2,

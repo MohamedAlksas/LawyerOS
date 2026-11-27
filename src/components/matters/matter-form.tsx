@@ -618,6 +618,7 @@ export function MatterForm({
               <input
                 id={`${formId}-openingDate`}
                 type="date"
+                dir="ltr"
                 value={openingDate}
                 onChange={(e) => setOpeningDate(e.target.value)}
                 data-testid="matter-opening-date-input"
@@ -659,6 +660,7 @@ export function MatterForm({
               <input
                 id={`${formId}-closingDate`}
                 type="date"
+                dir="ltr"
                 value={closingDate}
                 onChange={(e) => setClosingDate(e.target.value)}
                 data-testid="matter-closing-date-input"

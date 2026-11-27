@@ -21,7 +21,7 @@ import type {
   UpdateDeadlineDraftInput,
 } from '@/modules/scheduling/deadline-types';
 import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
-import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import type { SelectableMatterOptionDTO } from '@/modules/productivity/productivity-types';
 import { formatCairoDateArabic, getCairoTodayDateString } from '@/lib/cairo-date';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
@@ -74,7 +74,7 @@ export function DeadlinesView({
   actorId,
   initialDeadlines,
   selectableMatters,
-  canReadDocuments = true,
+  canReadDocuments = false,
   matterDocuments,
   initialDocumentsByMatter,
   documentsLoadError,
@@ -208,6 +208,7 @@ export function DeadlinesView({
   );
   const [fetchedDocsByMatter, setFetchedDocsByMatter] = useState<Record<string, LinkableDocumentSummary[]>>({});
   const [docsLoadErrorByMatter, setDocsLoadErrorByMatter] = useState<Record<string, string>>({});
+  const [ssrDocsLoadError, setSsrDocsLoadError] = useState<string | null | undefined>(documentsLoadError);
   const [docsFetchNonce, setDocsFetchNonce] = useState(0);
   const [lawyerReviewed, setLawyerReviewed] = useState(
     restoredDraftOp?.kind === 'confirm' ||
@@ -464,6 +465,7 @@ export function DeadlinesView({
             title: d.title,
             documentType: d.documentType,
             currentVersionId: d.currentVersionId,
+            scanStatus: d.currentVersion!.scanStatus,
             scanStatusLabel: d.currentVersion!.scanStatusLabel,
             proceedingId: d.proceedingId,
             hearingId: d.hearingId,
@@ -475,6 +477,7 @@ export function DeadlinesView({
           return next;
         });
         setFetchedDocsByMatter((prev) => ({ ...prev, [activeMatterId]: docs }));
+        setSsrDocsLoadError(null);
       })
       .catch(() => {
         if (controller.signal.aborted) return;
@@ -1212,7 +1215,7 @@ export function DeadlinesView({
             )}
             {d.sourceDocument?.scanStatusLabel && (
               <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-xs font-semibold border ${getScanStatusBadgeClassFromLabel(d.sourceDocument.scanStatusLabel)}`}
+                className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-xs font-semibold border ${getLinkableDocumentScanBadgeClass(d.sourceDocument)}`}
               >
                 {d.sourceDocument.scanStatusLabel}
               </span>
@@ -1451,14 +1454,14 @@ export function DeadlinesView({
       )}
 
       {canReadDocuments &&
-        documentsLoadError &&
-        !(lockedMatterId && lockedMatterId in fetchedDocsByMatter) && (
+        ssrDocsLoadError &&
+        (lockedMatterId ? !(lockedMatterId in fetchedDocsByMatter) : Object.keys(fetchedDocsByMatter).length === 0) && (
           <div
             role="alert"
             data-testid="deadline-ssr-docs-warning"
             className="p-3 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] text-sm font-medium"
           >
-            {documentsLoadError} سيتم إعادة محاولة تحميل مستندات الملف تلقائياً عند فتح نموذج الموعد.
+            {ssrDocsLoadError} سيتم إعادة محاولة تحميل مستندات الملف تلقائياً عند فتح نموذج الموعد.
           </div>
         )}
 

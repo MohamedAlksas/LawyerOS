@@ -74,7 +74,7 @@ export default async function AgendaPage({ searchParams }: AgendaPageProps) {
 
   return (
     <AgendaView
-      key={actor.sessionId}
+      key={`${actor.sessionId}:${view}:${anchorDate}:${courtId ?? ''}:${itemType ?? ''}:${includeCompleted ? '1' : '0'}`}
       initialAgenda={initialAgenda}
       initialError={initialError}
       initialGeneratedAtIso={new Date().toISOString()}

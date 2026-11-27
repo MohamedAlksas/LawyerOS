@@ -1032,6 +1032,7 @@ model UploadAttempt {
   document                Document?                @relation(fields: [documentId], references: [id], onDelete: SetNull)
   targetDocumentVersion   DocumentVersion?         @relation(fields: [targetDocumentVersionId], references: [id], onDelete: SetNull)
 
+  @@index([documentId])
   @@index([status, expiresAt])
   @@index([actorId, createdAt])
   @@map("upload_attempt")
@@ -1047,7 +1048,6 @@ model BackupFilePin {
   documentVersion   DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
 
   @@unique([backupId, documentVersionId])
-  @@index([documentVersionId])
   @@index([documentVersionId, releasedAt])
   @@map("backup_file_pin")
 }

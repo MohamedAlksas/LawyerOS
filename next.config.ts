@@ -7,6 +7,11 @@ const SECURITY_HEADERS = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ];
 
+const PAGE_CSP_VALUE =
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+
+const PAGE_CSP_HEADER = [{ key: 'Content-Security-Policy', value: PAGE_CSP_VALUE }];
+
 const NO_STORE_HEADER = [{ key: 'Cache-Control', value: 'private, no-store' }];
 
 const NO_STORE_PATHS = [
@@ -38,6 +43,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       { source: '/(.*)', headers: SECURITY_HEADERS },
+      {
+        source: '/:path((?!api/documents/[^/]+/content(?:/.*)?$).*)',
+        headers: PAGE_CSP_HEADER,
+      },
       {
         source: '/api/documents/:id/content',
         headers: [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }],

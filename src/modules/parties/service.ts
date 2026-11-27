@@ -42,6 +42,7 @@ import {
   addCommunicationNoteSchema,
   savePowerOfAttorneySchema,
   validateInput,
+  ValidationError,
 } from './validation';
 
 export class ConcurrencyConflictError extends Error {
@@ -312,6 +313,15 @@ export async function saveParty(
     input.id
   );
 
+  const nameNormalized = normalizeArabicText(input.name);
+  if (!nameNormalized) {
+    throw new ValidationError('اسم الطرف غير صالح ولا يمكن أن يحتوي فقط على علامات تشكيل أو تطويل.', {
+      name: 'اسم الطرف غير صالح',
+    });
+  }
+
+  const payloadForIdempotency = input;
+
   let attempts = 0;
   while (attempts < 3) {
     attempts++;
@@ -322,7 +332,7 @@ export async function saveParty(
           actorId: actor.id,
           commandType: 'saveParty',
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
           privateHashSecret: getEnv().PARTY_IDEMPOTENCY_SECRET ?? getEnv().BETTER_AUTH_SECRET,
         });
 
@@ -330,8 +340,7 @@ export async function saveParty(
           return await buildReplaySavePartyResult(tx, claim);
         }
 
-        const nameNormalized = normalizeArabicText(input.name);
-    const primaryPhoneNormalized = normalizePhone(input.primaryPhone) || null;
+        const primaryPhoneNormalized = normalizePhone(input.primaryPhone) || null;
 
     let targetPartyId: string;
     let resultingParty: Prisma.PartyGetPayload<{ include: { identities: true } }>;
@@ -554,7 +563,7 @@ export async function saveParty(
           actorId: actor.id,
           commandType: 'saveParty',
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
           privateHashSecret: getEnv().PARTY_IDEMPOTENCY_SECRET ?? getEnv().BETTER_AUTH_SECRET,
         });
         if (!concurrent) {
@@ -612,6 +621,13 @@ export async function searchParties(
 
     if (orClauses.length > 0) {
       where.OR = orClauses;
+    } else {
+      return {
+        parties: [],
+        totalCount: 0,
+        page,
+        totalPages: 1,
+      };
     }
   }
 
@@ -752,11 +768,14 @@ export async function addCommunicationNote(
           return await buildReplayCommunicationNoteResult(tx, claim);
         }
 
-        const party = await tx.party.findUnique({
-          where: { id: input.partyId, archivedAt: null },
-        });
+        const [party] = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+          SELECT "id", "archivedAt"
+          FROM "party"
+          WHERE "id" = ${input.partyId}
+          FOR NO KEY UPDATE
+        `;
 
-        if (!party) {
+        if (!party || party.archivedAt !== null) {
           throw new NotFoundError('الطرف المحدد لتسجيل الملاحظة غير موجود.');
         }
 
@@ -853,6 +872,8 @@ export async function savePowerOfAttorney(
   const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   const prisma = options.prismaOverride ?? getPrismaClient();
 
+  const payloadForIdempotency = input;
+
   let attempts = 0;
   while (attempts < 3) {
     attempts++;
@@ -862,7 +883,7 @@ export async function savePowerOfAttorney(
           actorId: actor.id,
           commandType: 'savePowerOfAttorney',
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
           digestVersion: 'poa-v2',
           legacyPayload: input.id && input.humanReviewStatus === undefined
             ? { ...input, humanReviewStatus: 'UNREVIEWED' }
@@ -877,7 +898,7 @@ export async function savePowerOfAttorney(
           SELECT "id", "archivedAt"
           FROM "party"
           WHERE "id" = ${input.partyId}
-          FOR UPDATE
+          FOR NO KEY UPDATE
         `;
 
         if (!party || party.archivedAt !== null) {
@@ -1055,7 +1076,7 @@ export async function savePowerOfAttorney(
           actorId: actor.id,
           commandType: 'savePowerOfAttorney',
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
           digestVersion: 'poa-v2',
           legacyPayload: input.id && input.humanReviewStatus === undefined
             ? { ...input, humanReviewStatus: 'UNREVIEWED' }

@@ -225,7 +225,7 @@ export function AgendaView({
 
             {h.hearingTime ? (
               <span className="text-xs font-bold px-2.5 py-1 rounded bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2]">
-                {h.timeLabel}
+                <bdi dir="ltr">{h.timeLabel}</bdi>
               </span>
             ) : (
               <span

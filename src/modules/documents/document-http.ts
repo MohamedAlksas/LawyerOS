@@ -30,6 +30,13 @@ export function verifyDocumentReadOrigin(request: Request): NextResponse | null 
       { status: 403, headers: DOCUMENT_NO_STORE_HEADERS }
     );
   }
+  const origin = request.headers.get('origin');
+  if (origin !== null && !getTrustedOrigins().has(origin)) {
+    return NextResponse.json(
+      { success: false, code: 'FORBIDDEN', error: 'مصدر الطلب غير موثوق.' },
+      { status: 403, headers: DOCUMENT_NO_STORE_HEADERS }
+    );
+  }
   return null;
 }
 

@@ -15,7 +15,7 @@ export function MobileBottomNav({ navRef, isDrawerOpen, onOpenDrawer }: MobileBo
   const pathname = usePathname();
 
   const isHomeActive = pathname === '/';
-  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search/');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isSecurityActive = pathname === '/settings/security';

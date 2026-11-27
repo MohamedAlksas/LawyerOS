@@ -48,7 +48,7 @@ export default async function NewPartyPage() {
       </div>
 
       {/* Main Party Form */}
-      <PartyForm ownerId={actor.id} />
+      <PartyForm key={actor.id} ownerId={actor.id} />
     </div>
   );
 }

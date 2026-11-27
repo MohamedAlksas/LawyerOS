@@ -513,7 +513,7 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     // Assert current application provider is configured for HTTP (supports both port 3000 and CI port 3100)
     const currentHttpOrigin = getAuth().options.baseURL;
-    expect(currentHttpOrigin).toBe(env.BETTER_AUTH_URL || 'http://127.0.0.1:3000');
+    expect(currentHttpOrigin).toBe(env.BETTER_AUTH_URL);
 
     // 1. Obtain genuine historical trust cookie through prior 30-day provider configuration
     const priorAuthHttp = betterAuth({
@@ -800,7 +800,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
         requireActor({ headers: signInReqSecure.headers })
       ).rejects.toThrowError(AuthenticationError);
     } finally {
-      process.env.BETTER_AUTH_URL = prevAuthUrl || currentHttpOrigin;
+      if (prevAuthUrl === undefined) {
+        delete process.env.BETTER_AUTH_URL;
+      } else {
+        process.env.BETTER_AUTH_URL = prevAuthUrl;
+      }
       getEnv(true);
       global.__lawoffice_auth = undefined;
       await prisma.verification.deleteMany({
@@ -1718,11 +1722,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
 
     // Configure provider for HTTPS
     const prevAuthUrl = process.env.BETTER_AUTH_URL;
-    process.env.BETTER_AUTH_URL = 'https://office.lawoffice.internal:3000';
-    getEnv(true);
-    global.__lawoffice_auth = undefined;
-
     try {
+      process.env.BETTER_AUTH_URL = 'https://office.lawoffice.internal:3000';
+      getEnv(true);
+      global.__lawoffice_auth = undefined;
+
       const env = getEnv();
       const req = new NextRequest('https://office.lawoffice.internal:3000/api/auth/get-session', {
         headers: {
@@ -1738,7 +1742,11 @@ describe('Real PostgreSQL Auth & Session Integration (T03)', () => {
       const inDb = await prisma.session.findUnique({ where: { token: idleToken } });
       expect(inDb).toBeNull();
     } finally {
-      process.env.BETTER_AUTH_URL = prevAuthUrl || 'http://127.0.0.1:3000';
+      if (prevAuthUrl === undefined) {
+        delete process.env.BETTER_AUTH_URL;
+      } else {
+        process.env.BETTER_AUTH_URL = prevAuthUrl;
+      }
       getEnv(true);
       global.__lawoffice_auth = undefined;
     }

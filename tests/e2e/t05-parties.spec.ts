@@ -3,6 +3,10 @@ import { getPrismaClient } from '@/lib/auth';
 import { seedT04Owner, deleteT04Owner, signInWithTotp, T04Owner } from '../helpers/t04-auth';
 import { cleanupPartyFixtures, setupTestEncryptionKeys } from '../helpers/party-test-helper';
 
+function formatOffsetYmd(daysFromNow: number, base: Date = new Date()): string {
+  return new Date(base.getTime() + daysFromNow * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
   let owner: T04Owner;
   const prisma = getPrismaClient();
@@ -146,7 +150,7 @@ test.describe('T05 Parties & Client Profiles Browser Journeys', () => {
     const noteSummaryText = 'تم التواصل مع الموكل لمناقشة طلبات صحيفة الدعوى وموعد جلسة الخبراء';
     await page.getByTestId('note-summary-input').fill(noteSummaryText);
     await page.getByTestId('note-follow-up-checkbox').check();
-    await page.getByTestId('note-follow-up-date-input').fill('2026-11-30');
+    await page.getByTestId('note-follow-up-date-input').fill(formatOffsetYmd(5));
     let firstNote: unknown;
     let retriedNote: unknown;
     await page.route(`**/parties/${partyId}`, async (route) => {

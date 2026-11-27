@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { hashPassword } from 'better-auth/crypto';
@@ -17,6 +17,11 @@ import { seedT04Owner, deleteT04Owner, signInWithTotp, type T04Owner } from '../
 import { cleanupTrackedFixtures, createValidatedTestPool } from '../helpers/test-db';
 import { setupTestEncryptionKeys, cleanupPartyFixtures } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures, cleanupReferenceFixtures } from '../helpers/matter-test-helper';
+import {
+  buildSyntheticJpeg,
+  buildSyntheticPdf,
+  buildSyntheticPng,
+} from '../helpers/synthetic-files';
 import {
   expectNoElementOverflow,
   expectNoPageOverflow,
@@ -44,100 +49,12 @@ import {
 
 const prisma = getPrismaClient();
 
-function crc32(buf: Buffer): number {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc ^= buf[i];
-    for (let bit = 0; bit < 8; bit++) {
-      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-    }
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function makePngChunk(type: string, data: Buffer): Buffer {
-  const typeBuf = Buffer.from(type, 'ascii');
-  const lenBuf = Buffer.alloc(4);
-  lenBuf.writeUInt32BE(data.length, 0);
-  const crcInput = Buffer.concat([typeBuf, data]);
-  const crcBuf = Buffer.alloc(4);
-  crcBuf.writeUInt32BE(crc32(crcInput), 0);
-  return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
-}
-
-function buildValidSyntheticPng(r: number, g: number, b: number, width = 120, height = 80): Buffer {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // RGB color type
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-
-  const rowStride = 1 + width * 3;
-  const rawPixels = Buffer.alloc(rowStride * height);
-  for (let y = 0; y < height; y++) {
-    const rowStart = y * rowStride;
-    rawPixels[rowStart] = 0x00; // filter None
-    const isBorder = y < 4 || y >= height - 4;
-    for (let x = 0; x < width; x++) {
-      const pxOffset = rowStart + 1 + x * 3;
-      const borderX = x < 4 || x >= width - 4;
-      if (isBorder || borderX) {
-        rawPixels[pxOffset] = 20;
-        rawPixels[pxOffset + 1] = 86;
-        rawPixels[pxOffset + 2] = 107;
-      } else {
-        rawPixels[pxOffset] = r & 0xff;
-        rawPixels[pxOffset + 1] = g & 0xff;
-        rawPixels[pxOffset + 2] = b & 0xff;
-      }
-    }
-  }
-  const idatData = zlib.deflateSync(rawPixels);
-  return Buffer.concat([
-    signature,
-    makePngChunk('IHDR', ihdr),
-    makePngChunk('IDAT', idatData),
-    makePngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-function buildSyntheticPdf(marker: string): Buffer {
-  const content = [
-    '%PDF-1.4',
-    '1 0 obj',
-    `<< /Type /Catalog /Marker (${marker}) >>`,
-    'endobj',
-    'trailer',
-    '<< /Root 1 0 R >>',
-    'startxref',
-    '9',
-    '%%EOF',
-    '',
-  ].join('\n');
-  return Buffer.from(content, 'ascii');
-}
-
-// Valid minimal 1x1 baseline JPEG (SOI + APP0 + DQT + SOF0 + DHT + SOS + entropy + EOI) decodable by Chromium
-const BASE_1X1_JPEG_B64 =
-  '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q==';
-
-function buildValidSyntheticJpeg(marker: string): Buffer {
-  const base = Buffer.from(BASE_1X1_JPEG_B64, 'base64');
-  const commentData = Buffer.from(marker, 'ascii');
-  const comHeader = Buffer.alloc(4);
-  comHeader[0] = 0xff;
-  comHeader[1] = 0xfe; // COM marker
-  comHeader.writeUInt16BE(commentData.byteLength + 2, 2);
-  // Insert COM segment right after SOI (bytes 0..2) so Chromium decodes identically while SHA-256 varies by marker
-  return Buffer.concat([base.subarray(0, 2), comHeader, commentData, base.subarray(2)]);
-}
-
 function resolveE2EStorageRoot(): string {
-  return process.env.DOCUMENTS_STORAGE_ROOT || path.resolve(process.cwd(), 'storage/t11-e2e');
+  return (
+    process.env.T11_E2E_STORAGE_ROOT ||
+    process.env.DOCUMENTS_STORAGE_ROOT ||
+    path.join(os.tmpdir(), 'lawoffice-t11-e2e')
+  );
 }
 
 function sha256Hex(buffer: Buffer): string {
@@ -338,7 +255,7 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
 
       const pdfBuffer = buildSyntheticPdf(`T11-E2E-PDF-${runId}`);
       const pdfHash = sha256Hex(pdfBuffer);
-      const pngBuffer = buildValidSyntheticPng(20, 86, 107);
+      const pngBuffer = buildSyntheticPng({ r: 20, g: 86, b: 107, width: 120, height: 80 });
       const pngHash = sha256Hex(pngBuffer);
 
       await signInWithTotp(page, owner);
@@ -546,7 +463,7 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       expect(sha256Hex(Buffer.from(await pngDownloadRes.body()))).toBe(pngHash);
 
       // 2b) Upload a valid synthetic JPEG in the browser, verify inline preview + matching image/jpeg download SHA-256
-      const jpegBuffer = buildValidSyntheticJpeg(`T11-E2E-JPEG-${runId}`);
+      const jpegBuffer = buildSyntheticJpeg(`T11-E2E-JPEG-${runId}`);
       const jpegHash = sha256Hex(jpegBuffer);
 
       await page.getByTestId('back-to-documents-link').click();
@@ -937,8 +854,6 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
     const width = testInfo.project.use.viewport?.width ?? 1440;
     const tag = `${runId}-w${width}`;
     const secretMatterTitle = `ملف سري خاص بالمستندات ${tag}`;
-    const screenshotDir = path.resolve(process.cwd(), 'test-results/t11');
-    fs.mkdirSync(screenshotDir, { recursive: true });
 
     const localMatterIds: string[] = [];
 
@@ -955,8 +870,8 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       });
       localMatterIds.push(matter.id);
 
-      const photo1 = buildValidSyntheticPng(10, 120, 80);
-      const photo2 = buildValidSyntheticPng(200, 50, 40);
+      const photo1 = buildSyntheticPng({ r: 10, g: 120, b: 80, width: 120, height: 80 });
+      const photo2 = buildSyntheticPng({ r: 200, g: 50, b: 40, width: 120, height: 80 });
       const disguisedJpg = Buffer.from(
         `This is plain text disguised as a JPEG image (${tag})`,
         'utf-8'
@@ -1060,9 +975,14 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
 
+      const docsScreenshotPath = testInfo.outputPath(`t11-documents-${width}.png`);
       await page.screenshot({
-        path: path.join(screenshotDir, `t11-documents-${width}.png`),
+        path: docsScreenshotPath,
         fullPage: true,
+      });
+      await testInfo.attach(`t11-documents-${width}`, {
+        path: docsScreenshotPath,
+        contentType: 'image/png',
       });
 
       // Verify keyboard focus indicator on filter search input
@@ -1109,9 +1029,14 @@ test.describe('T11 E2E: Private Document Upload, ADR 0003 Status & Authorized Pr
       await expectNoPageOverflow(page);
       await expectNoElementOverflow(page.getByTestId('main-content'));
 
+      const detailScreenshotPath = testInfo.outputPath(`t11-document-detail-${width}.png`);
       await page.screenshot({
-        path: path.join(screenshotDir, `t11-document-detail-${width}.png`),
+        path: detailScreenshotPath,
         fullPage: true,
+      });
+      await testInfo.attach(`t11-document-detail-${width}`, {
+        path: detailScreenshotPath,
+        contentType: 'image/png',
       });
 
       // Reapply 200% text scaling on /documents/[id] and verify zero overflow

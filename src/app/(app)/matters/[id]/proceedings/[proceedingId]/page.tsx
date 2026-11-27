@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -27,8 +28,13 @@ interface ProceedingDetailPageProps {
 
 export const metadata = { title: 'القيد القضائي — LawOffice OS' };
 
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
 export default async function ProceedingDetailPage({ params }: ProceedingDetailPageProps) {
   const { id, proceedingId } = await params;
+  if (!UUID_REGEX.test(id) || !UUID_REGEX.test(proceedingId)) {
+    notFound();
+  }
   let actor;
   try {
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
@@ -252,7 +258,13 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
           <div className="space-y-1">
             <span className="text-[#4D606A] block font-semibold">قيمة المطالبة:</span>
             <span className="font-bold text-[#172A35]">
-              {proceeding.claimAmount ? `${proceeding.claimAmount} ج.م` : 'غير محدد'}
+              {proceeding.claimAmount ? (
+                <>
+                  <bdi dir="ltr">{proceeding.claimAmount}</bdi> ج.م
+                </>
+              ) : (
+                'غير محدد'
+              )}
             </span>
           </div>
 
@@ -351,17 +363,20 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
         />
       </div>
 
-      {/* Honest Future Modules Placeholder */}
-      <div className="bg-white rounded-[6px] border border-dashed border-[#D5DFE3] p-5 shadow-xs space-y-2 opacity-75">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-bold text-[#172A35]">المذكرات والمستندات القضائية</h3>
+      {/* Active Matter Documents Link */}
+      <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-5 shadow-xs space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-[#172A35]">مستندات القضية والقيد</h3>
+          <Link
+            href={`/documents?matterId=${id}`}
+            className="text-xs font-semibold text-[#14566B] hover:underline"
+          >
+            عرض مستندات الملف في الأرشيف &larr;
+          </Link>
         </div>
         <p className="text-xs text-[#4D606A] leading-relaxed">
-          إيداع حافظة المستندات ومذكرات الدفاع والدفوع القانونية سيكون متاحاً في مرحلة تالية للنظام.
+          يمكنك استعراض ورفع المستندات والمذكرات المرتبطة بهذا الملف عبر أرشيف المستندات.
         </p>
-        <span className="inline-block text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-          قريباً في المرحلة القادمة
-        </span>
       </div>
     </div>
   );

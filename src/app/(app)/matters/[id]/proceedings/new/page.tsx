@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
@@ -18,8 +18,13 @@ interface NewProceedingPageProps {
 
 export const metadata = { title: 'إضافة قيد قضائي جديد — LawOffice OS' };
 
+const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
+
 export default async function NewProceedingPage({ params }: NewProceedingPageProps) {
   const { id } = await params;
+  if (!UUID_REGEX.test(id)) {
+    notFound();
+  }
   let actor;
   try {
     actor = await requireActor({ requiredPermission: 'WRITE_CLIENT_DATA' });

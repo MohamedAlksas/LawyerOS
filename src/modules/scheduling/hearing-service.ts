@@ -649,7 +649,18 @@ export async function recordHearingResult(
         },
       });
 
-      nextHearingDTO = mapHearingToDTO(nextHearing, false, canReadDocuments);
+      const nextSameDay = await tx.hearing.findFirst({
+        where: {
+          id: { not: nextHearing.id },
+          proceedingId: hearing.proceedingId,
+          hearingDate: nextDateUtc,
+          status: 'SCHEDULED',
+        },
+        select: { id: true },
+      });
+      const nextDuplicateWarning = Boolean(nextSameDay);
+
+      nextHearingDTO = mapHearingToDTO(nextHearing, nextDuplicateWarning, canReadDocuments);
     }
 
     // 6. Create selected follow-up tasks
@@ -765,11 +776,18 @@ export async function correctHearingResult(
 
   const nextHearingTime = validateAndNormalizeHearingTime(input.nextHearingTime);
   const intent = {
-    hearingId: input.hearingId, expectedVersion: input.expectedVersion, currentResultId: input.currentResultId,
-    reason, decision, summary: input.summary === '' ? null : input.summary,
-    attendance: input.attendance === '' ? null : input.attendance, notes: input.notes === '' ? null : input.notes,
-    ...(input.decisionDocumentId !== undefined ? { decisionDocumentId: input.decisionDocumentId } : {}),
-    nextDateDisposition: input.nextDateDisposition, nextHearingDate: input.nextHearingDate ?? null, nextHearingTime,
+    hearingId: input.hearingId,
+    expectedVersion: input.expectedVersion,
+    currentResultId: input.currentResultId,
+    reason,
+    decision,
+    summary: input.summary ?? null,
+    attendance: input.attendance ?? null,
+    notes: input.notes ?? null,
+    decisionDocumentId: input.decisionDocumentId ?? null,
+    nextDateDisposition: input.nextDateDisposition ?? null,
+    nextHearingDate: input.nextHearingDate ?? null,
+    nextHearingTime: nextHearingTime ?? null,
   };
   const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
   if (input.decisionDocumentId) {
@@ -1226,6 +1244,7 @@ export async function getHearing(
       },
       results: {
         orderBy: { revision: 'desc' },
+        take: 1,
         ...(canReadDocuments ? { include: { decisionDocument: DECISION_DOCUMENT_INCLUDE } } : {}),
       },
     },

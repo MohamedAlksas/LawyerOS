@@ -169,7 +169,9 @@ export function DocumentUploadForm({
 
   const hasUnsavedItems = pendingQueue.length > 0;
   useLeaveGuard(
-    hasUnsavedItems || (queue.length === 0 && Boolean(title.trim() || description.trim())),
+    hasUnsavedItems ||
+      (queue.length === 0 &&
+        Boolean(title.trim() || description.trim() || originalLocation.trim() || documentDate)),
     isUploading
   );
 
@@ -340,10 +342,12 @@ export function DocumentUploadForm({
       nextFieldErrors.partyId = 'يجب اختيار الطرف / الموكل المرتبط بالمستند.';
     }
 
+    let offendingQueueId: string | null = null;
     for (const item of pending) {
       if (!resolveEffectiveTitle(item, pending)) {
+        nextFieldErrors[`queue-title-${item.queueId}`] = 'عنوان هذا المستند مطلوب.';
         nextFieldErrors.title = 'عنوان المستند مطلوب.';
-        break;
+        if (!offendingQueueId) offendingQueueId = item.queueId;
       }
     }
 
@@ -352,6 +356,9 @@ export function DocumentUploadForm({
       setFormError('يرجى استكمال الحقول المطلوبة قبل بدء الرفع.');
       if (nextFieldErrors.matterId) matterSelectRef.current?.focus();
       else if (nextFieldErrors.partyId) partySelectRef.current?.focus();
+      else if (offendingQueueId && pending.length > 1) {
+        document.getElementById(`queue-title-${offendingQueueId}`)?.focus();
+      }
       else if (nextFieldErrors.title) titleInputRef.current?.focus();
       else if (nextFieldErrors.files) fileInputRef.current?.focus();
       return false;
@@ -942,6 +949,12 @@ export function DocumentUploadForm({
                           id={`queue-title-${item.queueId}`}
                           type="text"
                           maxLength={MAX_DOCUMENT_TITLE_LENGTH}
+                          aria-invalid={Boolean(fieldErrors[`queue-title-${item.queueId}`])}
+                          aria-describedby={
+                            fieldErrors[`queue-title-${item.queueId}`]
+                              ? `queue-title-error-${item.queueId}`
+                              : undefined
+                          }
                           value={
                             item.itemTitleEdited
                               ? item.itemTitle
@@ -952,14 +965,24 @@ export function DocumentUploadForm({
                             item.status === 'INCOMPLETE' ||
                             (Boolean(item.attemptId) && item.status !== 'REJECTED')
                           }
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            clearFieldError(`queue-title-${item.queueId}`);
                             updateQueueItem(item.queueId, {
                               itemTitle: e.target.value,
                               itemTitleEdited: true,
-                            })
-                          }
+                            });
+                          }}
                           className="w-full min-h-[44px] px-3 py-2 text-sm bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
                         />
+                        {fieldErrors[`queue-title-${item.queueId}`] && (
+                          <p
+                            id={`queue-title-error-${item.queueId}`}
+                            role="alert"
+                            className="text-xs text-[#A4262C] mt-1 font-medium"
+                          >
+                            {fieldErrors[`queue-title-${item.queueId}`]}
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -1387,7 +1410,7 @@ export function DocumentUploadForm({
             value={description}
             disabled={metadataDisabled}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
+            className="w-full max-w-full min-w-0 px-3 py-2 text-base bg-white text-[#172A35] border border-[#6E828C] rounded-[6px] focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-[#14566B] disabled:bg-[#F4F6F7] disabled:opacity-70"
           />
         </div>
 

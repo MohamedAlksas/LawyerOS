@@ -62,6 +62,7 @@ export default async function PartiesPage({ searchParams }: PartiesPageProps) {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <PartyListClient
+        key={`${actor.id}:${validKind ?? 'ALL'}`}
         initialResult={initialResult}
         initialError={initialError}
         initialKind={validKind}

@@ -142,7 +142,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
   const isAgendaActive = pathname === '/agenda' || pathname.startsWith('/agenda/');
   const isTasksActive = pathname === '/tasks' || pathname.startsWith('/tasks/');
   const isDeadlinesActive = pathname === '/deadlines' || pathname.startsWith('/deadlines/');
-  const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
+  const isSearchActive = pathname === '/search' || pathname.startsWith('/search/');
   const isMattersActive = pathname === '/matters' || pathname.startsWith('/matters/');
   const isPartiesActive = pathname === '/parties' || pathname.startsWith('/parties/');
   const isDocumentsActive = pathname === '/documents' || pathname.startsWith('/documents/');
@@ -157,7 +157,7 @@ export function TabletDrawer({ isOpen, onClose, triggerRef }: TabletDrawerProps)
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 lg:hidden flex justify-end">
+    <div className="fixed inset-0 z-50 lg:hidden flex justify-start">
       <div
         data-testid="drawer-backdrop"
         aria-hidden="true"

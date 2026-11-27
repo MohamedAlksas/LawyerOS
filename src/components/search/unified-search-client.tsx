@@ -71,7 +71,7 @@ function renderSearchSubtitle(item: UnifiedSearchResultItem): React.ReactNode {
   if (sepIdx > 0) {
     const first = text.slice(0, sepIdx);
     const rest = text.slice(sepIdx + 3);
-    if (/^[A-Za-z0-9/_-]+$/.test(first)) {
+    if (/^[A-Za-z0-9/_.\-+]+$/.test(first)) {
       return (
         <>
           <bdi dir="ltr" className="font-mono">
@@ -300,7 +300,7 @@ export function UnifiedSearchClient({
             >
               <span>الكل</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   searchType === 'ALL' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
                 }`}
               >
@@ -321,7 +321,7 @@ export function UnifiedSearchClient({
             >
               <span>ملفات القضايا</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   searchType === 'MATTER' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
                 }`}
               >
@@ -342,7 +342,7 @@ export function UnifiedSearchClient({
             >
               <span>القيود القضائية</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   searchType === 'PROCEEDING' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
                 }`}
               >
@@ -363,7 +363,7 @@ export function UnifiedSearchClient({
             >
               <span>دليل الأطراف</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   searchType === 'PARTY' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
                 }`}
               >
@@ -384,7 +384,7 @@ export function UnifiedSearchClient({
             >
               <span>المستندات</span>
               <span
-                className={`text-[11px] px-1.5 py-0.2 rounded-full font-bold ${
+                className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
                   searchType === 'DOCUMENT' ? 'bg-white/20 text-white' : 'bg-slate-200 text-[#172A35]'
                 }`}
               >
@@ -438,7 +438,6 @@ export function UnifiedSearchClient({
         hasActiveFilters ? (
           <EmptyStateContainer
             testId="empty-search-container"
-            icon=""
             title="لم يتم العثور على نتائج"
             description="لا توجد سجلات مطابقة لكلمات البحث أو الفلاتر المحددة."
             action={
@@ -454,7 +453,6 @@ export function UnifiedSearchClient({
         ) : (
           <EmptyStateContainer
             testId="empty-state-container"
-            icon=""
             title="ابدأ بالبحث في النظام"
             description="اكتب كود الملف (مثال: 2026/0001)، أو اسم الموكل أو الخصم، أو رقم الدعوى بالمحكمة، أو عنوان المستند للوصول المباشر."
           />

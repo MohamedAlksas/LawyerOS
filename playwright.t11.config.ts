@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 /**
@@ -21,7 +22,10 @@ import { validateTestEnvironment } from './tests/helpers/test-db';
 const PORT = 3211;
 const HOST = '127.0.0.1';
 const BASE_URL = `http://${HOST}:${PORT}`;
-const T11_E2E_STORAGE_ROOT = path.resolve(process.cwd(), 'storage/t11-e2e');
+const T11_E2E_STORAGE_ROOT = (process.env.T11_E2E_STORAGE_ROOT ??= path.join(
+  os.tmpdir(),
+  `lawoffice-t11-e2e-${process.pid}-${Date.now()}`
+));
 
 const env = validateTestEnvironment();
 Object.assign(process.env, {
@@ -56,7 +60,6 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
       },
-      grep: /@(?:t11|documents|responsive|a11y)\b/,
     },
     {
       name: 'tablet-768',

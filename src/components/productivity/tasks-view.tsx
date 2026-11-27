@@ -954,6 +954,7 @@ export function TasksView({
                       id="task-due-date-input"
                       data-testid="task-due-date-input"
                       type="date"
+                      dir="ltr"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
                       disabled={isSubmittingCreate || isFrozenCreateRetry}
@@ -970,6 +971,7 @@ export function TasksView({
                       id="task-due-time-input"
                       data-testid="task-due-time-input"
                       type="time"
+                      dir="ltr"
                       value={dueTime}
                       onChange={(e) => setDueTime(e.target.value)}
                       disabled={isSubmittingCreate || isFrozenCreateRetry}

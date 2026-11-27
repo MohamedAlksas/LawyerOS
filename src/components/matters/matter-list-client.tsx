@@ -251,7 +251,8 @@ export function MatterListClient({
     };
     // Back navigation can reuse an earlier render's server props.
     const saved = readSearchHistory(sessionId);
-    const firstRestore = saved ? setTimeout(onHistory, 0) : undefined;
+    const hasSearchFilters = Boolean(saved?.query?.trim() || saved?.client);
+    const firstRestore = hasSearchFilters ? setTimeout(onHistory, 0) : undefined;
     if (!saved) syncHistory('', initial);
     window.addEventListener('popstate', onHistory);
     return () => {

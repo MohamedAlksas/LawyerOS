@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isUncertainHearingOutcome } from '@/components/hearings/hearing-recovery';
 import type { ActionResult, CorrectHearingResultInput, HearingResultDTO, LinkableDocumentSummary, RecordHearingResultInput, RecordHearingResultResult } from '@/modules/scheduling/hearing-types';
 import { DOCUMENT_TYPE_LABELS_AR, type DocumentDTO } from '@/modules/documents/document-types';
-import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import {
   HearingStatus,
   NextDateDisposition,
@@ -77,7 +77,7 @@ export function HearingResultClient({
   matterId,
   matterFileCode,
   proceedingId,
-  canReadDocuments = true,
+  canReadDocuments = false,
   availableDocuments = [],
   documentsLoadError,
   latestResult: initialLatestResult,
@@ -95,6 +95,13 @@ export function HearingResultClient({
   const [docsList, setDocsList] = useState<LinkableDocumentSummary[]>(availableDocuments);
   const [docsError, setDocsError] = useState<string | null>(documentsLoadError ?? null);
   const [isRetryingDocs, setIsRetryingDocs] = useState(false);
+  const retryDocsAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      retryDocsAbortRef.current?.abort();
+    };
+  }, []);
 
   // Form state
   const [decision, setDecision] = useState(resultDraft.restored?.decision ?? '');
@@ -306,11 +313,17 @@ export function HearingResultClient({
     if (!canReadDocuments || isRetryingDocs) return;
     setIsRetryingDocs(true);
     setDocsError(null);
+    retryDocsAbortRef.current?.abort();
+    const controller = new AbortController();
+    retryDocsAbortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
     try {
       const res = await fetch(`/api/documents?matterId=${encodeURIComponent(matterId)}&limit=100`, {
         cache: 'no-store',
-        signal: AbortSignal.timeout(15_000),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (res.status === 401 && typeof window !== 'undefined') {
         window.dispatchEvent(new Event('lawoffice:recheck-session'));
       }
@@ -318,6 +331,7 @@ export function HearingResultClient({
         | { success: true; data: { documents: DocumentDTO[] } }
         | { success: false; error?: string }
         | null;
+      if (controller.signal.aborted) return;
       if (!res.ok || !body || !body.success) {
         setDocsError(
           (body && !body.success && body.error) || 'تعذر تحميل مستندات الملف الجاهزة من الخادم.'
@@ -339,6 +353,7 @@ export function HearingResultClient({
             title: d.title,
             documentType: d.documentType,
             currentVersionId: d.currentVersionId,
+            scanStatus: d.currentVersion!.scanStatus,
             scanStatusLabel: d.currentVersion!.scanStatusLabel,
             proceedingId: d.proceedingId,
             hearingId: d.hearingId,
@@ -346,9 +361,13 @@ export function HearingResultClient({
       );
       setDocsError(null);
     } catch {
+      if (controller.signal.aborted) return;
       setDocsError('تعذر تحميل مستندات الملف بسبب انقطاع الاتصال.');
     } finally {
-      setIsRetryingDocs(false);
+      clearTimeout(timeoutId);
+      if (!controller.signal.aborted) {
+        setIsRetryingDocs(false);
+      }
     }
   };
 
@@ -512,7 +531,8 @@ export function HearingResultClient({
       {/* Success Banner */}
       {savedSuccess && (
         <div
-          role="alert"
+          role="status"
+          aria-live="polite"
           data-testid="save-success-banner"
           className="p-4 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 space-y-2"
         >
@@ -538,7 +558,7 @@ export function HearingResultClient({
                 )}
                 {latestResult.decisionDocument?.scanStatusLabel && (
                   <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestResult.decisionDocument.scanStatusLabel)}`}
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestResult.decisionDocument)}`}
                   >
                     {latestResult.decisionDocument.scanStatusLabel}
                   </span>
@@ -571,7 +591,8 @@ export function HearingResultClient({
       {/* Correction Success Banner */}
       {correctionSuccess && (
         <div
-          role="alert"
+          role="status"
+          aria-live="polite"
           className="p-3 bg-emerald-50 border border-emerald-300 rounded-[6px] text-xs text-emerald-900 font-bold"
         >
           تم حفظ التصحيح بنجاح!
@@ -637,7 +658,7 @@ export function HearingResultClient({
                 )}
                 {latestResult.decisionDocument?.scanStatusLabel && (
                   <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestResult.decisionDocument.scanStatusLabel)}`}
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestResult.decisionDocument)}`}
                   >
                     {latestResult.decisionDocument.scanStatusLabel}
                   </span>
@@ -961,6 +982,7 @@ export function HearingResultClient({
                   id="next-hearing-date-input"
                   name="nextHearingDate"
                   type="date"
+                  dir="ltr"
                   required
                   value={nextHearingDate}
                   onChange={(e) => setNextHearingDate(e.target.value)}
@@ -971,7 +993,7 @@ export function HearingResultClient({
                 />
                 <label className="mt-2 block font-bold text-[#172A35]">
                   وقت الجلسة القادمة (اختياري)
-                  <input type="time" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64" />
+                  <input type="time" dir="ltr" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64" />
                 </label>
               </div>
             )}
@@ -1043,6 +1065,7 @@ export function HearingResultClient({
                         <input
                           id={`task-due-${task.id}`}
                           type="date"
+                          dir="ltr"
                           name={`task_due_${idx}`}
                           value={task.dueDate}
                           onChange={(e) => handleUpdateTaskDue(task.id, e.target.value)}

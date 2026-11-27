@@ -278,6 +278,48 @@ describe('Audit fixes unit regressions', () => {
       expect(isIdempotencyUniqueConflict(validCompositeP2002)).toBe(true);
     });
 
+    it('omits undefined properties while preserving null in canonicalizeJson, and throws on invalid Date', () => {
+      expect(canonicalizeJson({ a: undefined, b: 1 })).toBe('{"b":1}');
+      expect(canonicalizeJson({ a: null, b: 1 })).toBe('{"a":null,"b":1}');
+      expect(() => canonicalizeJson(new Date('invalid'))).toThrow(TypeError);
+    });
+
+    it('redacts storage keys, normalizes valid/invalid Dates, and handles circular references in sanitizeAuditPayload', () => {
+      const sanitizedKeys = sanitizeAuditPayload({
+        objectKey: 'doc/1/secret.pdf',
+        quarantineKey: 'quarantine/secret.pdf',
+        storageKey: 'storage/secret.pdf',
+        nested: { object_key: 'nested-key' },
+      }) as Record<string, unknown>;
+      expect(sanitizedKeys.objectKey).toBe('[REDACTED_SECRET]');
+      expect(sanitizedKeys.quarantineKey).toBe('[REDACTED_SECRET]');
+      expect(sanitizedKeys.storageKey).toBe('[REDACTED_SECRET]');
+      expect((sanitizedKeys.nested as Record<string, unknown>).object_key).toBe('[REDACTED_SECRET]');
+
+      const validDate = new Date('2026-11-26T12:00:00.000Z');
+      const invalidDate = new Date('invalid');
+      const sanitizedDates = sanitizeAuditPayload({
+        valid: validDate,
+        invalid: invalidDate,
+      }) as Record<string, unknown>;
+      expect(sanitizedDates.valid).toBe('2026-11-26T12:00:00.000Z');
+      expect(sanitizedDates.invalid).toBeNull();
+
+      const circularObj: Record<string, unknown> = { name: 'root' };
+      circularObj.self = circularObj;
+      const sanitizedCircular = sanitizeAuditPayload(circularObj) as Record<string, unknown>;
+      expect(sanitizedCircular.name).toBe('root');
+      expect(sanitizedCircular.self).toEqual({ circular: '[CIRCULAR]' });
+
+      const circularArrObj: Record<string, unknown> = { items: [1, 2] };
+      (circularArrObj.items as unknown[]).push(circularArrObj);
+      const sanitizedArr = sanitizeAuditPayload(circularArrObj) as Record<string, unknown>;
+      const items = sanitizedArr.items as unknown[];
+      expect(items[0]).toBe(1);
+      expect(items[1]).toBe(2);
+      expect(items[2]).toEqual({ circular: '[CIRCULAR]' });
+    });
+
     it('strips IPv6 brackets in host while preserving them in canonicalUrl in parseTargetUrl', () => {
       const parsed = parseTargetUrl(
         'postgresql://lawoffice_user:secret@[::1]:5432/lawoffice_test?sslmode=disable'

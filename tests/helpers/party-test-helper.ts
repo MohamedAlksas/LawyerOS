@@ -10,6 +10,11 @@ export function setupTestEncryptionKeys(): void {
   process.env.PARTY_IDENTITY_KEY_ID = SYNTHETIC_KEY_ID;
 }
 
+export function restoreTestEncryptionKeys(): void {
+  delete process.env.PARTY_IDENTITY_ENCRYPTION_KEY;
+  delete process.env.PARTY_IDENTITY_KEY_ID;
+}
+
 export function createSyntheticActor(overrides: Partial<Actor> = {}): Actor {
   return {
     id: overrides.id ?? 'synthetic-owner-uuid-001',
@@ -65,7 +70,32 @@ export async function cleanupPartyFixtures(
     await prisma.uploadAttempt.deleteMany({ where: { id: { in: uploadAttemptIds } } });
   }
 
-  // Deleting party cascades to identities, notes, poas, and documents via onDelete: Cascade
+  const documentIds = documents.map((r) => r.id);
+  let versionIds: string[] = [];
+  if (documentIds.length > 0) {
+    const versions = await prisma.documentVersion.findMany({
+      where: { documentId: { in: documentIds } },
+      select: { id: true },
+    });
+    versionIds = versions.map((v) => v.id);
+    if (versionIds.length > 0) {
+      await prisma.backupFilePin.deleteMany({
+        where: { documentVersionId: { in: versionIds } },
+      });
+    }
+    await prisma.document.updateMany({
+      where: { id: { in: documentIds } },
+      data: { currentVersionId: null },
+    });
+    await prisma.documentVersion.deleteMany({
+      where: { documentId: { in: documentIds } },
+    });
+    await prisma.document.deleteMany({
+      where: { id: { in: documentIds } },
+    });
+  }
+
+  // Deleting party cascades to identities, notes, and poas via onDelete: Cascade
   await prisma.party.deleteMany({
     where: { id: { in: validIds } },
   });
@@ -77,7 +107,8 @@ export async function cleanupPartyFixtures(
       ...notes.map((r) => r.id),
       ...poaIds,
       ...authorizations.map((r) => r.id),
-      ...documents.map((r) => r.id),
+      ...documentIds,
+      ...versionIds,
       ...uploadAttemptIds,
     ])
   );
@@ -85,19 +116,30 @@ export async function cleanupPartyFixtures(
   // Clean up associated audit and idempotency records for test cleanliness
   await prisma.auditEvent.deleteMany({
     where: {
-      entityType: {
-        in: [
-          'Party',
-          'PARTY',
-          'PartyIdentity',
-          'CommunicationNote',
-          'PowerOfAttorney',
-          'MatterAuthorization',
-          'Document',
-          'UploadAttempt',
-        ],
-      },
-      entityId: { in: allEntityIds },
+      OR: [
+        {
+          entityType: {
+            in: [
+              'Party',
+              'PARTY',
+              'PartyIdentity',
+              'CommunicationNote',
+              'PowerOfAttorney',
+              'MatterAuthorization',
+              'Document',
+              'DOCUMENT',
+              'DocumentVersion',
+              'DocumentStorage',
+              'UploadAttempt',
+              'BackupFilePin',
+            ],
+          },
+          entityId: { in: allEntityIds },
+        },
+        {
+          entityType: 'DocumentStorage',
+        },
+      ],
     },
   });
 

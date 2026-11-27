@@ -576,7 +576,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
             )}
           </div>
         </div>,
-        document.body
+        document.getElementById('app-shell-modal-root') ?? document.body
       )}
     </>
   );

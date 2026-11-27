@@ -64,7 +64,7 @@ export function MatterDetailClient({
   initialTasks = [],
   initialDeadlines = [],
   initialDocuments,
-  canReadDocuments = true,
+  canReadDocuments = false,
   documentsError,
   tasksError,
   deadlinesError,
@@ -1369,7 +1369,7 @@ export function MatterDetailClient({
             <Link href="/matters" className="hover:text-[#14566B] hover:underline">
               ملفات القضايا
             </Link>
-            <span aria-hidden="true">&gt;</span>
+            <span aria-hidden="true">/</span>
             <bdi dir="ltr" className="font-mono text-[#14566B] font-bold">
               {matter.fileCode}
             </bdi>
@@ -1687,9 +1687,11 @@ export function MatterDetailClient({
 
       {/* 4. Navigation Tabs */}
       <div className="border-b border-[#D5DFE3]">
-        <nav className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية">
+        <nav className="flex flex-wrap gap-1 sm:gap-2" aria-label="أقسام ملف القضية" role="tablist">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'parties'}
             data-testid="tab-parties"
             onClick={() => setActiveTab('parties')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -1703,6 +1705,8 @@ export function MatterDetailClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'proceedings'}
             data-testid="tab-proceedings"
             onClick={() => setActiveTab('proceedings')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -1716,6 +1720,8 @@ export function MatterDetailClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'authorizations'}
             data-testid="tab-authorizations"
             onClick={() => setActiveTab('authorizations')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -1729,6 +1735,8 @@ export function MatterDetailClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'tasksDeadlines'}
             data-testid="tab-tasks-deadlines"
             onClick={() => setActiveTab('tasksDeadlines')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -1742,6 +1750,8 @@ export function MatterDetailClient({
 
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'summary'}
             data-testid="tab-summary"
             onClick={() => setActiveTab('summary')}
             className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
@@ -1757,7 +1767,7 @@ export function MatterDetailClient({
 
       {/* Tab 1: Parties Section */}
       {activeTab === 'parties' && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-[#172A35]">
               أطراف الملف (الموكلون والخصوم)
@@ -1976,7 +1986,8 @@ export function MatterDetailClient({
                             onClick={() => handleTogglePrimary(c)}
                             disabled={isAssocSubmitting || !!pendingAssocOp}
                             title={c.isPrimaryContact ? 'إلغاء التعيين كأساسي' : 'تعيين كأساسي'}
-                            className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded ${
+                            aria-label={c.isPrimaryContact ? 'إلغاء التعيين كجهة اتصال أساسية' : 'تعيين كجهة اتصال أساسية'}
+                            className={`text-xs text-[#4D606A] hover:text-amber-700 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                               isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                           >
@@ -1987,10 +1998,11 @@ export function MatterDetailClient({
                             data-testid={`unlink-party-${c.id}`}
                             onClick={() => handleUnlinkParty(c)}
                             disabled={isAssocSubmitting || !!pendingAssocOp}
-                            className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                            className={`text-xs text-red-600 hover:text-red-800 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                               isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                             }`}
                             title="إزالة الطرف من الملف"
+                            aria-label="إزالة الطرف من الملف"
                           >
                             ✕
                           </button>
@@ -2040,10 +2052,11 @@ export function MatterDetailClient({
                           data-testid={`unlink-opponent-${op.id}`}
                           onClick={() => handleUnlinkParty(op)}
                           disabled={isAssocSubmitting || !!pendingAssocOp}
-                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded ${
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 rounded min-h-[44px] min-w-[44px] inline-flex items-center justify-center ${
                             isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
                           title="إزالة الخصم"
+                          aria-label="إزالة الخصم من الملف"
                         >
                           ✕
                         </button>
@@ -2085,8 +2098,8 @@ export function MatterDetailClient({
                           onClick={() => handleUnlinkParty(oth)}
                           disabled={isAssocSubmitting || !!pendingAssocOp}
                           title="إزالة الطرف"
-                          aria-label="إزالة الطرف"
-                          className={`text-xs text-red-600 hover:text-red-800 p-1 ${
+                          aria-label="إزالة الطرف من الملف"
+                          className={`text-xs text-red-600 hover:text-red-800 p-1 min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded ${
                             isAssocSubmitting || !!pendingAssocOp ? 'opacity-50 cursor-not-allowed' : ''
                           }`}
                         >
@@ -2104,7 +2117,7 @@ export function MatterDetailClient({
 
       {/* Tab 2: Court Proceedings */}
       {activeTab === 'proceedings' && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-[#172A35]">
               القيود والدعاوى القضائية المسجلة
@@ -2313,7 +2326,7 @@ export function MatterDetailClient({
 
       {/* Tab 3: Authorizations / POAs */}
       {activeTab === 'authorizations' && (
-        <div className="space-y-6">
+        <div className="space-y-6" role="tabpanel">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <h2 className="text-base font-bold text-[#172A35]">
@@ -2508,7 +2521,7 @@ export function MatterDetailClient({
 
       {/* Tab 4: Tasks & Legal Deadlines */}
       {activeTab === 'tasksDeadlines' && (
-        <div className="space-y-8" data-testid="matter-tasks-deadlines-panel">
+        <div className="space-y-8" role="tabpanel" data-testid="matter-tasks-deadlines-panel">
           <DeadlinesView
             actorId={ownerId}
             initialDeadlines={initialDeadlines}
@@ -2552,7 +2565,7 @@ export function MatterDetailClient({
 
       {/* Tab 5: Summary & Notes */}
       {activeTab === 'summary' && (
-        <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs">
+        <div className="bg-white rounded-[6px] border border-[#D5DFE3] p-6 space-y-6 shadow-xs" role="tabpanel">
           <div>
             <h3 className="text-sm font-bold text-[#172A35] mb-2 pb-1 border-b border-[#E8EEF1]">
               ملخص وقائع وموضوع الملف
@@ -2597,10 +2610,10 @@ export function MatterDetailClient({
       {/* Future Modules Notice */}
       <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
         <span className="font-bold text-[#172A35] block">
-          المستندات والحسابات
+          الحسابات المالية
         </span>
         <p>
-          وحدات حفظ المستندات الرقمية وحسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها.
+          حسابات الأتعاب والمصروفات سيتم ربطها تلقائياً بهذا الملف عند إطلاقها في المراحل اللاحقة.
         </p>
       </div>
 
@@ -2624,7 +2637,7 @@ export function MatterDetailClient({
               data-testid="archive-matter-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="archive-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2747,7 +2760,7 @@ export function MatterDetailClient({
               data-testid="reopen-matter-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="reopen-matter-title" className="text-base font-bold text-[#172A35]">
@@ -2871,7 +2884,7 @@ export function MatterDetailClient({
               data-testid="proceeding-lifecycle-modal"
               dir="rtl"
               lang="ar-EG"
-              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4"
+              className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-md w-full p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto"
             >
             <div className="flex items-center justify-between pb-2 border-b border-[#E8EEF1]">
               <h3 id="proceeding-lifecycle-title" className="text-base font-bold text-[#172A35]">

@@ -47,6 +47,7 @@ export interface LinkableDocumentSummary {
   proceedingId: string | null;
   hearingId: string | null;
   currentVersionId: string | null;
+  scanStatus: DocumentScanStatus;
   scanStatusLabel: string;
 }
 
@@ -98,6 +99,7 @@ export function mapLinkableDocumentSummary(
   doc: LinkableDocumentRow | null | undefined
 ): LinkableDocumentSummary | null {
   if (!doc) return null;
+  const scanStatus = doc.currentVersion?.scanStatus ?? 'NOT_SCANNED_POLICY';
   return {
     id: doc.id,
     title: doc.title,
@@ -105,6 +107,7 @@ export function mapLinkableDocumentSummary(
     proceedingId: doc.proceedingId ?? null,
     hearingId: doc.hearingId ?? null,
     currentVersionId: doc.currentVersionId,
+    scanStatus,
     scanStatusLabel: doc.currentVersion
       ? getScanStatusLabel(doc.currentVersion.scanStatus)
       : 'غير جاهز',

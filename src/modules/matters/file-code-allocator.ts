@@ -7,6 +7,8 @@ import { Prisma } from '@prisma/client';
 export function getCairoYear(date: Date = new Date()): number {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Africa/Cairo',
+    calendar: 'gregory',
+    numberingSystem: 'latn',
     year: 'numeric',
   });
   return parseInt(formatter.format(date), 10);

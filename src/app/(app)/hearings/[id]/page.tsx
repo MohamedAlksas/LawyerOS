@@ -17,7 +17,7 @@ import {
   LINKABLE_DOCUMENT_SELECT,
   type LinkableDocumentRow,
 } from '@/modules/documents/document-types';
-import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import { formatCairoDateOnly } from '@/components/matters/matter-ui-types';
 
 const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
@@ -295,7 +295,7 @@ export default async function HearingDetailPage({ params }: HearingDetailPagePro
                 )}
                 {latestDecisionDoc?.scanStatusLabel && (
                   <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(latestDecisionDoc.scanStatusLabel)}`}
+                    className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(latestDecisionDoc)}`}
                   >
                     {latestDecisionDoc.scanStatusLabel}
                   </span>

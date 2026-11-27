@@ -83,7 +83,32 @@ export async function cleanupMatterFixtures(
   }
   await prisma.reminderDelivery.deleteMany({ where: { matterId: { in: validIds } } });
 
-  // Deleting matter cascades to matter_party, proceeding, proceeding_party, matter_authorization, hearing, task, deadline, document
+  const documentIds = documents.map((r) => r.id);
+  let versionIds: string[] = [];
+  if (documentIds.length > 0) {
+    const versions = await prisma.documentVersion.findMany({
+      where: { documentId: { in: documentIds } },
+      select: { id: true },
+    });
+    versionIds = versions.map((v) => v.id);
+    if (versionIds.length > 0) {
+      await prisma.backupFilePin.deleteMany({
+        where: { documentVersionId: { in: versionIds } },
+      });
+    }
+    await prisma.document.updateMany({
+      where: { id: { in: documentIds } },
+      data: { currentVersionId: null },
+    });
+    await prisma.documentVersion.deleteMany({
+      where: { documentId: { in: documentIds } },
+    });
+    await prisma.document.deleteMany({
+      where: { id: { in: documentIds } },
+    });
+  }
+
+  // Deleting matter cascades to matter_party, proceeding, proceeding_party, matter_authorization, hearing, task, deadline
   await prisma.matter.deleteMany({
     where: { id: { in: validIds } },
   });
@@ -99,31 +124,43 @@ export async function cleanupMatterFixtures(
       ...hearingResults.map((r) => r.id),
       ...taskIdList,
       ...deadlineIdList,
-      ...documents.map((r) => r.id),
+      ...documentIds,
+      ...versionIds,
       ...uploadAttemptIds,
     ])
   );
 
   await prisma.auditEvent.deleteMany({
     where: {
-      entityType: {
-        in: [
-          'Matter',
-          'MATTER',
-          'MatterParty',
-          'Proceeding',
-          'PROCEEDING',
-          'ProceedingParty',
-          'MatterAuthorization',
-          'Hearing',
-          'HearingResult',
-          'Task',
-          'Deadline',
-          'Document',
-          'UploadAttempt',
-        ],
-      },
-      entityId: { in: allEntityIds },
+      OR: [
+        {
+          entityType: {
+            in: [
+              'Matter',
+              'MATTER',
+              'MatterParty',
+              'Proceeding',
+              'PROCEEDING',
+              'ProceedingParty',
+              'MatterAuthorization',
+              'Hearing',
+              'HearingResult',
+              'Task',
+              'Deadline',
+              'Document',
+              'DOCUMENT',
+              'DocumentVersion',
+              'DocumentStorage',
+              'UploadAttempt',
+              'BackupFilePin',
+            ],
+          },
+          entityId: { in: allEntityIds },
+        },
+        {
+          entityType: 'DocumentStorage',
+        },
+      ],
     },
   });
 

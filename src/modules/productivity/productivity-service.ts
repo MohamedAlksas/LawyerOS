@@ -623,9 +623,9 @@ export async function updateTask(
     taskId: input.taskId,
     expectedVersion: input.expectedVersion,
     title: input.title,
-    details: input.details,
-    dueDate: input.dueDate,
-    dueTime: input.dueTime,
+    details: input.details ?? null,
+    dueDate: input.dueDate ?? null,
+    dueTime: input.dueTime ?? null,
     priority: input.priority,
     status: input.status,
   };

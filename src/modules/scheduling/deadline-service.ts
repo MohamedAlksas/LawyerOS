@@ -93,12 +93,12 @@ function parseOrThrow<T>(
 
 function rejectDeferredDocumentLink(
   docId: string | null | undefined,
-  field: 'sourceDocumentId' | 'evidenceDocumentId'
+  field: 'evidenceDocumentId'
 ): void {
   if (docId !== undefined && docId !== null && docId.trim() !== '') {
     throw new SchedulingValidationError(
-      'ربط المستندات بالمواعيد القانونية غير متاح قبل تنفيذ وحدة المستندات (T12).',
-      { [field]: 'ربط المستندات مؤجل حتى تنفيذ T12' }
+      'ربط المستند كدليل إثبات للموعد القانوني غير مدعوم في هذا الإجراء.',
+      { [field]: 'ربط مستند الإثبات غير مدعوم' }
     );
   }
 }
@@ -558,13 +558,13 @@ export async function updateDeadlineDraft(
   const intent = {
     deadlineId: input.deadlineId,
     expectedVersion: input.expectedVersion,
-    proceedingId: input.proceedingId,
+    proceedingId: input.proceedingId ?? null,
     title: input.title,
     dueDate: input.dueDate,
-    dueTime: input.dueTime,
+    dueTime: input.dueTime ?? null,
     source: input.source,
-    basisNotes: input.basisNotes,
-    ...(input.sourceDocumentId !== undefined ? { sourceDocumentId: input.sourceDocumentId } : {}),
+    basisNotes: input.basisNotes ?? null,
+    sourceDocumentId: input.sourceDocumentId ?? null,
   };
 
   return deadlineCommand(

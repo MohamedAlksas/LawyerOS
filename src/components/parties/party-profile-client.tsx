@@ -30,7 +30,7 @@ interface PartyProfileClientProps {
 export function PartyProfileClient({
   ownerId,
   party,
-  canReadDocuments = true,
+  canReadDocuments = false,
   availablePoaDocuments = [],
   poaDocumentsError,
 }: PartyProfileClientProps) {
@@ -475,7 +475,7 @@ export function PartyProfileClient({
                       {MATTER_PARTY_ROLE_LABELS[m.role]}
                     </span>
                     {m.isPrimaryContact && (
-                      <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                      <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
                         جهة الاتصال الرئيسية
                       </span>
                     )}

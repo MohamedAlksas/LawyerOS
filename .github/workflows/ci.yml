@@ -15,6 +15,7 @@ jobs:
   test-and-build:
     name: Lint, Test, and Build
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     services:
       postgres:

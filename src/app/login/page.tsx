@@ -87,7 +87,7 @@ function LoginForm() {
             dir="ltr"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent text-left"
+            className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent text-left min-h-[44px]"
             placeholder="lawyer@example.com"
           />
         </div>
@@ -103,14 +103,14 @@ function LoginForm() {
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"
+            className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
           />
         </div>
 
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-2.5 px-4 bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 text-white font-medium rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
+          className="w-full py-2.5 px-4 bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 text-white font-medium rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
         >
           {isLoading ? 'جارٍ التحقق...' : 'تسجيل الدخول'}
         </button>

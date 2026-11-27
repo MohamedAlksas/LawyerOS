@@ -6,7 +6,7 @@ import path from 'path';
  * T05 browser-verification configuration.
  *
  * Dedicated to Task T05 parties, client profiles, communication notes, and POAs.
- * Runs on isolated application port 3205 against lawoffice_t05_test PostgreSQL database.
+ * Runs on isolated application port 3205 against test PostgreSQL database.
  */
 
 if (!process.env.TEST_DATABASE_URL) {
@@ -52,7 +52,6 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
       },
-      grep: /@(?:parties|a11y|desktop)\b/,
     },
     {
       name: 'tablet-768',

@@ -209,7 +209,7 @@ export function TodayView({ initialOverview, initialError }: TodayViewProps) {
           <>
             <span className="inline-flex items-center gap-1.5 text-sm font-bold text-[#14566B] bg-[#E9F2F5] border border-[#C2D9E2] px-2.5 py-1 rounded-[4px]">
               <IconClock className="w-3.5 h-3.5" />
-              <span>{h.timeLabel}</span>
+              <span><bdi dir="ltr">{h.timeLabel}</bdi></span>
             </span>
             <span className="text-xs text-[#4D606A]">موعد محدد</span>
           </>

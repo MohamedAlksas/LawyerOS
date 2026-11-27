@@ -147,14 +147,6 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
     );
   }
 
-  // Update session updatedAt to slide the inactivity window ONLY after all checks pass
-  if (options.touchSession !== false) {
-    await prisma.session.update({
-      where: { id: session.id },
-      data: { updatedAt: new Date() },
-    }).catch(() => {});
-  }
-
   const actor: Actor = {
     id: user.id,
     name: user.name,
@@ -166,6 +158,14 @@ export async function requireActor(options: RequireActorOptions = {}): Promise<A
 
   if (options.requiredPermission) {
     assertAuthorized(actor, options.requiredPermission);
+  }
+
+  // Update session updatedAt to slide the inactivity window ONLY after all auth + permission checks pass
+  if (options.touchSession !== false) {
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { updatedAt: new Date() },
+    }).catch(() => {});
   }
 
   return actor;

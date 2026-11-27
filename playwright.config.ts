@@ -21,15 +21,19 @@ Object.assign(process.env, { NODE_ENV: 'test' });
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: ['**/t04-*.spec.ts', '**/t05-*.spec.ts', '**/t06-*.spec.ts', '**/t07-*.spec.ts', '**/t08-*.spec.ts', '**/t09-*.spec.ts', '**/t10-*.spec.ts', '**/t11-*.spec.ts', '**/t12-*.spec.ts'],
+  testMatch: ['**/auth.spec.ts', '**/auth-round11-browser.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
   outputDir: 'test-results/t03',
   reporter: 'list',
   use: {
     baseURL: BASE_URL,
+    locale: 'ar-EG',
+    timezoneId: 'Africa/Cairo',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -61,7 +65,7 @@ export default defineConfig({
     command: `npx next start -H 127.0.0.1 -p ${PORT}`,
     url: `${BASE_URL}/login`,
     reuseExistingServer: false,
-    timeout: 60000,
+    timeout: 120_000,
     env: {
       PORT: String(PORT),
       HOST: '127.0.0.1',

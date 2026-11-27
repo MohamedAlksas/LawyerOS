@@ -51,7 +51,6 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
       },
-      grep: /@(?:t08|hearings|adjournment|results|a11y)\b/,
     },
     {
       name: 'tablet-768',

@@ -1028,6 +1028,7 @@ export function ProceedingForm({
               <input
                 id={`${formId}-numberText`}
                 type="text"
+                dir="ltr"
                 value={numberText}
                 onChange={(e) => {
                   setNumberText(e.target.value);
@@ -1054,6 +1055,7 @@ export function ProceedingForm({
               <input
                 id={`${formId}-yearLabel`}
                 type="text"
+                dir="ltr"
                 value={yearLabel}
                 onChange={(e) => {
                   setYearLabel(e.target.value);
@@ -1120,6 +1122,7 @@ export function ProceedingForm({
               <input
                 id={`${formId}-filingDate`}
                 type="date"
+                dir="ltr"
                 value={filingDate}
                 onChange={(e) => setFilingDate(e.target.value)}
                 data-testid="proceeding-filing-date-input"
@@ -1137,6 +1140,7 @@ export function ProceedingForm({
               <input
                 id={`${formId}-claimAmount`}
                 type="text"
+                dir="ltr"
                 value={claimAmount}
                 onChange={(e) => setClaimAmount(e.target.value)}
                 placeholder="مثال: 50000"

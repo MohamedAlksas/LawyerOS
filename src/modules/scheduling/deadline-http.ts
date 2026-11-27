@@ -5,7 +5,10 @@ import type { Actor } from '@/modules/identity/types';
 import { hearingError } from './hearing-errors';
 import { SchedulingValidationError, type ActionResult } from './deadline-types';
 
-const PRIVATE_NO_STORE_HEADERS = { 'Cache-Control': 'private, no-store' };
+const PRIVATE_NO_STORE_HEADERS = {
+  'Cache-Control': 'private, no-store',
+  'X-Content-Type-Options': 'nosniff',
+};
 
 export function statusFromErrorCode(code: string | undefined): number {
   if (code === 'FORBIDDEN' || code === 'CROSS_MATTER_LINK_FORBIDDEN') return 403;

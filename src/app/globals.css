@@ -58,3 +58,37 @@ body {
   }
 }
 
+/* Print styles */
+@media print {
+  header,
+  nav,
+  aside,
+  #app-header,
+  #app-shell-sidebar,
+  #app-shell-bottom-nav,
+  [data-testid="desktop-sidebar"],
+  [data-testid="tablet-drawer"],
+  [data-testid="mobile-bottom-nav"],
+  [data-testid="drawer-backdrop"],
+  [data-testid="connectivity-banner"],
+  [data-testid="session-expired-alert"],
+  [data-testid="skip-link"],
+  button:not(.print-visible),
+  input,
+  select,
+  textarea {
+    display: none !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  #app-shell-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+}
+

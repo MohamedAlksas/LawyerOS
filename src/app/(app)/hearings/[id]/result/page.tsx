@@ -126,6 +126,7 @@ export default async function HearingResultPage({ params }: HearingResultPagePro
           title: d.title,
           documentType: d.documentType,
           currentVersionId: d.currentVersionId,
+          scanStatus: d.currentVersion!.scanStatus,
           scanStatusLabel: d.currentVersion!.scanStatusLabel,
           proceedingId: d.proceedingId,
           hearingId: d.hearingId,

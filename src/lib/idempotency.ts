@@ -53,6 +53,8 @@ export function isIdempotencyUniqueConflict(error: unknown): boolean {
 
 /**
  * Deterministically canonicalizes a JavaScript value to JSON (keys sorted alphabetically).
+ * Skips `undefined` object properties (matching JSON.stringify), rejects invalid Dates,
+ * and escapes `$`-prefixed object keys so plain objects cannot collide with `{ $bigint }`.
  */
 export function canonicalizeJson(value: unknown): string {
   if (value === null || value === undefined) {
@@ -68,19 +70,35 @@ export function canonicalizeJson(value: unknown): string {
     return '[' + value.map((item) => canonicalizeJson(item)).join(',') + ']';
   }
   if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new TypeError('Invalid Date cannot be canonicalized.');
+    }
     return JSON.stringify(value.toISOString());
   }
   if (typeof value === 'bigint') {
     return JSON.stringify({ $bigint: value.toString() });
   }
   if (typeof value === 'object') {
-    const sortedKeys = Object.keys(value as Record<string, unknown>).sort();
-    const pairs = sortedKeys.map(
-      (k) => `${JSON.stringify(k)}:${canonicalizeJson((value as Record<string, unknown>)[k])}`
-    );
+    const obj = value as Record<string, unknown>;
+    const sortedKeys = Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort();
+    const pairs = sortedKeys.map((k) => {
+      const encodedKey = k.startsWith('$') ? `$${k}` : k;
+      return `${JSON.stringify(encodedKey)}:${canonicalizeJson(obj[k])}`;
+    });
     return '{' + pairs.join(',') + '}';
   }
   return JSON.stringify(value);
+}
+
+function hashesEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 /**
@@ -152,12 +170,12 @@ export async function claimIdempotencyKey(
   });
 
   if (existing) {
-    if (existing.payloadHash !== payloadHash && existing.payloadHash !== legacyHash) {
+    if (!hashesEqual(existing.payloadHash, payloadHash) && !hashesEqual(existing.payloadHash, legacyHash)) {
       throw new IdempotencyPayloadMismatchError();
     }
 
     if (existing.status === 'COMPLETED') {
-      if (params.privateHashSecret && existing.payloadHash !== payloadHash) {
+      if (params.privateHashSecret && !hashesEqual(existing.payloadHash, payloadHash)) {
         await tx.idempotencyRecord.updateMany({
           where: { id: existing.id, payloadHash: legacyHash },
           data: { payloadHash },
@@ -251,6 +269,7 @@ export async function resolveConcurrentIdempotency(
   prisma: {
     idempotencyRecord: {
       findUnique: (args: Prisma.IdempotencyRecordFindUniqueArgs) => Promise<Prisma.IdempotencyRecordGetPayload<object> | null>;
+      updateMany?: (args: Prisma.IdempotencyRecordUpdateManyArgs) => Promise<Prisma.BatchPayload>;
     };
   },
   params: ClaimIdempotencyParams,
@@ -277,11 +296,21 @@ export async function resolveConcurrentIdempotency(
       return null;
     }
 
-    if (existing.payloadHash !== payloadHash && existing.payloadHash !== legacyHash) {
+    if (!hashesEqual(existing.payloadHash, payloadHash) && !hashesEqual(existing.payloadHash, legacyHash)) {
       throw new IdempotencyPayloadMismatchError();
     }
 
     if (existing.status === 'COMPLETED') {
+      if (
+        params.privateHashSecret &&
+        !hashesEqual(existing.payloadHash, payloadHash) &&
+        prisma.idempotencyRecord.updateMany
+      ) {
+        await prisma.idempotencyRecord.updateMany({
+          where: { id: existing.id, payloadHash: legacyHash },
+          data: { payloadHash },
+        });
+      }
       return {
         isReplay: true,
         payloadHash,

@@ -2,6 +2,7 @@ import React from 'react';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
+import { authorize } from '@/modules/identity/authorize';
 import { listDocuments } from '@/modules/documents/document-service';
 import { DocumentType, type DocumentDTO } from '@/modules/documents/document-types';
 import { listSelectableMatters } from '@/modules/productivity';
@@ -44,6 +45,21 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
     }
     throw error;
   }
+
+  const canReadDocuments = authorize(actor, 'READ_DOCUMENTS');
+  if (!canReadDocuments) {
+    return (
+      <div
+        role="alert"
+        data-testid="documents-forbidden"
+        className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
+      >
+        <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
+        <p>لا تمتلك الصلاحيات الكافية لاستعراض أرشيف المستندات.</p>
+      </div>
+    );
+  }
+  const canWriteDocuments = authorize(actor, 'WRITE_DOCUMENTS');
 
   const rawMatterId = readParam(params, 'matterId')?.trim();
   const rawPartyId = readParam(params, 'partyId')?.trim();
@@ -95,7 +111,19 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
       name: party.name,
       kind: party.kind,
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return (
+        <div
+          role="alert"
+          data-testid="documents-forbidden"
+          className="max-w-4xl mx-auto p-6 bg-white rounded-[6px] border border-red-200 text-[#A4262C]"
+        >
+          <h1 className="text-xl font-bold mb-2">وصول مرفوض</h1>
+          <p>لا تمتلك الصلاحيات الكافية لاستعراض أرشيف المستندات.</p>
+        </div>
+      );
+    }
     console.error('[Documents page] Failed to load documents workspace');
     initialError = 'تعذر تحميل قائمة المستندات من الخادم.';
   }
@@ -103,13 +131,15 @@ export default async function DocumentsPage({ searchParams }: DocumentsPageProps
   return (
     <div className="max-w-5xl mx-auto">
       <DocumentsView
-        key={actor.id}
+        key={`${actor.id}:${matterId ?? ''}:${partyId ?? ''}:${documentType ?? ''}:${requestedPage}`}
         initialDocuments={initialDocuments}
         initialTotal={initialTotal}
         initialPage={initialPage}
         initialTotalPages={initialTotalPages}
         selectableMatters={selectableMatters}
         selectableParties={selectableParties}
+        canWriteDocuments={canWriteDocuments}
+        sessionId={actor.sessionId}
         initialFilters={{
           matterId,
           partyId,

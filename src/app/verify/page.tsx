@@ -104,14 +104,16 @@ function VerifyForm() {
           </div>
         )}
 
-        <div className="flex border-b border-[#D5DFE3] mb-5">
+        <div className="flex border-b border-[#D5DFE3] mb-5" role="tablist" aria-label="طريقة التحقق">
           <button
             type="button"
+            role="tab"
+            aria-selected={method === 'totp'}
             onClick={() => {
               setMethod('totp');
               setError(null);
             }}
-            className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors ${
+            className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors min-h-[44px] ${
               method === 'totp'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
@@ -121,11 +123,13 @@ function VerifyForm() {
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={method === 'backup'}
             onClick={() => {
               setMethod('backup');
               setError(null);
             }}
-            className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors ${
+            className={`flex-1 py-2 text-sm font-medium border-b-2 text-center transition-colors min-h-[44px] ${
               method === 'backup'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35]'
@@ -137,7 +141,7 @@ function VerifyForm() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {method === 'totp' ? (
-            <div>
+            <div role="tabpanel">
               <label htmlFor="totpCode" className="block text-sm font-medium text-[#172A35] mb-1">
                 رمز التحقق المكوّن من 6 أرقام
               </label>
@@ -154,20 +158,20 @@ function VerifyForm() {
                   setTotpCode(e.target.value);
                   if (error) setError(null);
                 }}
-                className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center tracking-widest text-xl font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"
+                className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center tracking-widest text-xl font-mono bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
                 placeholder="123456"
               />
               <div className="flex justify-between items-center text-xs text-[#4D606A] mt-1.5">
                 <span>أدخل الرمز من تطبيق المصادقة (يدعم الأرقام العربية والإنجليزية).</span>
                 {totpCode.length > 0 && (
                   <span className="font-mono text-[#14566B] font-medium" dir="ltr">
-                    {totpCode.length}/6
+                    <bdi dir="ltr">{totpCode.length}/6</bdi>
                   </span>
                 )}
               </div>
             </div>
           ) : (
-            <div>
+            <div role="tabpanel">
               <label htmlFor="backupCode" className="block text-sm font-medium text-[#172A35] mb-1">
                 رمز الاسترداد المطبوع
               </label>
@@ -182,7 +186,7 @@ function VerifyForm() {
                   setBackupCode(e.target.value);
                   if (error) setError(null);
                 }}
-                className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center font-mono text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent"
+                className="w-full px-3 py-2 border border-[#D5DFE3] rounded text-[#172A35] text-center font-mono text-base bg-white focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:border-transparent min-h-[44px]"
                 placeholder="xxxxx-xxxxx"
               />
               <p className="text-xs text-[#4D606A] mt-1.5">
@@ -194,7 +198,7 @@ function VerifyForm() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 px-4 bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 text-white font-medium rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2"
+            className="w-full py-2.5 px-4 bg-[#14566B] hover:bg-[#0f4354] disabled:opacity-50 text-white font-medium rounded transition-colors focus:outline-none focus:ring-2 focus:ring-[#14566B] focus:ring-offset-2 min-h-[44px]"
           >
             {isLoading ? 'جارٍ التحقق...' : 'تأكيد ومتابعة'}
           </button>
@@ -206,7 +210,7 @@ function VerifyForm() {
             onClick={() =>
               router.push(returnTo !== '/' ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login')
             }
-            className="text-xs text-[#14566B] hover:underline"
+            className="text-xs text-[#14566B] hover:underline min-h-[44px] inline-flex items-center justify-center p-2"
           >
             العودة إلى شاشة تسجيل الدخول
           </button>

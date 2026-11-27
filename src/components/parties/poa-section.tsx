@@ -6,7 +6,7 @@ import { savePowerOfAttorneyAction } from '@/modules/parties/actions';
 import { GuardedLink as Link, useFormDraft, useLeaveGuard } from '@/components/navigation-guard';
 import { isAuthRecoveryCode } from '@/components/matters/matter-ui-types';
 import { DOCUMENT_TYPE_LABELS_AR } from '@/modules/documents/document-types';
-import { getScanStatusBadgeClassFromLabel } from '@/components/documents/document-ui-helpers';
+import { getLinkableDocumentScanBadgeClass } from '@/components/documents/document-ui-helpers';
 import {
   LinkableDocumentSummary,
   PoAType,
@@ -47,7 +47,7 @@ export function PoaSection({
   ownerId,
   partyId,
   initialPoas,
-  canReadDocuments = true,
+  canReadDocuments = false,
   availableDocuments = [],
   documentsLoadError,
   readOnly = false,
@@ -576,7 +576,7 @@ export function PoaSection({
                       </bdi>
                       {poa.linkedDocument?.scanStatusLabel && (
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getScanStatusBadgeClassFromLabel(poa.linkedDocument.scanStatusLabel)}`}
+                          className={`inline-flex items-center px-2 py-0.5 rounded-[4px] text-[11px] font-semibold border ${getLinkableDocumentScanBadgeClass(poa.linkedDocument)}`}
                         >
                           {poa.linkedDocument.scanStatusLabel}
                         </span>

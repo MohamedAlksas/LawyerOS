@@ -253,6 +253,8 @@ const baseEnvSchema = z.object({
     }),
   PARTY_IDENTITY_ENCRYPTION_KEY: z.string().optional(),
   PARTY_IDENTITY_KEY_ID: z.string().optional(),
+  PARTY_IDENTITY_PREVIOUS_KEYS: z.string().optional(),
+  TRUSTED_PROXY_IPS: z.string().optional(),
   RESTORE_MODE: z.string().optional(),
   REMINDER_DISPATCH_DISABLED: z.string().optional(),
   WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().optional(),
@@ -454,10 +456,18 @@ export function isWorkerDispatchDisabled(
   );
 }
 
+export function parseTrustedProxyIps(raw?: string): string[] {
+  const entries = (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return entries.length > 0 ? entries : ['127.0.0.1', '::1'];
+}
+
 /**
  * Sanitizes error messages before persistence or UI/log exposure.
  * Strips connection strings, credentials, bearer tokens, JWTs, hex/base64 blobs,
- * and truncates length so secrets or document bytes never leak.
+ * OS file paths, and truncates length so secrets or document bytes never leak.
  */
 export function redactErrorMessage(error: unknown, maxLength = 300): string {
   const raw =
@@ -473,6 +483,12 @@ export function redactErrorMessage(error: unknown, maxLength = 300): string {
     .replace(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^\s]+/g, '[REDACTED_URL]')
     // Basic user:pass@host fragments without protocol
     .replace(/[^\s/:@]+:[^\s/@]+@[^\s/:]+/g, '[REDACTED_CREDENTIALS]')
+    // Windows and POSIX system/app paths
+    .replace(/\b[A-Za-z]:\\[^\s"'`<>|*?]+/g, '[REDACTED_PATH]')
+    .replace(
+      /(?:^|(?<=[\s"'(=:,]))\/(?:var|home|srv|app|tmp|opt|etc)(?:\/[^\s"'`<>|*),;\]}]+)+/g,
+      '[REDACTED_PATH]'
+    )
     // Bearer / Basic / JWT tokens
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 [REDACTED_TOKEN]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_JWT]')

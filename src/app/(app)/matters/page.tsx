@@ -38,10 +38,23 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
 
   const filters = matterSearchFilters((name) => readParam(params, name));
   const includeArchived = filters.includeArchived || filters.status === 'ARCHIVED';
-  const [courts, clients] = await Promise.all([
-    listReferenceItems('COURT', false, actor).catch(() => []),
-    searchMatterClients(actor, { limit: 10, includeArchived }).then((result) => result.clients).catch(() => []),
+
+  const [courtsResult, clientsResult] = await Promise.allSettled([
+    listReferenceItems('COURT', false, actor),
+    searchMatterClients(actor, { limit: 10, includeArchived }).then((res) => res.clients),
   ]);
+
+  const courts = courtsResult.status === 'fulfilled' ? courtsResult.value : [];
+  const clients = clientsResult.status === 'fulfilled' ? clientsResult.value : [];
+
+  let referenceLookupWarning: string | null = null;
+  if (courtsResult.status === 'rejected' && clientsResult.status === 'rejected') {
+    referenceLookupWarning = 'تعذر تحميل بيانات المحاكم والموكلين المرجعية من الخادم.';
+  } else if (courtsResult.status === 'rejected') {
+    referenceLookupWarning = 'تعذر تحميل قائمة المحاكم المرجعية من الخادم.';
+  } else if (clientsResult.status === 'rejected') {
+    referenceLookupWarning = 'تعذر تحميل قائمة الموكلين من الخادم.';
+  }
 
   let initialResult: SearchMattersResult | undefined;
   let initialError: string | undefined = undefined;
@@ -58,6 +71,15 @@ export default async function MattersPage({ searchParams }: MattersPageProps) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
+      {referenceLookupWarning && (
+        <div
+          role="alert"
+          data-testid="matters-reference-lookup-warning"
+          className="p-3 bg-amber-50 border border-amber-300 text-[#7A4A00] rounded-[6px] text-sm font-medium"
+        >
+          {referenceLookupWarning} يمكنك الاستمرار في البحث والتصفح.
+        </div>
+      )}
       <MatterListClient
         key={actor.sessionId}
         initialMatters={initialResult?.matters}

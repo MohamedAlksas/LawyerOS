@@ -104,8 +104,8 @@ export function resolveSafeStorageRoot(overrideRoot?: string): string {
   }
 
   if (
-    normalizeForComparison(realRoot) === normalizeForComparison(realAppRoot) ||
-    normalizeForComparison(rawRoot) === normalizeForComparison(runtimeCwd)
+    isSameOrInside(realAppRoot, realRoot) ||
+    isSameOrInside(runtimeCwd, rawRoot)
   ) {
     throw new DocumentStoragePathError(
       'يجب أن يكون مجلد تخزين المستندات في مجلد مخصص ومنفصل عن جذر التطبيق.'
@@ -237,6 +237,26 @@ async function unlinkIfExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function ensurePrivateDir(dirPath: string, stopAtDir?: string): Promise<void> {
+  await fs.promises.mkdir(dirPath, { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') return;
+  let current = path.resolve(dirPath);
+  const boundary = stopAtDir ? path.resolve(stopAtDir) : null;
+  while (true) {
+    await fs.promises.chmod(current, 0o700).catch(() => {});
+    if (!boundary || current === boundary) break;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
+async function ensurePrivateFileMode(handle: fs.promises.FileHandle): Promise<void> {
+  if (process.platform !== 'win32') {
+    await handle.chmod(0o600);
+  }
+}
+
 export function createLocalDocumentStorage(overrideRoot?: string): DocumentStorageAdapter {
   const rootDir = resolveSafeStorageRoot(overrideRoot);
   const quarantineDir = path.join(rootDir, 'quarantine');
@@ -282,7 +302,7 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
     ): Promise<WriteQuarantineResult> {
       const targetPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
       const targetDir = path.dirname(targetPath);
-      await fs.promises.mkdir(targetDir, { recursive: true });
+      await ensurePrivateDir(targetDir, rootDir);
 
       const tempPartPath = `${targetPath}.part-${crypto.randomUUID()}`;
       const hash = crypto.createHash('sha256');
@@ -290,7 +310,8 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       let handle: fs.promises.FileHandle | null = null;
 
       try {
-        handle = await fs.promises.open(tempPartPath, 'wx');
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
+        await ensurePrivateFileMode(handle);
 
         if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
           const buf = Buffer.isBuffer(source)
@@ -383,12 +404,13 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
     async writeReadyBytes(readyKey: string, bytes: Buffer): Promise<void> {
       const destPath = resolveSafeKeyPath(readyDir, readyKey);
       const destDir = path.dirname(destPath);
-      await fs.promises.mkdir(destDir, { recursive: true });
+      await ensurePrivateDir(destDir, rootDir);
 
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
-        handle = await fs.promises.open(tempPartPath, 'wx');
+        handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
+        await ensurePrivateFileMode(handle);
         await writeAll(handle, bytes);
         await handle.sync();
         await handle.close();
@@ -408,13 +430,14 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
       const srcPath = resolveSafeKeyPath(quarantineDir, quarantineKey);
       const destPath = resolveSafeKeyPath(readyDir, readyKey);
       const destDir = path.dirname(destPath);
-      await fs.promises.mkdir(destDir, { recursive: true });
+      await ensurePrivateDir(destDir, rootDir);
 
       const tempPartPath = `${destPath}.part-${crypto.randomUUID()}`;
       let handle: fs.promises.FileHandle | null = null;
       try {
         await fs.promises.copyFile(srcPath, tempPartPath, fs.constants.COPYFILE_EXCL);
         handle = await fs.promises.open(tempPartPath, 'r+');
+        await ensurePrivateFileMode(handle);
         await handle.sync();
         await handle.close();
         handle = null;
@@ -456,13 +479,25 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
 
     async readReadyBytes(readyKey: string): Promise<Buffer> {
       const targetPath = resolveSafeKeyPath(readyDir, readyKey);
+      let handle: fs.promises.FileHandle;
       try {
-        return await fs.promises.readFile(targetPath);
+        handle = await fs.promises.open(targetPath, 'r');
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') {
           throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
         }
         throw err;
+      }
+
+      try {
+        const st = await handle.stat();
+        if (!st.isFile() || st.size <= 0) {
+          throw new DocumentNotFoundError('ملف المستند غير متاح في التخزين الخاص.');
+        }
+        return await handle.readFile();
+      } finally {
+        await handle.close().catch(() => {});
       }
     },
 

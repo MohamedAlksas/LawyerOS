@@ -636,42 +636,45 @@ describe('T06 Comprehensive Review Regressions (C01–C08, C16, C18)', () => {
   // =========================================================================
   it('C07: reference-actions handleActionError maps CONCURRENCY_CONFLICT and NOT_FOUND without falling back to INTERNAL_ERROR', async () => {
     // Mock requireActor to simulate authenticated session in Action
-    vi.spyOn(requireActorModule, 'requireActor').mockResolvedValue(actor);
-
-    // Attempt updating non-existent reference item
-    const notFoundRes = await updateReferenceItemAction({
-      id: crypto.randomUUID(),
-      type: 'COURT',
-      expectedVersion: 1,
-      name: 'محكمة وهمية',
-      isActive: true,
-      idempotencyKey: `act-nf-${crypto.randomUUID()}`,
-    });
-    expect(notFoundRes.success).toBe(false);
-    if (!notFoundRes.success) {
-      expect(notFoundRes.code).toBe('NOT_FOUND');
-    }
-
-    // Create item and trigger concurrency conflict
-    const created = await createReferenceItemAction({
-      type: 'STORAGE_LOCATION',
-      name: `Ref Action Test ${crypto.randomUUID().slice(0, 6)}`,
-      idempotencyKey: `act-cr-${crypto.randomUUID()}`,
-    });
-    expect(created.success).toBe(true);
-    if (created.success) {
-      const conflictRes = await updateReferenceItemAction({
-        id: created.data.id,
-        type: 'STORAGE_LOCATION',
-        expectedVersion: 999, // Mismatched!
-        name: 'تعديل بنسخة خاطئة',
+    const spy = vi.spyOn(requireActorModule, 'requireActor').mockResolvedValue(actor);
+    try {
+      // Attempt updating non-existent reference item
+      const notFoundRes = await updateReferenceItemAction({
+        id: crypto.randomUUID(),
+        type: 'COURT',
+        expectedVersion: 1,
+        name: 'محكمة وهمية',
         isActive: true,
-        idempotencyKey: `act-cf-${crypto.randomUUID()}`,
+        idempotencyKey: `act-nf-${crypto.randomUUID()}`,
       });
-      expect(conflictRes.success).toBe(false);
-      if (!conflictRes.success) {
-        expect(conflictRes.code).toBe('CONCURRENCY_CONFLICT');
+      expect(notFoundRes.success).toBe(false);
+      if (!notFoundRes.success) {
+        expect(notFoundRes.code).toBe('NOT_FOUND');
       }
+
+      // Create item and trigger concurrency conflict
+      const created = await createReferenceItemAction({
+        type: 'STORAGE_LOCATION',
+        name: `Ref Action Test ${crypto.randomUUID().slice(0, 6)}`,
+        idempotencyKey: `act-cr-${crypto.randomUUID()}`,
+      });
+      expect(created.success).toBe(true);
+      if (created.success) {
+        const conflictRes = await updateReferenceItemAction({
+          id: created.data.id,
+          type: 'STORAGE_LOCATION',
+          expectedVersion: 999, // Mismatched!
+          name: 'تعديل بنسخة خاطئة',
+          isActive: true,
+          idempotencyKey: `act-cf-${crypto.randomUUID()}`,
+        });
+        expect(conflictRes.success).toBe(false);
+        if (!conflictRes.success) {
+          expect(conflictRes.code).toBe('CONCURRENCY_CONFLICT');
+        }
+      }
+    } finally {
+      spy.mockRestore();
     }
   });
 

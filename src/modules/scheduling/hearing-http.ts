@@ -6,7 +6,10 @@ import { hearingError } from './hearing-errors';
 import { isCrossSiteRequest, statusFromErrorCode } from './deadline-http';
 import { SchedulingValidationError } from './hearing-types';
 
-const headers = { 'Cache-Control': 'private, no-store' };
+const headers = {
+  'Cache-Control': 'private, no-store',
+  'X-Content-Type-Options': 'nosniff',
+};
 
 export async function writeHearingFromRequest<T extends { hearingId: string }, R>(
   request: Request, id: string, command: (actor: Actor, input: T) => Promise<R>,

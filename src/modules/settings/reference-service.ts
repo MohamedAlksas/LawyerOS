@@ -92,6 +92,12 @@ function mapOfficeSettingsToDTO(settings: {
 async function getOfficeSettingsInternal(
   prismaOrTx: PrismaClient | Prisma.TransactionClient
 ): Promise<OfficeSettingsDTO> {
+  const existing = await prismaOrTx.officeSettings.findUnique({
+    where: { id: SINGLETON_ID },
+  });
+  if (existing) {
+    return mapOfficeSettingsToDTO(existing);
+  }
   try {
     const settings = await prismaOrTx.officeSettings.upsert({
       where: { id: SINGLETON_ID },
@@ -111,10 +117,10 @@ async function getOfficeSettingsInternal(
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === 'P2002'
     ) {
-      const existing = await prismaOrTx.officeSettings.findUniqueOrThrow({
+      const fallback = await prismaOrTx.officeSettings.findUniqueOrThrow({
         where: { id: SINGLETON_ID },
       });
-      return mapOfficeSettingsToDTO(existing);
+      return mapOfficeSettingsToDTO(fallback);
     }
     throw err;
   }
@@ -149,6 +155,16 @@ export async function updateOfficeSettings(
 
   const prisma = options?.prisma || getPrismaClient();
 
+  const payloadForIdempotency = {
+    expectedVersion: input.expectedVersion,
+    officeName: input.officeName,
+    ...(input.lawyerName !== undefined ? { lawyerName: input.lawyerName } : {}),
+    ...(input.phone !== undefined ? { phone: input.phone } : {}),
+    ...(input.email !== undefined ? { email: input.email } : {}),
+    ...(input.address !== undefined ? { address: input.address } : {}),
+    ...(input.taxNumber !== undefined ? { taxNumber: input.taxNumber } : {}),
+  };
+
   return runWithIdempotencyRetry(
     () =>
       prisma.$transaction(async (tx) => {
@@ -157,7 +173,7 @@ export async function updateOfficeSettings(
           actorId: actor.id,
           commandType: 'updateOfficeSettings',
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
         });
 
         if (claim.isReplay) {
@@ -588,6 +604,16 @@ export async function updateReferenceItem(
 
   const prisma = getPrismaClient();
 
+  const payloadForIdempotency = {
+    type: input.type,
+    id: input.id,
+    expectedVersion: input.expectedVersion,
+    name: input.name,
+    code: input.code ?? null,
+    notes: input.notes ?? null,
+    isActive: input.isActive,
+  };
+
   return runWithIdempotencyRetry(
     () =>
       prisma.$transaction(async (tx) => {
@@ -595,7 +621,7 @@ export async function updateReferenceItem(
           actorId: actor.id,
           commandType: `updateReferenceItem:${input.type}`,
           key: input.idempotencyKey,
-          payload: input,
+          payload: payloadForIdempotency,
         });
 
         if (claim.isReplay) {

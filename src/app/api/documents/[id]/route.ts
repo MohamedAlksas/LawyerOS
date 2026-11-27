@@ -34,10 +34,10 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const originRejection = verifyDocumentMutationOrigin(request);
-  if (originRejection) return originRejection;
-
   try {
+    const originRejection = verifyDocumentMutationOrigin(request);
+    if (originRejection) return originRejection;
+
     const actor = await requireDocumentActor(request, 'WRITE_DOCUMENTS');
     const { id } = await params;
     const body = await parseJsonMutationBody(request);
