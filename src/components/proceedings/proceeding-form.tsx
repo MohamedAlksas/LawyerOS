@@ -983,7 +983,7 @@ export function ProceedingForm({
                       setIncompleteDraftAcknowledged(false);
                     }}
                     data-testid="proceeding-status-select"
-                    className="px-2.5 py-1 text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                    className="px-2.5 py-1 text-base sm:text-xs font-semibold bg-white border border-[#D5DFE3] rounded-[6px] text-[#14566B] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                   >
                     <option value="ACTIVE">قيد نشط بالمحكمة</option>
                     <option value="AWAITING_JUDGMENT">حجز للحكم</option>
@@ -1223,7 +1223,7 @@ export function ProceedingForm({
                                   }
                                   data-testid={`capacity-select-${mp.id}`}
                                   {...fieldErrorProps(`capacity_${mp.id}`)}
-                                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                                  className="w-full px-2.5 py-1.5 text-base sm:text-xs bg-white border border-[#D5DFE3] rounded-[6px] font-semibold text-[#14566B] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                                 >
                                   <option value="">-- اختر الصفة القانونية صراحةً --</option>
                                   {(['PLAINTIFF', 'DEFENDANT', 'APPELLANT', 'APPELLEE', 'INTERVENOR', 'OTHER'] as ProceedingLegalCapacity[]).map((cap) => (
@@ -1256,7 +1256,7 @@ export function ProceedingForm({
                                 }
                                 placeholder="مثال: مدعي، بصفته..."
                                 data-testid={`capacity-text-${mp.id}`}
-                                className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                                className="w-full px-2.5 py-1.5 text-base sm:text-xs bg-white border border-[#D5DFE3] rounded-[6px] text-[#172A35] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                               />
                             </div>
                           </div>

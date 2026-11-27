@@ -1527,7 +1527,7 @@ export function MatterDetailClient({
                 }
               }
             }}
-            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-[6px] transition-colors whitespace-nowrap min-h-[44px]"
+            className="px-3.5 py-1.5 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded-[6px] transition-colors whitespace-nowrap min-h-[44px]"
           >
             متابعة وإعادة المحاولة
           </button>
@@ -2466,7 +2466,7 @@ export function MatterDetailClient({
                 <p
                   role="alert"
                   data-testid="poa-load-error"
-                  className="text-xs text-red-600 font-bold bg-red-50 p-2 rounded"
+                  className="text-xs text-[#A4262C] font-bold bg-red-50 p-2 rounded"
                 >
                   {poaActionError}
                 </p>
@@ -2828,7 +2828,7 @@ export function MatterDetailClient({
                   type="submit"
                   disabled={isLifecycleSubmitting || (pendingLifecycleOp?.kind === 'archiveMatter' ? false : matterLifecycleReason.trim().length < 3)}
                   data-testid="confirm-archive-matter-button"
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px]"
+                  className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px]"
                 >
                   {isLifecycleSubmitting
                     ? 'جارٍ الأرشفة...'
@@ -3146,7 +3146,7 @@ export function MatterDetailClient({
                   data-testid="confirm-proceeding-lifecycle-button"
                   className={`px-4 py-2 text-white text-xs font-bold rounded-[6px] disabled:opacity-50 min-h-[44px] ${
                     proceedingLifecycleAction === 'archive'
-                      ? 'bg-amber-600 hover:bg-amber-700'
+                      ? 'bg-amber-700 hover:bg-amber-800'
                       : 'bg-[#14566B] hover:bg-[#0F4354]'
                   }`}
                 >

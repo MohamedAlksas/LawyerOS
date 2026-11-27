@@ -194,7 +194,7 @@ export default async function ProceedingDetailPage({ params }: ProceedingDetailP
 
             <div className="text-xs text-[#4D606A] flex flex-wrap items-center gap-3 pt-1">
               <span>الملف: <bdi dir="ltr" className="font-semibold text-[#172A35]">{matter.fileCode}</bdi></span>
-              <span>•</span>
+              <span aria-hidden="true">•</span>
               <span className="text-[#14566B] font-medium">{matter.title}</span>
             </div>
           </div>

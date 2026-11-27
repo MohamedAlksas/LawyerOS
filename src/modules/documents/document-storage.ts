@@ -461,6 +461,13 @@ export function createLocalDocumentStorage(overrideRoot?: string): DocumentStora
         if (!st.isFile() || st.size <= 0) {
           throw new DocumentValidationError('ملف الحجر غير صالح أو فارغ.');
         }
+        if (st.size > MAX_DOCUMENT_BYTES) {
+          throw new DocumentValidationError(
+            'حجم الملف يتجاوز الحد الأقصى المسموح به (25 ميجابايت).',
+            { file: 'حجم الملف يتجاوز 25 ميجابايت' },
+            'PAYLOAD_TOO_LARGE'
+          );
+        }
         const bytes = await srcHandle.readFile();
         handle = await fs.promises.open(tempPartPath, 'wx', 0o600);
         await ensurePrivateFileMode(handle);

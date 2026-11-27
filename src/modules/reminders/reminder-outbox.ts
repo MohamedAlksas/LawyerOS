@@ -344,6 +344,7 @@ export async function cancelSourceReminderJobsBatch(
 
   await tx.jobRun.updateMany({
     where: {
+      jobType: 'REMINDER_DELIVERY',
       sourceType,
       sourceId: { in: sourceIds },
       status: { in: ['PENDING', 'RUNNING', 'FAILED'] },

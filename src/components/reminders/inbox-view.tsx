@@ -532,7 +532,7 @@ export function InboxView({ initialOverview, initialError }: InboxViewProps) {
               {overview.overdueCount}
             </strong>
             <span className="text-xs text-[#4D606A]">متأخرة</span>
-            <span className="text-[#D5DFE3]">•</span>
+            <span aria-hidden="true" className="text-[#D5DFE3]">•</span>
             <strong className="text-2xl font-bold text-[#A4262C]" data-testid="inbox-failed-count">
               {overview.failedCount}
             </strong>

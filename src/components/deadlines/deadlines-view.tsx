@@ -1525,7 +1525,7 @@ export function DeadlinesView({
           {/* Confirmed Section */}
           <section data-testid="deadlines-confirmed-section" className="space-y-3" aria-labelledby="confirmed-deadlines-heading">
             <h2 id="confirmed-deadlines-heading" className="text-lg font-bold text-[#14566B] flex items-center gap-2">
-              <span>✓</span>
+              <span aria-hidden="true">✓</span>
               <span>مواعيد قانونية مؤكدة ({confirmedList.length})</span>
             </h2>
             {confirmedList.length === 0 ? (

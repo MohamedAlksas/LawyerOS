@@ -475,7 +475,7 @@ export function MatterListClient({
                 data-testid="filter-court-select"
                 value={selectedCourtId || ''}
                 onChange={(e) => handleCourtChange(e.target.value || undefined)}
-                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="text-base sm:text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل المحاكم</option>
                 {courts.map((c) => (
@@ -492,7 +492,7 @@ export function MatterListClient({
                 data-testid="filter-client-select"
                 value={selectedClientId || ''}
                 onChange={(e) => handleClientChange(clientSelectOptions.find(({ id }) => id === e.target.value))}
-                className="text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+                className="text-base sm:text-xs py-1.5 px-2.5 border border-[#D5DFE3] rounded-[6px] bg-white text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">كل الموكلين</option>
                 {clientSelectOptions.map((cl) => (
@@ -551,7 +551,7 @@ export function MatterListClient({
                     value={clientPickerQuery}
                     onChange={(e) => handleClientPickerQueryChange(e.target.value)}
                     placeholder="ابحث بالاسم أو الهاتف..."
-                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-xs text-[#172A35] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
+                    className="w-full px-2.5 py-1.5 border border-[#D5DFE3] rounded-[4px] text-base sm:text-xs text-[#172A35] min-h-[44px] focus:outline-none focus:ring-1 focus:ring-[#14566B]"
                   />
 
                   {isSearchingClients ? (
@@ -730,6 +730,7 @@ export function MatterListClient({
                         <td className="px-4 py-3 font-semibold text-[#172A35] max-w-xs truncate">
                           <Link
                             href={`/matters/${matter.id}`}
+                            title={matter.title}
                             className="hover:text-[#14566B] hover:underline focus:outline-none focus:ring-1 focus:ring-[#14566B] rounded"
                           >
                             {matter.title}

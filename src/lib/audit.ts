@@ -64,6 +64,7 @@ function sanitizeAuditRecord(
         normalizedKey.includes('privatekey') ||
         normalizedKey.includes('objectkey') ||
         normalizedKey.includes('quarantinekey') ||
+        normalizedKey.includes('readykey') ||
         normalizedKey.includes('storagekey') ||
         normalizedKey.includes('ciphertext') ||
         normalizedKey.includes('authtag') ||

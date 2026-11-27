@@ -273,7 +273,7 @@ export default function SecurityClient({ initialSessions, actor }: SecurityClien
           >
             <div>
               <div className="font-bold text-sm">تنبيه أمني: إعداد المصادقة الثنائية غير مكتمل</div>
-              <div className="text-xs text-[#7A4100]/80">
+              <div className="text-xs text-[#7A4100]">
                 حسابك في وضع الإعداد المعلق. يلزم إدخال رمز التحقق من تطبيق المصادقة لإتمام تأكيد الحيازة.
               </div>
             </div>

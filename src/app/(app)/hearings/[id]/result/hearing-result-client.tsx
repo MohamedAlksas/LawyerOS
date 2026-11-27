@@ -737,7 +737,7 @@ export function HearingResultClient({
                   value={correctionReason}
                   onChange={(e) => setCorrectionReason(e.target.value)}
                   disabled={correctionFieldsDisabled}
-                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
+                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
 
@@ -754,7 +754,7 @@ export function HearingResultClient({
                   value={correctedDecision}
                   onChange={(e) => setCorrectedDecision(e.target.value)}
                   disabled={correctionFieldsDisabled}
-                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs focus:ring-2 focus:ring-[#14566B]"
+                  className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs focus:ring-2 focus:ring-[#14566B]"
                 />
               </div>
 
@@ -885,18 +885,18 @@ export function HearingResultClient({
               onChange={(e) => setDecision(e.target.value)}
               disabled={resultFieldsDisabled}
               data-testid="hearing-decision-textarea"
-              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] leading-relaxed"
+              className="w-full p-2.5 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:outline-none focus:ring-2 focus:ring-[#14566B] leading-relaxed"
             />
           </div>
 
           <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
             <label className="space-y-1 font-semibold">
               <span>ملخص الجلسة (اختياري)</span>
-              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px]" />
+              <textarea value={summary} maxLength={1000} disabled={resultFieldsDisabled} onChange={(event) => setSummary(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px] text-base sm:text-xs" />
             </label>
             <label className="space-y-1 font-semibold">
               <span>الحضور (اختياري)</span>
-              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px]" />
+              <input value={attendance} maxLength={500} disabled={resultFieldsDisabled} onChange={(event) => setAttendance(event.target.value)} className="w-full rounded-[6px] border border-[#D5DFE3] p-2 min-h-[44px] text-base sm:text-xs" />
             </label>
           </div>
 
@@ -1020,11 +1020,11 @@ export function HearingResultClient({
                   disabled={resultFieldsDisabled}
                   min={hearingDate}
                   data-testid="next-hearing-date-input"
-                  className="w-full sm:w-64 p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                  className="w-full sm:w-64 p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                 />
                 <label className="mt-2 block font-bold text-[#172A35]">
                   وقت الجلسة القادمة (اختياري)
-                  <input type="time" dir="ltr" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64" />
+                  <input type="time" dir="ltr" value={nextHearingTime} disabled={resultFieldsDisabled} onChange={(event) => setNextHearingTime(event.target.value)} className="mt-1 block min-h-[44px] w-full rounded-[6px] border border-[#D5DFE3] p-2 sm:w-64 text-base sm:text-xs" />
                 </label>
               </div>
             )}
@@ -1085,7 +1085,7 @@ export function HearingResultClient({
                           onChange={(e) => handleUpdateTaskTitle(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-title-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
 
@@ -1102,7 +1102,7 @@ export function HearingResultClient({
                           onChange={(e) => handleUpdateTaskDue(task.id, e.target.value)}
                           disabled={resultFieldsDisabled}
                           data-testid={`task-due-${idx}`}
-                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
+                          className="w-full p-2 bg-white border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs text-[#172A35] focus:ring-2 focus:ring-[#14566B] min-h-[44px]"
                         />
                       </div>
                     </div>

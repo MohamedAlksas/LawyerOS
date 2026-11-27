@@ -197,13 +197,13 @@ export function DesktopSidebar({ userRole }: { userRole?: UserRole }) {
               </span>
               <div className="space-y-1">
                 <div
-                  className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[40px]"
+                  className="flex items-center justify-between px-3 py-2 rounded-[4px] text-xs font-medium text-[#4D606A] bg-[#F8FAFB] border border-[#E5ECEE] opacity-80 cursor-not-allowed select-none min-h-[44px]"
                 >
                   <div className="flex items-center gap-2">
                     <IconWallet className="w-4 h-4 text-[#4D606A]" />
                     <span>حسابات الموكلين</span>
                   </div>
-                  <span className="text-[10px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
+                  <span className="text-[11px] bg-[#E9F2F5] text-[#14566B] border border-[#C2D9E2] px-1.5 py-0.5 rounded font-semibold">
                     قريباً
                   </span>
                 </div>

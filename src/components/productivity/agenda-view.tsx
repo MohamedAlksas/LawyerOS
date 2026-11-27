@@ -961,7 +961,7 @@ function AgendaResultsSection({
         </span>
         {agenda.rangeEnd !== agenda.rangeStart && (
           <>
-            <span>—</span>
+            <span aria-hidden="true">—</span>
             <span className="text-[#172A35]">
               {formatCairoDateArabic(agenda.rangeEnd)} (<bdi dir="ltr">{agenda.rangeEnd}</bdi>)
             </span>
