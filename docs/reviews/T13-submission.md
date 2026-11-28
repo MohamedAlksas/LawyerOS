@@ -1,99 +1,182 @@
-# LawOffice OS — T13 Submission & Agency Verification Report
+# Task T13 Submission Report — Fees, Fee Agreements, Collections & Client Statements
 
-- **Task ID:** `T13` — Balanced ledger, fee agreements, collections, receipts, and Arabic S11 Finance UI
-- **Base commit / snapshot:** `7c3d09ba28ff678e7f395ec3453d86732ab01dc5` (`origin/main`)
-- **Branch / upstream / PR:** `feature/t13-fees-collections` / `origin/feature/t13-fees-collections` -> [Draft PR #25](https://github.com/MohamedAlksas/LawyerOS/pull/25) -> `main` on `https://github.com/MohamedAlksas/LawyerOS.git` (unmerged; awaiting independent review and owner merge authorization)
-- **Implementation Checkpoints:**
-  - Initial Frozen Checkpoint SHA: `aa54924f3a7a40f02218c993229923ffe104c038` (`feat(t13): balanced fee ledger, agreements, collections, receipts, and S11 UI`)
-  - Agency P2 Closure Checkpoint SHA: `3971bf47a2c3cb60dfd28cfe3a94e15df0d31617` (`fix(t13): align fee agreement lock order, guard approved status, and expand E2E checks`)
-  - **Final Verified Implementation SHA:** `11f576dc6dcddf44e6f5294ac075a7fd34263f17` (`fix(t13): resolve code review P2/P3 UI, print, 404, and unlink guards`)
-  - *Note:* `docs/reviews/T13-submission.md` is committed separately as the subsequent report-only attestation commit (`docs(t13): update submission evidence report after review fixes`) so the final published HEAD differs from the verified implementation SHA only by this submission report.
-- **Predecessor & Owner Directives:**
-  - PR #23 (`feature/t12-document-versions`, merged at `90ad1c2d1d7276191dc11d4f7076ea501b66d99`) and PR #24 (`docs/ai-assistant-adr-plan`, merged at `7c3d09ba28ff678e7f395ec3453d86732ab01dc5`) are already integrated on `origin/main`.
-  - Project owner explicitly authorized starting `T13` directly off merged `origin/main` without a separate Codex `docs/reviews/T12-review.md` file, and requested execution via `/ponytail ابدأ` alongside required native Agency subagent orchestration and frozen-checkpoint reviews.
+## Summary
 
-## 1. Skills Loaded
+- **Task**: `T13` (`docs/tasks/T13.md`) — Fees, fee agreements (`DRAFT` / `APPROVED` / `CANCELLED`), balanced ledger postings, atomic fee collections & allocations, sequential receipts & reprints, client statements, matter Finance tab, and `/finance` standalone workspace.
+- **Branch**: `feature/t13-fees-collections`
+- **Upstream**: `origin/feature/t13-fees-collections`
+- **Canonical Remote**: `https://github.com/MohamedAlksas/LawyerOS.git`
+- **Pull Request**: [Draft PR #25](https://github.com/MohamedAlksas/LawyerOS/pull/25) -> `main` (unmerged; awaiting independent Codex review)
+- **Base (`origin/main`)**: `7c3d09ba28ff678e7f395ec3453d86732ab01dc5`
+- **Predecessors Verified Accepted & Merged on `origin/main`**:
+  - PR #23 merge commit: `90ad1c2d1d7276191dc11d4f7076ea501b66d799`
+  - PR #24 (`T12`) merge commit: `7c3d09ba28ff678e7f395ec3453d86732ab01dc5`
+- **Implementation Checkpoints**:
+  - `aa54924f3a7a40f02218c993229923ffe104c038` (Initial T13 implementation & submission)
+  - `3971bf47a2c3cb60dfd28cfe3a94e15df0d31617` (P2 closure & submission alignment)
+  - `11f576dc6dcddf44e6f5294ac075a7fd34263f17` -> `736a40d62d97302875d5839d7e897c07d98a9bc8` (Audited by 5 read-only microscopic agents and superseded by full 4-phase Agency remediation)
+- **Final Verified Implementation SHA**: `fa911caa17f8895544acc7b3dfa6c6c79ea4de28`
+- **Submission / Report-Only Attestation Commit (`HEAD` & Independently Verified Remote Pushed SHA)**: Committed directly on top of `fa911caa17f8895544acc7b3dfa6c6c79ea4de28`, touching only `docs/reviews/T13-submission.md` (`git diff --name-only fa911caa17f8895544acc7b3dfa6c6c79ea4de28..HEAD` verified report-only; see PR #25 head / `git ls-remote origin refs/heads/feature/t13-fees-collections`).
 
-- `D:/Lawyer/.agents/skills/lawoffice-delivery/SKILL.md` — governed single-task execution, worktree discipline, and `REVIEW_PROTOCOL.md` / `AGENCY_AGENTS.md` evidence reporting.
-- `D:/Lawyer/.agents/skills/lawoffice-finance/SKILL.md` — EGP `bigint` piastres accounting (`currency = 'EGP'`), balanced ledger postings, immutable financial records, single-client receipt allocation (`FEE_PAYMENT`), and strict separation of T13 fees from T14 expenses/advances, T15 reversals/refunds, and ADR 0004 excluded `OFFICE_EXPENSE`.
-- `D:/Lawyer/.agents/skills/lawoffice-arabic-ui/SKILL.md` — S11 `/finance` and `/matters/[id]` `الحسابات` Arabic RTL screens (`ar-EG`, `Africa/Cairo`), `focus-visible` keyboard navigation, accessible modal lifecycle (`Escape`, focus return), 390/768/1440px + 200% text scaling reflow, and truthful T14 placeholders.
-- `D:/Lawyer/.agents/skills/lawoffice-testing/SKILL.md` — pure BigInt unit tests, real PostgreSQL integration/concurrency/trigger/migration-upgrade tests, and real Playwright end-to-end verification across `t03`..`t13`.
-- `C:/Users/Alksas/.gemini/config/plugins/ponytail/skills/ponytail/SKILL.md` — smallest complete diff discipline, helper reuse, caller checks, and explicit non-executed scope disclosure.
+## Skills Loaded
 
-## 2. Slice Routing Decision
+Every implementation phase and verification step read the local project skills directly from disk:
 
-- Retains `docs/AGENCY_AGENT_ROUTING.json` defaults for `T13`:
-  - **Lead:** `agency-backend-architect` (owned Phase 1–2 schema/migrations/finance service/API routes and Phase 4 P2 reconciliation).
-  - **Support 1:** `agency-database-optimizer` (independent read-only audit of `bigint` piastres schema, triggers, row-locking order, partial unique indexes, FKs, and additive status-guard migration).
-  - **Support 2:** `agency-test-automation-engineer` (independent read-only audit of `T13-TC-01`..`T13-TC-07` unit, PG integration, upgrade, E2E coverage, and CI alignment).
-- UI/E2E wiring in Phase 3 was coordinated cleanly against existing S11/Matter detail/shell accessibility patterns (`useAccessibleModal`, `expectNoPageOverflow`, `expectNoSensitiveValues`, `tabToTestId`/`expectVisibleFocus`) and verified across desktop/tablet/mobile viewports.
+- `d:/Lawyer/.agents/skills/lawoffice-delivery/SKILL.md` — Task execution order, strict GitHub branch/PR workflow, report-only attestation separation, and submission protocol.
+- `d:/Lawyer/.agents/skills/lawoffice-finance/SKILL.md` — `bigint` EGP piastres, separation of fees vs reimbursable expenses vs client advances, immutability of posted financial entries, atomic transaction/receipt/idempotency rules.
+- `d:/Lawyer/.agents/skills/lawoffice-domain/SKILL.md` — `Matter` vs `Proceeding` separation, scoped `ClientMatterParty` client checks, and unlinking/demotion obligation guards.
+- `d:/Lawyer/.agents/skills/lawoffice-arabic-ui/SKILL.md` — Arabic RTL workspace, Bidi digit isolation, Cairo timezone dates, focus/modal accessibility, and `@media print` receipt formatting.
+- `d:/Lawyer/.agents/skills/lawoffice-testing/SKILL.md` — Real PostgreSQL integration testing, migration/upgrade verification, E2E isolation, and strict `NOT RUN` accounting.
 
-## 3. Agency Agent Evidence
+## Slice Routing Decision & Agency Agent Evidence
 
-All Agency roles ran as distinct native subagent invocations with verified definitions, skill profiles, and SHA-256 hashes (no drift detected). Note: original Lead `c085e01a-2513-44e9-a8bb-d24f458631fe` became unaddressable by `send_message` after host compaction, so `1689b32c-75e3-4568-a64a-0d9be9132fcd` (`agency-backend-architect`) was invoked for P2 closure reconciliation and verified identically.
+Task-level routing follows `docs/AGENCY_AGENT_ROUTING.json` (`T13`: Lead `agency-backend-architect`, Support `agency-database-optimizer`, `agency-test-automation-engineer`, supplemented during full-codebase audit and 4-phase remediation by `agency-application-security-engineer` and `agency-frontend-developer` per `docs/AGENCY_AGENTS.md`). Same-session persona fallback was not used; every phase and confirmation audit ran in a distinct native `invoke_subagent` session.
 
-| Role/profile | Native conversation ID | Definition ref & SHA-256 | Loaded profile path & SHA-256 | Owned / examined paths | Inspected SHA | Findings & Lead reconciliation |
-|---|---|---|---|---|---|---|
-| `agency-backend-architect` (Lead — Phase 1–2) | `c085e01a-2513-44e9-a8bb-d24f458631fe` | `D:/Lawyer/.agents/agents/agency-backend-architect.md` \| `e357ed74d54d358e903f14f2f2c4a79e77e9b71c59cfec3f1fd319b29cba14b4` | `D:/Lawyer/.agents/skills/engineering-backend-architect/SKILL.md` \| `05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf` (drift: none) | `prisma/schema.prisma`, `prisma/migrations/20261127000000_*`, `src/modules/finance/*`, `src/app/api/finance/**`, `tests/unit/finance-validation.test.ts`, `tests/integration/t13-finance-ledger.test.ts`, `tests/integration/migration-upgrade.test.ts` | `7c3d09b` -> working tree -> `aa54924` | Built T13 subledger schema, triggers, BigInt domain service, HTTP APIs, unit tests, PG integration (`T13-TC-01`..`T13-TC-06`), and T13 migration upgrade test. |
-| `agency-database-optimizer` (Support 1 — Read-only) | `78902a6d-71ea-4b9e-9110-3221223bc154` | `D:/Lawyer/.agents/agents/agency-database-optimizer.md` \| `e260d8bbc32bb73a232571b1fbddb452b680a83607b757be374a662c3d5d95be` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md` \| `bd5f5e6813c8931c1387689f6a4d6137e3385734d402f72bd0dfc4292f7ee068` (drift: none) | `prisma/schema.prisma`, `prisma/migrations/20261127000000_*`, `prisma/migrations/20261127010000_*`, `src/modules/finance/finance-service.ts`, `src/modules/finance/finance-errors.ts`, `src/modules/finance/receipt-allocator.ts`, `src/modules/matters/matter-service.ts` | `aa54924`, `3971bf4` & `11f576d` | On `aa54924`: `NO_BLOCKING_FINDINGS` (`0 P0`, `0 P1`, `2 [P2]`: `saveFeeAgreementDraft` vs `approveFeeAgreement` lock-order inversion + SQLSTATE `40P01` mapping; `trg_fee_agreement_approved_immutable` not guarding `status`/`approved_at`/`approved_by_id`). On `3971bf4`: **`P2_CLOSED_NO_FINDINGS`**. On `11f576d` (diff `3971bf4..11f576d`): **`CLOSURE_NO_FINDINGS`** (`unlinkMatterParty`, `getClientStatement`, `listFinanceOverview`). Support execution: `NOT RUN` (read-only audit). |
-| `agency-test-automation-engineer` (Support 2 — Read-only) | `2de4e9d0-0892-49f3-abca-17364a9ce901` | `D:/Lawyer/.agents/agents/agency-test-automation-engineer.md` \| `5ca889b023baa6774e3bc13d5e015cbf9f06fc2c2157c646d5231642c3d4bc8e` | `D:/Lawyer/.agents/skills/testing-test-automation-engineer/SKILL.md` \| `af5a9b7ef8ecedf45988ae39ee169050b036037466a4d7fc4bf476fad847cab4` (drift: none) | `tests/unit/finance-validation.test.ts`, `tests/integration/t13-finance-ledger.test.ts`, `tests/integration/migration-upgrade.test.ts`, `tests/e2e/t13-finance.spec.ts`, `tests/helpers/t13-ui-constants.ts`, `tests/helpers/t04-constants.ts`, `playwright.t13.config.ts`, `package.json`, `src/components/finance/finance-workspace.tsx`, `src/app/globals.css`, `src/app/(app)/finance/page.tsx`, `src/components/matters/matter-detail-client.tsx` | `aa54924`, `3971bf4` & `11f576d` | On `aa54924`: `0 P0`, `0 P1`, `2 [P2]` (client statement UI `عرض الكشف المفصل` not clicked in E2E; receipt reprint across 390/768/1440px and Tab focus traversal not checked in `T13-TC-07`). On `3971bf4`: **`P2_CLOSED_NO_FINDINGS`**. On `11f576d` (diff `3971bf4..11f576d`): **`CLOSURE_NO_FINDINGS`** (`T13-REVIEW-GUARDS`, `/finance?matterId=<missing>` `404`, open statement auto-refresh, print/CSS & UI state polish). Support execution: `NOT RUN` (read-only audit). |
-| `agency-backend-architect` (Lead Reconciler — P2 Closure) | `1689b32c-75e3-4568-a64a-0d9be9132fcd` | `D:/Lawyer/.agents/agents/agency-backend-architect.md` \| `e357ed74d54d358e903f14f2f2c4a79e77e9b71c59cfec3f1fd319b29cba14b4` | `D:/Lawyer/.agents/skills/engineering-backend-architect/SKILL.md` \| `05a2fd1cbc4e1c05147b3574fe4cad69a08e851a72d43a4591427df6bd061aaf` (drift: none) | `src/modules/finance/finance-service.ts`, `src/modules/finance/finance-errors.ts`, `prisma/migrations/20261127010000_t13_fee_agreement_status_guard/migration.sql`, `src/components/finance/finance-workspace.tsx`, `tests/unit/finance-validation.test.ts`, `tests/integration/t13-finance-ledger.test.ts`, `tests/e2e/t13-finance.spec.ts` | `aa54924` -> `3971bf4` | Resolved all 4 `[P2]` findings + `focus-visible:ring-2` styles in `3971bf4`; ran `prisma migrate deploy`, `git diff --check`, `lint`, `typecheck`, `finance-validation.test.ts` (`6/6`), `next build`, `t13-finance-ledger.test.ts` + `migration-upgrade.test.ts` (`33/33`), and `test:e2e:t13` (`5/5`), all exit `0`. |
+### Installed Profile & Skill Verification (SHA-256)
 
-## 4. Changed Files (`7c3d09b..11f576d`)
+| Agency Role | Definition Path | Definition SHA-256 | Profile Skill Path | Profile SHA-256 |
+| --- | --- | --- | --- | --- |
+| `agency-backend-architect` | `D:/Lawyer/.agents/agents/agency-backend-architect.md` | `E357ED74D54D358E903F14F2F2C4A79E77E9B71C59CFEC3F1FD319B29CBA14B4` | `D:/Lawyer/.agents/skills/engineering-backend-architect/SKILL.md` | `05A2FD1CBC4E1C05147B3574FE4CAD69A08E851A72D43A4591427DF6BD061AAF` |
+| `agency-database-optimizer` | `D:/Lawyer/.agents/agents/agency-database-optimizer.md` | `E260D8BBC32BB73A232571B1FBDDB452B680A83607B757BE374A662C3D5D95BE` | `D:/Lawyer/.agents/skills/engineering-database-optimizer/SKILL.md` | `BD5F5E6813C8931C1387689F6A4D6137E3385734D402F72BD0DFC4292F7EE068` |
+| `agency-application-security-engineer` | `D:/Lawyer/.agents/agents/agency-application-security-engineer.md` | `CEB1DAE321159422C0076688DC479D26451EC0EF1E8497186F5576A427B383D9` | `D:/Lawyer/.agents/skills/security-appsec-engineer/SKILL.md` | `77C29A754E6C25B97F189C06D8459B02FD29F4D8DE8602CA53740F4C92A1F259` |
+| `agency-frontend-developer` | `D:/Lawyer/.agents/agents/agency-frontend-developer.md` | `D893C2C1CD277F52595F4ABE77F8775B81A69B6D5E61CEE15061476F38943496` | `D:/Lawyer/.agents/skills/engineering-frontend-developer/SKILL.md` | `69D473C132831E0861BBF3CC50BB933C1DC231D74872B08731C3B453D79925F0` |
+| `agency-test-automation-engineer` | `D:/Lawyer/.agents/agents/agency-test-automation-engineer.md` | `5CA889B023BAA6774E3BC13D5E015CBF9F06FC2C2157C646D5231642C3D4BC8E` | `D:/Lawyer/.agents/skills/testing-test-automation-engineer/SKILL.md` | `AF5A9B7EF8ECEDF45988AE39EE169050B036037466A4D7FC4BF476FAD847CAB4` |
 
-- **Database & Migrations:** `prisma/schema.prisma`, `prisma/migrations/20261127000000_t13_balanced_ledger_fees_receipts/migration.sql`, `prisma/migrations/20261127010000_t13_fee_agreement_status_guard/migration.sql`
-- **Finance & Matter Modules:** `src/modules/finance/{finance-types.ts,finance-errors.ts,finance-http.ts,receipt-allocator.ts,finance-service.ts,index.ts}`, `src/modules/matters/matter-service.ts` (`unlinkMatterParty` financial pre-check)
-- **API Routes:** `src/app/api/finance/{route.ts,statement/route.ts,agreements/route.ts,agreements/[id]/approve/route.ts,transactions/route.ts,transactions/[id]/route.ts,receipts/[id]/route.ts}`
-- **UI, Print CSS & Navigation:** `src/app/(app)/finance/page.tsx` (clean `notFound()` on missing UUID `matterId`), `src/app/globals.css` (`@media print` shell suppression behind active modal), `src/components/finance/finance-workspace.tsx`, `src/app/(app)/matters/[id]/page.tsx`, `src/components/matters/matter-detail-client.tsx` (memoized `financeInitialOverview`), `src/components/desktop-sidebar.tsx`, `src/components/tablet-drawer.tsx`
-- **Tests & Tooling:** `tests/unit/finance-validation.test.ts`, `tests/integration/t13-finance-ledger.test.ts`, `tests/integration/migration-upgrade.test.ts`, `tests/e2e/t13-finance.spec.ts`, `tests/helpers/t13-ui-constants.ts`, `tests/helpers/t04-constants.ts`, `playwright.t13.config.ts`, `package.json`
+### Native Agency Sessions & Reconciliation
 
-## 5. Behavior & Acceptance Coverage (`T13-TC-01`..`T13-TC-07`)
+| Phase / Role | Native Conversation ID | Checkpoint Inspected / Produced | Owned Scope & Findings / Actions | Reconciliation / Checks Run |
+| --- | --- | --- | --- | --- |
+| Initial Build Lead (`agency-backend-architect`) | `c085e01a-2513-44e9-a8bb-d24f458631fe` | `7c3d09b` -> `aa54924` | Core schema, ledger posting, receipt allocation, API routes, initial UI & integration tests | Reconciled into `aa54924` |
+| Initial Support 1 (`agency-database-optimizer`) | `78902a6d-71ea-4b9e-9110-3221223bc154` | `aa54924` / `3971bf4` | DB schema, balanced triggers, composite FK & sequence locking audit | `aa54924` / `3971bf4` findings integrated |
+| Initial Support 2 (`agency-test-automation-engineer`) | `2de4e9d0-0892-49f3-abca-17364a9ce901` | `aa54924` / `3971bf4` | Unit, integration, E2E test rigor & assertion audit | `aa54924` / `3971bf4` findings integrated |
+| P2 Closure Lead (`agency-backend-architect`) | `1689b32c-75e3-4568-a64a-0d9be9132fcd` | `aa54924` -> `3971bf4` | Closed initial review items on `3971bf4` | Reconciled prior to audit expansion |
+| Microscopic Audit: Backend (`agency-backend-architect`) | `11945c6d-44e8-456a-8f17-1347753543a8` | `736a40d` (read-only) | Identified client demotion/unlink guard gap, read snapshot isolation, openCharges bound, Cairo year allocation, duplicate receipt upsert | Fixed in Phase 2 (`5b4a7383`); `NOT RUN` (read-only) |
+| Microscopic Audit: Database (`agency-database-optimizer`) | `52fb9392-4834-4bc4-9472-d33da2c683a0` | `736a40d` (read-only) | Identified missing `MoneyAccount` & `ReceiptSequence` immutability triggers, `BEFORE TRUNCATE` triggers, `FeeAgreement` status/cross-matter FK guards, `1:1` `feeCharge`, and hot indexes | Fixed in Phase 1 (`87acbaa2`); `NOT RUN` (read-only) |
+| Microscopic Audit: AppSec (`agency-application-security-engineer`) | `20557e06-7690-4d53-98cf-2bb14c8fc53f` | `736a40d` (read-only) | Identified 128 KB JSON body cap (`413`), `Sec-Fetch-Site` allowlist, CSP header on finance API, `NO_STORE_PATHS` for `/finance`, strict parser upper bound, `sanitize-return-to` `/finance` | Fixed in Phase 2 (`5b4a7383`); `NOT RUN` (read-only) |
+| Microscopic Audit: Frontend (`agency-frontend-developer`) | `3b732c74-4376-401d-8e3f-64841370f265` | `736a40d` (read-only) | Identified Bidi digit isolation (`<bdi dir="ltr">`), stale overview/statement/receipt race guards, locked-form indeterminate state & `useLeaveGuard`, modal focus return & print selector, `DRAFT` edit UI, responsive `allocation-amount-*` | Fixed in Phase 3 (`92f33952`); `NOT RUN` (read-only) |
+| Microscopic Audit: Tests/Submission (`agency-test-automation-engineer`) | `64e741f8-63ae-456e-89ca-f0e221c200cb` | `736a40d` (read-only) | Identified shared storage teardown regex risk, client/server parser constant divergence, missing `migration-upgrade.test.ts` T13 checks, `T13-TC-01..07` submission table drift, PR #23 SHA typo | Fixed in Phase 4 (`ac094a3a`) + report update; `NOT RUN` (read-only) |
+| Remediation Phase 1 Lead (`agency-database-optimizer`) | `87acbaa2-e9a6-49bb-8418-ffaab9b5072e` | `736a40d` -> `fa911ca` | Authored `prisma/migrations/20261128000000_t13_ledger_integrity_and_indexes/migration.sql` & `prisma/schema.prisma` | `prisma validate`, `prisma generate`, `prisma migrate deploy`, `prisma migrate status` (exit `0`) |
+| Remediation Phase 2 Lead (`agency-backend-architect`) | `5b4a7383-cd9f-449c-88ef-7b5f5284ce89` | `736a40d` -> `fa911ca` | Hardened `matter-service.ts`, `finance-types.ts`, `finance-http.ts`, `receipt-allocator.ts`, `finance-service.ts`, `next.config.ts`, `sanitize-return-to.ts`, `matters/[id]/page.tsx`, `transactions/[id]/route.ts` | Verified by coordinator lint/typecheck/unit/integration suite on `fa911ca` |
+| Remediation Phase 3 Lead (`agency-frontend-developer`) | `92f33952-9a2d-4dcf-9406-11e6f5802d0e` | `736a40d` -> `fa911ca` | Hardened `finance/page.tsx`, `productivity-ui-types.ts`, `globals.css`, `matter-detail-client.tsx`, `finance-workspace.tsx` | Verified by coordinator build & Playwright E2E on `fa911ca` |
+| Remediation Phase 4 Lead (`agency-test-automation-engineer`) | `ac094a3a-4c15-48d9-88c2-7894fdad1921` | `736a40d` -> `fa911ca` | Updated `playwright-storage-teardown.ts`, `t13-ui-constants.ts`, `finance-validation.test.ts`, `sanitize-return-to.test.ts`, `migration-upgrade.test.ts`, `t13-finance-ledger.test.ts`, `t13-finance.spec.ts` | Verified by coordinator full test suite on `fa911ca` |
+| Post-Fix Audit: Database (`agency-database-optimizer`) | `10941005-9bc4-40f7-94b9-845ff23852ee` | `fa911ca` (read-only) | Confirmed 24 migrations, 22 T13 triggers, 1:1 `feeCharge`, paired dimensions, cross-matter FKs, `TRUNCATE` blocks, & hot indexes | **`CLOSURE_NO_FINDINGS`** (`NOT RUN` — read-only) |
+| Post-Fix Audit: AppSec (`agency-application-security-engineer`) | `ea2a94db-bd48-4afa-a293-880621c9de30` | `fa911ca` (read-only) | Confirmed `0 [P0] / 0 [P1] / 0 [P2]`; flagged 1 non-blocking `[P3]` (missing `{ error: '...' }` on base `z.string()` / `z.union()` in `src/modules/finance/finance-types.ts` yields Zod `"Invalid input"` on omitted/wrong-type keys) | **1 `[P3]` non-blocking** (`NOT RUN` — read-only) |
+| Post-Fix Audit: Tests & UI (`agency-test-automation-engineer`) | `dc6a9a36-1e3f-4a84-9b17-f3b1e7fe1e34` | `fa911ca` (read-only) | Confirmed E2E/integration/unit isolation, storage regex scope, responsive + print checks, zero skipped/relaxed assertions | **`CLOSURE_NO_FINDINGS`** (`NOT RUN` — read-only) |
 
-| Case | Level | Coverage & Outcome |
-|---|---|---|
-| `T13-TC-01` | Unit + PG + HTTP + Browser | **PASS** — Draft `15,000` EGP fee agreement creates zero `MoneyTransaction`, zero `FeeCharge`, zero `MoneyLine`, and `0 ج.م.` balance; approval in 2 installments (`6,000` + `9,000`) posts one balanced `FEE_CHARGE` (`1,500,000` piastres `DEBIT FEE_RECEIVABLE` across 2 `FeeCharge` rows + `CREDIT FEE_BASIS`), leaving `15,000 ج.م.` due. |
-| `T13-TC-02` | PG + HTTP + Browser | **PASS** — Collecting `5,000` EGP (`500,000` piastres) against installment 1 yields balanced `FEE_PAYMENT` (`DEBIT CASH_CLEARING` / `CREDIT FEE_RECEIVABLE`), sequential administrative `Receipt` (`RCP-YYYY-NNNN` + `"إيصال تحصيل إداري — للاستخدام الداخلي بالمكتب وليس مستنداً ضريبياً."`), `5,000 ج.م.` collected, `10,000 ج.م.` remaining, and single-client statement reconciliation (`reconciled: true`). Reprinting returns the exact same `receiptNumber` without adding any transaction; concurrent `Promise.allSettled` collections serialize cleanly via `FOR UPDATE` without over-collecting. |
-| `T13-TC-03` | PG + Browser | **PASS** — HTTP/service idempotency replay returns original response without duplicate posting; mismatched payload returns `409 IDEMPOTENCY_PAYLOAD_MISMATCH`; browser lost-response simulation (`route.fetch()` + `route.abort('failed')`) recovers with frozen idempotency key (`retry-payment-button`) without double payment; audit failure inside transaction rolls back ledger, allocation, receipt, and sequence cleanly. |
-| `T13-TC-04` / `T13-TC-04b` | Unit + PG | **PASS** — Rejects zero/negative/float amounts, empty/unbalanced postings, excess payment over remaining fees without `CLIENT_ADVANCE`, cross-matter/cross-client allocations (`ScopeMismatchError`), `OFFICE_EXPENSE` (excluded by ADR 0004), and T14/T15 future kinds with zero writes; concurrent draft update vs approval (`T13-TC-04b`) avoids `40P01` via fixed `matter -> matter_party -> fee_agreement` locking and maps `40P01` -> `409 CONCURRENCY_CONFLICT`. |
-| `T13-TC-05` | PG + HTTP + Migration | **PASS** — Posted `MoneyTransaction`, `MoneyLine`, `MoneyAllocation`, `FeeCharge`, `Receipt`, and `APPROVED` `FeeAgreement` financial/status fields reject mutation via HTTP (`409 IMMUTABLE_POSTED_RECORD` / `DELETE`/`PATCH`), service guard, and PostgreSQL triggers (`trg_money_transaction_immutable`, `trg_money_line_immutable`, `trg_money_allocation_immutable`, `trg_fee_charge_immutable`, `trg_receipt_immutable`, `trg_fee_agreement_approved_immutable` + additive `20261127010000` guard); unbalanced inserts fail on commit (`DEFERRABLE INITIALLY DEFERRED`). `migration-upgrade.test.ts` (`28/28`) verifies clean T12->T13 upgrade with synthetic data preserved. |
-| `T13-TC-06` | HTTP + Browser | **PASS** — `MAINTAINER` lacks `/finance` link in desktop sidebar / tablet drawer and receives `403` on `/finance` and `/api/finance/**`; unauthenticated callers receive `401`; untrusted cross-origin mutations fail closed (`403`). |
-| `T13-TC-07` | Browser (`390`/`768`/`1440px`) | **PASS** — Verified `/finance` and `/matters/[id]` `الحسابات` tab across `1440x900`, `768x1024`, and `390x844`: Arabic-Indic numeral entry (`١٥٠٠٠`, `٥٠٠٠`), pre-save balance preview (`15,000` -> `5,000` -> `10,000 ج.م.`), client statement UI (`مطابق حسابياً مع القيود المرحلة`), keyboard `Tab` focus rings + `Escape` modal dismissal, receipt reprint across all 3 viewports, `200%` zoom reflow with zero horizontal overflow, touch targets >= 44px, and zero sensitive leakage in `localStorage`/`sessionStorage`/`IndexedDB`/`CacheStorage`. |
+## Changed Files (`7c3d09ba..HEAD`)
 
-## 6. Verification Results on Final Implementation SHA `11f576dc6dcddf44e6f5294ac075a7fd34263f17`
+All `38` implementation/test files below match `git diff --name-status 7c3d09ba28ff678e7f395ec3453d86732ab01dc5..fa911caa17f8895544acc7b3dfa6c6c79ea4de28`, plus `docs/reviews/T13-submission.md` updated in the final report-only attestation commit:
 
-All commands below ran in `D:/Lawyer/work/t13-gemini` AFTER the final code/test edit (`11f576d`):
+### Added (`24` implementation/test files + `1` submission report)
+- `docs/reviews/T13-submission.md`
+- `playwright.t13.config.ts`
+- `prisma/migrations/20261127000000_t13_balanced_ledger_fees_receipts/migration.sql`
+- `prisma/migrations/20261127010000_t13_fee_agreement_status_guard/migration.sql`
+- `prisma/migrations/20261128000000_t13_ledger_integrity_and_indexes/migration.sql`
+- `src/app/(app)/finance/page.tsx`
+- `src/app/api/finance/route.ts`
+- `src/app/api/finance/statement/route.ts`
+- `src/app/api/finance/agreements/route.ts`
+- `src/app/api/finance/agreements/[id]/approve/route.ts`
+- `src/app/api/finance/transactions/route.ts`
+- `src/app/api/finance/transactions/[id]/route.ts`
+- `src/app/api/finance/receipts/[id]/route.ts`
+- `src/components/finance/finance-workspace.tsx`
+- `src/modules/finance/finance-errors.ts`
+- `src/modules/finance/finance-http.ts`
+- `src/modules/finance/finance-service.ts`
+- `src/modules/finance/finance-types.ts`
+- `src/modules/finance/index.ts`
+- `src/modules/finance/receipt-allocator.ts`
+- `tests/e2e/t13-finance.spec.ts`
+- `tests/helpers/t13-ui-constants.ts`
+- `tests/integration/t13-finance-ledger.test.ts`
+- `tests/unit/finance-validation.test.ts`
 
-- `git diff --check`: **exit `0`**
-- `npm.cmd run lint`: **exit `0`**
-- `npm.cmd run typecheck`: **exit `0`**
-- `npm.cmd run test`: **exit `0`** — **`24/24` files passed, `373/373` unit tests passed** (`tests/unit/finance-validation.test.ts`: `6` tests)
-- `$env:NODE_ENV='production'; npm.cmd run build; Remove-Item Env:NODE_ENV`: **exit `0`** (`33/33` static pages + dynamic app/API routes compiled cleanly)
-- `npx.cmd vitest run --no-file-parallelism tests/integration`: **exit `0`** — **`39/39` files passed, `380/380` PG integration tests passed** (`649.99s`; `tests/integration/t13-finance-ledger.test.ts`: `6` tests including `T13-REVIEW-GUARDS`; `tests/integration/migration-upgrade.test.ts`: `28` tests)
-- `npm.cmd run test:e2e` (`1 worker`, `retries: 0`, all 11 configs): **exit `0`** — **`177/177` passed (`0` failed, `0` skipped)**:
-  - `playwright.config.ts` (`t03`): `28/28` passed (`1.3m`)
-  - `playwright.t04.config.ts` (`t04`): `46/46` passed (`1.2m`)
-  - `playwright.t05.config.ts` (`t05`): `14/14` passed (`1.0m`)
-  - `playwright.t06.config.ts` (`t06`): `28/28` passed (`1.8m`)
-  - `playwright.t07.config.ts` (`t07`): `16/16` passed (`1.4m`)
-  - `playwright.t08.config.ts` (`t08`): `10/10` passed (`1.1m`)
-  - `playwright.t09.config.ts` (`t09`): `10/10` passed (`1.1m`)
-  - `playwright.t10.config.ts` (`t10`): `8/8` passed (`43.8s`)
-  - `playwright.t11.config.ts` (`t11`): `6/6` passed (`51.6s`)
-  - `playwright.t12.config.ts` (`t12`): `6/6` passed (`1.1m`)
-  - `playwright.t13.config.ts` (`t13`): `5/5` passed (`44.0s`)
-- `Test-Path D:/Lawyer/work/t13-gemini/storage`: **`False`** (no stray workspace storage directory left behind).
-- *(Review fixes closed in `11f576d`: client-scoped pre-save balance preview (`totalEligibleDue`), `/finance?matterId=<missing>` `404`, modal `@media print` isolation, `unlinkMatterParty` financial pre-check (`ActiveObligationError`), auto-refresh of open `client-statement-summary`, memoized `financeInitialOverview` in `MatterDetailClient`, non-`CLIENT` rejection in `getClientStatement`, eliminated duplicate queries + Prisma pagination in `listFinanceOverview`, idempotency key rotation on `<500` agreement errors, and pure Arabic UI card text without internal planning tokens.)*
+### Modified (`14` existing files)
+- `next.config.ts` (`NO_STORE_PATHS` extended with `'/finance'` and `'/finance/:path*'`)
+- `package.json` (`test:e2e` includes `playwright.t13.config.ts` and `test:e2e:t13`)
+- `prisma/schema.prisma` (T13 finance models, 1:1 `MoneyLine.feeCharge`, constraints, indexes, `@default(now())` on `ReceiptSequence.updatedAt`)
+- `src/app/(app)/matters/[id]/page.tsx` (UUID-validated `id` for `returnTo` & initial `MatterFinanceSummary` SSR load)
+- `src/app/globals.css` (`body:has(#app-shell-modal-root > *) #app-shell-content { display: none !important; }` for `@media print`)
+- `src/components/desktop-sidebar.tsx` (shows Finance navigation only for allowed roles, excluding `MAINTAINER`)
+- `src/components/tablet-drawer.tsx` (shows Finance navigation only for allowed roles, excluding `MAINTAINER`)
+- `src/components/matters/matter-detail-client.tsx` (Finance tab + `focus-visible:ring-2` + `"إعادة المحاولة"` retry on SSR error)
+- `src/components/productivity/productivity-ui-types.ts` (`returnFocusRef` + skips `document.body` focus capture/restore in `useAccessibleModal`)
+- `src/lib/sanitize-return-to.ts` (`'/finance'` in `ALLOWED_EXACT_ROUTES`)
+- `src/modules/matters/matter-service.ts` (`assertNoClientFinancialObligations` on `CLIENT` demotion and party unlinking)
+- `tests/helpers/playwright-storage-teardown.ts` (tightened regex `/^(?:lawoffice-t\d+-e2e-)/`)
+- `tests/helpers/t04-constants.ts` (aligned nav item helpers/assertions)
+- `tests/integration/migration-upgrade.test.ts` (added T13 migration/trigger/index/SQL behavioral upgrade checks)
+- `tests/unit/sanitize-return-to.test.ts` (covers `'/finance'` & preserved query parameters)
 
-## 7. Security, Privacy, Migration & Rollback Notes
+## Acceptance Matrix (`T13-TC-01` .. `T13-TC-07` per `docs/tasks/T13.md`)
 
-- **Security & Privacy:** All `/api/finance/**` routes use `requireActor` with permission enforcement (`READ_FINANCE`/`WRITE_FINANCE`), fail closed on `401`/`403`/`UNAUTHENTICATED`/`MFA_REQUIRED`/`MAINTAINER`, validate same-origin state-changing requests (`assertTrustedOrigin`), redact sensitive tokens while preserving `receiptNumber` (`src/lib/audit.ts`), and persist nothing financial in browser storage. Synthetic test data only (`0` real client documents or credentials).
-- **Safe Schema/Migration Application:** Both migrations (`20261127000000_t13_balanced_ledger_fees_receipts` and additive `20261127010000_t13_fee_agreement_status_guard`) are append-only forward SQL migrations without modifying historical migrations (including `20261114000000_credential_version`). Production application uses standard `npx prisma migrate deploy` after pre-migration backup (`pg_dump` / `pg_basebackup`).
-- **Rollback:** Because financial ledger tables are append-only/immutable (`BEFORE UPDATE OR DELETE`), reverting code prior to live T13 traffic uses a compensating downward migration only in non-production or pre-launch environments; never run `prisma db push` or reset production databases.
+| TC ID | Acceptance Requirement (`docs/tasks/T13.md`) | Verified Test Cases & Coverage |
+| --- | --- | --- |
+| `T13-TC-01` | Draft fee agreement `15,000` EGP changes no balance; approve `6,000` + `9,000` creates balanced `1,500,000`-piastre obligation. | `tests/integration/t13-finance-ledger.test.ts` (`T13-TC-01..03`, `T13-REVIEW-GUARDS`) + `tests/e2e/t13-finance.spec.ts` (`T13-TC-01`, `T13-DRAFT-EDIT-AND-2CLIENT-EXCESS`) |
+| `T13-TC-02` | Record `5,000` EGP fee collection toward matching charge -> `10,000` EGP remaining due, balanced `MoneyLine` rows, `PaymentAllocation`, sequential `Receipt`, audit entry, Arabic confirmation, updated statement. | `tests/integration/t13-finance-ledger.test.ts` + `tests/e2e/t13-finance.spec.ts` (`T13-TC-02`) |
+| `T13-TC-03` | Retry with same `idempotencyKey` after committed post returns same transaction & receipt; same key with different payload rejects; reprint reuses same `receiptNumber` without new payment/number. | `tests/integration/t13-finance-ledger.test.ts` + `tests/e2e/t13-finance.spec.ts` (`T13-TC-03`) |
+| `T13-TC-04` | Concurrent `4,000` collections on `5,000` remaining -> only 1 succeeds (`1,000` remaining, 1 receipt) via scoped `fee_charge` lock; concurrent draft edit vs approval resolves cleanly with `CONCURRENCY_CONFLICT` / `ALREADY_POSTED` and zero deadlocks. | `tests/integration/t13-finance-ledger.test.ts` (`T13-TC-04`, `T13-TC-04b`) |
+| `T13-TC-05` | Negative validation: zero/negative/float amounts, mismatched debtor/matter, unbalanced/empty `lines`, excess overpayment without implicit advance, unimplemented `OFFICE_EXPENSE`, DB/HTTP `409` edit/delete rejection on posted ledger/approved/cancelled agreements/receipts. | `tests/unit/finance-validation.test.ts` (8 tests) + `tests/integration/t13-finance-ledger.test.ts` (`T13-TC-05`) |
+| `T13-TC-06` | Audit-log failure rolls back ledger, allocations, receipt, sequence & idempotency; unauthenticated/`MAINTAINER` requests receive `401`/`403`; Finance nav item hidden in both desktop sidebar (`1440px`) and tablet/mobile drawer (`768px`/`390px`). | `tests/integration/t13-finance-ledger.test.ts` (`T13-TC-06`, HTTP `413` & `Sec-Fetch-Site` checks) + `tests/e2e/t13-finance.spec.ts` (`T13-TC-06`, `T13-AUTH-REDIRECT`) |
+| `T13-TC-07` | UI verification: Arabic RTL matter Finance tab across `1440px`, `768px`, `390px`, `200%` text zoom, `Tab`/`Escape` focus management, `@media print` receipt view, and standalone `/finance` workspace; zero client-document/storage leaks. | `tests/e2e/t13-finance.spec.ts` (`T13-TC-01..03`, `T13-TC-06` `@responsive`, `T13-TC-07` `@responsive @a11y`, `T13-DRAFT-EDIT-AND-2CLIENT-EXCESS`) |
 
-## 8. Known Limitations / `NOT RUN` & Out-of-Scope Boundaries
+## Verification Commands & Observed Results (After Final Code Edit `fa911ca`)
 
-- **T14 Expenses & Client Advances (`1,200` expense part of `AC-12`, `AC-13` advances) (`NOT RUN` — Future Task T14):** Only `FEE_CHARGE` / `FEE_PAYMENT` are active in T13; S11 shows truthful T14 cards (`مصاريف القضايا` / `أموال الموكل (العُهد)`), and excess collections or unimplemented transaction kinds are rejected without writes.
-- **T15 Reversals, Refunds & Multi-Client Distribution (`NOT RUN` — Future Task T15):** Explicitly out of T13 scope; S11 displays posted records as immutable (`مرحّل ومغلق`) with `409 IMMUTABLE_POSTED_RECORD` on edit/delete attempts.
-- **T16 Official PDF/CSV Exports (`NOT RUN` — Future Task T16):** S11 provides browser print modal (`window.print()`) with administrative notice; server HTML-to-PDF rendering is deferred to T16.
-- **ADR 0003 Malware Scanner & T19 Backup/Restore Pipeline (`NOT RUN` — Deferred / T19):** Live ClamAV execution and full database+files+key restore drills were not executed inside T13.
-- **Unresolved Decisions:** Formal Codex independent review (`T13-review.md`) and owner merge authorization into `main` remain pending after Draft PR submission.
+All commands ran in `D:/Lawyer/work/t13-gemini` against commit `fa911caa17f8895544acc7b3dfa6c6c79ea4de28` with synthetic test data only:
+
+1. `git diff --check` -> **exit `0`** (no whitespace errors)
+2. `npx prisma validate && npx prisma generate` -> **exit `0`**
+3. `npx prisma migrate deploy` & `npx prisma migrate status` (against `lawoffice_test`) -> **exit `0`** (`24 migrations found in prisma/migrations`, database schema up to date)
+4. `npm.cmd run lint` -> **exit `0`**
+5. `npm.cmd run typecheck` -> **exit `0`**
+6. `npm.cmd run test` -> **exit `0`**: **`24/24` files passed, `377/377` unit tests passed** (`finance-validation.test.ts`: `8/8`, `sanitize-return-to.test.ts`: `32/32`)
+7. `$env:NODE_ENV='production'; npm.cmd run build` -> **exit `0`**: Next.js production build succeeded across **`33`** routes (`/finance` dynamic `ƒ`)
+8. `npx.cmd vitest run --no-file-parallelism tests/integration` -> **exit `0`**: **`39/39` files passed, `383/383` real PostgreSQL integration tests passed** (`468.76s`; `migration-upgrade.test.ts`: `28/28`, `t13-finance-ledger.test.ts`: `9/9`)
+9. `npm.cmd run test:e2e` -> **exit `0`**: **`11/11` Playwright configs passed, `181/181` E2E tests passed** (`t03`: `28/28` `1.0m`, `t04`: `46/46` `56.0s`, `t05`: `14/14` `47.6s`, `t06`: `28/28` `1.4m`, `t07`: `16/16` `1.1m`, `t08`: `10/10` `49.5s`, `t09`: `10/10` `53.8s`, `t10`: `8/8` `36.3s`, `t11`: `6/6` `40.3s`, `t12`: `6/6` `52.9s`, `t13`: `9/9` `42.6s`)
+10. `Test-Path D:/Lawyer/work/t13-gemini/storage` -> **`False`** (zero leaked E2E storage directories after suite teardown)
+
+## Manual Demo Steps and Observations
+
+- Verified interactively and via automated Playwright runs (`playwright.t13.config.ts`) in Arabic RTL (`dir="rtl"`, Cairo date/time, `<bdi dir="ltr">` isolated numeric figures):
+  - Created and edited a `DRAFT` fee agreement from the matter Finance tab and standalone `/finance` selector, confirming summary totals remain `0.00 ج.م` until explicit approval.
+  - Approved a multi-client fee agreement (`6,000` + `9,000` EGP = `15,000` EGP) and recorded a `5,000` EGP collection with live client balance updates (`10,000` EGP remaining) and Arabic receipt preview/print rendering (`@media print` hides shell chrome and renders only `#app-shell-modal-root`).
+  - Reprinted the issued receipt, confirming `receiptNumber` permanence and zero duplicate ledger transactions.
+  - Verified `MAINTAINER` sees no Finance nav link in either desktop sidebar or mobile/tablet drawer and receives HTTP `403` on finance endpoints.
+
+## Screenshots / Sample PDF Paths
+
+- Automated Playwright runs capture screenshot attachments into ephemeral, gitignored `test-results/t13/` via `testInfo.attach` on `@responsive` / `@a11y` / print tests (`T13-TC-06`, `T13-TC-07`). No screenshots or real client PDFs are committed to Git.
+- Sample PDF binary generation: `NOT RUN` (out of scope for T13; T13 delivers HTML/CSS `@media print` receipts inside the printable modal portal, while Playwright PDF binary export belongs to T16/later document templates).
+
+## Schema / Data Migrations
+
+- `prisma/migrations/20261127000000_t13_balanced_ledger_fees_receipts/migration.sql` — Core T13 models (`FeeAgreement`, `FeeCharge`, `MoneyAccount`, `MoneyTransaction`, `MoneyLine`, `PaymentAllocation`, `Receipt`, `ReceiptSequence`), composite unique/FK constraints, balanced ledger `DEFERRABLE` trigger, and immutability triggers.
+- `prisma/migrations/20261127010000_t13_fee_agreement_status_guard/migration.sql` — Prevents mutating approved fee agreements and blocks non-`DRAFT` activation shortcuts.
+- `prisma/migrations/20261128000000_t13_ledger_integrity_and_indexes/migration.sql` — Hardens ledger immutability & multi-layer DB invariants:
+  - `trg_money_account_immutable` & `trg_receipt_sequence_immutable` (rejects `UPDATE`/`DELETE` on immutable account identity and monotonic sequence history).
+  - `trg_finance_table_no_truncate()` across all 8 T13 finance tables (`BEFORE TRUNCATE`).
+  - Paired dimension check (`money_line_dimensions_paired_check`), cross-matter/client integrity triggers (`trg_money_account_integrity`, `trg_money_line_integrity`, `trg_fee_agreement_integrity`, `trg_fee_charge_integrity`), and 1:1 `MoneyLine.feeCharge`.
+  - Recreated `trg_money_line_balanced` (`AFTER INSERT OR UPDATE OR DELETE DEFERRABLE INITIALLY DEFERRED`).
+  - `fee_agreement` 3-state & `CANCELLED` immutability triggers, `ON DELETE RESTRICT` on `money_transaction_idempotency_record_id_fkey`, receipt format & year checks, and 6 hot query/FK indexes.
+- Migration upgrade path verified cleanly in `tests/integration/migration-upgrade.test.ts` (all `24` migrations from empty schema + `22` T13 triggers + `9` T13 indexes).
+
+## Security & Privacy Effects
+
+- **Origin & CSRF / Request Guards** (`src/modules/finance/finance-http.ts`): `verifyFinanceReadOrigin` and `verifyFinanceMutationOrigin` enforce same-origin + `Sec-Fetch-Site` allowlist (`same-origin` / `none`), bounded `readFinanceJsonBody` enforces a `128 KB` limit returning HTTP `413` (`PAYLOAD_TOO_LARGE`), and `FINANCE_NO_STORE_HEADERS` emits `Cache-Control: no-store` plus strict CSP (`default-src 'none'`).
+- **Route & Navigation Hardening**: `next.config.ts` adds `'/finance'` and `'/finance/:path*'` to `NO_STORE_PATHS`; `src/lib/sanitize-return-to.ts` whitelists `'/finance'` with safe parameter validation; `src/app/(app)/finance/page.tsx` and `src/app/(app)/matters/[id]/page.tsx` validate UUID parameters before passing `returnTo` or rendering.
+- **Authorization & Domain Guards**: Finance routes allow `OWNER`, `LAWYER`, and `SECRETARY` (denying `MAINTAINER` and unauthenticated users with `403`/`401`), preserve `billingEnabled` advisory-only until T15c, and `matter-service.ts` (`assertNoClientFinancialObligations`) blocks unlinking or demoting a `CLIENT` who holds active `FeeAgreement`s, `FeeCharge`s, `PaymentAllocation`s, `Receipt`s, or `MoneyLine`s.
+- **AppSec Post-Fix Confirmation (`ea2a94db`)**: `0 [P0] / 0 [P1] / 0 [P2]`; 1 non-blocking `[P3]` disclosed below.
+
+## Rollback / Recovery Notes
+
+- Because PR #25 is unmerged and T13 tables do not hold production client records, rollback before merge closes PR #25 and reverts branch `feature/t13-fees-collections`.
+- Once T13 migrations are applied to an environment, preserve additive schema integrity or restore from coordinated PostgreSQL pre-upgrade dump/checkpoint rather than hand-dropping ledger triggers (`BEFORE TRUNCATE` and immutability triggers enforce audit preservation).
+
+## Known Limitations / `NOT RUN` Checks
+
+1. **Remaining Non-Blocking `[P3]` Finding (AppSec `ea2a94db`)**: In `src/modules/finance/finance-types.ts`, base `z.string()` / `z.union()` primitives prior to `.uuid()` / union branches omit `{ error: '...' }`, so missing keys or non-string/wrong-type JSON values return Zod 4's English default `"Invalid input"` instead of an Arabic validation message. Valid types, empty strings, bad UUIDs, invalid amounts, and business rules all return Arabic messages. Kept unedited on `fa911ca` so the full `377` unit + `383` PG + `181` E2E verification and 3 post-fix audits remain anchored to an unchanged commit.
+2. **Standalone `/finance` Responsive Matrix**: The `390px` / `768px` / `1440px` + `200%` zoom + `@media print` responsive E2E assertions (`T13-TC-06`, `T13-TC-07`) ran on the Matter Finance tab (`/matters/[id]`) and `MAINTAINER` navigation drawer, while standalone `/finance` OWNER workflow E2E tests (`T13-TC-01..03`, `T13-AUTH-REDIRECT`, `T13-DRAFT-EDIT-AND-2CLIENT-EXCESS`) executed at desktop `1440px`. Both screens render the shared `FinanceWorkspace` component.
+3. **Out-of-Scope / Later-Task Items (`NOT RUN`)**: Reimbursable expenses (`T14`), client advances & retainers (`T15a`), corrections/reversals/refunds (`T15b`), office billing-enabled gating (`T15c`), Playwright binary PDF rendering & ClamAV attachment scanning (`T16+`), and full production backup/restore drills (`T19`).
+4. **GitHub Actions CI**: Triggered upon pushing this report-only update commit; final remote workflow status reported with the push verification.
