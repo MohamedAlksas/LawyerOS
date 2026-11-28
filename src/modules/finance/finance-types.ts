@@ -329,7 +329,9 @@ function tryParsePositivePiastresToString(value: unknown): string | null {
 }
 
 export const positivePiastresSchema = z
-  .union([z.string(), z.number(), z.bigint()])
+  .union([z.string(), z.number(), z.bigint()], {
+    error: 'المبلغ بالقروش يجب أن يكون رقماً صحيحاً موجباً أكبر من صفر بدون كسور.',
+  })
   .transform((val, ctx) => {
     const parsed = tryParsePositivePiastresToString(val);
     if (!parsed) {
@@ -343,14 +345,14 @@ export const positivePiastresSchema = z
   });
 
 const strictDateSchema = z
-  .string()
+  .string({ error: 'التاريخ مطلوب بصيغة YYYY-MM-DD.' })
   .trim()
   .refine((val) => validateStrictCalendarDate(val), {
     message: 'التاريخ غير صالح (يجب أن يكون بصيغة YYYY-MM-DD وتاريخ تقويمي صحيح).',
   });
 
 const optionalDateSchema = z
-  .string()
+  .string({ error: 'التاريخ يجب أن يكون نصاً بصيغة YYYY-MM-DD.' })
   .trim()
   .optional()
   .nullable()
@@ -367,14 +369,21 @@ const nonEmptyIdempotencyKeySchema = z
 
 export const saveFeeAgreementDraftSchema = z
   .object({
-    feeAgreementId: z.string().uuid('معرف اتفاق الأتعاب غير صالح.').optional(),
+    feeAgreementId: z
+      .string({ error: 'معرف اتفاق الأتعاب غير صالح.' })
+      .uuid('معرف اتفاق الأتعاب غير صالح.')
+      .optional(),
     expectedVersion: z
       .number({ error: 'رقم الإصدار المتوقع غير صالح.' })
       .int('رقم الإصدار المتوقع يجب أن يكون رقماً صحيحاً.')
       .min(1, 'رقم الإصدار غير صالح.')
       .optional(),
-    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
-    clientMatterPartyId: z.string().uuid('معرف الموكل بالملف غير صالح.'),
+    matterId: z
+      .string({ error: 'معرف ملف القضية مطلوب.' })
+      .uuid('معرف ملف القضية غير صالح.'),
+    clientMatterPartyId: z
+      .string({ error: 'معرف الموكل بالملف مطلوب.' })
+      .uuid('معرف الموكل بالملف غير صالح.'),
     description: z
       .string({ error: 'وصف اتفاق الأتعاب مطلوب.' })
       .trim()
@@ -385,7 +394,11 @@ export const saveFeeAgreementDraftSchema = z
     chargingMethod: z.nativeEnum(FeeChargingMethod, {
       error: 'طريقة احتساب الأتعاب غير صالحة.',
     }),
-    agreementDocumentId: z.string().uuid('معرف المستند غير صالح.').optional().nullable(),
+    agreementDocumentId: z
+      .string({ error: 'معرف المستند غير صالح.' })
+      .uuid('معرف المستند غير صالح.')
+      .optional()
+      .nullable(),
     notes: z
       .string({ error: 'الملاحظات غير صالحة.' })
       .trim()
@@ -395,6 +408,7 @@ export const saveFeeAgreementDraftSchema = z
       .transform((v) => (v === '' || v === null || v === undefined ? null : v)),
     idempotencyKey: nonEmptyIdempotencyKeySchema,
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (data.feeAgreementId && data.expectedVersion === undefined) {
       ctx.addIssue({
@@ -405,55 +419,75 @@ export const saveFeeAgreementDraftSchema = z
     }
   });
 
-export const feeInstallmentInputSchema = z.object({
-  description: z
-    .string({ error: 'وصف القسط مطلوب.' })
-    .trim()
-    .min(1, 'وصف القسط مطلوب.')
-    .max(300, 'وصف القسط لا يجب أن يتجاوز 300 حرف.'),
-  dueDate: optionalDateSchema,
-  amountPiastres: positivePiastresSchema,
-});
+export const feeInstallmentInputSchema = z
+  .object({
+    description: z
+      .string({ error: 'وصف القسط مطلوب.' })
+      .trim()
+      .min(1, 'وصف القسط مطلوب.')
+      .max(300, 'وصف القسط لا يجب أن يتجاوز 300 حرف.'),
+    dueDate: optionalDateSchema,
+    amountPiastres: positivePiastresSchema,
+  })
+  .strict();
 
-export const approveFeeAgreementSchema = z.object({
-  feeAgreementId: z.string().uuid('معرف اتفاق الأتعاب غير صالح.'),
-  expectedVersion: z
-    .number({ error: 'رقم الإصدار المتوقع غير صالح.' })
-    .int('رقم الإصدار المتوقع يجب أن يكون رقماً صحيحاً.')
-    .min(1, 'رقم الإصدار المتوقع غير صالح.'),
-  transactionDate: optionalDateSchema,
-  installments: z
-    .array(feeInstallmentInputSchema, { error: 'قائمة الأقساط غير صالحة.' })
-    .max(100, 'عدد الأقساط كبير جداً.')
-    .optional(),
-  idempotencyKey: nonEmptyIdempotencyKeySchema,
-});
+export const approveFeeAgreementSchema = z
+  .object({
+    feeAgreementId: z
+      .string({ error: 'معرف اتفاق الأتعاب مطلوب.' })
+      .uuid('معرف اتفاق الأتعاب غير صالح.'),
+    expectedVersion: z
+      .number({ error: 'رقم الإصدار المتوقع غير صالح.' })
+      .int('رقم الإصدار المتوقع يجب أن يكون رقماً صحيحاً.')
+      .min(1, 'رقم الإصدار المتوقع غير صالح.'),
+    transactionDate: optionalDateSchema,
+    installments: z
+      .array(feeInstallmentInputSchema, { error: 'قائمة الأقساط غير صالحة.' })
+      .max(100, 'عدد الأقساط كبير جداً.')
+      .optional(),
+    idempotencyKey: nonEmptyIdempotencyKeySchema,
+  })
+  .strict();
 
-export const feeAllocationInputSchema = z.object({
-  feeChargeId: z.string().uuid('معرف القسط أو البند المستحق غير صالح.'),
-  amountPiastres: positivePiastresSchema,
-});
+export const feeAllocationInputSchema = z
+  .object({
+    feeChargeId: z
+      .string({ error: 'معرف القسط أو البند المستحق مطلوب.' })
+      .uuid('معرف القسط أو البند المستحق غير صالح.'),
+    amountPiastres: positivePiastresSchema,
+  })
+  .strict();
 
-export const explicitLedgerLineInputSchema = z.object({
-  accountType: z
-    .string({ error: 'نوع الحساب غير صالح.' })
-    .trim()
-    .min(1, 'نوع الحساب لا يمكن أن يكون فارغاً.')
-    .optional(),
-  side: z.nativeEnum(MoneyLineSide, {
-    error: 'اتجاه القيد المالي غير صالح.',
-  }),
-  amountPiastres: positivePiastresSchema,
-});
+export const explicitLedgerLineInputSchema = z
+  .object({
+    accountType: z
+      .string({ error: 'نوع الحساب غير صالح.' })
+      .trim()
+      .min(1, 'نوع الحساب لا يمكن أن يكون فارغاً.')
+      .optional(),
+    side: z.nativeEnum(MoneyLineSide, {
+      error: 'اتجاه القيد المالي غير صالح.',
+    }),
+    amountPiastres: positivePiastresSchema,
+  })
+  .strict();
 
 export const postTransactionSchema = z
   .object({
     kind: z.literal('FEE_PAYMENT', {
       error: 'نوع الحركة المالية غير مدعوم في هذه المرحلة.',
     }),
-    matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
-    clientMatterPartyId: z.string().uuid('معرف الموكل المسؤول غير صالح.'),
-    payerPartyId: z.string().uuid('معرف الدافع غير صالح.').optional().nullable(),
+    matterId: z
+      .string({ error: 'معرف ملف القضية مطلوب.' })
+      .uuid('معرف ملف القضية غير صالح.'),
+    clientMatterPartyId: z
+      .string({ error: 'معرف الموكل المسؤول مطلوب.' })
+      .uuid('معرف الموكل المسؤول غير صالح.'),
+    payerPartyId: z
+      .string({ error: 'معرف الدافع غير صالح.' })
+      .uuid('معرف الدافع غير صالح.')
+      .optional()
+      .nullable(),
     transactionDate: strictDateSchema,
     paymentMethod: z.nativeEnum(PaymentMethod, {
       error: 'طريقة السداد غير صالحة.',
@@ -481,6 +515,7 @@ export const postTransactionSchema = z
       .optional(),
     idempotencyKey: nonEmptyIdempotencyKeySchema,
   })
+  .strict()
   .superRefine((data, ctx) => {
     const seenCharges = new Set<string>();
     let allocSum = 0n;
@@ -533,10 +568,20 @@ export const postTransactionSchema = z
 
 export const getClientStatementSchema = z
   .object({
-    matterId: z.string().uuid('معرف ملف القضية غير صالح.').optional(),
-    partyId: z.string().uuid('معرف الموكل غير صالح.').optional(),
-    clientMatterPartyId: z.string().uuid('معرف ارتباط الموكل بالملف غير صالح.').optional(),
+    matterId: z
+      .string({ error: 'معرف ملف القضية غير صالح.' })
+      .uuid('معرف ملف القضية غير صالح.')
+      .optional(),
+    partyId: z
+      .string({ error: 'معرف الموكل غير صالح.' })
+      .uuid('معرف الموكل غير صالح.')
+      .optional(),
+    clientMatterPartyId: z
+      .string({ error: 'معرف ارتباط الموكل بالملف غير صالح.' })
+      .uuid('معرف ارتباط الموكل بالملف غير صالح.')
+      .optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (!data.matterId && !data.partyId && !data.clientMatterPartyId) {
       ctx.addIssue({
@@ -546,26 +591,31 @@ export const getClientStatementSchema = z
     }
   });
 
-export const listFinanceOverviewSchema = z.object({
-  matterId: z.string().uuid('معرف ملف القضية غير صالح.').optional(),
-  q: z
-    .string({ error: 'نص البحث غير صالح.' })
-    .trim()
-    .max(120, 'نص البحث لا يجب أن يتجاوز 120 حرفاً.')
-    .optional(),
-  page: z
-    .number({ error: 'رقم الصفحة غير صالح.' })
-    .int('رقم الصفحة يجب أن يكون رقماً صحيحاً.')
-    .min(1, 'رقم الصفحة يجب أن لا يقل عن 1.')
-    .max(MAX_FINANCE_PAGE, `رقم الصفحة لا يجب أن يتجاوز ${MAX_FINANCE_PAGE}.`)
-    .default(1),
-  limit: z
-    .number({ error: 'حد النتائج غير صالح.' })
-    .int('حد النتائج يجب أن يكون رقماً صحيحاً.')
-    .min(1, 'حد النتائج يجب أن لا يقل عن 1.')
-    .max(MAX_FINANCE_LIMIT, `حد النتائج لا يجب أن يتجاوز ${MAX_FINANCE_LIMIT}.`)
-    .default(20),
-});
+export const listFinanceOverviewSchema = z
+  .object({
+    matterId: z
+      .string({ error: 'معرف ملف القضية غير صالح.' })
+      .uuid('معرف ملف القضية غير صالح.')
+      .optional(),
+    q: z
+      .string({ error: 'نص البحث غير صالح.' })
+      .trim()
+      .max(120, 'نص البحث لا يجب أن يتجاوز 120 حرفاً.')
+      .optional(),
+    page: z
+      .number({ error: 'رقم الصفحة غير صالح.' })
+      .int('رقم الصفحة يجب أن يكون رقماً صحيحاً.')
+      .min(1, 'رقم الصفحة يجب أن لا يقل عن 1.')
+      .max(MAX_FINANCE_PAGE, `رقم الصفحة لا يجب أن يتجاوز ${MAX_FINANCE_PAGE}.`)
+      .default(1),
+    limit: z
+      .number({ error: 'حد النتائج غير صالح.' })
+      .int('حد النتائج يجب أن يكون رقماً صحيحاً.')
+      .min(1, 'حد النتائج يجب أن لا يقل عن 1.')
+      .max(MAX_FINANCE_LIMIT, `حد النتائج لا يجب أن يتجاوز ${MAX_FINANCE_LIMIT}.`)
+      .default(20),
+  })
+  .strict();
 
 export type SaveFeeAgreementDraftInput = z.input<typeof saveFeeAgreementDraftSchema>;
 export type ApproveFeeAgreementInput = z.input<typeof approveFeeAgreementSchema>;

@@ -200,6 +200,7 @@ export function FinanceWorkspace({
   const [draftMethod, setDraftMethod] = useState<FeeChargingMethod>('INSTALLMENTS');
   const [draftNotes, setDraftNotes] = useState('');
   const [draftIdempotencyKey, setDraftIdempotencyKey] = useState(() => createClientIdempotencyKey());
+  const [frozenDraftPayload, setFrozenDraftPayload] = useState<Record<string, unknown> | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   // Approve agreement state
@@ -207,6 +208,13 @@ export function FinanceWorkspace({
   const [approveDate, setApproveDate] = useState(defaultDate);
   const [approveInstallments, setApproveInstallments] = useState<DraftInstallmentRow[]>([]);
   const [approveIdempotencyKey, setApproveIdempotencyKey] = useState(() => createClientIdempotencyKey());
+  const [frozenApprovePayload, setFrozenApprovePayload] = useState<{
+    feeAgreementId: string;
+    expectedVersion: number;
+    transactionDate: string;
+    installments: Array<{ description: string; dueDate: string | null; amountPiastres: string }>;
+    idempotencyKey: string;
+  } | null>(null);
   const [isApproving, setIsApproving] = useState(false);
 
   // Collect fee payment state
@@ -261,12 +269,19 @@ export function FinanceWorkspace({
       payReference.trim() ||
       payDescription.trim() ||
       Object.values(chargeAllocations).some((v) => v.trim() !== '') ||
-      frozenPaymentPayload !== null
+      frozenPaymentPayload !== null ||
+      frozenDraftPayload !== null ||
+      frozenApprovePayload !== null
   );
 
   useLeaveGuard(
     hasUnsavedInput,
-    isPostingPayment || isApproving || isSavingDraft || Boolean(frozenPaymentPayload)
+    isPostingPayment ||
+      isApproving ||
+      isSavingDraft ||
+      Boolean(frozenPaymentPayload) ||
+      Boolean(frozenDraftPayload) ||
+      Boolean(frozenApprovePayload)
   );
 
   useAccessibleModal({
@@ -327,25 +342,32 @@ export function FinanceWorkspace({
       }
       if (activeStatementClientId) {
         const stmtGen = ++statementGenRef.current;
-        const stmtRes = await fetch(
-          `/api/finance/statement?clientMatterPartyId=${encodeURIComponent(activeStatementClientId)}`,
-          { cache: 'no-store' }
-        );
-        const stmtJson = await stmtRes.json().catch(() => null);
-        if (gen !== overviewGenRef.current || stmtGen !== statementGenRef.current) return;
+        setIsLoadingStatement(true);
+        try {
+          const stmtRes = await fetch(
+            `/api/finance/statement?clientMatterPartyId=${encodeURIComponent(activeStatementClientId)}`,
+            { cache: 'no-store' }
+          );
+          const stmtJson = await stmtRes.json().catch(() => null);
+          if (gen !== overviewGenRef.current || stmtGen !== statementGenRef.current) return;
 
-        if (isAuthErrorResponse(stmtRes.status, stmtJson?.code)) {
-          setSessionExpired(true);
-          setLoadedStatement(null);
-          window.dispatchEvent(new Event('lawoffice:recheck-session'));
-          setActionError('انتهت الجلسة أثناء تحديث كشف الحساب. يرجى تسجيل الدخول في نافذة جديدة.');
-          return;
-        }
-        if (stmtRes.ok && stmtJson?.success) {
-          setLoadedStatement(stmtJson.data as ClientStatementDTO);
-        } else {
-          setLoadedStatement(null);
-          setActionError(stmtJson?.error || 'تعذر تحديث كشف حساب الموكل.');
+          if (isAuthErrorResponse(stmtRes.status, stmtJson?.code)) {
+            setSessionExpired(true);
+            setLoadedStatement(null);
+            window.dispatchEvent(new Event('lawoffice:recheck-session'));
+            setActionError('انتهت الجلسة أثناء تحديث كشف الحساب. يرجى تسجيل الدخول في نافذة جديدة.');
+            return;
+          }
+          if (stmtRes.ok && stmtJson?.success) {
+            setLoadedStatement(stmtJson.data as ClientStatementDTO);
+          } else {
+            setLoadedStatement(null);
+            setActionError(stmtJson?.error || 'تعذر تحديث كشف حساب الموكل.');
+          }
+        } finally {
+          if (stmtGen === statementGenRef.current) {
+            setIsLoadingStatement(false);
+          }
         }
       }
     } catch {
@@ -433,6 +455,7 @@ export function FinanceWorkspace({
     setDraftTotalEgp('');
     setDraftDate(getCairoTodayDateString());
     setDraftNotes('');
+    setFrozenDraftPayload(null);
     setDraftIdempotencyKey(createClientIdempotencyKey());
   };
 
@@ -446,6 +469,7 @@ export function FinanceWorkspace({
     setDraftDate(ag.agreementDate);
     setDraftMethod(ag.chargingMethod);
     setDraftNotes(ag.notes || '');
+    setFrozenDraftPayload(null);
     setDraftIdempotencyKey(createClientIdempotencyKey());
     setShowDraftForm(true);
     setFieldErrors({});
@@ -453,9 +477,73 @@ export function FinanceWorkspace({
     setActionNotice(null);
   };
 
+  const submitDraftRequest = async (payload: Record<string, unknown>) => {
+    setIsSavingDraft(true);
+    setActionError(null);
+    setActionNotice(null);
+    setFieldErrors({});
+    try {
+      const res = await fetch('/api/finance/agreements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => null);
+      if (isAuthErrorResponse(res.status, json?.code)) {
+        setSessionExpired(true);
+        setFrozenDraftPayload(payload);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        setActionError('انتهت الجلسة. افتح صفحة تسجيل الدخول وأعد المحاولة دون فقدان البيانات.');
+        return;
+      }
+      if (!res.ok || !json?.success) {
+        if (res.status >= 500 || isUncertainMutationOutcome(json?.code)) {
+          setFrozenDraftPayload(payload);
+        } else {
+          setFrozenDraftPayload(null);
+          setDraftIdempotencyKey(createClientIdempotencyKey());
+          const mappedErrors: Record<string, string> = {};
+          const srvErrors = json?.fieldErrors as Record<string, string> | undefined;
+          if (srvErrors) {
+            if (srvErrors.matterId) mappedErrors['draft-matter-select'] = srvErrors.matterId;
+            if (srvErrors.clientMatterPartyId) mappedErrors['draft-client-select'] = srvErrors.clientMatterPartyId;
+            if (srvErrors.description) mappedErrors['draft-description-input'] = srvErrors.description;
+            if (srvErrors.totalAmountPiastres) mappedErrors['draft-total-egp-input'] = srvErrors.totalAmountPiastres;
+            if (srvErrors.agreementDate) mappedErrors['draft-date-input'] = srvErrors.agreementDate;
+            if (srvErrors.chargingMethod) mappedErrors['draft-method-select'] = srvErrors.chargingMethod;
+            if (srvErrors.notes) mappedErrors['draft-notes-input'] = srvErrors.notes;
+          }
+          setFieldErrors(mappedErrors);
+          focusFirstErrorTarget(mappedErrors);
+        }
+        setActionError(json?.error || 'تعذر حفظ مسودة اتفاق الأتعاب.');
+        return;
+      }
+      setSessionExpired(false);
+      setFrozenDraftPayload(null);
+      setActionNotice(
+        typeof payload.feeAgreementId === 'string'
+          ? 'تم تحديث مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
+          : 'تم حفظ مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
+      );
+      resetDraftFormState();
+      await refreshOverview(selectedMatterId);
+      onDataChanged?.();
+    } catch {
+      setFrozenDraftPayload(payload);
+      setActionError('انقطع الاتصال أثناء حفظ مسودة الاتفاق. أعد المحاولة بنفس البيانات دون تكرار.');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const handleSaveDraft = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canWriteFinance || effectiveReadOnly || isSavingDraft) return;
+    if (frozenDraftPayload) {
+      await submitDraftRequest(frozenDraftPayload);
+      return;
+    }
     setActionError(null);
     setActionNotice(null);
     setFieldErrors({});
@@ -484,74 +572,30 @@ export function FinanceWorkspace({
       return;
     }
 
-    setIsSavingDraft(true);
-    try {
-      const res = await fetch('/api/finance/agreements', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(editingAgreementId !== null && editingAgreementVersion !== null
-            ? {
-                feeAgreementId: editingAgreementId,
-                expectedVersion: editingAgreementVersion,
-              }
-            : {}),
-          matterId: draftMatterId,
-          clientMatterPartyId: draftClientId,
-          description: draftDescription.trim(),
-          totalAmountPiastres: parsedTotal.toString(),
-          agreementDate: draftDate,
-          chargingMethod: draftMethod,
-          notes: draftNotes.trim() || null,
-          idempotencyKey: draftIdempotencyKey,
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (isAuthErrorResponse(res.status, json?.code)) {
-        setSessionExpired(true);
-        window.dispatchEvent(new Event('lawoffice:recheck-session'));
-        setActionError('انتهت الجلسة. افتح صفحة تسجيل الدخول وأعد المحاولة دون فقدان البيانات.');
-        return;
-      }
-      if (!res.ok || !json?.success) {
-        if (res.status < 500 && !isUncertainMutationOutcome(json?.code)) {
-          setDraftIdempotencyKey(createClientIdempotencyKey());
-        }
-        const mappedErrors: Record<string, string> = {};
-        const srvErrors = json?.fieldErrors as Record<string, string> | undefined;
-        if (srvErrors) {
-          if (srvErrors.matterId) mappedErrors['draft-matter-select'] = srvErrors.matterId;
-          if (srvErrors.clientMatterPartyId) mappedErrors['draft-client-select'] = srvErrors.clientMatterPartyId;
-          if (srvErrors.description) mappedErrors['draft-description-input'] = srvErrors.description;
-          if (srvErrors.totalAmountPiastres) mappedErrors['draft-total-egp-input'] = srvErrors.totalAmountPiastres;
-          if (srvErrors.agreementDate) mappedErrors['draft-date-input'] = srvErrors.agreementDate;
-          if (srvErrors.chargingMethod) mappedErrors['draft-method-select'] = srvErrors.chargingMethod;
-          if (srvErrors.notes) mappedErrors['draft-notes-input'] = srvErrors.notes;
-        }
-        setFieldErrors(mappedErrors);
-        setActionError(json?.error || 'تعذر حفظ مسودة اتفاق الأتعاب.');
-        focusFirstErrorTarget(mappedErrors);
-        return;
-      }
-      setSessionExpired(false);
-      setActionNotice(
-        editingAgreementId !== null
-          ? 'تم تحديث مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
-          : 'تم حفظ مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
-      );
-      resetDraftFormState();
-      await refreshOverview(selectedMatterId);
-      onDataChanged?.();
-    } catch {
-      setActionError('انقطع الاتصال أثناء حفظ مسودة الاتفاق. أعد المحاولة بنفس البيانات دون تكرار.');
-    } finally {
-      setIsSavingDraft(false);
-    }
+    const payload: Record<string, unknown> = {
+      ...(editingAgreementId !== null && editingAgreementVersion !== null
+        ? {
+            feeAgreementId: editingAgreementId,
+            expectedVersion: editingAgreementVersion,
+          }
+        : {}),
+      matterId: draftMatterId,
+      clientMatterPartyId: draftClientId,
+      description: draftDescription.trim(),
+      totalAmountPiastres: parsedTotal.toString(),
+      agreementDate: draftDate,
+      chargingMethod: draftMethod,
+      notes: draftNotes.trim() || null,
+      idempotencyKey: draftIdempotencyKey,
+    };
+
+    await submitDraftRequest(payload);
   };
 
   const openApprovePanel = (ag: FeeAgreementDTO) => {
     setApprovingAgreementId(ag.id);
     setApproveDate(getCairoTodayDateString());
+    setFrozenApprovePayload(null);
     setApproveIdempotencyKey(createClientIdempotencyKey());
     setApproveInstallments([
       {
@@ -584,8 +628,76 @@ export function FinanceWorkspace({
     return { sum, hasInvalid };
   }, [approveInstallments]);
 
+  const submitApproveRequest = async (payload: {
+    feeAgreementId: string;
+    expectedVersion: number;
+    transactionDate: string;
+    installments: Array<{ description: string; dueDate: string | null; amountPiastres: string }>;
+    idempotencyKey: string;
+  }) => {
+    setIsApproving(true);
+    setActionError(null);
+    setActionNotice(null);
+    setFieldErrors({});
+    try {
+      const res = await fetch(`/api/finance/agreements/${payload.feeAgreementId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => null);
+      if (isAuthErrorResponse(res.status, json?.code)) {
+        setSessionExpired(true);
+        setFrozenApprovePayload(payload);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        setActionError('انتهت الجلسة أثناء اعتماد الاتفاق. سجل الدخول وأعد المحاولة بنفس الطلب.');
+        return;
+      }
+      if (!res.ok || !json?.success) {
+        if (res.status >= 500 || isUncertainMutationOutcome(json?.code)) {
+          setFrozenApprovePayload(payload);
+        } else {
+          setFrozenApprovePayload(null);
+          setApproveIdempotencyKey(createClientIdempotencyKey());
+          const mappedErrors: Record<string, string> = {};
+          if (json?.fieldErrors?.transactionDate) {
+            mappedErrors['approve-tx-date'] = json.fieldErrors.transactionDate;
+          }
+          setFieldErrors(mappedErrors);
+          focusFirstErrorTarget(mappedErrors);
+        }
+        setActionError(json?.error || 'تعذر اعتماد اتفاق الأتعاب.');
+        return;
+      }
+      const matchedAg = agreements.find((a) => a.id === payload.feeAgreementId);
+      setSessionExpired(false);
+      setFrozenApprovePayload(null);
+      setApproveIdempotencyKey(createClientIdempotencyKey());
+      setActionNotice(
+        `تم اعتماد اتفاق الأتعاب وترحيل ${payload.installments.length} استحقاق مالي متوازن.`
+      );
+      setApprovingAgreementId(null);
+      if (matchedAg) {
+        setPayMatterId(matchedAg.matterId);
+        setPayClientId(matchedAg.clientMatterPartyId);
+      }
+      setChargeAllocations({});
+      await refreshOverview(selectedMatterId);
+      onDataChanged?.();
+    } catch {
+      setFrozenApprovePayload(payload);
+      setActionError('انقطع الاتصال أثناء اعتماد الاتفاق. يمكنك إعادة المحاولة بنفس الطلب دون تكرار.');
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
   const handleApproveAgreement = async (ag: FeeAgreementDTO) => {
     if (!canWriteFinance || effectiveReadOnly || isApproving) return;
+    if (frozenApprovePayload && frozenApprovePayload.feeAgreementId === ag.id) {
+      await submitApproveRequest(frozenApprovePayload);
+      return;
+    }
     setActionError(null);
     setActionNotice(null);
     setFieldErrors({});
@@ -626,52 +738,15 @@ export function FinanceWorkspace({
       return;
     }
 
-    setIsApproving(true);
-    try {
-      const res = await fetch(`/api/finance/agreements/${ag.id}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          feeAgreementId: ag.id,
-          expectedVersion: ag.version,
-          transactionDate: approveDate,
-          installments: parsedRows,
-          idempotencyKey: approveIdempotencyKey,
-        }),
-      });
-      const json = await res.json().catch(() => null);
-      if (isAuthErrorResponse(res.status, json?.code)) {
-        setSessionExpired(true);
-        window.dispatchEvent(new Event('lawoffice:recheck-session'));
-        setActionError('انتهت الجلسة أثناء اعتماد الاتفاق. سجل الدخول وأعد المحاولة بنفس الطلب.');
-        return;
-      }
-      if (!res.ok || !json?.success) {
-        if (res.status < 500 && !isUncertainMutationOutcome(json?.code)) {
-          setApproveIdempotencyKey(createClientIdempotencyKey());
-        }
-        const mappedErrors: Record<string, string> = {};
-        if (json?.fieldErrors?.transactionDate) {
-          mappedErrors['approve-tx-date'] = json.fieldErrors.transactionDate;
-        }
-        setFieldErrors(mappedErrors);
-        setActionError(json?.error || 'تعذر اعتماد اتفاق الأتعاب.');
-        focusFirstErrorTarget(mappedErrors);
-        return;
-      }
-      setSessionExpired(false);
-      setActionNotice(`تم اعتماد اتفاق الأتعاب وترحيل ${parsedRows.length} استحقاق مالي متوازن.`);
-      setApprovingAgreementId(null);
-      setPayMatterId(ag.matterId);
-      setPayClientId(ag.clientMatterPartyId);
-      setChargeAllocations({});
-      await refreshOverview(selectedMatterId);
-      onDataChanged?.();
-    } catch {
-      setActionError('انقطع الاتصال أثناء اعتماد الاتفاق. يمكنك إعادة المحاولة بنفس الطلب دون تكرار.');
-    } finally {
-      setIsApproving(false);
-    }
+    const payload = {
+      feeAgreementId: ag.id,
+      expectedVersion: ag.version,
+      transactionDate: approveDate,
+      installments: parsedRows,
+      idempotencyKey: approveIdempotencyKey,
+    };
+
+    await submitApproveRequest(payload);
   };
 
   // Compute current payment & live pre-save preview using BigInt only
@@ -958,10 +1033,22 @@ export function FinanceWorkspace({
               data-testid="finance-matter-filter"
               value={selectedMatterId}
               onChange={(e) => {
-                if (frozenPaymentPayload !== null) {
+                if (
+                  frozenPaymentPayload !== null ||
+                  frozenDraftPayload !== null ||
+                  frozenApprovePayload !== null
+                ) {
                   window.alert(
-                    'توجد دفعة معلقة لم تتأكد نتيجتها بعد. يرجى إعادة المحاولة أو إلغاء وتعديل الدفعة أولاً.'
+                    'توجد عملية معلقة لم تتأكد نتيجتها بعد. يرجى إعادة المحاولة أو بدء طلب جديد أولاً.'
                   );
+                  return;
+                }
+                if (
+                  hasUnsavedInput &&
+                  !window.confirm(
+                    'توجد تعديلات أو مسودات غير محفوظة. هل تريد متابعة تغيير الملف وتجاهل التعديلات الحالية؟'
+                  )
+                ) {
                   return;
                 }
                 const nextId = e.target.value;
@@ -970,15 +1057,24 @@ export function FinanceWorkspace({
                 setLoadedStatement(null);
                 setChargeAllocations({});
                 setApprovingAgreementId(null);
+                if (hasUnsavedInput) {
+                  resetDraftFormState();
+                  setPayAmountEgp('');
+                  setPayReference('');
+                  setPayDescription('');
+                  setFieldErrors({});
+                  setActionError(null);
+                  setActionNotice(null);
+                }
                 if (nextId) {
                   setPayMatterId(nextId);
-                  if (editingAgreementId === null) {
+                  if (editingAgreementId === null || hasUnsavedInput) {
                     setDraftMatterId(nextId);
                   }
                   const m = matterOptions.find((item) => item.matterId === nextId);
                   const firstCid = m?.clients[0]?.clientMatterPartyId || '';
                   setPayClientId(firstCid);
-                  if (editingAgreementId === null) {
+                  if (editingAgreementId === null || hasUnsavedInput) {
                     setDraftClientId(firstCid);
                   }
                 }
@@ -1173,6 +1269,7 @@ export function FinanceWorkspace({
               type="button"
               data-testid="toggle-draft-agreement-button"
               aria-expanded={showDraftForm}
+              disabled={isSavingDraft || Boolean(frozenDraftPayload)}
               onClick={() => {
                 if (showDraftForm) {
                   resetDraftFormState();
@@ -1183,12 +1280,13 @@ export function FinanceWorkspace({
                   setDraftTotalEgp('');
                   setDraftNotes('');
                   setDraftDate(getCairoTodayDateString());
+                  setFrozenDraftPayload(null);
                   setDraftIdempotencyKey(createClientIdempotencyKey());
                   setFieldErrors({});
                   setShowDraftForm(true);
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
             >
               <IconPlus className="w-4 h-4" />
               <span>{showDraftForm ? 'إخفاء نموذج الاتفاق' : 'اتفاق أتعاب جديد (مسودة)'}</span>
@@ -1198,6 +1296,7 @@ export function FinanceWorkspace({
 
         {showDraftForm && canWriteFinance && !effectiveReadOnly && (
           <form
+            noValidate
             onSubmit={handleSaveDraft}
             data-testid="draft-agreement-form"
             className="p-4 bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] space-y-4 print:hidden"
@@ -1206,7 +1305,45 @@ export function FinanceWorkspace({
               {editingAgreementId !== null ? 'تعديل مسودة اتفاق الأتعاب' : 'إضافة مسودة اتفاق أتعاب جديدة'}
             </SubHeading>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {frozenDraftPayload && (
+              <div
+                role="status"
+                data-testid="frozen-draft-banner"
+                className="p-3 bg-amber-50 border border-amber-200 text-[#7A4A00] rounded-[6px] text-sm font-semibold flex flex-wrap items-center justify-between gap-2"
+              >
+                <span>
+                  الحقول مقفلة مؤقتاً لحماية طلب المسودة المعلق من التكرار. يمكنك إعادة المحاولة بنفس الطلب أو بدء طلب جديد.
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="retry-draft-button"
+                    disabled={isSavingDraft}
+                    aria-busy={isSavingDraft}
+                    onClick={() => void submitDraftRequest(frozenDraftPayload)}
+                    className="px-3 py-2 bg-amber-700 hover:bg-amber-800 text-white text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    إعادة المحاولة بنفس الطلب (دون تكرار)
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="reset-frozen-draft-button"
+                    disabled={isSavingDraft}
+                    onClick={() => {
+                      setFrozenDraftPayload(null);
+                      setDraftIdempotencyKey(createClientIdempotencyKey());
+                      setActionError(null);
+                    }}
+                    className="px-3 py-2 bg-white hover:bg-red-100 border border-red-300 text-[#A4262C] text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    بدء طلب جديد
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <fieldset disabled={isSavingDraft || Boolean(frozenDraftPayload)} className="space-y-4 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {!lockedMatterId && (
                 <div className="space-y-1">
                   <label htmlFor="draft-matter-select" className="block text-sm font-bold text-[#172A35]">
@@ -1420,6 +1557,7 @@ export function FinanceWorkspace({
                   : 'حفظ الاتفاق كمسودة'}
               </button>
             </div>
+            </fieldset>
           </form>
         )}
 
@@ -1479,8 +1617,9 @@ export function FinanceWorkspace({
                         <button
                           type="button"
                           data-testid={`edit-draft-agreement-${ag.id}`}
+                          disabled={isSavingDraft || Boolean(frozenDraftPayload)}
                           onClick={() => openEditDraftForm(ag)}
-                          className="px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                          className="px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
                         >
                           تعديل المسودة
                         </button>
@@ -1488,12 +1627,13 @@ export function FinanceWorkspace({
                           type="button"
                           data-testid={`open-approve-agreement-${ag.id}`}
                           aria-expanded={approvingAgreementId === ag.id}
+                          disabled={isApproving || Boolean(frozenApprovePayload)}
                           onClick={() =>
                             approvingAgreementId === ag.id
                               ? setApprovingAgreementId(null)
                               : openApprovePanel(ag)
                           }
-                          className="px-3 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                          className="px-3 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
                         >
                           {approvingAgreementId === ag.id ? 'إلغاء الاعتماد' : 'اعتماد وترحيل'}
                         </button>
@@ -1508,6 +1648,44 @@ export function FinanceWorkspace({
                     data-testid={`approve-agreement-panel-${ag.id}`}
                     className="p-3.5 bg-white border border-[#14566B]/30 rounded-[6px] space-y-3 print:hidden"
                   >
+                    {frozenApprovePayload && frozenApprovePayload.feeAgreementId === ag.id && (
+                      <div
+                        role="status"
+                        data-testid="frozen-approve-banner"
+                        className="p-3 bg-amber-50 border border-amber-200 text-[#7A4A00] rounded-[6px] text-sm font-semibold flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span>
+                          الحقول مقفلة مؤقتاً لحماية طلب الاعتماد المعلق من التكرار. يمكنك إعادة المحاولة بنفس الطلب أو بدء طلب جديد.
+                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            data-testid="retry-approve-button"
+                            disabled={isApproving}
+                            aria-busy={isApproving}
+                            onClick={() => void submitApproveRequest(frozenApprovePayload)}
+                            className="px-3 py-2 bg-amber-700 hover:bg-amber-800 text-white text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                          >
+                            إعادة المحاولة بنفس الطلب (دون تكرار)
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="reset-frozen-approve-button"
+                            disabled={isApproving}
+                            onClick={() => {
+                              setFrozenApprovePayload(null);
+                              setApproveIdempotencyKey(createClientIdempotencyKey());
+                              setActionError(null);
+                            }}
+                            className="px-3 py-2 bg-white hover:bg-red-100 border border-red-300 text-[#A4262C] text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                          >
+                            بدء طلب جديد
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <fieldset disabled={isApproving || Boolean(frozenApprovePayload)} className="space-y-3 min-w-0">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <SubHeading className="text-sm font-bold text-[#14566B]">
                         تحديد استحقاقات / أقساط الاتفاق قبل الاعتماد النهائي
@@ -1670,6 +1848,7 @@ export function FinanceWorkspace({
                         {isApproving ? 'جارٍ الاعتماد...' : 'تأكيد الاعتماد وترحيل الاستحقاق'}
                       </button>
                     </div>
+                    </fieldset>
                   </div>
                 )}
 
@@ -1724,7 +1903,7 @@ export function FinanceWorkspace({
               لا توجد بنود أتعاب مستحقة مفتوحة للتحصيل حالياً. اعتمد اتفاق أتعاب أولاً.
             </p>
           ) : (
-            <form onSubmit={handleSubmitPayment} data-testid="fee-payment-form" className="space-y-4">
+            <form noValidate onSubmit={handleSubmitPayment} data-testid="fee-payment-form" className="space-y-4">
               {frozenPaymentPayload && (
                 <div
                   role="status"

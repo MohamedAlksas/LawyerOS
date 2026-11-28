@@ -1,19 +1,32 @@
 import crypto from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
+import {
+  approveFeeAgreement,
+  getClientStatement,
+  listFinanceOverview,
+  postTransaction,
+  saveFeeAgreementDraft,
+} from '@/modules/finance';
 import { financeError } from '@/modules/finance/finance-errors';
 import { statusFromFinanceErrorCode } from '@/modules/finance/finance-http';
 import {
+  FinanceValidationError,
   MAX_PIASTRE_AMOUNT,
   approveFeeAgreementSchema,
+  explicitLedgerLineInputSchema,
+  feeAllocationInputSchema,
+  feeInstallmentInputSchema,
   formatEgpPiastres,
   getClientStatementSchema,
+  listFinanceOverviewSchema,
   parseEgpToPiastres,
   parsePositivePiastres,
   piastresToEgpDecimalString,
   postTransactionSchema,
   saveFeeAgreementDraftSchema,
 } from '@/modules/finance/finance-types';
+import { createSyntheticActor } from '../helpers/party-test-helper';
 
 describe('T13 Unit Tests: Finance Validation, Arabic/Latin Digits & BigInt Piastres', () => {
   it('parses Arabic-Indic, Persian, and Latin digits into exact BigInt piastres without floats', () => {
@@ -349,5 +362,291 @@ describe('T13 Unit Tests: Finance Validation, Arabic/Latin Digits & BigInt Piast
     expect(statusFromFinanceErrorCode('DOCUMENT_NOT_READY')).toBe(409);
     expect(statusFromFinanceErrorCode('PAYLOAD_TOO_LARGE')).toBe(413);
     expect(statusFromFinanceErrorCode('INTERNAL_ERROR')).toBe(500);
+  });
+
+  it('rejects unknown/typoed keys via .strict() and maps them to Arabic messages via formatZodIssues', async () => {
+    const owner = createSyntheticActor();
+    const matterId = crypto.randomUUID();
+    const clientMatterPartyId = crypto.randomUUID();
+    const feeAgreementId = crypto.randomUUID();
+    const feeChargeId = crypto.randomUUID();
+
+    // 1. saveFeeAgreementDraftSchema: currency & documentId typo
+    const draftUnknown = saveFeeAgreementDraftSchema.safeParse({
+      matterId,
+      clientMatterPartyId,
+      description: 'اتفاق أتعاب',
+      totalAmountPiastres: '150000',
+      agreementDate: '2026-11-27',
+      chargingMethod: 'FIXED',
+      currency: 'USD',
+      documentId: crypto.randomUUID(),
+      idempotencyKey: 'strict-draft-1',
+    });
+    expect(draftUnknown.success).toBe(false);
+    if (!draftUnknown.success) {
+      expect(draftUnknown.error.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    }
+
+    let draftErr: unknown;
+    try {
+      await saveFeeAgreementDraft(owner, {
+        matterId,
+        clientMatterPartyId,
+        description: 'اتفاق أتعاب',
+        totalAmountPiastres: '150000',
+        agreementDate: '2026-11-27',
+        chargingMethod: 'FIXED',
+        currency: 'USD',
+        documentId: crypto.randomUUID(),
+        idempotencyKey: 'strict-draft-svc-1',
+      } as unknown as Parameters<typeof saveFeeAgreementDraft>[1]);
+    } catch (e) {
+      draftErr = e;
+    }
+    expect(draftErr).toBeInstanceOf(FinanceValidationError);
+    const draftFieldErrors = (draftErr as FinanceValidationError).fieldErrors ?? {};
+    expect(draftFieldErrors.currency).toBe('حقل غير معروف في الطلب: currency');
+    expect(draftFieldErrors.documentId).toBe('حقل غير معروف في الطلب: documentId');
+
+    // 2. approveFeeAgreementSchema: installment typo & nested currency on installment item
+    const approveTypo = approveFeeAgreementSchema.safeParse({
+      feeAgreementId,
+      expectedVersion: 1,
+      installment: [{ description: 'قسط', amountPiastres: '100000' }],
+      idempotencyKey: 'strict-approve-1',
+    });
+    expect(approveTypo.success).toBe(false);
+
+    let approveErr: unknown;
+    try {
+      await approveFeeAgreement(owner, {
+        feeAgreementId,
+        expectedVersion: 1,
+        installment: [{ description: 'قسط', amountPiastres: '100000' }],
+        idempotencyKey: 'strict-approve-svc-1',
+      } as unknown as Parameters<typeof approveFeeAgreement>[1]);
+    } catch (e) {
+      approveErr = e;
+    }
+    expect(approveErr).toBeInstanceOf(FinanceValidationError);
+    expect((approveErr as FinanceValidationError).fieldErrors?.installment).toBe(
+      'حقل غير معروف في الطلب: installment'
+    );
+
+    expect(
+      feeInstallmentInputSchema.safeParse({
+        description: 'قسط',
+        amountPiastres: '100000',
+        currency: 'USD',
+      }).success
+    ).toBe(false);
+
+    // 3. postTransactionSchema & nested allocation/line schemas: unknown keys rejected in Arabic
+    let postErr: unknown;
+    try {
+      await postTransaction(owner, {
+        kind: 'FEE_PAYMENT',
+        matterId,
+        clientMatterPartyId,
+        transactionDate: '2026-11-27',
+        paymentMethod: 'CASH',
+        totalAmountPiastres: '100000',
+        currency: 'USD',
+        allocations: [{ feeChargeId, amountPiastres: '100000', extraAllocKey: true }],
+        idempotencyKey: 'strict-post-svc-1',
+      } as unknown as Parameters<typeof postTransaction>[1]);
+    } catch (e) {
+      postErr = e;
+    }
+    expect(postErr).toBeInstanceOf(FinanceValidationError);
+    const postFieldErrors = (postErr as FinanceValidationError).fieldErrors ?? {};
+    expect(postFieldErrors.currency).toBe('حقل غير معروف في الطلب: currency');
+    expect(postFieldErrors['allocations.0.extraAllocKey']).toBe(
+      'حقل غير معروف في الطلب: extraAllocKey'
+    );
+
+    expect(
+      feeAllocationInputSchema.safeParse({
+        feeChargeId,
+        amountPiastres: '100000',
+        currency: 'USD',
+      }).success
+    ).toBe(false);
+    expect(
+      explicitLedgerLineInputSchema.safeParse({
+        side: 'DEBIT',
+        amountPiastres: '100000',
+        currency: 'USD',
+      }).success
+    ).toBe(false);
+
+    // 4. getClientStatementSchema & listFinanceOverviewSchema: unknown keys rejected in Arabic
+    let stmtErr: unknown;
+    try {
+      await getClientStatement(owner, {
+        matterId,
+        currency: 'USD',
+      } as unknown as Parameters<typeof getClientStatement>[1]);
+    } catch (e) {
+      stmtErr = e;
+    }
+    expect(stmtErr).toBeInstanceOf(FinanceValidationError);
+    expect((stmtErr as FinanceValidationError).fieldErrors?.currency).toBe(
+      'حقل غير معروف في الطلب: currency'
+    );
+
+    let ovErr: unknown;
+    try {
+      await listFinanceOverview(owner, {
+        unknownFilter: 'x',
+      } as unknown as Parameters<typeof listFinanceOverview>[1]);
+    } catch (e) {
+      ovErr = e;
+    }
+    expect(ovErr).toBeInstanceOf(FinanceValidationError);
+    expect((ovErr as FinanceValidationError).fieldErrors?.unknownFilter).toBe(
+      'حقل غير معروف في الطلب: unknownFilter'
+    );
+    expect(listFinanceOverviewSchema.safeParse({ unknownFilter: 'x' }).success).toBe(false);
+  });
+
+  it('returns Arabic validation messages (never English "Invalid input") for missing or wrong-type base fields', async () => {
+    const owner = createSyntheticActor();
+
+    const assertArabicMessages = (messages: string[], context: string) => {
+      expect(messages.length, context).toBeGreaterThan(0);
+      for (const msg of messages) {
+        expect(msg, `${context}: ${msg}`).not.toMatch(/Invalid input|Expected |Required/i);
+        expect(msg, `${context}: ${msg}`).toMatch(/[\u0600-\u06FF]/);
+      }
+    };
+
+    const schemaCases: Array<{
+      name: string;
+      result: { success: boolean; error?: { issues: Array<{ message: string }> } };
+    }> = [
+      {
+        name: 'saveFeeAgreementDraftSchema missing/wrong-type',
+        result: saveFeeAgreementDraftSchema.safeParse({
+          matterId: 123,
+          clientMatterPartyId: null,
+          description: 99,
+          totalAmountPiastres: { invalid: true },
+          agreementDate: 20261127,
+          chargingMethod: 'INVALID_METHOD',
+          idempotencyKey: undefined,
+        }),
+      },
+      {
+        name: 'approveFeeAgreementSchema missing/wrong-type',
+        result: approveFeeAgreementSchema.safeParse({
+          feeAgreementId: 42,
+          expectedVersion: '1',
+          transactionDate: 12345,
+          installments: 'not-an-array',
+          idempotencyKey: null,
+        }),
+      },
+      {
+        name: 'postTransactionSchema missing/wrong-type',
+        result: postTransactionSchema.safeParse({
+          kind: 'FEE_PAYMENT',
+          matterId: undefined,
+          clientMatterPartyId: 100,
+          payerPartyId: 200,
+          transactionDate: null,
+          paymentMethod: 55,
+          totalAmountPiastres: true,
+          reference: 123,
+          description: ['bad'],
+          allocations: 'bad',
+          lines: 42,
+          idempotencyKey: 1,
+        }),
+      },
+      {
+        name: 'getClientStatementSchema wrong-type',
+        result: getClientStatementSchema.safeParse({
+          matterId: 123,
+          partyId: false,
+          clientMatterPartyId: {},
+        }),
+      },
+      {
+        name: 'listFinanceOverviewSchema wrong-type',
+        result: listFinanceOverviewSchema.safeParse({
+          matterId: 123,
+          q: 456,
+          page: '1',
+          limit: '20',
+        }),
+      },
+    ];
+
+    for (const c of schemaCases) {
+      expect(c.result.success, c.name).toBe(false);
+      assertArabicMessages(
+        c.result.error!.issues.map((i) => i.message),
+        c.name
+      );
+    }
+
+    // Verify service boundary formatting via formatZodIssues as well
+    const serviceCalls: Array<() => Promise<unknown>> = [
+      () =>
+        saveFeeAgreementDraft(
+          owner,
+          {
+            matterId: 123,
+            totalAmountPiastres: { bad: 1 },
+            agreementDate: null,
+            idempotencyKey: undefined,
+          } as unknown as Parameters<typeof saveFeeAgreementDraft>[1]
+        ),
+      () =>
+        approveFeeAgreement(
+          owner,
+          {
+            feeAgreementId: null,
+            expectedVersion: '1',
+            idempotencyKey: 123,
+          } as unknown as Parameters<typeof approveFeeAgreement>[1]
+        ),
+      () =>
+        postTransaction(
+          owner,
+          {
+            kind: 'FEE_PAYMENT',
+            matterId: 123,
+            totalAmountPiastres: false,
+            transactionDate: 123,
+            allocations: 'bad',
+            idempotencyKey: undefined,
+          } as unknown as Parameters<typeof postTransaction>[1]
+        ),
+      () =>
+        getClientStatement(
+          owner,
+          { matterId: 123 } as unknown as Parameters<typeof getClientStatement>[1]
+        ),
+      () =>
+        listFinanceOverview(
+          owner,
+          { page: 'abc', limit: false } as unknown as Parameters<typeof listFinanceOverview>[1]
+        ),
+    ];
+
+    for (const fn of serviceCalls) {
+      let caught: unknown;
+      try {
+        await fn();
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(FinanceValidationError);
+      const msgs = Object.values((caught as FinanceValidationError).fieldErrors ?? {});
+      assertArabicMessages(msgs, 'service formatZodIssues');
+    }
   });
 });

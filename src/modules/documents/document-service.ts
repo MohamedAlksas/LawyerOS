@@ -2633,6 +2633,7 @@ const protectedVersionWhere: Prisma.DocumentVersionWhereInput = {
           { powersOfAttorney: { some: {} } },
           { hearingResultDecisions: { some: {} } },
           { deadlineSources: { some: {} } },
+          { feeAgreements: { some: {} } },
         ],
       },
     },

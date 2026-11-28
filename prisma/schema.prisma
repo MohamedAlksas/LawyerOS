@@ -1246,7 +1246,7 @@ model FeeAgreement {
 
   matter                Matter             @relation(fields: [matterId], references: [id], onDelete: Restrict)
   clientMatterParty     MatterParty        @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
-  agreementDocument     Document?          @relation("FeeAgreementDocument", fields: [agreementDocumentId], references: [id], onDelete: SetNull)
+  agreementDocument     Document?          @relation("FeeAgreementDocument", fields: [agreementDocumentId], references: [id], onDelete: Restrict)
   approvedTransaction   MoneyTransaction?  @relation("FeeAgreementTransaction", fields: [approvedTransactionId], references: [id], onDelete: Restrict)
   charges               FeeCharge[]
 

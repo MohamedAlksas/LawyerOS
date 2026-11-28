@@ -35,57 +35,6 @@ const prisma = getPrismaClient();
 
 async function cleanupFinanceTestFixtures(matterIds: string[], partyIds: string[], ownerIds: string[]) {
   if (matterIds.length > 0) {
-    const { pool } = createValidatedTestPool();
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('ALTER TABLE public."receipt" DISABLE TRIGGER trg_receipt_immutable');
-      await client.query('ALTER TABLE public."money_allocation" DISABLE TRIGGER trg_money_allocation_immutable');
-      await client.query('ALTER TABLE public."fee_charge" DISABLE TRIGGER trg_fee_charge_immutable');
-      await client.query('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_immutable');
-      await client.query('ALTER TABLE public."fee_agreement" DISABLE TRIGGER trg_fee_agreement_approved_immutable');
-      await client.query('ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_immutable');
-      await client.query('ALTER TABLE public."money_account" DISABLE TRIGGER trg_money_account_immutable');
-      await client.query('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_balanced');
-      await client.query('ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_balanced');
-
-      await client.query(
-        `DELETE FROM public."receipt" WHERE transaction_id IN (SELECT id FROM public."money_transaction" WHERE matter_id = ANY($1::text[]))`,
-        [matterIds]
-      );
-      await client.query(
-        `DELETE FROM public."money_allocation" WHERE settlement_line_id IN (SELECT id FROM public."money_line" WHERE matter_id = ANY($1::text[]) OR transaction_id IN (SELECT id FROM public."money_transaction" WHERE matter_id = ANY($1::text[]))) OR receivable_line_id IN (SELECT id FROM public."money_line" WHERE matter_id = ANY($1::text[]))`,
-        [matterIds]
-      );
-      await client.query(`DELETE FROM public."fee_charge" WHERE matter_id = ANY($1::text[])`, [matterIds]);
-      await client.query(`DELETE FROM public."fee_agreement" WHERE matter_id = ANY($1::text[])`, [matterIds]);
-      await client.query(
-        `DELETE FROM public."money_line" WHERE matter_id = ANY($1::text[]) OR transaction_id IN (SELECT id FROM public."money_transaction" WHERE matter_id = ANY($1::text[]))`,
-        [matterIds]
-      );
-      await client.query(`DELETE FROM public."money_transaction" WHERE matter_id = ANY($1::text[])`, [matterIds]);
-      await client.query(`DELETE FROM public."money_account" WHERE matter_id = ANY($1::text[])`, [matterIds]);
-
-      await client.query('ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_balanced');
-      await client.query('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_balanced');
-      await client.query('ALTER TABLE public."money_account" ENABLE TRIGGER trg_money_account_immutable');
-      await client.query('ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_immutable');
-      await client.query('ALTER TABLE public."fee_agreement" ENABLE TRIGGER trg_fee_agreement_approved_immutable');
-      await client.query('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_immutable');
-      await client.query('ALTER TABLE public."fee_charge" ENABLE TRIGGER trg_fee_charge_immutable');
-      await client.query('ALTER TABLE public."money_allocation" ENABLE TRIGGER trg_money_allocation_immutable');
-      await client.query('ALTER TABLE public."receipt" ENABLE TRIGGER trg_receipt_immutable');
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      client.release();
-      await pool.end();
-    }
-  }
-
-  if (matterIds.length > 0) {
     await cleanupMatterFixtures(prisma, matterIds);
   }
   if (partyIds.length > 0) {
@@ -310,6 +259,14 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
 
     const nonRfcRes = await page.goto('/finance?matterId=11111111-1111-1111-1111-111111111111');
     expect(nonRfcRes?.status()).toBe(404);
+
+    // Party profile finance link opens /finance cleanly
+    await page.goto(`/parties/${fixture.partyId}`);
+    const partyFinanceLink = page.getByTestId('party-finance-link');
+    await expect(partyFinanceLink).toBeVisible();
+    await partyFinanceLink.click();
+    await expect(page).toHaveURL((u) => u.pathname === '/finance');
+    await expect(page.getByTestId('finance-workspace')).toBeVisible();
   });
 
   test('T13-AUTH-REDIRECT: Unauthenticated /finance redirects to /login preserving returnTo and lands back on /finance @t13 @finance', async ({
@@ -382,10 +339,29 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await filterRespPromise;
     await expect(page.locator(`[data-testid="client-balance-row-${secondClientMp.id}"]`)).toBeVisible();
 
-    // 1. Save initial DRAFT for Client 1 (10,000 EGP) -> then edit DRAFT to 15,000 EGP
+    // 1. Save initial DRAFT for Client 1 (10,000 EGP) -> test frozen draft reset-frozen-draft-button -> then save & edit DRAFT to 15,000 EGP
     await page.getByTestId('toggle-draft-agreement-button').click();
     await page.getByTestId('draft-description-input').fill('مسودة أولية قبل التعديل');
     await page.getByTestId('draft-total-egp-input').fill('10000');
+
+    let abortedDraftOnce = false;
+    await page.route('**/api/finance/agreements', async (route) => {
+      if (!abortedDraftOnce && route.request().method() === 'POST') {
+        abortedDraftOnce = true;
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
+    await page.getByTestId('save-draft-agreement-button').click();
+    await expect(page.getByTestId('frozen-draft-banner')).toBeVisible();
+    await expect(page.getByTestId('retry-draft-button')).toBeVisible();
+    await expect(page.getByTestId('draft-description-input')).toBeDisabled();
+    await page.unroute('**/api/finance/agreements');
+
+    await page.getByTestId('reset-frozen-draft-button').click();
+    await expect(page.getByTestId('frozen-draft-banner')).toBeHidden();
+    await expect(page.getByTestId('draft-description-input')).toBeEnabled();
 
     const afterCreatePromise = page.waitForResponse(
       (res) =>
@@ -418,9 +394,24 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(page.getByTestId(`fee-agreement-card-${ag1Id}`)).toContainText('15,000 ج.م.');
     await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
 
-    // Approve Client 1 agreement (15,000 EGP)
+    // Approve Client 1 agreement (15,000 EGP) with simulated lost response -> retry-approve-button idempotently
     await page.getByTestId(`open-approve-agreement-${ag1Id}`).click();
+    let interceptedApprove = false;
+    await page.route(`**/api/finance/agreements/${ag1Id}/approve`, async (route) => {
+      if (!interceptedApprove && route.request().method() === 'POST') {
+        interceptedApprove = true;
+        await route.fetch();
+        await route.abort('failed');
+        return;
+      }
+      await route.continue();
+    });
     await page.getByTestId(`confirm-approve-agreement-${ag1Id}`).click();
+    await expect(page.getByTestId('frozen-approve-banner')).toBeVisible();
+    await expect(page.getByTestId('retry-approve-button')).toBeVisible();
+    await page.unroute(`**/api/finance/agreements/${ag1Id}/approve`);
+    await page.getByTestId('retry-approve-button').click();
+    await expect(page.getByTestId(`agreement-status-${ag1Id}`)).toContainText('معتمد');
     await expect(page.getByTestId('fees-due-value')).toContainText('15,000 ج.م.');
 
     // 2. Create & approve smaller agreement for Client 2 (3,000 EGP) -> matter due = 18,000 EGP
@@ -503,6 +494,11 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     if (mode === 'desktop') {
       await expect(page.getByTestId('desktop-sidebar').getByTestId('nav-link-finance')).toHaveCount(0);
     } else {
+      if (mode === 'mobile') {
+        const mobileNav = page.getByTestId('mobile-bottom-nav');
+        await expect(mobileNav).toBeVisible();
+        await expect(mobileNav.getByTestId('nav-link-finance')).toHaveCount(0);
+      }
       await page.getByTestId('drawer-toggle-button').click();
       const drawer = page.getByTestId('tablet-drawer');
       await expect(drawer).toBeVisible();

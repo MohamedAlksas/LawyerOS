@@ -88,9 +88,29 @@ function assertValidUuid(value: string | undefined | null, label: string): strin
   return parsed.data;
 }
 
-function formatZodIssues(err: { issues: Array<{ path: PropertyKey[]; message: string }> }): Record<string, string> {
+function formatZodIssues(err: {
+  issues: Array<{ code?: string; path: PropertyKey[]; message: string; keys?: PropertyKey[] }>;
+}): Record<string, string> {
   const fieldErrors: Record<string, string> = {};
   for (const issue of err.issues) {
+    if (issue.code === 'unrecognized_keys') {
+      const prefix = issue.path.map(String).join('.');
+      const keys = Array.isArray(issue.keys) ? issue.keys.map(String) : [];
+      if (keys.length > 0) {
+        for (const unknownKey of keys) {
+          const fullKey = prefix ? `${prefix}.${unknownKey}` : unknownKey;
+          if (!fieldErrors[fullKey]) {
+            fieldErrors[fullKey] = `حقل غير معروف في الطلب: ${unknownKey}`;
+          }
+        }
+      } else {
+        const key = prefix || 'input';
+        if (!fieldErrors[key]) {
+          fieldErrors[key] = 'حقل غير معروف في الطلب.';
+        }
+      }
+      continue;
+    }
     const key = issue.path.map(String).join('.') || 'input';
     if (!fieldErrors[key]) {
       fieldErrors[key] = issue.message;
@@ -280,7 +300,7 @@ async function loadFeeAgreementsDTO(
         },
       },
       charges: {
-        orderBy: { installmentNumber: 'asc' },
+        orderBy: [{ installmentNumber: 'asc' }, { id: 'asc' }],
       },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -359,10 +379,10 @@ async function loadTransactionsDTO(
                 },
               },
             },
-            orderBy: { createdAt: 'asc' },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           },
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       },
     },
     orderBy: [{ transactionDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
@@ -513,7 +533,7 @@ async function computeMatterFinanceSummaryInternal(
       parties: {
         where: { role: 'CLIENT' },
         include: { party: { select: { name: true } } },
-        orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
       },
     },
   });
@@ -868,8 +888,10 @@ export async function approveFeeAgreement(
         throw new MatterArchivedError();
       }
 
-      const clientLinks = await tx.$queryRaw<Array<{ id: string; matterId: string; role: string }>>`
-        SELECT "id", "matterId", "role"
+      const clientLinks = await tx.$queryRaw<
+        Array<{ id: string; matterId: string; partyId: string; role: string }>
+      >`
+        SELECT "id", "matterId", "partyId", "role"
         FROM public."matter_party"
         WHERE "id" = ${scope.client_matter_party_id}
         FOR UPDATE
@@ -920,6 +942,17 @@ export async function approveFeeAgreement(
       }
       if (clientLink.matterId !== ag.matter_id || clientLink.role !== 'CLIENT') {
         throw new ScopeMismatchError('الموكل المسؤول لم يعد صالحاً في هذا الملف.');
+      }
+
+      const clientPartyRows = await tx.$queryRaw<Array<{ id: string; archivedAt: Date | null }>>`
+        SELECT "id", "archivedAt"
+        FROM public."party"
+        WHERE "id" = ${clientLink.partyId}
+        FOR NO KEY UPDATE
+      `;
+      const party = clientPartyRows[0];
+      if (!party || party.archivedAt !== null) {
+        throw new FinanceValidationError('الموكل المحدد مؤرشف ولا يمكن اعتماد اتفاق أتعاب له.');
       }
 
       const agreementTotal = BigInt(ag.total_amount_piastres);
@@ -1243,31 +1276,49 @@ export async function postTransaction(
         throw new FinanceValidationError('الطرف المخصص له السداد يجب أن يكون موكلاً في الملف.');
       }
 
-      const clientParty = await tx.party.findUniqueOrThrow({
-        where: { id: clientLink.partyId },
-        select: { id: true, name: true },
-      });
+      const clientPartyRows = await tx.$queryRaw<
+        Array<{ id: string; name: string; archivedAt: Date | null }>
+      >`
+        SELECT "id", "name", "archivedAt"
+        FROM public."party"
+        WHERE "id" = ${clientLink.partyId}
+        FOR NO KEY UPDATE
+      `;
+      const clientParty = clientPartyRows[0];
+      if (!clientParty) {
+        throw new NotFoundError('الموكل المحدد غير موجود.');
+      }
 
       let payerParty: { id: string; name: string };
       if (input.payerPartyId) {
-        const payerRows = await tx.$queryRaw<
-          Array<{ id: string; name: string; archivedAt: Date | null }>
-        >`
-          SELECT "id", "name", "archivedAt"
-          FROM "party"
-          WHERE "id" = ${input.payerPartyId}
-          FOR NO KEY UPDATE
-        `;
-        const foundPayer = payerRows[0];
-        if (!foundPayer) {
-          throw new NotFoundError('طرف الدافع المحدد غير موجود.');
+        if (input.payerPartyId === clientLink.partyId) {
+          if (clientParty.archivedAt !== null) {
+            throw new FinanceValidationError('طرف الدافع المحدد مؤرشف ولا يمكن تسجيل سداد باسمه.');
+          }
+          payerParty = { id: clientParty.id, name: clientParty.name };
+        } else {
+          const payerRows = await tx.$queryRaw<
+            Array<{ id: string; name: string; archivedAt: Date | null }>
+          >`
+            SELECT "id", "name", "archivedAt"
+            FROM public."party"
+            WHERE "id" = ${input.payerPartyId}
+            FOR NO KEY UPDATE
+          `;
+          const foundPayer = payerRows[0];
+          if (!foundPayer) {
+            throw new NotFoundError('طرف الدافع المحدد غير موجود.');
+          }
+          if (foundPayer.archivedAt !== null) {
+            throw new FinanceValidationError('طرف الدافع المحدد مؤرشف ولا يمكن تسجيل سداد باسمه.');
+          }
+          payerParty = { id: foundPayer.id, name: foundPayer.name };
         }
-        if (foundPayer.archivedAt !== null) {
-          throw new FinanceValidationError('طرف الدافع المحدد مؤرشف ولا يمكن تسجيل سداد باسمه.');
-        }
-        payerParty = { id: foundPayer.id, name: foundPayer.name };
       } else {
-        payerParty = clientParty;
+        if (clientParty.archivedAt !== null) {
+          throw new FinanceValidationError('الموكل المحدد مؤرشف ولا يمكن تسجيل سداد باسمه تلقائياً.');
+        }
+        payerParty = { id: clientParty.id, name: clientParty.name };
       }
 
       // Non-locking pre-check so foreign-matter or unknown charges fail fast before acquiring locks
@@ -1724,7 +1775,7 @@ export async function getClientStatement(
             select: { partyId: true, party: { select: { name: true } } },
           },
         },
-        orderBy: [{ createdAt: 'asc' }, { installmentNumber: 'asc' }],
+        orderBy: [{ createdAt: 'asc' }, { installmentNumber: 'asc' }, { id: 'asc' }],
       });
 
       const allocatedMap = await computeNetAllocatedMap(
@@ -1855,7 +1906,7 @@ export async function listFinanceOverview(
         title: true,
         status: true,
         parties: {
-          where: { role: 'CLIENT' },
+          where: { role: 'CLIENT', party: { archivedAt: null } },
           select: {
             id: true,
             partyId: true,
@@ -1863,7 +1914,7 @@ export async function listFinanceOverview(
             billingEnabled: true,
             party: { select: { name: true } },
           },
-          orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }],
+          orderBy: [{ isPrimaryContact: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
         },
       } satisfies Prisma.MatterSelect;
 
@@ -1871,10 +1922,10 @@ export async function listFinanceOverview(
         where: {
           archivedAt: null,
           status: { not: 'ARCHIVED' },
-          parties: { some: { role: 'CLIENT' } },
+          parties: { some: { role: 'CLIENT', party: { archivedAt: null } } },
         },
         select: selectableMatterSelect,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
         take: 100,
       });
 
@@ -1884,7 +1935,7 @@ export async function listFinanceOverview(
             id: params.matterId,
             archivedAt: null,
             status: { not: 'ARCHIVED' },
-            parties: { some: { role: 'CLIENT' } },
+            parties: { some: { role: 'CLIENT', party: { archivedAt: null } } },
           },
           select: selectableMatterSelect,
         });
@@ -1945,7 +1996,20 @@ export async function listFinanceOverview(
       if (selectedMatterSummary && !qRaw) {
         totalAgreements = selectedMatterSummary.agreements.length;
         agreements = selectedMatterSummary.agreements.slice(skip, skip + params.limit);
-        openCharges = selectedMatterSummary.charges.filter((c) => BigInt(c.remainingPiastres) > 0n);
+        openCharges = selectedMatterSummary.charges
+          .filter((c) => BigInt(c.remainingPiastres) > 0n)
+          .sort((a, b) => {
+            if (a.dueDate !== b.dueDate) {
+              if (!a.dueDate) return 1;
+              if (!b.dueDate) return -1;
+              return a.dueDate < b.dueDate ? -1 : 1;
+            }
+            if (a.createdAt !== b.createdAt) {
+              return a.createdAt > b.createdAt ? -1 : 1;
+            }
+            return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+          })
+          .slice(0, 200);
       } else {
         const sqlConditions: Prisma.Sql[] = [
           Prisma.sql`fa."status" = 'APPROVED'::"FeeAgreementStatus"`,

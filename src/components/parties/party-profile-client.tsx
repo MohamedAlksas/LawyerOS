@@ -525,15 +525,23 @@ export function PartyProfileClient({
         )}
       </div>
 
-      {/* 6. Future Financial Modules Indicator */}
-      <div className="p-4 bg-[#F4F6F7] rounded-[6px] border border-dashed border-[#D5DFE3] text-xs text-[#4D606A] space-y-1">
-        <span className="font-bold text-[#172A35] block">
-          الحسابات المالية والأتعاب
-        </span>
-        <p>
-          وحدات حسابات الأتعاب والمصروفات
-          غير مفعلة في هذه المرحلة التشغيلية، وسيتم ربطها تلقائياً بملف هذا الطرف عند إطلاقها.
-        </p>
+      {/* 6. Financial Accounts & Fees Access */}
+      <div className="p-4 bg-white rounded-[6px] border border-[#D5DFE3] shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1 min-w-0">
+          <span className="font-bold text-sm text-[#172A35] block">
+            الحسابات المالية والأتعاب
+          </span>
+          <p className="text-xs text-[#4D606A]">
+            إدارة اتفاقات الأتعاب وتحصيل الدفعات وإصدار الإيصالات وكشوف حساب الموكلين من وحدة الحسابات المالية.
+          </p>
+        </div>
+        <Link
+          href="/finance"
+          data-testid="party-finance-link"
+          className="px-3.5 py-2 text-xs font-bold text-white bg-[#14566B] hover:bg-[#0F4354] rounded-[6px] min-h-[44px] inline-flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+        >
+          فتح الحسابات المالية
+        </Link>
       </div>
     </div>
   );

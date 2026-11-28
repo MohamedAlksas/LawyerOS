@@ -83,6 +83,132 @@ export async function cleanupMatterFixtures(
   }
   await prisma.reminderDelivery.deleteMany({ where: { matterId: { in: validIds } } });
 
+  const [hasFinanceTx, hasFinanceAg, hasFinanceAcct, hasFinanceLine, hasFinanceCharge] =
+    await Promise.all([
+      prisma.moneyTransaction.count({ where: { matterId: { in: validIds } } }),
+      prisma.feeAgreement.count({ where: { matterId: { in: validIds } } }),
+      prisma.moneyAccount.count({ where: { matterId: { in: validIds } } }),
+      prisma.moneyLine.count({ where: { matterId: { in: validIds } } }),
+      prisma.feeCharge.count({ where: { matterId: { in: validIds } } }),
+    ]);
+
+  let financeEntityIds: string[] = [];
+  if (hasFinanceTx + hasFinanceAg + hasFinanceAcct + hasFinanceLine + hasFinanceCharge > 0) {
+    financeEntityIds = await prisma.$transaction(
+      async (tx) => {
+        const [agreements, charges, txs] = await Promise.all([
+          tx.feeAgreement.findMany({ where: { matterId: { in: validIds } }, select: { id: true } }),
+          tx.feeCharge.findMany({ where: { matterId: { in: validIds } }, select: { id: true } }),
+          tx.moneyTransaction.findMany({ where: { matterId: { in: validIds } }, select: { id: true } }),
+        ]);
+        const txIds = txs.map((r) => r.id);
+        const lines = await tx.moneyLine.findMany({
+          where: {
+            OR: [
+              { matterId: { in: validIds } },
+              ...(txIds.length > 0 ? [{ transactionId: { in: txIds } }] : []),
+            ],
+          },
+          select: { id: true },
+        });
+        const lineIds = lines.map((r) => r.id);
+        const [receipts, allocs] = await Promise.all([
+          txIds.length > 0
+            ? tx.receipt.findMany({ where: { transactionId: { in: txIds } }, select: { id: true } })
+            : Promise.resolve([]),
+          lineIds.length > 0 || txIds.length > 0
+            ? tx.moneyAllocation.findMany({
+                where: {
+                  OR: [
+                    ...(lineIds.length > 0
+                      ? [{ receivableLineId: { in: lineIds } }, { settlementLineId: { in: lineIds } }]
+                      : []),
+                    ...(txIds.length > 0 ? [{ adjustmentTransactionId: { in: txIds } }] : []),
+                  ],
+                },
+                select: { id: true },
+              })
+            : Promise.resolve([]),
+        ]);
+
+        await tx.$executeRawUnsafe('ALTER TABLE public."receipt" DISABLE TRIGGER trg_receipt_immutable');
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE public."money_allocation" DISABLE TRIGGER trg_money_allocation_immutable'
+        );
+        await tx.$executeRawUnsafe('ALTER TABLE public."fee_charge" DISABLE TRIGGER trg_fee_charge_immutable');
+        await tx.$executeRawUnsafe('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_immutable');
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE public."fee_agreement" DISABLE TRIGGER trg_fee_agreement_approved_immutable'
+        );
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_immutable'
+        );
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE public."money_account" DISABLE TRIGGER trg_money_account_immutable'
+        );
+        await tx.$executeRawUnsafe('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_balanced');
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_balanced'
+        );
+
+        try {
+          if (receipts.length > 0) {
+            await tx.receipt.deleteMany({ where: { id: { in: receipts.map((r) => r.id) } } });
+          }
+          if (allocs.length > 0) {
+            await tx.moneyAllocation.deleteMany({ where: { id: { in: allocs.map((r) => r.id) } } });
+          }
+          if (charges.length > 0) {
+            await tx.feeCharge.deleteMany({ where: { id: { in: charges.map((r) => r.id) } } });
+          }
+          if (agreements.length > 0) {
+            await tx.feeAgreement.deleteMany({ where: { id: { in: agreements.map((r) => r.id) } } });
+          }
+          await tx.$executeRaw`
+            DELETE FROM public."money_line"
+            WHERE "matter_id" = ANY(${validIds}::text[])
+               OR "transaction_id" IN (SELECT "id" FROM public."money_transaction" WHERE "matter_id" = ANY(${validIds}::text[]))
+          `;
+          if (txIds.length > 0) {
+            await tx.moneyTransaction.deleteMany({ where: { id: { in: txIds } } });
+          }
+          await tx.moneyAccount.deleteMany({ where: { matterId: { in: validIds } } });
+          await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+        } finally {
+          await tx.$executeRawUnsafe(
+            'ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_balanced'
+          );
+          await tx.$executeRawUnsafe('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_balanced');
+          await tx.$executeRawUnsafe(
+            'ALTER TABLE public."money_account" ENABLE TRIGGER trg_money_account_immutable'
+          );
+          await tx.$executeRawUnsafe(
+            'ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_immutable'
+          );
+          await tx.$executeRawUnsafe(
+            'ALTER TABLE public."fee_agreement" ENABLE TRIGGER trg_fee_agreement_approved_immutable'
+          );
+          await tx.$executeRawUnsafe('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_immutable');
+          await tx.$executeRawUnsafe('ALTER TABLE public."fee_charge" ENABLE TRIGGER trg_fee_charge_immutable');
+          await tx.$executeRawUnsafe(
+            'ALTER TABLE public."money_allocation" ENABLE TRIGGER trg_money_allocation_immutable'
+          );
+          await tx.$executeRawUnsafe('ALTER TABLE public."receipt" ENABLE TRIGGER trg_receipt_immutable');
+        }
+
+        return [
+          ...agreements.map((r) => r.id),
+          ...charges.map((r) => r.id),
+          ...txIds,
+          ...lineIds,
+          ...allocs.map((r) => r.id),
+          ...receipts.map((r) => r.id),
+        ];
+      },
+      { timeout: 15000 }
+    );
+  }
+
   const documentIds = documents.map((r) => r.id);
   let versionIds: string[] = [];
   if (documentIds.length > 0) {
@@ -127,6 +253,7 @@ export async function cleanupMatterFixtures(
       ...documentIds,
       ...versionIds,
       ...uploadAttemptIds,
+      ...financeEntityIds,
     ])
   );
 
@@ -150,6 +277,11 @@ export async function cleanupMatterFixtures(
           'DocumentVersion',
           'UploadAttempt',
           'BackupFilePin',
+          'FeeAgreement',
+          'FeeCharge',
+          'MoneyTransaction',
+          'MoneyAllocation',
+          'Receipt',
         ],
       },
       entityId: { in: allEntityIds },

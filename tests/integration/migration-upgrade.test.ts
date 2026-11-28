@@ -1415,11 +1415,12 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
       const deployRes = runPrismaCli(['migrate', 'deploy'], db.url);
       expect(deployRes.status, deployRes.stderr).toBe(0);
 
-      // Verify ALL THREE T13 migrations recorded with finished_at IS NOT NULL
+      // Verify ALL FOUR T13 migrations recorded with finished_at IS NOT NULL (25 migrations total)
       const expectedT13Migrations = [
         '20261127000000_t13_balanced_ledger_fees_receipts',
         '20261127010000_t13_fee_agreement_status_guard',
         '20261128000000_t13_ledger_integrity_and_indexes',
+        '20261128010000_t13_ledger_allocation_agreement_guards',
       ];
       const migRows = await db.pool.query(
         `SELECT migration_name, finished_at
@@ -1428,13 +1429,17 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
          ORDER BY migration_name`,
         [expectedT13Migrations]
       );
-      expect(migRows.rows).toHaveLength(3);
+      expect(migRows.rows).toHaveLength(4);
       expect(migRows.rows.map((r: { migration_name: string }) => r.migration_name)).toEqual(
         expectedT13Migrations
       );
       for (const row of migRows.rows) {
         expect(row.finished_at).not.toBeNull();
       }
+      const totalMigRes = await db.pool.query(
+        `SELECT COUNT(*)::int AS total FROM _prisma_migrations WHERE finished_at IS NOT NULL`
+      );
+      expect(totalMigRes.rows[0].total).toBe(25);
 
       // Verify pre-existing synthetic T12 records preserved
       const preservedMp = await db.pool.query(
@@ -1482,15 +1487,19 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
       // Verify immutability, no-truncate, integrity & balanced constraint triggers are enabled
       const expectedTriggers = [
         'trg_fee_agreement_approved_immutable',
+        'trg_fee_agreement_charges_integrity',
         'trg_fee_agreement_integrity',
         'trg_fee_agreement_no_truncate',
+        'trg_fee_charge_agreement_integrity',
         'trg_fee_charge_immutable',
         'trg_fee_charge_integrity',
         'trg_fee_charge_no_truncate',
         'trg_money_account_immutable',
         'trg_money_account_integrity',
         'trg_money_account_no_truncate',
+        'trg_money_allocation_bounds',
         'trg_money_allocation_immutable',
+        'trg_money_allocation_integrity',
         'trg_money_allocation_no_truncate',
         'trg_money_line_balanced',
         'trg_money_line_immutable',
@@ -1499,10 +1508,12 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
         'trg_money_transaction_balanced',
         'trg_money_transaction_immutable',
         'trg_money_transaction_no_truncate',
+        'trg_money_transaction_reversal_guard',
         'trg_receipt_immutable',
         'trg_receipt_no_truncate',
         'trg_receipt_sequence_immutable',
         'trg_receipt_sequence_no_truncate',
+        'trg_receipt_transaction_guard',
       ];
       const triggers = await db.pool.query(
         `SELECT tgname, tgenabled::text AS enabled
@@ -1532,9 +1543,10 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
       ).rejects.toThrow(/money_account_currency_check/i);
 
       // Behavioral SQL enforcement on upgraded DB:
-      // 1) Insert balanced POSTED tx + APPROVED fee_agreement -> UPDATE(status/description/cancelled_at) & DELETE blocked
+      // 1) Insert balanced POSTED tx + APPROVED fee_agreement + matching fee_charge in same tx -> UPDATE(status/description/cancelled_at) & DELETE blocked
       const recvAcctId = crypto.randomUUID();
       const basisAcctId = crypto.randomUUID();
+      const recvLineId = crypto.randomUUID();
       const txId = crypto.randomUUID();
       const agId = crypto.randomUUID();
 
@@ -1559,19 +1571,113 @@ describe('T13 Migration & Upgrade Verification (from prior T12 schema)', () => {
              (id, transaction_id, account_id, side, amount_piastres, currency, matter_id, client_matter_party_id)
            VALUES ($1, $3, $4, 'DEBIT', 100000, 'EGP', $6, $7),
                   ($2, $3, $5, 'CREDIT', 100000, 'EGP', $6, $7)`,
-          [crypto.randomUUID(), crypto.randomUUID(), txId, recvAcctId, basisAcctId, matterId, mpId]
+          [recvLineId, crypto.randomUUID(), txId, recvAcctId, basisAcctId, matterId, mpId]
+        );
+        await txClient.query(
+          `INSERT INTO public."fee_agreement"
+             (id, matter_id, client_matter_party_id, description, total_amount_piastres, currency, agreement_date, charging_method, status, approved_transaction_id, approved_at, approved_by_id, version, created_by_id, updated_by_id, updated_at)
+           VALUES ($1, $2, $3, 'اتفاق معتمد لاختبار الترقية', 100000, 'EGP', CURRENT_DATE, 'FIXED', 'APPROVED', $4, NOW(), $5, 2, $5, $5, NOW())`,
+          [agId, matterId, mpId, txId, userId]
+        );
+        await txClient.query(
+          `INSERT INTO public."fee_charge"
+             (id, fee_agreement_id, matter_id, client_matter_party_id, installment_number, description, amount_piastres, currency, receivable_line_id, created_by_id)
+           VALUES ($1, $2, $3, $4, 1, 'دفعة الترقية', 100000, 'EGP', $5, $6)`,
+          [crypto.randomUUID(), agId, matterId, mpId, recvLineId, userId]
         );
         await txClient.query('COMMIT');
       } finally {
         txClient.release();
       }
 
+      // 1b) APPROVED fee_agreement with 0 fee_charge rows or mismatched sum raises at SQL level on COMMIT
+      const zeroChargeTxId = crypto.randomUUID();
+      const zeroChargeClient = await db.pool.connect();
+      try {
+        await zeroChargeClient.query('BEGIN');
+        await zeroChargeClient.query(
+          `INSERT INTO public."money_transaction"
+             (id, kind, status, transaction_date, currency, total_amount_piastres, description, matter_id, posted_by_id, posted_at, created_by_id)
+           VALUES ($1, 'FEE_CHARGE', 'POSTED', CURRENT_DATE, 'EGP', 100000, 'قيد بلا استحقاق', $2, $3, NOW(), $3)`,
+          [zeroChargeTxId, matterId, userId]
+        );
+        await zeroChargeClient.query(
+          `INSERT INTO public."money_line"
+             (id, transaction_id, account_id, side, amount_piastres, currency, matter_id, client_matter_party_id)
+           VALUES ($1, $3, $4, 'DEBIT', 100000, 'EGP', $6, $7),
+                  ($2, $3, $5, 'CREDIT', 100000, 'EGP', $6, $7)`,
+          [crypto.randomUUID(), crypto.randomUUID(), zeroChargeTxId, recvAcctId, basisAcctId, matterId, mpId]
+        );
+        await zeroChargeClient.query(
+          `INSERT INTO public."fee_agreement"
+             (id, matter_id, client_matter_party_id, description, total_amount_piastres, currency, agreement_date, charging_method, status, approved_transaction_id, approved_at, approved_by_id, version, created_by_id, updated_by_id, updated_at)
+           VALUES ($1, $2, $3, 'اتفاق بدون أقساط', 100000, 'EGP', CURRENT_DATE, 'FIXED', 'APPROVED', $4, NOW(), $5, 2, $5, $5, NOW())`,
+          [crypto.randomUUID(), matterId, mpId, zeroChargeTxId, userId]
+        );
+        await expect(zeroChargeClient.query('COMMIT')).rejects.toThrow(
+          /requires SUM\(fee_charge\.amount_piastres\)/i
+        );
+      } finally {
+        await zeroChargeClient.query('ROLLBACK').catch(() => {});
+        zeroChargeClient.release();
+      }
+
+      const mismatchTxId = crypto.randomUUID();
+      const mismatchRecvLineId = crypto.randomUUID();
+      const mismatchAgId = crypto.randomUUID();
+      const mismatchClient = await db.pool.connect();
+      try {
+        await mismatchClient.query('BEGIN');
+        await mismatchClient.query(
+          `INSERT INTO public."money_transaction"
+             (id, kind, status, transaction_date, currency, total_amount_piastres, description, matter_id, posted_by_id, posted_at, created_by_id)
+           VALUES ($1, 'FEE_CHARGE', 'POSTED', CURRENT_DATE, 'EGP', 50000, 'قيد غير مطابق', $2, $3, NOW(), $3)`,
+          [mismatchTxId, matterId, userId]
+        );
+        await mismatchClient.query(
+          `INSERT INTO public."money_line"
+             (id, transaction_id, account_id, side, amount_piastres, currency, matter_id, client_matter_party_id)
+           VALUES ($1, $3, $4, 'DEBIT', 50000, 'EGP', $6, $7),
+                  ($2, $3, $5, 'CREDIT', 50000, 'EGP', $6, $7)`,
+          [mismatchRecvLineId, crypto.randomUUID(), mismatchTxId, recvAcctId, basisAcctId, matterId, mpId]
+        );
+        await mismatchClient.query(
+          `INSERT INTO public."fee_agreement"
+             (id, matter_id, client_matter_party_id, description, total_amount_piastres, currency, agreement_date, charging_method, status, approved_transaction_id, approved_at, approved_by_id, version, created_by_id, updated_by_id, updated_at)
+           VALUES ($1, $2, $3, 'اتفاق غير مطابق', 100000, 'EGP', CURRENT_DATE, 'FIXED', 'APPROVED', $4, NOW(), $5, 2, $5, $5, NOW())`,
+          [mismatchAgId, matterId, mpId, mismatchTxId, userId]
+        );
+        await mismatchClient.query(
+          `INSERT INTO public."fee_charge"
+             (id, fee_agreement_id, matter_id, client_matter_party_id, installment_number, description, amount_piastres, currency, receivable_line_id, created_by_id)
+           VALUES ($1, $2, $3, $4, 1, 'قسط ناقص', 50000, 'EGP', $5, $6)`,
+          [crypto.randomUUID(), mismatchAgId, matterId, mpId, mismatchRecvLineId, userId]
+        );
+        await expect(mismatchClient.query('COMMIT')).rejects.toThrow(
+          /requires SUM\(fee_charge\.amount_piastres\)/i
+        );
+      } finally {
+        await mismatchClient.query('ROLLBACK').catch(() => {});
+        mismatchClient.release();
+      }
+
+      // 1c) CANCELLED fee_agreement cannot be mutated or deleted at SQL level
+      const cancelledAgId = crypto.randomUUID();
       await db.pool.query(
         `INSERT INTO public."fee_agreement"
-           (id, matter_id, client_matter_party_id, description, total_amount_piastres, currency, agreement_date, charging_method, status, approved_transaction_id, approved_at, approved_by_id, version, created_by_id, updated_by_id, updated_at)
-         VALUES ($1, $2, $3, 'اتفاق معتمد لاختبار الترقية', 100000, 'EGP', CURRENT_DATE, 'FIXED', 'APPROVED', $4, NOW(), $5, 2, $5, $5, NOW())`,
-        [agId, matterId, mpId, txId, userId]
+           (id, matter_id, client_matter_party_id, description, total_amount_piastres, currency, agreement_date, charging_method, status, cancelled_at, cancelled_reason, version, created_by_id, updated_by_id, updated_at)
+         VALUES ($1, $2, $3, 'اتفاق ملغى لاختبار الترقية', 50000, 'EGP', CURRENT_DATE, 'FIXED', 'CANCELLED', NOW(), 'إلغاء اختباري', 2, $4, $4, NOW())`,
+        [cancelledAgId, matterId, mpId, userId]
       );
+      await expect(
+        db.pool.query(
+          `UPDATE public."fee_agreement" SET "description" = 'تعديل ملغى' WHERE "id" = $1`,
+          [cancelledAgId]
+        )
+      ).rejects.toThrow(/Cancelled fee_agreement records are immutable/i);
+      await expect(
+        db.pool.query(`DELETE FROM public."fee_agreement" WHERE "id" = $1`, [cancelledAgId])
+      ).rejects.toThrow(/Cancelled fee_agreement records are immutable/i);
 
       await expect(
         db.pool.query(`UPDATE public."fee_agreement" SET "status" = 'DRAFT' WHERE "id" = $1`, [agId])
