@@ -34,7 +34,7 @@ export default async function MatterDetailPage({ params }: MatterDetailPageProps
     actor = await requireActor({ requiredPermission: 'READ_CLIENT_DATA' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      await redirectOnAuthError(error, `/matters/${id}`);
+      await redirectOnAuthError(error, UUID_REGEX.test(id) ? `/matters/${id}` : '/matters');
     }
     if (error instanceof AuthorizationError) {
       return (

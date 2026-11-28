@@ -1,11 +1,12 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
+import { z } from 'zod';
 import { requireActor } from '@/modules/identity/require-actor';
 import { redirectOnAuthError } from '@/modules/identity/auth-redirect';
 import { authorize } from '@/modules/identity/authorize';
 import { AuthenticationError, AuthorizationError } from '@/modules/identity/types';
 import { listFinanceOverview } from '@/modules/finance/finance-service';
-import { NotFoundError } from '@/modules/finance/finance-types';
+import { FinanceValidationError, NotFoundError } from '@/modules/finance/finance-types';
 import { readParam } from '@/lib/search-params';
 import { FinanceWorkspace } from '@/components/finance/finance-workspace';
 
@@ -13,20 +14,22 @@ export const metadata = {
   title: 'الحسابات والأتعاب — LawOffice OS',
 };
 
-const UUID_REGEX = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
-
 interface FinancePageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export default async function FinancePage({ searchParams }: FinancePageProps) {
   const params = searchParams ? await searchParams : {};
+  const rawMatterId = readParam(params, 'matterId')?.trim();
+  const parsedMatterId = rawMatterId ? z.string().uuid().safeParse(rawMatterId) : null;
+  const matterId = parsedMatterId?.success ? parsedMatterId.data : undefined;
+
   let actor;
   try {
     actor = await requireActor({ requiredPermission: 'READ_FINANCE' });
   } catch (error) {
     if (error instanceof AuthenticationError) {
-      await redirectOnAuthError(error, '/finance');
+      await redirectOnAuthError(error, matterId ? `/finance?matterId=${matterId}` : '/finance');
     }
     if (error instanceof AuthorizationError) {
       return (
@@ -43,13 +46,15 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
     throw error;
   }
 
-  const rawMatterId = readParam(params, 'matterId')?.trim();
-  const matterId = rawMatterId && UUID_REGEX.test(rawMatterId) ? rawMatterId : undefined;
+  if (rawMatterId && !matterId) {
+    notFound();
+  }
+
   let overview;
   try {
     overview = await listFinanceOverview(actor, { matterId });
   } catch (error) {
-    if (error instanceof NotFoundError) {
+    if (error instanceof NotFoundError || error instanceof FinanceValidationError) {
       notFound();
     }
     throw error;

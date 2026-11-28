@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { financeError } from '@/modules/finance/finance-errors';
 import { statusFromFinanceErrorCode } from '@/modules/finance/finance-http';
 import {
+  MAX_PIASTRE_AMOUNT,
   approveFeeAgreementSchema,
   formatEgpPiastres,
   getClientStatementSchema,
@@ -260,5 +261,93 @@ describe('T13 Unit Tests: Finance Validation, Arabic/Latin Digits & BigInt Piast
     });
 
     expect(statusFromFinanceErrorCode('CONCURRENCY_CONFLICT')).toBe(409);
+  });
+
+  it('enforces boundary limits for parsePositivePiastres, parseEgpToPiastres, and formatEgpPiastres', () => {
+    expect(parsePositivePiastres(MAX_PIASTRE_AMOUNT)).toBe(MAX_PIASTRE_AMOUNT);
+    expect(parsePositivePiastres(MAX_PIASTRE_AMOUNT.toString())).toBe(MAX_PIASTRE_AMOUNT);
+    expect(parsePositivePiastres(Number.MAX_SAFE_INTEGER)).toBe(BigInt(Number.MAX_SAFE_INTEGER));
+
+    // > MAX_PIASTRE_AMOUNT
+    expect(() => parsePositivePiastres(MAX_PIASTRE_AMOUNT + 1n)).toThrow();
+    expect(() => parsePositivePiastres((MAX_PIASTRE_AMOUNT + 1n).toString())).toThrow();
+    // > 32 chars
+    expect(() => parsePositivePiastres('1'.repeat(33))).toThrow();
+    // Unsafe / non-finite numbers
+    expect(() => parsePositivePiastres(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+    expect(() => parsePositivePiastres(Infinity)).toThrow();
+    expect(() => parsePositivePiastres(-Infinity)).toThrow();
+    expect(() => parsePositivePiastres(NaN)).toThrow();
+
+    // parseEgpToPiastres boundaries
+    expect(() => parseEgpToPiastres('0,500')).toThrow();
+    expect(() => parseEgpToPiastres('1 5')).toThrow();
+    expect(() => parseEgpToPiastres((MAX_PIASTRE_AMOUNT / 100n + 1n).toString())).toThrow();
+    expect(() => parseEgpToPiastres('1'.repeat(33))).toThrow();
+
+    // formatEgpPiastres edge values: 0n, negative, and numeric strings
+    expect(formatEgpPiastres(0n)).toBe('0 ج.م.');
+    expect(formatEgpPiastres(0n, { showZeroDecimals: true })).toBe('0.00 ج.م.');
+    expect(formatEgpPiastres(-1500000n)).toBe('-15,000 ج.م.');
+    expect(formatEgpPiastres('1500000')).toBe('15,000 ج.م.');
+    expect(formatEgpPiastres('0')).toBe('0 ج.م.');
+    expect(formatEgpPiastres('-250050')).toBe('-2,500.50 ج.م.');
+  });
+
+  it('maps 40001, 55P03, sqlState, deep cause chains, and all HTTP status codes accurately', () => {
+    expect(financeError({ code: '40001' })).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+    expect(financeError({ code: '55P03' })).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+    expect(financeError({ sqlState: '40001' })).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+    expect(financeError({ sqlState: '55P03' })).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+
+    const deepCause = {
+      cause: {
+        cause: {
+          cause: {
+            cause: {
+              driverAdapterError: { sqlState: '40P01' },
+            },
+          },
+        },
+      },
+    };
+    expect(financeError(deepCause)).toMatchObject({
+      success: false,
+      code: 'CONCURRENCY_CONFLICT',
+    });
+
+    expect(statusFromFinanceErrorCode('VALIDATION_ERROR')).toBe(400);
+    expect(statusFromFinanceErrorCode('UNSUPPORTED_TRANSACTION_KIND')).toBe(400);
+    expect(statusFromFinanceErrorCode(undefined)).toBe(400);
+    expect(statusFromFinanceErrorCode('UNAUTHENTICATED')).toBe(401);
+    expect(statusFromFinanceErrorCode('MFA_REQUIRED')).toBe(401);
+    expect(statusFromFinanceErrorCode('SESSION_EXPIRED')).toBe(401);
+    expect(statusFromFinanceErrorCode('SESSION_INACTIVE')).toBe(401);
+    expect(statusFromFinanceErrorCode('FORBIDDEN')).toBe(403);
+    expect(statusFromFinanceErrorCode('CROSS_MATTER_LINK_FORBIDDEN')).toBe(403);
+    expect(statusFromFinanceErrorCode('NOT_FOUND')).toBe(404);
+    expect(statusFromFinanceErrorCode('CONCURRENCY_CONFLICT')).toBe(409);
+    expect(statusFromFinanceErrorCode('IDEMPOTENCY_PAYLOAD_MISMATCH')).toBe(409);
+    expect(statusFromFinanceErrorCode('IDEMPOTENCY_CONCURRENT_CONFLICT')).toBe(409);
+    expect(statusFromFinanceErrorCode('IMMUTABLE_POSTED_RECORD')).toBe(409);
+    expect(statusFromFinanceErrorCode('EXCESS_OVERPAYMENT')).toBe(409);
+    expect(statusFromFinanceErrorCode('ALREADY_POSTED')).toBe(409);
+    expect(statusFromFinanceErrorCode('MATTER_ARCHIVED')).toBe(409);
+    expect(statusFromFinanceErrorCode('UNSUPPORTED_TRANSITION')).toBe(409);
+    expect(statusFromFinanceErrorCode('DOCUMENT_NOT_READY')).toBe(409);
+    expect(statusFromFinanceErrorCode('PAYLOAD_TOO_LARGE')).toBe(413);
+    expect(statusFromFinanceErrorCode('INTERNAL_ERROR')).toBe(500);
   });
 });

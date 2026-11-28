@@ -80,7 +80,7 @@ body {
     color: #000000 !important;
   }
 
-  #app-shell-content[aria-hidden="true"] {
+  body:has(#app-shell-modal-root > *) #app-shell-content {
     display: none !important;
   }
 

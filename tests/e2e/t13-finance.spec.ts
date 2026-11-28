@@ -2,12 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { hashPassword } from 'better-auth/crypto';
 import { getPrismaClient } from '@/lib/auth';
-import { openMatter } from '@/modules/matters/matter-service';
+import { closeDbPool } from '@/lib/db';
+import { linkMatterParty, openMatter } from '@/modules/matters/matter-service';
 import { createSyntheticActor } from '../helpers/party-test-helper';
 import { createValidatedTestPool } from '../helpers/test-db';
 import { cleanupPartyFixtures, setupTestEncryptionKeys } from '../helpers/party-test-helper';
 import { cleanupMatterFixtures } from '../helpers/matter-test-helper';
 import {
+  currentTotp,
   deleteT04Owner,
   seedT04Owner,
   signInWithTotp,
@@ -19,6 +21,7 @@ import {
   expectTouchTarget,
   expectVisibleFocus,
   nextPaint,
+  shellModeForViewport,
   tabToTestId,
 } from '../helpers/t04-layout';
 import {
@@ -42,6 +45,7 @@ async function cleanupFinanceTestFixtures(matterIds: string[], partyIds: string[
       await client.query('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_immutable');
       await client.query('ALTER TABLE public."fee_agreement" DISABLE TRIGGER trg_fee_agreement_approved_immutable');
       await client.query('ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_immutable');
+      await client.query('ALTER TABLE public."money_account" DISABLE TRIGGER trg_money_account_immutable');
       await client.query('ALTER TABLE public."money_line" DISABLE TRIGGER trg_money_line_balanced');
       await client.query('ALTER TABLE public."money_transaction" DISABLE TRIGGER trg_money_transaction_balanced');
 
@@ -64,6 +68,7 @@ async function cleanupFinanceTestFixtures(matterIds: string[], partyIds: string[
 
       await client.query('ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_balanced');
       await client.query('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_balanced');
+      await client.query('ALTER TABLE public."money_account" ENABLE TRIGGER trg_money_account_immutable');
       await client.query('ALTER TABLE public."money_transaction" ENABLE TRIGGER trg_money_transaction_immutable');
       await client.query('ALTER TABLE public."fee_agreement" ENABLE TRIGGER trg_fee_agreement_approved_immutable');
       await client.query('ALTER TABLE public."money_line" ENABLE TRIGGER trg_money_line_immutable');
@@ -87,8 +92,8 @@ async function cleanupFinanceTestFixtures(matterIds: string[], partyIds: string[
     await cleanupPartyFixtures(prisma, partyIds);
   }
   for (const oid of ownerIds) {
-    await prisma.idempotencyRecord.deleteMany({ where: { actorId: oid } }).catch(() => {});
-    await prisma.auditEvent.deleteMany({ where: { userId: oid } }).catch(() => {});
+    await prisma.idempotencyRecord.deleteMany({ where: { actorId: oid } });
+    await prisma.auditEvent.deleteMany({ where: { userId: oid } });
     await deleteT04Owner(oid);
   }
 }
@@ -102,8 +107,15 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     setupTestEncryptionKeys();
   });
 
+  test.afterEach(async () => {
+    const matters = createdMatters.splice(0);
+    const parties = createdParties.splice(0);
+    const owners = createdOwners.splice(0);
+    await cleanupFinanceTestFixtures(matters, parties, owners);
+  });
+
   test.afterAll(async () => {
-    await cleanupFinanceTestFixtures(createdMatters, createdParties, createdOwners);
+    await closeDbPool();
   });
 
   async function seedOwnerAndMatter(suffix: string): Promise<{
@@ -158,8 +170,17 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(page).toHaveURL((u) => u.pathname === '/finance');
     await expect(page.getByRole('heading', { level: 1 })).toContainText('الحسابات المالية');
 
-    // Filter to seeded matter so totals start cleanly at 0
+    // Filter to seeded matter and wait for overview GET + client balance row
+    const filterRespPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
     await page.getByTestId('finance-matter-filter').selectOption(fixture.matterId);
+    await filterRespPromise;
+    await expect(page.locator('[data-testid^="client-balance-row-"]').first()).toBeVisible();
+
     await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
     await expect(page.getByTestId('finance-card-expenses')).toContainText('قيد التفعيل لاحقاً');
     await expect(page.getByTestId('finance-card-advances')).toContainText('قيد التفعيل لاحقاً');
@@ -168,13 +189,22 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await page.getByTestId('toggle-draft-agreement-button').click();
     await page.getByTestId('draft-description-input').fill('أتعاب التقاضي شاملة الدرجات');
     await page.getByTestId('draft-total-egp-input').fill('15000');
+
+    const afterDraftOverviewPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
     await page.getByTestId('save-draft-agreement-button').click();
+    await afterDraftOverviewPromise;
 
     await expect(page.getByTestId('finance-success-banner')).toContainText('مسودة');
     await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
     await expect(page.getByTestId('fees-charged-value')).toContainText('0 ج.م.');
 
     const agreementCard = page.locator('[data-testid^="fee-agreement-card-"]').first();
+    await expect(agreementCard).toBeVisible();
     const agIdAttr = await agreementCard.getAttribute('data-testid');
     const agId = agIdAttr!.replace('fee-agreement-card-', '');
 
@@ -200,7 +230,7 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     const receiptDialog = page.getByTestId('finance-receipt-dialog');
     await expect(receiptDialog).toBeVisible();
     const firstReceiptNumber = (await page.getByTestId('receipt-number').innerText()).trim();
-    expect(firstReceiptNumber).toMatch(/^RCP-\d{4}-\d{4}$/);
+    expect(firstReceiptNumber).toMatch(/^RCP-\d{4}-\d{4,}$/);
     await expect(page.getByTestId('receipt-amount')).toContainText('5,000 ج.م.');
     await expect(page.getByTestId('receipt-remaining-after')).toContainText('10,000 ج.م.');
     await expect(page.getByTestId('receipt-administrative-notice')).toContainText(
@@ -213,7 +243,7 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(page.getByTestId('fees-due-value')).toContainText('10,000 ج.م.');
 
     // Open detailed single-client statement BEFORE the next payment and verify auto-refresh after retry payment
-    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
+    await page.getByRole('button', { name: /عرض الكشف المفصل/ }).first().click();
     const statementSummary = page.getByTestId('client-statement-summary');
     await expect(statementSummary).toBeVisible();
     await expect(statementSummary).toContainText('15,000 ج.م.');
@@ -225,10 +255,13 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await page.getByTestId('allocation-amount-0').fill('1000');
 
     let intercepted = false;
+    let committedNum = '';
     await page.route('**/api/finance/transactions', async (route) => {
       if (!intercepted && route.request().method() === 'POST') {
         intercepted = true;
-        await route.fetch();
+        const response = await route.fetch();
+        const json = (await response.json()) as { data?: { receipt?: { receiptNumber?: string } } };
+        committedNum = json.data?.receipt?.receiptNumber ?? '';
         await route.abort('failed');
         return;
       }
@@ -242,16 +275,21 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await page.getByTestId('retry-payment-button').click();
     await expect(receiptDialog).toBeVisible();
     const retryReceiptNumber = (await page.getByTestId('receipt-number').innerText()).trim();
+    expect(committedNum).toMatch(/^RCP-\d{4}-\d{4,}$/);
+    expect(retryReceiptNumber).toBe(committedNum);
     expect(retryReceiptNumber).not.toBe(firstReceiptNumber);
     await expect(page.getByTestId('receipt-remaining-after')).toContainText('9,000 ج.م.');
     await page.getByTestId('close-receipt-dialog-button').click();
+    await expect(receiptDialog).toBeHidden();
 
     await expect(page.getByTestId('fees-collected-value')).toContainText('6,000 ج.م.');
     await expect(page.getByTestId('fees-due-value')).toContainText('9,000 ج.م.');
 
-    // Reprint first receipt -> must keep exact original receiptNumber without creating any payment
-    const reprintBtn = page.locator('[data-testid^="reprint-receipt-button-"]').last();
-    await reprintBtn.click();
+    // Reprint first receipt -> scoped to the posted-tx-row containing firstReceiptNumber
+    const firstTxRow = page.locator('[data-testid^="posted-tx-row-"]', {
+      hasText: firstReceiptNumber,
+    });
+    await firstTxRow.locator('[data-testid^="reprint-receipt-button-"]').click();
     await expect(receiptDialog).toBeVisible();
     const reprintedNum = (await page.getByTestId('receipt-number').innerText()).trim();
     expect(reprintedNum).toBe(firstReceiptNumber);
@@ -266,12 +304,169 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(statementSummary).toContainText('6,000 ج.م.');
     await expect(statementSummary).toContainText('9,000 ج.م.');
 
-    // Visiting /finance?matterId=<missing-uuid> must render clean 404 (not 500)
+    // Visiting /finance?matterId=<missing-uuid> and non-RFC4122 UUID must render clean 404 (not 500)
     const missingRes = await page.goto(`/finance?matterId=${randomUUID()}`);
     expect(missingRes?.status()).toBe(404);
+
+    const nonRfcRes = await page.goto('/finance?matterId=11111111-1111-1111-1111-111111111111');
+    expect(nonRfcRes?.status()).toBe(404);
   });
 
-  test('T13-TC-06: MAINTAINER is excluded from navigation and denied 403 on /finance and /api/finance @t13 @finance', async ({
+  test('T13-AUTH-REDIRECT: Unauthenticated /finance redirects to /login preserving returnTo and lands back on /finance @t13 @finance', async ({
+    page,
+  }) => {
+    const owner = await seedT04Owner({ label: `t13-auth-${randomUUID().slice(0, 6)}` });
+    createdOwners.push(owner.id);
+
+    await page.goto('/finance');
+    await expect(page).toHaveURL(/\/login/);
+    expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/finance');
+
+    await page.locator('#email').fill(owner.email);
+    await page.locator('#password').fill(owner.password);
+    await page.locator('button[type="submit"]').click();
+
+    await expect(page).toHaveURL(/\/verify/);
+    expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/finance');
+
+    const code = await currentTotp(owner.totpSecret);
+    await page.locator('#totpCode').fill(code);
+    await page.locator('button[type="submit"]').click();
+
+    await expect(page).toHaveURL((u) => u.pathname === '/finance');
+    await expectShellReady(page);
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('الحسابات المالية');
+  });
+
+  test('T13-DRAFT-EDIT-AND-2CLIENT-EXCESS: Editing DRAFT agreement and 2-client excess warning preview against totalEligibleDue @t13 @finance', async ({
+    page,
+  }) => {
+    const suffix = randomUUID().slice(0, 6);
+    const fixture = await seedOwnerAndMatter(suffix);
+    const actor = createSyntheticActor({
+      id: fixture.owner.id,
+      name: fixture.owner.name,
+      email: fixture.owner.email,
+    });
+
+    const secondParty = await prisma.party.create({
+      data: {
+        kind: 'PERSON',
+        name: `موكل ثاني ${suffix}`,
+        nameNormalized: `موكل ثاني ${suffix}`,
+        createdById: fixture.owner.id,
+        updatedById: fixture.owner.id,
+      },
+    });
+    createdParties.push(secondParty.id);
+
+    const secondClientMp = await linkMatterParty(actor, {
+      matterId: fixture.matterId,
+      partyId: secondParty.id,
+      role: 'CLIENT',
+      billingEnabled: true,
+      idempotencyKey: randomUUID(),
+    });
+
+    await signInWithTotp(page, fixture.owner);
+    await expectShellReady(page);
+    await page.goto('/finance');
+
+    const filterRespPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
+    await page.getByTestId('finance-matter-filter').selectOption(fixture.matterId);
+    await filterRespPromise;
+    await expect(page.locator(`[data-testid="client-balance-row-${secondClientMp.id}"]`)).toBeVisible();
+
+    // 1. Save initial DRAFT for Client 1 (10,000 EGP) -> then edit DRAFT to 15,000 EGP
+    await page.getByTestId('toggle-draft-agreement-button').click();
+    await page.getByTestId('draft-description-input').fill('مسودة أولية قبل التعديل');
+    await page.getByTestId('draft-total-egp-input').fill('10000');
+
+    const afterCreatePromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
+    await page.getByTestId('save-draft-agreement-button').click();
+    await afterCreatePromise;
+
+    const draftCard = page.locator('[data-testid^="fee-agreement-card-"]').first();
+    const ag1Id = (await draftCard.getAttribute('data-testid'))!.replace('fee-agreement-card-', '');
+    await expect(draftCard).toContainText('10,000 ج.م.');
+    await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
+
+    await page.getByTestId(`edit-draft-agreement-${ag1Id}`).click();
+    await page.getByTestId('draft-description-input').fill('أتعاب معدلة قبل الاعتماد');
+    await page.getByTestId('draft-total-egp-input').fill('15000');
+
+    const afterEditPromise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
+    await page.getByTestId('save-draft-agreement-button').click();
+    await afterEditPromise;
+
+    await expect(page.getByTestId(`fee-agreement-card-${ag1Id}`)).toContainText('أتعاب معدلة قبل الاعتماد');
+    await expect(page.getByTestId(`fee-agreement-card-${ag1Id}`)).toContainText('15,000 ج.م.');
+    await expect(page.getByTestId('fees-due-value')).toContainText('0 ج.م.');
+
+    // Approve Client 1 agreement (15,000 EGP)
+    await page.getByTestId(`open-approve-agreement-${ag1Id}`).click();
+    await page.getByTestId(`confirm-approve-agreement-${ag1Id}`).click();
+    await expect(page.getByTestId('fees-due-value')).toContainText('15,000 ج.م.');
+
+    // 2. Create & approve smaller agreement for Client 2 (3,000 EGP) -> matter due = 18,000 EGP
+    await page.getByTestId('toggle-draft-agreement-button').click();
+    await page.getByTestId('draft-client-select').selectOption(secondClientMp.id);
+    await page.getByTestId('draft-description-input').fill('اتفاق الموكل الثاني');
+    await page.getByTestId('draft-total-egp-input').fill('3000');
+
+    const afterDraft2Promise = page.waitForResponse(
+      (res) =>
+        res.url().includes(`/api/finance?matterId=${fixture.matterId}`) &&
+        res.request().method() === 'GET' &&
+        res.status() === 200
+    );
+    await page.getByTestId('save-draft-agreement-button').click();
+    await afterDraft2Promise;
+
+    const ag2Card = page.locator('[data-testid^="fee-agreement-card-"]', {
+      hasText: 'اتفاق الموكل الثاني',
+    });
+    const ag2Id = (await ag2Card.getAttribute('data-testid'))!.replace('fee-agreement-card-', '');
+    await page.getByTestId(`open-approve-agreement-${ag2Id}`).click();
+    await page.getByTestId('installment-amount-0').fill('1500');
+    await page.getByTestId('add-installment-row-button').click();
+    await page.getByTestId('installment-desc-1').fill('قسط ثاني للموكل الثاني');
+    await page.getByTestId('installment-amount-1').fill('1500');
+    await page.getByTestId(`confirm-approve-agreement-${ag2Id}`).click();
+    await expect(page.getByTestId('fees-due-value')).toContainText('18,000 ج.م.');
+
+    // 3. Select Client 2 for payment and enter 5,000 EGP (> Client 2's 3,000 EGP due, < 18,000 matter total)
+    await page.getByTestId('pay-client-select').selectOption(secondClientMp.id);
+    await page.getByTestId('pay-amount-egp-input').fill('5000');
+
+    const preview = page.getByTestId('finance-presave-preview');
+    await expect(preview).toBeVisible();
+    await expect(preview).toContainText('يتجاوز إجمالي الأتعاب المستحقة على الموكل المحدد');
+    await expect(preview).toContainText('3,000 ج.م.');
+    await expect(preview).toContainText('ولن يتم ترحيله كدفعة مقدمة تلقائياً');
+
+    // Submitting is rejected client-side without touching balances
+    await page.getByTestId('submit-payment-button').click();
+    await expect(page.getByTestId('finance-error-banner')).toBeVisible();
+    await expect(page.getByTestId('fees-due-value')).toContainText('18,000 ج.م.');
+  });
+
+  test('T13-TC-06: MAINTAINER is excluded from navigation (desktop sidebar & tablet-drawer) and denied 403 on /finance and /api/finance @t13 @finance @responsive', async ({
     page,
   }) => {
     const suffix = randomUUID().slice(0, 8);
@@ -304,16 +499,27 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expect(page).not.toHaveURL(/\/login(?:[/?]|$)/);
     await expectShellReady(page);
 
-    await expect(page.getByTestId('nav-link-finance')).toHaveCount(0);
+    const mode = shellModeForViewport(page.viewportSize()!.width);
+    if (mode === 'desktop') {
+      await expect(page.getByTestId('desktop-sidebar').getByTestId('nav-link-finance')).toHaveCount(0);
+    } else {
+      await page.getByTestId('drawer-toggle-button').click();
+      const drawer = page.getByTestId('tablet-drawer');
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByTestId('nav-link-finance')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(drawer).toBeHidden();
+    }
 
     await page.goto('/finance');
     await expect(page.getByTestId('finance-forbidden')).toBeVisible();
+    await expectNoPageOverflow(page);
 
     const apiRes = await page.request.get('/api/finance');
     expect(apiRes.status()).toBe(403);
   });
 
-  test('T13-TC-07: Matter Finance tab, 390/768/1440px responsive reflow, 200% zoom, keyboard Escape, and storage privacy @t13 @finance @responsive @a11y', async ({
+  test('T13-TC-07: Matter Finance tab, 390/768/1440px responsive reflow, print media CSS, 200% zoom, keyboard Escape, and storage privacy @t13 @finance @responsive @a11y', async ({
     page,
   }, testInfo) => {
     const fixture = await seedOwnerAndMatter(randomUUID().slice(0, 6));
@@ -344,7 +550,7 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     const receiptDialog = page.getByTestId('finance-receipt-dialog');
     await expect(receiptDialog).toBeVisible();
     const firstReceiptNumber = (await page.getByTestId('receipt-number').innerText()).trim();
-    expect(firstReceiptNumber).toMatch(/^RCP-\d{4}-\d{4}$/);
+    expect(firstReceiptNumber).toMatch(/^RCP-\d{4}-\d{4,}$/);
     await expect(page.getByTestId('fees-due-value')).toContainText('10,000 ج.م.');
 
     const shot = await page.screenshot({ fullPage: true });
@@ -353,14 +559,34 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
       contentType: 'image/png',
     });
 
-    // Keyboard Tab traversal inside receipt modal + visible focus, then Escape dismisses cleanly
+    // Verify print media CSS while receipt modal is open, then restore screen media
+    try {
+      await page.emulateMedia({ media: 'print' });
+      await expect(page.locator('#app-shell-content')).toBeHidden();
+      await expect(receiptDialog).toBeVisible();
+      await expect(page.getByTestId('print-receipt-button')).toBeHidden();
+    } finally {
+      await page.emulateMedia({ media: 'screen' });
+    }
+
+    // Keyboard Tab traversal inside receipt modal + visible focus, then Escape dismisses & restores focus
     expect(await tabToTestId(page, 'print-receipt-button', 6)).toBe(true);
     await expectVisibleFocus(page, page.getByTestId('print-receipt-button'));
     await page.keyboard.press('Escape');
     await expect(receiptDialog).toBeHidden();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            document.activeElement !== null &&
+            document.activeElement !== document.body &&
+            document.activeElement !== document.documentElement
+        )
+      )
+      .toBe(true);
 
     // Load detailed single-client statement across all 3 viewports without horizontal overflow
-    await page.getByRole('button', { name: 'عرض الكشف المفصل' }).click();
+    await page.getByRole('button', { name: /عرض الكشف المفصل/ }).first().click();
     const statementSummary = page.getByTestId('client-statement-summary');
     await expect(statementSummary).toBeVisible();
     await expect(statementSummary).toContainText('مطابق حسابياً مع القيود المرحلة');
@@ -370,8 +596,10 @@ test.describe('T13 E2E: Fee Agreements, Balanced Collections, Receipts & Arabic 
     await expectNoPageOverflow(page);
 
     // Reprint receipt across all 3 viewports: identical number, remaining balance unchanged
-    const reprintBtn = page.locator('[data-testid^="reprint-receipt-button-"]').first();
-    await reprintBtn.click();
+    const firstTxRow = page.locator('[data-testid^="posted-tx-row-"]', {
+      hasText: firstReceiptNumber,
+    });
+    await firstTxRow.locator('[data-testid^="reprint-receipt-button-"]').click();
     await expect(receiptDialog).toBeVisible();
     expect((await page.getByTestId('receipt-number').innerText()).trim()).toBe(firstReceiptNumber);
     await expect(page.getByTestId('receipt-remaining-after')).toContainText('10,000 ج.م.');

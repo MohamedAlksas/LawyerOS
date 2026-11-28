@@ -1,2 +1,1 @@
-export const ADMINISTRATIVE_NOTICE_TEXT =
-  'إيصال تحصيل إداري — للاستخدام الداخلي بالمكتب وليس مستنداً ضريبياً.';
+export { ADMINISTRATIVE_RECEIPT_NOTICE_AR as ADMINISTRATIVE_NOTICE_TEXT } from '@/modules/finance/finance-types';

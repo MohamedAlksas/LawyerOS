@@ -269,6 +269,8 @@ model IdempotencyRecord {
   createdAt          DateTime          @default(now()) @db.Timestamptz(3)
   completedAt        DateTime?         @db.Timestamptz(3)
 
+  moneyTransaction   MoneyTransaction?
+
   @@unique([actorId, commandType, key])
   @@index([createdAt])
   @@map("idempotency_record")
@@ -1139,6 +1141,7 @@ model MoneyAccount {
   lines               MoneyLine[]
 
   @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
   @@index([type])
   @@map("money_account")
 }
@@ -1168,6 +1171,7 @@ model MoneyTransaction {
   matter                Matter?                @relation(fields: [matterId], references: [id], onDelete: Restrict)
   payerParty            Party?                 @relation("MoneyTransactionPayer", fields: [payerPartyId], references: [id], onDelete: Restrict)
   payeeParty            Party?                 @relation("MoneyTransactionPayee", fields: [payeePartyId], references: [id], onDelete: Restrict)
+  idempotencyRecord     IdempotencyRecord?     @relation(fields: [idempotencyRecordId], references: [id], onDelete: Restrict)
   reversalOf            MoneyTransaction?      @relation("TransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversedBy            MoneyTransaction?      @relation("TransactionReversal")
   refundOf              MoneyTransaction?      @relation("TransactionRefund", fields: [refundOfId], references: [id], onDelete: Restrict)
@@ -1179,6 +1183,7 @@ model MoneyTransaction {
 
   @@index([matterId, transactionDate])
   @@index([kind, status, transactionDate])
+  @@index([status, transactionDate(sort: Desc), createdAt(sort: Desc)])
   @@index([payerPartyId])
   @@index([payeePartyId])
   @@index([refundOfId])
@@ -1204,13 +1209,14 @@ model MoneyLine {
   clientMatterParty     MatterParty?      @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
   originalLine          MoneyLine?        @relation("MoneyLineOriginal", fields: [originalLineId], references: [id], onDelete: Restrict)
   derivedLines          MoneyLine[]       @relation("MoneyLineOriginal")
-  feeCharges            FeeCharge[]
+  feeCharge             FeeCharge?
   settlementAllocations MoneyAllocation[] @relation("SettlementAllocations")
   receivableAllocations MoneyAllocation[] @relation("ReceivableAllocations")
 
   @@index([accountId, transactionId])
   @@index([transactionId])
   @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
   @@index([originalLineId])
   @@map("money_line")
 }
@@ -1247,6 +1253,8 @@ model FeeAgreement {
   @@index([matterId, status])
   @@index([clientMatterPartyId, status])
   @@index([agreementDocumentId])
+  @@index([createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
   @@map("fee_agreement")
 }
 
@@ -1271,6 +1279,7 @@ model FeeCharge {
 
   @@unique([feeAgreementId, installmentNumber])
   @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
   @@index([dueDate])
   @@map("fee_charge")
 }
@@ -1303,7 +1312,7 @@ model MoneyAllocation {
 model ReceiptSequence {
   year      Int      @id @map("year")
   nextVal   Int      @default(1) @map("next_val")
-  updatedAt DateTime @updatedAt @db.Timestamptz(3) @map("updated_at")
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3) @map("updated_at")
 
   @@map("receipt_sequence")
 }

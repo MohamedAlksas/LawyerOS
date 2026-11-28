@@ -224,5 +224,21 @@ describe('sanitizeReturnTo (C21 / R04-06)', () => {
       expect(sanitizeReturnTo('/tasks/123')).toBe('/');
     });
   });
+
+  describe('T13 finance routes', () => {
+    it('allows /finance and /finance?matterId=<uuid>', () => {
+      expect(sanitizeReturnTo('/finance')).toBe('/finance');
+      expect(sanitizeReturnTo('/finance/')).toBe('/finance/');
+      expect(sanitizeReturnTo(`/finance?matterId=${VALID_UUID_1}`)).toBe(
+        `/finance?matterId=${VALID_UUID_1}`
+      );
+    });
+
+    it('rejects hostile or non-allowlisted /finance subroutes fail-closed', () => {
+      expect(sanitizeReturnTo('/finance/extra')).toBe('/');
+      expect(sanitizeReturnTo('/finance?next=//evil.com')).toBe('/');
+      expect(sanitizeReturnTo('/finance?return=https://evil.com')).toBe('/');
+    });
+  });
 });
 

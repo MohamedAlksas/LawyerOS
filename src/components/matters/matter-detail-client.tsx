@@ -1798,7 +1798,7 @@ export function MatterDetailClient({
             data-testid="tab-parties"
             onClick={() => setActiveTab('parties')}
             onKeyDown={(e) => handleMatterTabKeyDown(e, 'parties')}
-            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
               activeTab === 'parties'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -1820,7 +1820,7 @@ export function MatterDetailClient({
             data-testid="tab-proceedings"
             onClick={() => setActiveTab('proceedings')}
             onKeyDown={(e) => handleMatterTabKeyDown(e, 'proceedings')}
-            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
               activeTab === 'proceedings'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -1842,7 +1842,7 @@ export function MatterDetailClient({
             data-testid="tab-authorizations"
             onClick={() => setActiveTab('authorizations')}
             onKeyDown={(e) => handleMatterTabKeyDown(e, 'authorizations')}
-            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
               activeTab === 'authorizations'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -1864,7 +1864,7 @@ export function MatterDetailClient({
             data-testid="tab-tasks-deadlines"
             onClick={() => setActiveTab('tasksDeadlines')}
             onKeyDown={(e) => handleMatterTabKeyDown(e, 'tasksDeadlines')}
-            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
               activeTab === 'tasksDeadlines'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -1887,7 +1887,7 @@ export function MatterDetailClient({
               data-testid="tab-finance"
               onClick={() => setActiveTab('finance')}
               onKeyDown={(e) => handleMatterTabKeyDown(e, 'finance')}
-              className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+              className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
                 activeTab === 'finance'
                   ? 'border-[#14566B] text-[#14566B]'
                   : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -1910,7 +1910,7 @@ export function MatterDetailClient({
             data-testid="tab-summary"
             onClick={() => setActiveTab('summary')}
             onKeyDown={(e) => handleMatterTabKeyDown(e, 'summary')}
-            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] ${
+            className={`py-3 px-3 text-xs sm:text-sm font-bold border-b-2 transition-colors min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 ${
               activeTab === 'summary'
                 ? 'border-[#14566B] text-[#14566B]'
                 : 'border-transparent text-[#4D606A] hover:text-[#172A35] hover:border-gray-300'
@@ -2724,8 +2724,19 @@ export function MatterDetailClient({
       {activeTab === 'finance' && canReadFinance && (
         <div id="matter-tabpanel-finance" role="tabpanel" aria-labelledby="matter-tab-finance" className="space-y-4">
           {financeError ? (
-            <div role="alert" className="p-4 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold">
-              {financeError}
+            <div
+              role="alert"
+              className="p-4 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-sm font-semibold flex flex-wrap items-center justify-between gap-3"
+            >
+              <span>{financeError}</span>
+              <button
+                type="button"
+                data-testid="retry-finance-summary-button"
+                onClick={() => router.refresh()}
+                className="px-3 py-2 bg-white hover:bg-red-100 border border-red-300 text-[#A4262C] text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+              >
+                إعادة المحاولة
+              </button>
             </div>
           ) : financeInitialOverview ? (
             <FinanceWorkspace

@@ -45,6 +45,8 @@ export const DOCUMENTED_FUTURE_TRANSACTION_KINDS = [
 
 export const MAX_FINANCE_PAGE = 100;
 export const MAX_FINANCE_LIMIT = 100;
+export const MAX_PIASTRE_AMOUNT = 10_000_000_000_000_000n;
+const MAX_AMOUNT_INPUT_LENGTH = 32;
 
 export class FinanceValidationError extends Error {
   fieldErrors?: Record<string, string>;
@@ -163,6 +165,11 @@ export function parsePositivePiastres(value: unknown, fieldName = 'amountPiastre
         [fieldName]: 'المبلغ يجب أن يكون أكبر من صفر',
       });
     }
+    if (value > MAX_PIASTRE_AMOUNT) {
+      throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+        [fieldName]: 'المبلغ يتجاوز الحد الأقصى المسموح به',
+      });
+    }
     return value;
   }
 
@@ -177,11 +184,23 @@ export function parsePositivePiastres(value: unknown, fieldName = 'amountPiastre
         [fieldName]: 'المبلغ يجب أن يكون أكبر من صفر',
       });
     }
-    return BigInt(value);
+    const parsed = BigInt(value);
+    if (parsed > MAX_PIASTRE_AMOUNT) {
+      throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+        [fieldName]: 'المبلغ يتجاوز الحد الأقصى المسموح به',
+      });
+    }
+    return parsed;
   }
 
   if (typeof value === 'string') {
-    const normalized = normalizeArabicDigits(value.trim());
+    const trimmed = value.trim();
+    if (trimmed.length > MAX_AMOUNT_INPUT_LENGTH) {
+      throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+        [fieldName]: 'طول المبلغ النصي يتجاوز الحد الأقصى المسموح به',
+      });
+    }
+    const normalized = normalizeArabicDigits(trimmed);
     if (!/^\d+$/.test(normalized)) {
       throw new FinanceValidationError('صيغة المبلغ بالقروش غير صالحة (يجب أن تكون أرقاماً صحيحة موجبة).', {
         [fieldName]: 'أدخل مبلغاً صحيحاً موجباً بالقروش بدون علامات عشرية أو سالبة',
@@ -191,6 +210,11 @@ export function parsePositivePiastres(value: unknown, fieldName = 'amountPiastre
     if (parsed <= 0n) {
       throw new FinanceValidationError('المبلغ يجب أن يكون أكبر من صفر.', {
         [fieldName]: 'المبلغ يجب أن يكون أكبر من صفر',
+      });
+    }
+    if (parsed > MAX_PIASTRE_AMOUNT) {
+      throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+        [fieldName]: 'المبلغ يتجاوز الحد الأقصى المسموح به',
       });
     }
     return parsed;
@@ -218,15 +242,19 @@ export function parseEgpToPiastres(value: unknown, fieldName = 'amountEgp'): big
       [fieldName]: 'المبلغ مطلوب',
     });
   }
+  if (trimmed.length > MAX_AMOUNT_INPUT_LENGTH) {
+    throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+      [fieldName]: 'طول المبلغ النصي يتجاوز الحد الأقصى المسموح به',
+    });
+  }
 
   // Normalize Arabic-Indic/Persian digits, Arabic decimal separator (٫), and Arabic thousands separator (٬)
   let normalized = normalizeArabicDigits(trimmed)
     .replace(/\u066B/g, '.')
-    .replace(/\u066C/g, ',')
-    .replace(/\s+/g, '');
+    .replace(/\u066C/g, ',');
 
   // Strip valid comma thousands grouping only when unambiguous (e.g., 15,000 or 1,250,000.50)
-  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(normalized)) {
+  if (/^[1-9]\d{0,2}(,\d{3})+(\.\d{1,2})?$/.test(normalized)) {
     normalized = normalized.replace(/,/g, '');
   }
 
@@ -246,6 +274,11 @@ export function parseEgpToPiastres(value: unknown, fieldName = 'amountEgp'): big
   if (piastres <= 0n) {
     throw new FinanceValidationError('المبلغ يجب أن يكون أكبر من صفر.', {
       [fieldName]: 'المبلغ يجب أن يكون أكبر من صفر',
+    });
+  }
+  if (piastres > MAX_PIASTRE_AMOUNT) {
+    throw new FinanceValidationError('المبلغ يتجاوز الحد الأقصى المسموح به.', {
+      [fieldName]: 'المبلغ يتجاوز الحد الأقصى المسموح به',
     });
   }
 
@@ -335,7 +368,11 @@ const nonEmptyIdempotencyKeySchema = z
 export const saveFeeAgreementDraftSchema = z
   .object({
     feeAgreementId: z.string().uuid('معرف اتفاق الأتعاب غير صالح.').optional(),
-    expectedVersion: z.number().int().min(1, 'رقم الإصدار غير صالح.').optional(),
+    expectedVersion: z
+      .number({ error: 'رقم الإصدار المتوقع غير صالح.' })
+      .int('رقم الإصدار المتوقع يجب أن يكون رقماً صحيحاً.')
+      .min(1, 'رقم الإصدار غير صالح.')
+      .optional(),
     matterId: z.string().uuid('معرف ملف القضية غير صالح.'),
     clientMatterPartyId: z.string().uuid('معرف الموكل بالملف غير صالح.'),
     description: z
@@ -350,11 +387,12 @@ export const saveFeeAgreementDraftSchema = z
     }),
     agreementDocumentId: z.string().uuid('معرف المستند غير صالح.').optional().nullable(),
     notes: z
-      .string()
+      .string({ error: 'الملاحظات غير صالحة.' })
       .trim()
       .max(2000, 'الملاحظات لا يجب أن تتجاوز 2000 حرف.')
       .optional()
-      .nullable(),
+      .nullable()
+      .transform((v) => (v === '' || v === null || v === undefined ? null : v)),
     idempotencyKey: nonEmptyIdempotencyKeySchema,
   })
   .superRefine((data, ctx) => {
@@ -379,9 +417,15 @@ export const feeInstallmentInputSchema = z.object({
 
 export const approveFeeAgreementSchema = z.object({
   feeAgreementId: z.string().uuid('معرف اتفاق الأتعاب غير صالح.'),
-  expectedVersion: z.number().int().min(1, 'رقم الإصدار المتوقع غير صالح.'),
+  expectedVersion: z
+    .number({ error: 'رقم الإصدار المتوقع غير صالح.' })
+    .int('رقم الإصدار المتوقع يجب أن يكون رقماً صحيحاً.')
+    .min(1, 'رقم الإصدار المتوقع غير صالح.'),
   transactionDate: optionalDateSchema,
-  installments: z.array(feeInstallmentInputSchema).max(100, 'عدد الأقساط كبير جداً.').optional(),
+  installments: z
+    .array(feeInstallmentInputSchema, { error: 'قائمة الأقساط غير صالحة.' })
+    .max(100, 'عدد الأقساط كبير جداً.')
+    .optional(),
   idempotencyKey: nonEmptyIdempotencyKeySchema,
 });
 
@@ -391,8 +435,14 @@ export const feeAllocationInputSchema = z.object({
 });
 
 export const explicitLedgerLineInputSchema = z.object({
-  accountType: z.string().trim().min(1).optional(),
-  side: z.nativeEnum(MoneyLineSide),
+  accountType: z
+    .string({ error: 'نوع الحساب غير صالح.' })
+    .trim()
+    .min(1, 'نوع الحساب لا يمكن أن يكون فارغاً.')
+    .optional(),
+  side: z.nativeEnum(MoneyLineSide, {
+    error: 'اتجاه القيد المالي غير صالح.',
+  }),
   amountPiastres: positivePiastresSchema,
 });
 
@@ -410,20 +460,25 @@ export const postTransactionSchema = z
     }),
     totalAmountPiastres: positivePiastresSchema,
     reference: z
-      .string()
+      .string({ error: 'المرجع غير صالح.' })
       .trim()
       .max(120, 'المرجع لا يجب أن يتجاوز 120 حرفاً.')
       .optional()
-      .nullable(),
+      .nullable()
+      .transform((v) => (v === '' || v === null || v === undefined ? null : v)),
     description: z
-      .string()
+      .string({ error: 'الوصف غير صالح.' })
       .trim()
       .max(500, 'الوصف لا يجب أن يتجاوز 500 حرف.')
       .optional(),
     allocations: z
-      .array(feeAllocationInputSchema)
-      .min(1, 'يجب تحديد توزيع واحد على الأقل على بنود الأتعاب المستحقة.'),
-    lines: z.array(explicitLedgerLineInputSchema).optional(),
+      .array(feeAllocationInputSchema, { error: 'قائمة التوزيعات غير صالحة.' })
+      .min(1, 'يجب تحديد توزيع واحد على الأقل على بنود الأتعاب المستحقة.')
+      .max(100, 'عدد بنود التوزيع في الدفعة الواحدة كبير جداً.'),
+    lines: z
+      .array(explicitLedgerLineInputSchema, { error: 'قائمة السطور المالية غير صالحة.' })
+      .max(20, 'عدد سطور القيد المالي كبير جداً.')
+      .optional(),
     idempotencyKey: nonEmptyIdempotencyKeySchema,
   })
   .superRefine((data, ctx) => {
@@ -493,9 +548,23 @@ export const getClientStatementSchema = z
 
 export const listFinanceOverviewSchema = z.object({
   matterId: z.string().uuid('معرف ملف القضية غير صالح.').optional(),
-  q: z.string().trim().max(120).optional(),
-  page: z.number().int().min(1).max(MAX_FINANCE_PAGE).default(1),
-  limit: z.number().int().min(1).max(MAX_FINANCE_LIMIT).default(20),
+  q: z
+    .string({ error: 'نص البحث غير صالح.' })
+    .trim()
+    .max(120, 'نص البحث لا يجب أن يتجاوز 120 حرفاً.')
+    .optional(),
+  page: z
+    .number({ error: 'رقم الصفحة غير صالح.' })
+    .int('رقم الصفحة يجب أن يكون رقماً صحيحاً.')
+    .min(1, 'رقم الصفحة يجب أن لا يقل عن 1.')
+    .max(MAX_FINANCE_PAGE, `رقم الصفحة لا يجب أن يتجاوز ${MAX_FINANCE_PAGE}.`)
+    .default(1),
+  limit: z
+    .number({ error: 'حد النتائج غير صالح.' })
+    .int('حد النتائج يجب أن يكون رقماً صحيحاً.')
+    .min(1, 'حد النتائج يجب أن لا يقل عن 1.')
+    .max(MAX_FINANCE_LIMIT, `حد النتائج لا يجب أن يتجاوز ${MAX_FINANCE_LIMIT}.`)
+    .default(20),
 });
 
 export type SaveFeeAgreementDraftInput = z.input<typeof saveFeeAgreementDraftSchema>;

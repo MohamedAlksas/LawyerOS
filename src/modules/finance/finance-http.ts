@@ -8,9 +8,14 @@ import { FinanceValidationError } from './finance-types';
 export const FINANCE_NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
 };
 
+export const MAX_FINANCE_JSON_BYTES = 128 * 1024;
+const ALLOWED_FETCH_SITES = new Set(['same-origin', 'none']);
+
 export function statusFromFinanceErrorCode(code: string | undefined): number {
+  if (code === 'PAYLOAD_TOO_LARGE') return 413;
   if (code === 'FORBIDDEN' || code === 'CROSS_MATTER_LINK_FORBIDDEN') return 403;
   if (['UNAUTHENTICATED', 'MFA_REQUIRED', 'SESSION_EXPIRED', 'SESSION_INACTIVE'].includes(code ?? '')) {
     return 401;
@@ -45,7 +50,8 @@ export function financeHttpErrorResponse(error: unknown) {
 }
 
 export function isCrossSiteRequest(request: Request): boolean {
-  return request.headers.get('sec-fetch-site')?.trim().toLowerCase() === 'cross-site';
+  const secFetchSite = request.headers.get('sec-fetch-site')?.trim().toLowerCase();
+  return Boolean(secFetchSite && !ALLOWED_FETCH_SITES.has(secFetchSite));
 }
 
 export function verifyFinanceReadOrigin(request: Request): NextResponse | null {
@@ -108,6 +114,65 @@ export async function readFinanceFromRequest<R>(
   }
 }
 
+async function readJsonBodyWithLimit(request: Request, maxBytes: number): Promise<unknown> {
+  const contentLengthRaw = request.headers.get('content-length');
+  if (contentLengthRaw !== null) {
+    const contentLength = Number(contentLengthRaw);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      throw new FinanceValidationError(
+        'حجم بيانات الطلب المالي كبير جداً.',
+        undefined,
+        'PAYLOAD_TOO_LARGE'
+      );
+    }
+  }
+
+  let rawText: string;
+  if (request.body) {
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new FinanceValidationError(
+            'حجم بيانات الطلب المالي كبير جداً.',
+            undefined,
+            'PAYLOAD_TOO_LARGE'
+          );
+        }
+        chunks.push(value);
+      }
+    }
+    const combined = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    rawText = new TextDecoder('utf-8').decode(combined);
+  } else {
+    rawText = await request.text();
+    if (Buffer.byteLength(rawText, 'utf8') > maxBytes) {
+      throw new FinanceValidationError(
+        'حجم بيانات الطلب المالي كبير جداً.',
+        undefined,
+        'PAYLOAD_TOO_LARGE'
+      );
+    }
+  }
+
+  try {
+    return JSON.parse(rawText) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 export async function writeFinanceFromRequest<T, R>(
   request: Request,
   command: (actor: Actor, input: T) => Promise<R>,
@@ -130,7 +195,7 @@ export async function writeFinanceFromRequest<T, R>(
       throw new FinanceValidationError('صيغة البيانات غير صحيحة (يجب إرسال JSON).');
     }
 
-    const body: unknown = await request.json().catch(() => null);
+    const body = await readJsonBodyWithLimit(request, MAX_FINANCE_JSON_BYTES);
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new FinanceValidationError('بيانات الطلب غير صالحة.');
     }

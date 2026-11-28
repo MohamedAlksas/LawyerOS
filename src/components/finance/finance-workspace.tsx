@@ -12,9 +12,18 @@ import type {
   ReceiptDTO,
   TransactionDTO,
 } from '@/modules/finance/finance-types';
-import { getCairoTodayDateString, formatCairoDateArabic } from '@/lib/cairo-date';
+import {
+  formatCairoDateArabic,
+  formatCairoInstantArabic,
+  getCairoTodayDateString,
+} from '@/lib/cairo-date';
 import { normalizeArabicDigits } from '@/lib/normalization';
-import { renderModalPortal, useAccessibleModal } from '@/components/productivity/productivity-ui-types';
+import {
+  isUncertainMutationOutcome,
+  renderModalPortal,
+  useAccessibleModal,
+} from '@/components/productivity/productivity-ui-types';
+import { useLeaveGuard } from '@/components/navigation-guard';
 import {
   IconCheck,
   IconDocument,
@@ -55,6 +64,9 @@ const TRANSACTION_KIND_LABELS: Record<string, string> = {
 const ADMINISTRATIVE_NOTICE =
   'إيصال تحصيل إداري — للاستخدام الداخلي بالمكتب وليس مستنداً ضريبياً.';
 
+const MAX_AMOUNT_INPUT_LENGTH = 32;
+const MAX_PIASTRE_AMOUNT = 10_000_000_000_000_000n;
+
 function createClientIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -65,13 +77,12 @@ function createClientIdempotencyKey(): string {
 /** Pure BigInt parser matching server parseEgpToPiastres without floats. */
 function tryParseEgpToPiastres(raw: string): bigint | null {
   const trimmed = raw.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.length > MAX_AMOUNT_INPUT_LENGTH) return null;
   let normalized = normalizeArabicDigits(trimmed)
     .replace(/\u066B/g, '.')
-    .replace(/\u066C/g, ',')
-    .replace(/\s+/g, '');
+    .replace(/\u066C/g, ',');
 
-  if (/^\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(normalized)) {
+  if (/^[1-9]\d{0,2}(,\d{3})+(\.\d{1,2})?$/.test(normalized)) {
     normalized = normalized.replace(/,/g, '');
   }
   if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
@@ -79,7 +90,7 @@ function tryParseEgpToPiastres(raw: string): bigint | null {
   }
   const [whole, frac = ''] = normalized.split('.');
   const piastres = BigInt(whole) * 100n + BigInt(frac.padEnd(2, '0'));
-  return piastres > 0n ? piastres : null;
+  return piastres > 0n && piastres <= MAX_PIASTRE_AMOUNT ? piastres : null;
 }
 
 function formatPiastresToInputEgp(piastresStr: string): string {
@@ -89,7 +100,7 @@ function formatPiastresToInputEgp(piastresStr: string): string {
   return frac === 0n ? whole.toString() : `${whole.toString()}.${frac.toString().padStart(2, '0')}`;
 }
 
-function formatEgp(piastresInput: bigint | string): string {
+function formatEgpNumber(piastresInput: bigint | string): string {
   const val = typeof piastresInput === 'bigint' ? piastresInput : BigInt(piastresInput || '0');
   const neg = val < 0n;
   const abs = neg ? -val : val;
@@ -97,18 +108,28 @@ function formatEgp(piastresInput: bigint | string): string {
   const frac = abs % 100n;
   const grouped = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const fracStr = frac > 0n ? `.${frac.toString().padStart(2, '0')}` : '';
-  return `${neg ? '-' : ''}${grouped}${fracStr} ج.م.`;
+  return `${neg ? '-' : ''}${grouped}${fracStr}`;
 }
 
-function formatCairoTimestamp(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('ar-EG', {
-    timeZone: 'Africa/Cairo',
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(d);
+function formatEgp(piastresInput: bigint | string): string {
+  return `${formatEgpNumber(piastresInput)} ج.م.`;
+}
+
+function EgpAmount({ piastres }: { piastres: bigint | string }) {
+  return (
+    <span className="whitespace-nowrap">
+      <bdi dir="ltr">{formatEgpNumber(piastres)}</bdi> <span>ج.م.</span>
+    </span>
+  );
+}
+
+function isAuthErrorResponse(status: number, code?: string): boolean {
+  return (
+    status === 401 ||
+    code === 'UNAUTHENTICATED' ||
+    code === 'SESSION_EXPIRED' ||
+    code === 'MFA_REQUIRED'
+  );
 }
 
 interface DraftInstallmentRow {
@@ -137,7 +158,7 @@ export function FinanceWorkspace({
 }: FinanceWorkspaceProps) {
   const SectionHeading = headingLevel;
   const SubHeading = headingLevel === 'h2' ? 'h3' : 'h4';
-  const defaultDate = useMemo(() => getCairoTodayDateString(), []);
+  const defaultDate = getCairoTodayDateString();
 
   const [overview, setOverview] = useState<FinanceOverviewDTO>(initialOverview);
   const prevInitialOverviewRef = useRef(initialOverview);
@@ -147,23 +168,31 @@ export function FinanceWorkspace({
       setOverview(initialOverview);
     }
   }, [initialOverview]);
+
   const [selectedMatterId, setSelectedMatterId] = useState<string>(
     lockedMatterId || initialOverview.selectedMatterSummary?.matterId || ''
   );
   const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [sessionExpired, setSessionExpired] = useState(false);
 
-  // Draft fee agreement form
+  // Draft fee agreement form (supports create & DRAFT update)
   const [showDraftForm, setShowDraftForm] = useState(false);
+  const [editingAgreementId, setEditingAgreementId] = useState<string | null>(null);
+  const [editingAgreementVersion, setEditingAgreementVersion] = useState<number | null>(null);
   const [draftMatterId, setDraftMatterId] = useState<string>(
-    lockedMatterId || initialOverview.selectableMatters[0]?.matterId || ''
+    lockedMatterId || initialOverview.selectedMatterSummary?.matterId || initialOverview.selectableMatters[0]?.matterId || ''
   );
   const [draftClientId, setDraftClientId] = useState<string>(
     initialOverview.selectableMatters.find(
-      (m) => m.matterId === (lockedMatterId || initialOverview.selectableMatters[0]?.matterId)
-    )?.clients[0]?.clientMatterPartyId || ''
+      (m) =>
+        m.matterId ===
+        (lockedMatterId || initialOverview.selectedMatterSummary?.matterId || initialOverview.selectableMatters[0]?.matterId)
+    )?.clients[0]?.clientMatterPartyId ||
+      initialOverview.selectedMatterSummary?.clients[0]?.clientMatterPartyId ||
+      ''
   );
   const [draftDescription, setDraftDescription] = useState('');
   const [draftTotalEgp, setDraftTotalEgp] = useState('');
@@ -183,9 +212,17 @@ export function FinanceWorkspace({
   // Collect fee payment state
   const firstCharge = initialOverview.openCharges[0] ?? null;
   const [payMatterId, setPayMatterId] = useState<string>(
-    lockedMatterId || firstCharge?.matterId || initialOverview.selectableMatters[0]?.matterId || ''
+    lockedMatterId ||
+      initialOverview.selectedMatterSummary?.matterId ||
+      firstCharge?.matterId ||
+      initialOverview.selectableMatters[0]?.matterId ||
+      ''
   );
-  const [payClientId, setPayClientId] = useState<string>(firstCharge?.clientMatterPartyId || '');
+  const [payClientId, setPayClientId] = useState<string>(
+    firstCharge?.clientMatterPartyId ||
+      initialOverview.selectedMatterSummary?.clients[0]?.clientMatterPartyId ||
+      ''
+  );
   const [payDate, setPayDate] = useState(defaultDate);
   const [payMethod, setPayMethod] = useState<PaymentMethod>('CASH');
   const [payAmountEgp, setPayAmountEgp] = useState('');
@@ -197,40 +234,83 @@ export function FinanceWorkspace({
   const [isPostingPayment, setIsPostingPayment] = useState(false);
 
   // Statement & Receipt modal state
-  const [statementClientKey, setStatementClientKey] = useState<string>(
-    initialOverview.selectedMatterSummary?.clients[0]?.clientMatterPartyId || ''
-  );
+  const [statementClientKey, setStatementClientKey] = useState<string>('');
   const [loadedStatement, setLoadedStatement] = useState<ClientStatementDTO | null>(null);
   const [isLoadingStatement, setIsLoadingStatement] = useState(false);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptDTO | null>(null);
   const [isLoadingReceipt, setIsLoadingReceipt] = useState(false);
+
+  const errorBannerRef = useRef<HTMLDivElement>(null);
   const receiptModalRef = useRef<HTMLDivElement>(null);
   const closeReceiptBtnRef = useRef<HTMLButtonElement>(null);
+  const submitBtnRef = useRef<HTMLButtonElement>(null);
   const lastFocusRef = useRef<HTMLElement | null>(null);
+
+  const overviewGenRef = useRef(0);
+  const statementGenRef = useRef(0);
+  const receiptGenRef = useRef(0);
+
+  const summary = overview.selectedMatterSummary;
+  const effectiveReadOnly = isReadOnly || summary?.matterStatus === 'ARCHIVED';
+
+  const hasUnsavedInput = Boolean(
+    (showDraftForm &&
+      (draftDescription.trim() || draftTotalEgp.trim() || draftNotes.trim() || editingAgreementId !== null)) ||
+      approvingAgreementId !== null ||
+      payAmountEgp.trim() ||
+      payReference.trim() ||
+      payDescription.trim() ||
+      Object.values(chargeAllocations).some((v) => v.trim() !== '') ||
+      frozenPaymentPayload !== null
+  );
+
+  useLeaveGuard(
+    hasUnsavedInput,
+    isPostingPayment || isApproving || isSavingDraft || Boolean(frozenPaymentPayload)
+  );
 
   useAccessibleModal({
     isOpen: Boolean(activeReceipt),
     hasPending: false,
     onClose: () => {
       setActiveReceipt(null);
-      lastFocusRef.current?.focus();
     },
     dialogRef: receiptModalRef,
     initialFocusRef: closeReceiptBtnRef,
+    returnFocusRef: lastFocusRef,
   });
+
+  const focusFirstErrorTarget = (errors: Record<string, string>) => {
+    requestAnimationFrame(() => {
+      for (const key of Object.keys(errors)) {
+        const directEl = document.getElementById(key);
+        if (directEl) {
+          directEl.scrollIntoView({ block: 'nearest' });
+          directEl.focus();
+          return;
+        }
+      }
+      errorBannerRef.current?.scrollIntoView({ block: 'nearest' });
+      errorBannerRef.current?.focus();
+    });
+  };
 
   const refreshOverview = async (
     matterFilter: string,
     activeStatementClientId: string | null = loadedStatement?.scope.clientMatterPartyId ?? null
   ) => {
+    const gen = ++overviewGenRef.current;
     setIsLoadingOverview(true);
     setActionError(null);
     try {
       const qs = matterFilter ? `?matterId=${encodeURIComponent(matterFilter)}` : '';
       const res = await fetch(`/api/finance${qs}`, { cache: 'no-store' });
       const json = await res.json().catch(() => null);
-      if (res.status === 401 || json?.code === 'UNAUTHENTICATED' || json?.code === 'SESSION_EXPIRED' || json?.code === 'MFA_REQUIRED') {
+      if (gen !== overviewGenRef.current) return;
+
+      if (isAuthErrorResponse(res.status, json?.code)) {
         setSessionExpired(true);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
         setActionError('انتهت الجلسة. يرجى تسجيل الدخول في نافذة جديدة ثم إعادة المحاولة.');
         return;
       }
@@ -246,23 +326,55 @@ export function FinanceWorkspace({
         setPayClientId(next.openCharges[0].clientMatterPartyId);
       }
       if (activeStatementClientId) {
+        const stmtGen = ++statementGenRef.current;
         const stmtRes = await fetch(
           `/api/finance/statement?clientMatterPartyId=${encodeURIComponent(activeStatementClientId)}`,
           { cache: 'no-store' }
         );
         const stmtJson = await stmtRes.json().catch(() => null);
+        if (gen !== overviewGenRef.current || stmtGen !== statementGenRef.current) return;
+
+        if (isAuthErrorResponse(stmtRes.status, stmtJson?.code)) {
+          setSessionExpired(true);
+          setLoadedStatement(null);
+          window.dispatchEvent(new Event('lawoffice:recheck-session'));
+          setActionError('انتهت الجلسة أثناء تحديث كشف الحساب. يرجى تسجيل الدخول في نافذة جديدة.');
+          return;
+        }
         if (stmtRes.ok && stmtJson?.success) {
           setLoadedStatement(stmtJson.data as ClientStatementDTO);
+        } else {
+          setLoadedStatement(null);
+          setActionError(stmtJson?.error || 'تعذر تحديث كشف حساب الموكل.');
         }
       }
     } catch {
-      setActionError('تعذر الاتصال بالخادم لتحديث البيانات المالية.');
+      if (gen === overviewGenRef.current) {
+        setActionError('تعذر الاتصال بالخادم لتحديث البيانات المالية.');
+      }
     } finally {
-      setIsLoadingOverview(false);
+      if (gen === overviewGenRef.current) {
+        setIsLoadingOverview(false);
+      }
     }
   };
 
-  const summary = overview.selectedMatterSummary;
+  const matterOptions = useMemo(() => {
+    if (!summary || overview.selectableMatters.some((m) => m.matterId === summary.matterId)) {
+      return overview.selectableMatters;
+    }
+    return [
+      {
+        matterId: summary.matterId,
+        fileCode: summary.matterFileCode,
+        title: summary.matterTitle,
+        status: summary.matterStatus,
+        clients: summary.clients,
+      },
+      ...overview.selectableMatters,
+    ];
+  }, [overview.selectableMatters, summary]);
+
   const activeTotals = summary
     ? {
         feesChargedPiastres: summary.feesChargedPiastres,
@@ -279,25 +391,96 @@ export function FinanceWorkspace({
     : overview.openCharges;
   const transactions: TransactionDTO[] = summary ? summary.transactions : overview.recentTransactions;
 
-  const effectivePayMatterId = lockedMatterId || payMatterId || selectedMatterId;
-  const payMatterOption = overview.selectableMatters.find((m) => m.matterId === effectivePayMatterId);
+  const effectivePayMatterId = lockedMatterId || payMatterId;
+  const payMatterOption = matterOptions.find((m) => m.matterId === effectivePayMatterId);
+  const payMatterClients =
+    payMatterOption?.clients ??
+    (summary && summary.matterId === effectivePayMatterId ? summary.clients : []);
   const payEligibleCharges = allOpenCharges.filter(
     (c) =>
       (!effectivePayMatterId || c.matterId === effectivePayMatterId) &&
       (!payClientId || c.clientMatterPartyId === payClientId)
   );
-  const draftMatterClients =
-    overview.selectableMatters.find((m) => m.matterId === draftMatterId)?.clients || [];
+
+  const editingAgreement = editingAgreementId
+    ? agreements.find((a) => a.id === editingAgreementId) ?? null
+    : null;
+  const draftMatterClients = useMemo(() => {
+    const fromOption = matterOptions.find((m) => m.matterId === draftMatterId)?.clients;
+    if (fromOption && fromOption.length > 0) return fromOption;
+    if (summary && summary.matterId === draftMatterId && summary.clients.length > 0) {
+      return summary.clients;
+    }
+    if (editingAgreement && editingAgreement.matterId === draftMatterId) {
+      return [
+        {
+          clientMatterPartyId: editingAgreement.clientMatterPartyId,
+          partyId: editingAgreement.clientPartyId,
+          partyName: editingAgreement.clientName,
+          isPrimaryContact: true,
+          billingEnabled: true,
+        },
+      ];
+    }
+    return [];
+  }, [matterOptions, draftMatterId, summary, editingAgreement]);
+
+  const resetDraftFormState = () => {
+    setShowDraftForm(false);
+    setEditingAgreementId(null);
+    setEditingAgreementVersion(null);
+    setDraftDescription('');
+    setDraftTotalEgp('');
+    setDraftDate(getCairoTodayDateString());
+    setDraftNotes('');
+    setDraftIdempotencyKey(createClientIdempotencyKey());
+  };
+
+  const openEditDraftForm = (ag: FeeAgreementDTO) => {
+    setEditingAgreementId(ag.id);
+    setEditingAgreementVersion(ag.version);
+    setDraftMatterId(ag.matterId);
+    setDraftClientId(ag.clientMatterPartyId);
+    setDraftDescription(ag.description);
+    setDraftTotalEgp(formatPiastresToInputEgp(ag.totalAmountPiastres));
+    setDraftDate(ag.agreementDate);
+    setDraftMethod(ag.chargingMethod);
+    setDraftNotes(ag.notes || '');
+    setDraftIdempotencyKey(createClientIdempotencyKey());
+    setShowDraftForm(true);
+    setFieldErrors({});
+    setActionError(null);
+    setActionNotice(null);
+  };
 
   const handleSaveDraft = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canWriteFinance || isReadOnly || isSavingDraft) return;
+    if (!canWriteFinance || effectiveReadOnly || isSavingDraft) return;
     setActionError(null);
     setActionNotice(null);
+    setFieldErrors({});
 
+    const nextErrors: Record<string, string> = {};
+    if (!draftMatterId) {
+      nextErrors['draft-matter-select'] = 'يرجى اختيار ملف القضية.';
+    }
+    if (!draftClientId) {
+      nextErrors['draft-client-select'] = 'يرجى اختيار الموكل المسؤول.';
+    }
+    if (!draftDescription.trim()) {
+      nextErrors['draft-description-input'] = 'يرجى إدخال بيان أو وصف اتفاق الأتعاب.';
+    }
     const parsedTotal = tryParseEgpToPiastres(draftTotalEgp);
     if (!parsedTotal) {
-      setActionError('يرجى إدخال مبلغ أتعاب صحيح وموجب بالجنيه المصري.');
+      nextErrors['draft-total-egp-input'] = 'يرجى إدخال مبلغ أتعاب صحيح وموجب بالجنيه المصري.';
+    }
+    if (!draftDate.trim()) {
+      nextErrors['draft-date-input'] = 'يرجى تحديد تاريخ الاتفاق.';
+    }
+    if (Object.keys(nextErrors).length > 0 || !parsedTotal) {
+      setFieldErrors(nextErrors);
+      setActionError('يرجى مراجعة الحقول المطلوبة في نموذج اتفاق الأتعاب.');
+      focusFirstErrorTarget(nextErrors);
       return;
     }
 
@@ -307,6 +490,12 @@ export function FinanceWorkspace({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(editingAgreementId !== null && editingAgreementVersion !== null
+            ? {
+                feeAgreementId: editingAgreementId,
+                expectedVersion: editingAgreementVersion,
+              }
+            : {}),
           matterId: draftMatterId,
           clientMatterPartyId: draftClientId,
           description: draftDescription.trim(),
@@ -318,24 +507,39 @@ export function FinanceWorkspace({
         }),
       });
       const json = await res.json().catch(() => null);
-      if (res.status === 401) {
+      if (isAuthErrorResponse(res.status, json?.code)) {
         setSessionExpired(true);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
         setActionError('انتهت الجلسة. افتح صفحة تسجيل الدخول وأعد المحاولة دون فقدان البيانات.');
         return;
       }
       if (!res.ok || !json?.success) {
-        if (res.status < 500) {
+        if (res.status < 500 && !isUncertainMutationOutcome(json?.code)) {
           setDraftIdempotencyKey(createClientIdempotencyKey());
         }
+        const mappedErrors: Record<string, string> = {};
+        const srvErrors = json?.fieldErrors as Record<string, string> | undefined;
+        if (srvErrors) {
+          if (srvErrors.matterId) mappedErrors['draft-matter-select'] = srvErrors.matterId;
+          if (srvErrors.clientMatterPartyId) mappedErrors['draft-client-select'] = srvErrors.clientMatterPartyId;
+          if (srvErrors.description) mappedErrors['draft-description-input'] = srvErrors.description;
+          if (srvErrors.totalAmountPiastres) mappedErrors['draft-total-egp-input'] = srvErrors.totalAmountPiastres;
+          if (srvErrors.agreementDate) mappedErrors['draft-date-input'] = srvErrors.agreementDate;
+          if (srvErrors.chargingMethod) mappedErrors['draft-method-select'] = srvErrors.chargingMethod;
+          if (srvErrors.notes) mappedErrors['draft-notes-input'] = srvErrors.notes;
+        }
+        setFieldErrors(mappedErrors);
         setActionError(json?.error || 'تعذر حفظ مسودة اتفاق الأتعاب.');
+        focusFirstErrorTarget(mappedErrors);
         return;
       }
-      setActionNotice('تم حفظ مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).');
-      setShowDraftForm(false);
-      setDraftDescription('');
-      setDraftTotalEgp('');
-      setDraftNotes('');
-      setDraftIdempotencyKey(createClientIdempotencyKey());
+      setSessionExpired(false);
+      setActionNotice(
+        editingAgreementId !== null
+          ? 'تم تحديث مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
+          : 'تم حفظ مسودة اتفاق الأتعاب بنجاح (بلا أثر مالي حتى الاعتماد).'
+      );
+      resetDraftFormState();
       await refreshOverview(selectedMatterId);
       onDataChanged?.();
     } catch {
@@ -347,7 +551,7 @@ export function FinanceWorkspace({
 
   const openApprovePanel = (ag: FeeAgreementDTO) => {
     setApprovingAgreementId(ag.id);
-    setApproveDate(defaultDate);
+    setApproveDate(getCairoTodayDateString());
     setApproveIdempotencyKey(createClientIdempotencyKey());
     setApproveInstallments([
       {
@@ -357,35 +561,68 @@ export function FinanceWorkspace({
         amountEgp: formatPiastresToInputEgp(ag.totalAmountPiastres),
       },
     ]);
+    setFieldErrors({});
     setActionError(null);
     setActionNotice(null);
   };
 
+  const approveInstallmentsLive = useMemo(() => {
+    let sum = 0n;
+    let hasInvalid = false;
+    for (const row of approveInstallments) {
+      if (!row.amountEgp.trim()) {
+        hasInvalid = true;
+        continue;
+      }
+      const parsed = tryParseEgpToPiastres(row.amountEgp);
+      if (!parsed) {
+        hasInvalid = true;
+      } else {
+        sum += parsed;
+      }
+    }
+    return { sum, hasInvalid };
+  }, [approveInstallments]);
+
   const handleApproveAgreement = async (ag: FeeAgreementDTO) => {
-    if (!canWriteFinance || isReadOnly || isApproving) return;
+    if (!canWriteFinance || effectiveReadOnly || isApproving) return;
     setActionError(null);
     setActionNotice(null);
+    setFieldErrors({});
 
     const parsedRows: Array<{ description: string; dueDate: string | null; amountPiastres: string }> = [];
+    const nextErrors: Record<string, string> = {};
     let sum = 0n;
     for (const row of approveInstallments) {
-      const amt = tryParseEgpToPiastres(row.amountEgp);
-      if (!amt || !row.description.trim()) {
-        setActionError('يجب أن يحتوي كل قسط على وصف صحيح ومبلغ موجب.');
-        return;
+      if (!row.description.trim()) {
+        nextErrors[`inst-desc-${row.key}`] = 'وصف البند مطلوب';
       }
-      sum += amt;
-      parsedRows.push({
-        description: row.description.trim(),
-        dueDate: row.dueDate.trim() || null,
-        amountPiastres: amt.toString(),
-      });
+      const amt = tryParseEgpToPiastres(row.amountEgp);
+      if (!amt) {
+        nextErrors[`inst-amt-${row.key}`] = 'أدخل مبلغاً صحيحاً وموجباً';
+      }
+      if (amt && row.description.trim()) {
+        sum += amt;
+        parsedRows.push({
+          description: row.description.trim(),
+          dueDate: row.dueDate.trim() || null,
+          amountPiastres: amt.toString(),
+        });
+      }
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      setActionError('يجب أن يحتوي كل قسط على وصف صحيح ومبلغ موجب.');
+      focusFirstErrorTarget(nextErrors);
+      return;
     }
 
     if (sum !== BigInt(ag.totalAmountPiastres)) {
       setActionError(
         `مجموع الأقساط (${formatEgp(sum)}) يجب أن يساوي إجمالي الاتفاق (${formatEgp(ag.totalAmountPiastres)}).`
       );
+      focusFirstErrorTarget({});
       return;
     }
 
@@ -403,22 +640,31 @@ export function FinanceWorkspace({
         }),
       });
       const json = await res.json().catch(() => null);
-      if (res.status === 401) {
+      if (isAuthErrorResponse(res.status, json?.code)) {
         setSessionExpired(true);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
         setActionError('انتهت الجلسة أثناء اعتماد الاتفاق. سجل الدخول وأعد المحاولة بنفس الطلب.');
         return;
       }
       if (!res.ok || !json?.success) {
-        if (res.status < 500) {
+        if (res.status < 500 && !isUncertainMutationOutcome(json?.code)) {
           setApproveIdempotencyKey(createClientIdempotencyKey());
         }
+        const mappedErrors: Record<string, string> = {};
+        if (json?.fieldErrors?.transactionDate) {
+          mappedErrors['approve-tx-date'] = json.fieldErrors.transactionDate;
+        }
+        setFieldErrors(mappedErrors);
         setActionError(json?.error || 'تعذر اعتماد اتفاق الأتعاب.');
+        focusFirstErrorTarget(mappedErrors);
         return;
       }
+      setSessionExpired(false);
       setActionNotice(`تم اعتماد اتفاق الأتعاب وترحيل ${parsedRows.length} استحقاق مالي متوازن.`);
       setApprovingAgreementId(null);
       setPayMatterId(ag.matterId);
       setPayClientId(ag.clientMatterPartyId);
+      setChargeAllocations({});
       await refreshOverview(selectedMatterId);
       onDataChanged?.();
     } catch {
@@ -430,23 +676,40 @@ export function FinanceWorkspace({
 
   // Compute current payment & live pre-save preview using BigInt only
   const parsedPaymentAmount = tryParseEgpToPiastres(payAmountEgp);
+  const invalidAllocationChargeIds: string[] = [];
+  const overAllocatedChargeIds: string[] = [];
   const resolvedAllocations: Array<{ feeChargeId: string; amountPiastres: bigint }> = [];
+  let hasExplicitAllocationInput = false;
+
   for (const ch of payEligibleCharges) {
     const rawAlloc = chargeAllocations[ch.id];
-    const parsedAlloc = rawAlloc ? tryParseEgpToPiastres(rawAlloc) : null;
-    if (parsedAlloc) {
-      resolvedAllocations.push({ feeChargeId: ch.id, amountPiastres: parsedAlloc });
+    if (rawAlloc !== undefined && rawAlloc.trim() !== '') {
+      hasExplicitAllocationInput = true;
+      const parsedAlloc = tryParseEgpToPiastres(rawAlloc);
+      if (!parsedAlloc) {
+        invalidAllocationChargeIds.push(ch.id);
+      } else {
+        resolvedAllocations.push({ feeChargeId: ch.id, amountPiastres: parsedAlloc });
+        if (parsedAlloc > BigInt(ch.remainingPiastres)) {
+          overAllocatedChargeIds.push(ch.id);
+        }
+      }
     }
   }
+
   if (
-    resolvedAllocations.length === 0 &&
-    parsedPaymentAmount !== null &&
-    payEligibleCharges.length === 1
+    payEligibleCharges.length === 1 &&
+    !(payEligibleCharges[0].id in chargeAllocations) &&
+    parsedPaymentAmount !== null
   ) {
+    const singleCh = payEligibleCharges[0];
     resolvedAllocations.push({
-      feeChargeId: payEligibleCharges[0].id,
+      feeChargeId: singleCh.id,
       amountPiastres: parsedPaymentAmount,
     });
+    if (parsedPaymentAmount > BigInt(singleCh.remainingPiastres)) {
+      overAllocatedChargeIds.push(singleCh.id);
+    }
   }
 
   const effectiveAllocTotal = resolvedAllocations.reduce((acc, a) => acc + a.amountPiastres, 0n);
@@ -461,6 +724,7 @@ export function FinanceWorkspace({
     setIsPostingPayment(true);
     setActionError(null);
     setActionNotice(null);
+    setFieldErrors({});
     try {
       const res = await fetch('/api/finance/transactions', {
         method: 'POST',
@@ -468,35 +732,51 @@ export function FinanceWorkspace({
         body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => null);
-      if (res.status === 401) {
+      if (isAuthErrorResponse(res.status, json?.code)) {
         setSessionExpired(true);
         setFrozenPaymentPayload(payload);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
         setActionError('انتهت الجلسة. يرجى تسجيل الدخول في نافذة جديدة ثم إعادة المحاولة بنفس المفتاح.');
         return;
       }
       if (!res.ok || !json?.success) {
-        if (res.status >= 500) {
+        if (res.status >= 500 || isUncertainMutationOutcome(json?.code)) {
           setFrozenPaymentPayload(payload);
         } else {
           // Validation / over-allocation error: release frozen payload so user can fix input with a fresh key
           setFrozenPaymentPayload(null);
           setPaymentIdempotencyKey(createClientIdempotencyKey());
+          const mappedErrors: Record<string, string> = {};
+          const srvErrors = json?.fieldErrors as Record<string, string> | undefined;
+          if (srvErrors) {
+            if (srvErrors.matterId) mappedErrors['pay-matter-select'] = srvErrors.matterId;
+            if (srvErrors.clientMatterPartyId) mappedErrors['pay-client-select'] = srvErrors.clientMatterPartyId;
+            if (srvErrors.totalAmountPiastres) mappedErrors['pay-amount-egp-input'] = srvErrors.totalAmountPiastres;
+            if (srvErrors.paymentMethod) mappedErrors['pay-method-select'] = srvErrors.paymentMethod;
+            if (srvErrors.transactionDate) mappedErrors['pay-date-input'] = srvErrors.transactionDate;
+            if (srvErrors.reference) mappedErrors['pay-reference-input'] = srvErrors.reference;
+            if (srvErrors.description) mappedErrors['pay-description-input'] = srvErrors.description;
+          }
+          setFieldErrors(mappedErrors);
+          focusFirstErrorTarget(mappedErrors);
         }
         setActionError(json?.error || 'تعذر تسجيل الدفعة المالية.');
         return;
       }
 
       const data = json.data as { receipt: ReceiptDTO; matterSummary: { feesDuePiastres: string } };
+      setSessionExpired(false);
       setFrozenPaymentPayload(null);
       setPaymentIdempotencyKey(createClientIdempotencyKey());
       setPayAmountEgp('');
       setPayReference('');
       setPayDescription('');
+      setPayDate(getCairoTodayDateString());
       setChargeAllocations({});
       setActionNotice(
         `تم تحصيل ${formatEgp(data.receipt.amountPiastres)} وإصدار الإيصال رقم ${data.receipt.receiptNumber}. باقي الأتعاب: ${formatEgp(data.matterSummary.feesDuePiastres)}.`
       );
-      lastFocusRef.current = document.activeElement as HTMLElement | null;
+      receiptGenRef.current += 1;
       setActiveReceipt(data.receipt);
       await refreshOverview(selectedMatterId);
       onDataChanged?.();
@@ -510,29 +790,57 @@ export function FinanceWorkspace({
 
   const handleSubmitPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canWriteFinance || isReadOnly || isPostingPayment) return;
+    if (!canWriteFinance || effectiveReadOnly || isPostingPayment) return;
 
     if (frozenPaymentPayload) {
       await submitPaymentRequest(frozenPaymentPayload);
       return;
     }
 
+    const nextErrors: Record<string, string> = {};
+    if (!effectivePayMatterId) {
+      nextErrors['pay-matter-select'] = 'يرجى تحديد الملف.';
+    }
+    if (!payClientId) {
+      nextErrors['pay-client-select'] = 'يرجى تحديد الموكل المسؤول.';
+    }
     if (!parsedPaymentAmount) {
-      setActionError('يرجى إدخال مبلغ تحصيل صحيح وموجب بالجنيه المصري.');
-      return;
+      nextErrors['pay-amount-egp-input'] = 'يرجى إدخال مبلغ تحصيل صحيح وموجب بالجنيه المصري.';
     }
-    if (!effectivePayMatterId || !payClientId) {
-      setActionError('يرجى تحديد الملف والموكل المسؤول قبل تسجيل الدفعة.');
-      return;
+    if (!payDate.trim()) {
+      nextErrors['pay-date-input'] = 'يرجى تحديد تاريخ التحصيل.';
     }
-    if (resolvedAllocations.length === 0) {
-      setActionError('يرجى تحديد البند أو القسط المخصص له هذه الدفعة.');
-      return;
+    for (const chId of invalidAllocationChargeIds) {
+      nextErrors[`alloc-${chId}`] = 'قيمة توزيع غير صالحة';
     }
-    if (effectiveAllocTotal !== parsedPaymentAmount) {
+    for (const chId of overAllocatedChargeIds) {
+      nextErrors[`alloc-${chId}`] = 'تتجاوز الرصيد المتبقي للبند';
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
       setActionError(
-        `مجموع التوزيع على البنود (${formatEgp(effectiveAllocTotal)}) يجب أن يطابق مبلغ الدفعة (${formatEgp(parsedPaymentAmount)}).`
+        invalidAllocationChargeIds.length > 0
+          ? 'يرجى تصحيح قيم التوزيع غير الصالحة على البنود.'
+          : overAllocatedChargeIds.length > 0
+          ? 'المبلغ الموزع على أحد البنود يتجاوز الرصيد المتبقي المستحق عليه.'
+          : 'يرجى استكمال وتصحيح بيانات الدفعة المالية.'
       );
+      focusFirstErrorTarget(nextErrors);
+      return;
+    }
+
+    if (payEligibleCharges.length === 0 || resolvedAllocations.length === 0) {
+      setActionError('يرجى تحديد البند أو القسط المخصص له هذه الدفعة.');
+      focusFirstErrorTarget({});
+      return;
+    }
+    if (!parsedPaymentAmount || effectiveAllocTotal !== parsedPaymentAmount) {
+      setFieldErrors({ 'pay-amount-egp-input': 'لا يطابق مجموع التوزيعات' });
+      setActionError(
+        `مجموع التوزيع على البنود (${formatEgp(effectiveAllocTotal)}) يجب أن يطابق مبلغ الدفعة (${formatEgp(parsedPaymentAmount ?? 0n)}).`
+      );
+      focusFirstErrorTarget({ 'pay-amount-egp-input': 'لا يطابق مجموع التوزيعات' });
       return;
     }
 
@@ -552,10 +860,12 @@ export function FinanceWorkspace({
       idempotencyKey: paymentIdempotencyKey,
     };
 
+    lastFocusRef.current = submitBtnRef.current ?? (document.activeElement as HTMLElement | null);
     await submitPaymentRequest(payload);
   };
 
   const handleOpenReceipt = async (receiptId: string, triggerEl: HTMLElement) => {
+    const gen = ++receiptGenRef.current;
     lastFocusRef.current = triggerEl;
     setIsLoadingReceipt(true);
     setActionError(null);
@@ -564,22 +874,39 @@ export function FinanceWorkspace({
         cache: 'no-store',
       });
       const json = await res.json().catch(() => null);
+      if (gen !== receiptGenRef.current) return;
+
+      if (isAuthErrorResponse(res.status, json?.code)) {
+        setSessionExpired(true);
+        setActiveReceipt(null);
+        setLoadedStatement(null);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        setActionError('انتهت الجلسة. يرجى تسجيل الدخول في نافذة جديدة ثم إعادة المحاولة.');
+        return;
+      }
       if (!res.ok || !json?.success) {
         setActionError(json?.error || 'تعذر تحميل بيانات الإيصال.');
         return;
       }
+      setSessionExpired(false);
       setActiveReceipt(json.data as ReceiptDTO);
     } catch {
-      setActionError('تعذر الاتصال بالخادم لعرض الإيصال.');
+      if (gen === receiptGenRef.current) {
+        setActionError('تعذر الاتصال بالخادم لعرض الإيصال.');
+      }
     } finally {
-      setIsLoadingReceipt(false);
+      if (gen === receiptGenRef.current) {
+        setIsLoadingReceipt(false);
+      }
     }
   };
 
   const handleLoadClientStatement = async (clientMatterPartyId: string) => {
+    const gen = ++statementGenRef.current;
     setStatementClientKey(clientMatterPartyId);
     if (!clientMatterPartyId) {
       setLoadedStatement(null);
+      setIsLoadingStatement(false);
       return;
     }
     setIsLoadingStatement(true);
@@ -590,15 +917,30 @@ export function FinanceWorkspace({
         { cache: 'no-store' }
       );
       const json = await res.json().catch(() => null);
+      if (gen !== statementGenRef.current) return;
+
+      if (isAuthErrorResponse(res.status, json?.code)) {
+        setSessionExpired(true);
+        setLoadedStatement(null);
+        window.dispatchEvent(new Event('lawoffice:recheck-session'));
+        setActionError('انتهت الجلسة. يرجى تسجيل الدخول في نافذة جديدة ثم إعادة المحاولة.');
+        return;
+      }
       if (!res.ok || !json?.success) {
+        setLoadedStatement(null);
         setActionError(json?.error || 'تعذر تحميل كشف حساب الموكل.');
         return;
       }
+      setSessionExpired(false);
       setLoadedStatement(json.data as ClientStatementDTO);
     } catch {
-      setActionError('تعذر الاتصال لتحميل كشف حساب الموكل.');
+      if (gen === statementGenRef.current) {
+        setActionError('تعذر الاتصال لتحميل كشف حساب الموكل.');
+      }
     } finally {
-      setIsLoadingStatement(false);
+      if (gen === statementGenRef.current) {
+        setIsLoadingStatement(false);
+      }
     }
   };
 
@@ -607,8 +949,8 @@ export function FinanceWorkspace({
       {/* Scope Filter Bar */}
       {!lockedMatterId && (
         <div className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 flex flex-wrap items-center justify-between gap-3 print:hidden">
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="finance-matter-filter" className="text-xs font-bold text-[#172A35]">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full flex-1">
+            <label htmlFor="finance-matter-filter" className="text-sm font-bold text-[#172A35]">
               تصفية حسب ملف القضية:
             </label>
             <select
@@ -616,23 +958,36 @@ export function FinanceWorkspace({
               data-testid="finance-matter-filter"
               value={selectedMatterId}
               onChange={(e) => {
+                if (frozenPaymentPayload !== null) {
+                  window.alert(
+                    'توجد دفعة معلقة لم تتأكد نتيجتها بعد. يرجى إعادة المحاولة أو إلغاء وتعديل الدفعة أولاً.'
+                  );
+                  return;
+                }
                 const nextId = e.target.value;
                 setSelectedMatterId(nextId);
+                setStatementClientKey('');
+                setLoadedStatement(null);
+                setChargeAllocations({});
+                setApprovingAgreementId(null);
                 if (nextId) {
                   setPayMatterId(nextId);
-                  setDraftMatterId(nextId);
-                  const m = overview.selectableMatters.find((item) => item.matterId === nextId);
+                  if (editingAgreementId === null) {
+                    setDraftMatterId(nextId);
+                  }
+                  const m = matterOptions.find((item) => item.matterId === nextId);
                   const firstCid = m?.clients[0]?.clientMatterPartyId || '';
                   setPayClientId(firstCid);
-                  setDraftClientId(firstCid);
+                  if (editingAgreementId === null) {
+                    setDraftClientId(firstCid);
+                  }
                 }
-                setLoadedStatement(null);
                 void refreshOverview(nextId, null);
               }}
-              className="px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
+              className="w-full sm:w-auto max-w-full min-w-0 px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
             >
               <option value="">كل الملفات النشطة</option>
-              {overview.selectableMatters.map((m) => (
+              {matterOptions.map((m) => (
                 <option key={m.matterId} value={m.matterId}>
                   {m.fileCode} — {m.title}
                 </option>
@@ -643,7 +998,8 @@ export function FinanceWorkspace({
             type="button"
             onClick={() => void refreshOverview(selectedMatterId)}
             disabled={isLoadingOverview}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] min-h-[44px]"
+            aria-busy={isLoadingOverview}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-[#14566B] bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
           >
             <IconRefresh className="w-4 h-4" />
             <span>{isLoadingOverview ? 'جارٍ التحديث...' : 'تحديث الحسابات'}</span>
@@ -654,9 +1010,11 @@ export function FinanceWorkspace({
       {/* Alerts */}
       {actionError && (
         <div
+          ref={errorBannerRef}
+          tabIndex={-1}
           role="alert"
           data-testid="finance-error-banner"
-          className="p-3.5 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-xs font-semibold flex flex-wrap items-center justify-between gap-2"
+          className="p-3.5 bg-red-50 border border-red-200 text-[#A4262C] rounded-[6px] text-sm font-semibold flex flex-wrap items-center justify-between gap-2 print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
         >
           <span>{actionError}</span>
           <div className="flex flex-wrap items-center gap-2">
@@ -665,21 +1023,46 @@ export function FinanceWorkspace({
                 href="/login"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3 py-2 bg-[#14566B] text-white rounded-[6px] min-h-[44px] inline-flex items-center"
+                className="px-3 py-2 bg-[#14566B] text-white rounded-[6px] min-h-[44px] inline-flex items-center text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
               >
                 تسجيل الدخول في نافذة جديدة
               </NextLink>
             )}
             {frozenPaymentPayload && (
-              <button
-                type="button"
-                data-testid="retry-payment-button"
-                disabled={isPostingPayment}
-                onClick={() => void submitPaymentRequest(frozenPaymentPayload)}
-                className="px-3 py-2 bg-amber-700 hover:bg-amber-800 text-white font-bold rounded-[6px] min-h-[44px]"
-              >
-                إعادة المحاولة بنفس الطلب (دون تكرار)
-              </button>
+              <>
+                <button
+                  type="button"
+                  data-testid="retry-payment-button"
+                  disabled={isPostingPayment}
+                  aria-busy={isPostingPayment}
+                  onClick={(e) => {
+                    lastFocusRef.current = e.currentTarget;
+                    void submitPaymentRequest(frozenPaymentPayload);
+                  }}
+                  className="px-3 py-2 bg-amber-700 hover:bg-amber-800 text-white text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                >
+                  إعادة المحاولة بنفس الطلب (دون تكرار)
+                </button>
+                <button
+                  type="button"
+                  data-testid="cancel-frozen-payment-button"
+                  disabled={isPostingPayment}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'قد تكون الدفعة السابقة قيد المعالجة أو نُفذت على الخادم. هل تريد فعلاً إلغاء إعادة المحاولة وتعديل البيانات بمفتاح طلب جديد؟'
+                      )
+                    ) {
+                      setFrozenPaymentPayload(null);
+                      setPaymentIdempotencyKey(createClientIdempotencyKey());
+                      setActionError(null);
+                    }
+                  }}
+                  className="px-3 py-2 bg-white hover:bg-red-100 border border-red-300 text-[#A4262C] text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                >
+                  إلغاء وتعديل الدفعة
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -689,7 +1072,7 @@ export function FinanceWorkspace({
         <div
           role="status"
           data-testid="finance-success-banner"
-          className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-[6px] text-xs font-semibold flex items-center gap-2"
+          className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-[6px] text-sm font-semibold flex items-center gap-2 print:hidden"
         >
           <IconCheck className="w-4 h-4 shrink-0 text-emerald-700" />
           <span>{actionNotice}</span>
@@ -702,32 +1085,32 @@ export function FinanceWorkspace({
           data-testid="finance-card-fees"
           className="bg-white border border-[#D5DFE3] rounded-[6px] p-4 shadow-xs space-y-2"
         >
-          <div className="flex items-center justify-between">
-            <SectionHeading className="text-sm font-bold text-[#14566B] flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <SectionHeading className="text-base font-bold text-[#14566B] flex items-center gap-1.5">
               <IconWallet className="w-4 h-4" />
               <span>الأتعاب</span>
             </SectionHeading>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-[#E9F2F5] text-[#14566B]">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-[#E9F2F5] text-[#14566B]">
               مفعّل
             </span>
           </div>
-          <dl className="space-y-1.5 text-xs pt-1">
-            <div className="flex items-center justify-between">
+          <dl className="space-y-1.5 text-sm pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-2 [overflow-wrap:anywhere]">
               <dt className="text-[#4D606A]">المتفق عليه المعتمد:</dt>
               <dd className="font-bold text-[#172A35]" data-testid="fees-charged-value">
-                <bdi dir="ltr">{formatEgp(activeTotals.feesChargedPiastres)}</bdi>
+                <EgpAmount piastres={activeTotals.feesChargedPiastres} />
               </dd>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2 [overflow-wrap:anywhere]">
               <dt className="text-[#4D606A]">المحصل من الأتعاب:</dt>
               <dd className="font-bold text-emerald-800" data-testid="fees-collected-value">
-                <bdi dir="ltr">{formatEgp(activeTotals.feesCollectedPiastres)}</bdi>
+                <EgpAmount piastres={activeTotals.feesCollectedPiastres} />
               </dd>
             </div>
-            <div className="flex items-center justify-between pt-1.5 border-t border-[#E8EEF1]">
+            <div className="flex flex-wrap items-center justify-between gap-2 [overflow-wrap:anywhere] pt-1.5 border-t border-[#E8EEF1]">
               <dt className="font-bold text-[#172A35]">باقي الأتعاب المستحق:</dt>
               <dd className="text-base font-bold text-[#14566B]" data-testid="fees-due-value">
-                <bdi dir="ltr">{formatEgp(activeTotals.feesDuePiastres)}</bdi>
+                <EgpAmount piastres={activeTotals.feesDuePiastres} />
               </dd>
             </div>
           </dl>
@@ -737,18 +1120,18 @@ export function FinanceWorkspace({
           data-testid="finance-card-expenses"
           className="bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] p-4 space-y-2"
         >
-          <div className="flex items-center justify-between">
-            <SectionHeading className="text-sm font-bold text-[#172A35]">
+          <div className="flex items-center justify-between gap-2">
+            <SectionHeading className="text-base font-bold text-[#172A35]">
               مصاريف القضايا
             </SectionHeading>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
               قيد التفعيل لاحقاً
             </span>
           </div>
-          <p className="text-sm font-bold text-[#172A35]" data-testid="expenses-due-value">
-            <bdi dir="ltr">{formatEgp(activeTotals.expensesDuePiastres)}</bdi>
+          <p className="text-base font-bold text-[#172A35]" data-testid="expenses-due-value">
+            <EgpAmount piastres={activeTotals.expensesDuePiastres} />
           </p>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
+          <p className="text-sm text-[#4D606A] leading-relaxed">
             مصاريف القضايا القابلة للاسترداد منفصلة تماماً عن الأتعاب وسيتم تفعيل تسجيلها في مرحلة لاحقة (مصروفات تشغيل المكتب غير مشمولة بالنظام).
           </p>
         </div>
@@ -757,18 +1140,18 @@ export function FinanceWorkspace({
           data-testid="finance-card-advances"
           className="bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] p-4 space-y-2"
         >
-          <div className="flex items-center justify-between">
-            <SectionHeading className="text-sm font-bold text-[#172A35]">
+          <div className="flex items-center justify-between gap-2">
+            <SectionHeading className="text-base font-bold text-[#172A35]">
               أموال الموكل (العُهد)
             </SectionHeading>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-200 text-[#172A35]">
               قيد التفعيل لاحقاً
             </span>
           </div>
-          <p className="text-sm font-bold text-[#172A35]" data-testid="advances-available-value">
-            <bdi dir="ltr">{formatEgp(activeTotals.advanceAvailablePiastres)}</bdi>
+          <p className="text-base font-bold text-[#172A35]" data-testid="advances-available-value">
+            <EgpAmount piastres={activeTotals.advanceAvailablePiastres} />
           </p>
-          <p className="text-xs text-[#4D606A] leading-relaxed">
+          <p className="text-sm text-[#4D606A] leading-relaxed">
             أمانات الصرف المخصصة للقضايا تبقى منفصلة ولا تُحتسب إيراداً أو أتعاباً، وسيتم تفعيلها في مرحلة لاحقة.
           </p>
         </div>
@@ -781,19 +1164,31 @@ export function FinanceWorkspace({
             <SectionHeading className="text-base font-bold text-[#172A35]">
               اتفاقات الأتعاب والأقساط المعتمدة
             </SectionHeading>
-            <p className="text-xs text-[#4D606A]">
+            <p className="text-sm text-[#4D606A]">
               حفظ الاتفاق كمسودة لا ينشئ مديونية؛ اعتماد الاتفاق يرحّل استحقاقات متوازنة على حساب الموكل.
             </p>
           </div>
-          {canWriteFinance && !isReadOnly && (
+          {canWriteFinance && !effectiveReadOnly && (
             <button
               type="button"
               data-testid="toggle-draft-agreement-button"
+              aria-expanded={showDraftForm}
               onClick={() => {
-                setShowDraftForm((v) => !v);
-                setDraftIdempotencyKey(createClientIdempotencyKey());
+                if (showDraftForm) {
+                  resetDraftFormState();
+                } else {
+                  setEditingAgreementId(null);
+                  setEditingAgreementVersion(null);
+                  setDraftDescription('');
+                  setDraftTotalEgp('');
+                  setDraftNotes('');
+                  setDraftDate(getCairoTodayDateString());
+                  setDraftIdempotencyKey(createClientIdempotencyKey());
+                  setFieldErrors({});
+                  setShowDraftForm(true);
+                }
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] print:hidden"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
             >
               <IconPlus className="w-4 h-4" />
               <span>{showDraftForm ? 'إخفاء نموذج الاتفاق' : 'اتفاق أتعاب جديد (مسودة)'}</span>
@@ -801,16 +1196,20 @@ export function FinanceWorkspace({
           )}
         </div>
 
-        {showDraftForm && canWriteFinance && !isReadOnly && (
+        {showDraftForm && canWriteFinance && !effectiveReadOnly && (
           <form
             onSubmit={handleSaveDraft}
             data-testid="draft-agreement-form"
             className="p-4 bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] space-y-4 print:hidden"
           >
+            <SubHeading className="text-sm font-bold text-[#14566B]">
+              {editingAgreementId !== null ? 'تعديل مسودة اتفاق الأتعاب' : 'إضافة مسودة اتفاق أتعاب جديدة'}
+            </SubHeading>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {!lockedMatterId && (
                 <div className="space-y-1">
-                  <label htmlFor="draft-matter-select" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="draft-matter-select" className="block text-sm font-bold text-[#172A35]">
                     ملف القضية
                   </label>
                   <select
@@ -818,26 +1217,33 @@ export function FinanceWorkspace({
                     data-testid="draft-matter-select"
                     required
                     value={draftMatterId}
+                    aria-invalid={Boolean(fieldErrors['draft-matter-select'])}
+                    aria-describedby={fieldErrors['draft-matter-select'] ? 'draft-matter-select-error' : undefined}
                     onChange={(e) => {
                       const nextM = e.target.value;
                       setDraftMatterId(nextM);
-                      const m = overview.selectableMatters.find((item) => item.matterId === nextM);
+                      const m = matterOptions.find((item) => item.matterId === nextM);
                       setDraftClientId(m?.clients[0]?.clientMatterPartyId || '');
                     }}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                   >
                     <option value="">-- اختر ملف القضية --</option>
-                    {overview.selectableMatters.map((m) => (
+                    {matterOptions.map((m) => (
                       <option key={m.matterId} value={m.matterId}>
                         {m.fileCode} — {m.title}
                       </option>
                     ))}
                   </select>
+                  {fieldErrors['draft-matter-select'] && (
+                    <p id="draft-matter-select-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['draft-matter-select']}
+                    </p>
+                  )}
                 </div>
               )}
 
               <div className="space-y-1">
-                <label htmlFor="draft-client-select" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-client-select" className="block text-sm font-bold text-[#172A35]">
                   الموكل المسؤول عن السداد
                 </label>
                 <select
@@ -845,8 +1251,10 @@ export function FinanceWorkspace({
                   data-testid="draft-client-select"
                   required
                   value={draftClientId}
+                  aria-invalid={Boolean(fieldErrors['draft-client-select'])}
+                  aria-describedby={fieldErrors['draft-client-select'] ? 'draft-client-select-error' : undefined}
                   onChange={(e) => setDraftClientId(e.target.value)}
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 >
                   <option value="">-- اختر الموكل --</option>
                   {draftMatterClients.map((cl) => (
@@ -855,12 +1263,17 @@ export function FinanceWorkspace({
                     </option>
                   ))}
                 </select>
+                {fieldErrors['draft-client-select'] && (
+                  <p id="draft-client-select-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-client-select']}
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1 sm:col-span-1">
-                <label htmlFor="draft-description-input" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-description-input" className="block text-sm font-bold text-[#172A35]">
                   بيان / وصف الأتعاب
                 </label>
                 <input
@@ -869,14 +1282,23 @@ export function FinanceWorkspace({
                   type="text"
                   required
                   value={draftDescription}
+                  aria-invalid={Boolean(fieldErrors['draft-description-input'])}
+                  aria-describedby={
+                    fieldErrors['draft-description-input'] ? 'draft-description-input-error' : undefined
+                  }
                   onChange={(e) => setDraftDescription(e.target.value)}
                   placeholder="مثال: أتعاب الدعوى الابتدائية والاستئناف"
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 />
+                {fieldErrors['draft-description-input'] && (
+                  <p id="draft-description-input-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-description-input']}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="draft-total-egp-input" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-total-egp-input" className="block text-sm font-bold text-[#172A35]">
                   إجمالي الأتعاب المتفق عليها (ج.م.)
                 </label>
                 <input
@@ -887,14 +1309,23 @@ export function FinanceWorkspace({
                   inputMode="decimal"
                   required
                   value={draftTotalEgp}
+                  aria-invalid={Boolean(fieldErrors['draft-total-egp-input'])}
+                  aria-describedby={
+                    fieldErrors['draft-total-egp-input'] ? 'draft-total-egp-input-error' : undefined
+                  }
                   onChange={(e) => setDraftTotalEgp(e.target.value)}
                   placeholder="15000"
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 />
+                {fieldErrors['draft-total-egp-input'] && (
+                  <p id="draft-total-egp-input-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-total-egp-input']}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="draft-date-input" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-date-input" className="block text-sm font-bold text-[#172A35]">
                   تاريخ الاتفاق
                 </label>
                 <input
@@ -904,22 +1335,31 @@ export function FinanceWorkspace({
                   dir="ltr"
                   required
                   value={draftDate}
+                  aria-invalid={Boolean(fieldErrors['draft-date-input'])}
+                  aria-describedby={fieldErrors['draft-date-input'] ? 'draft-date-input-error' : undefined}
                   onChange={(e) => setDraftDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 />
+                {fieldErrors['draft-date-input'] && (
+                  <p id="draft-date-input-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-date-input']}
+                  </p>
+                )}
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label htmlFor="draft-method-select" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-method-select" className="block text-sm font-bold text-[#172A35]">
                   طريقة احتساب الأتعاب
                 </label>
                 <select
                   id="draft-method-select"
                   value={draftMethod}
+                  aria-invalid={Boolean(fieldErrors['draft-method-select'])}
+                  aria-describedby={fieldErrors['draft-method-select'] ? 'draft-method-select-error' : undefined}
                   onChange={(e) => setDraftMethod(e.target.value as FeeChargingMethod)}
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 >
                   {(Object.keys(CHARGING_METHOD_LABELS) as FeeChargingMethod[]).map((m) => (
                     <option key={m} value={m}>
@@ -927,36 +1367,64 @@ export function FinanceWorkspace({
                     </option>
                   ))}
                 </select>
+                {fieldErrors['draft-method-select'] && (
+                  <p id="draft-method-select-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-method-select']}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
-                <label htmlFor="draft-notes-input" className="block text-xs font-bold text-[#172A35]">
+                <label htmlFor="draft-notes-input" className="block text-sm font-bold text-[#172A35]">
                   ملاحظات (اختياري)
                 </label>
                 <input
                   id="draft-notes-input"
                   type="text"
                   value={draftNotes}
+                  aria-invalid={Boolean(fieldErrors['draft-notes-input'])}
+                  aria-describedby={fieldErrors['draft-notes-input'] ? 'draft-notes-input-error' : undefined}
                   onChange={(e) => setDraftNotes(e.target.value)}
-                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs text-[#172A35] min-h-[44px]"
+                  className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm text-[#172A35] min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                 />
+                {fieldErrors['draft-notes-input'] && (
+                  <p id="draft-notes-input-error" role="alert" className="text-xs text-[#A4262C]">
+                    {fieldErrors['draft-notes-input']}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {editingAgreementId !== null && (
+                <button
+                  type="button"
+                  data-testid="cancel-edit-draft-button"
+                  disabled={isSavingDraft}
+                  onClick={resetDraftFormState}
+                  className="px-4 py-2 bg-white hover:bg-[#F4F6F7] border border-[#D5DFE3] text-[#172A35] text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
+                >
+                  إلغاء التعديل
+                </button>
+              )}
               <button
                 type="submit"
                 data-testid="save-draft-agreement-button"
                 disabled={isSavingDraft}
-                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                aria-busy={isSavingDraft}
+                className="px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
               >
-                {isSavingDraft ? 'جارٍ الحفظ...' : 'حفظ الاتفاق كمسودة'}
+                {isSavingDraft
+                  ? 'جارٍ الحفظ...'
+                  : editingAgreementId !== null
+                  ? 'حفظ تعديلات المسودة'
+                  : 'حفظ الاتفاق كمسودة'}
               </button>
             </div>
           </form>
         )}
 
         {agreements.length === 0 ? (
-          <p className="text-xs text-[#4D606A] py-2" data-testid="finance-agreements-empty">
+          <p className="text-sm text-[#4D606A] py-2" data-testid="finance-agreements-empty">
             لا توجد اتفاقات أتعاب مسجلة ضمن النطاق الحالي بعد.
           </p>
         ) : (
@@ -968,60 +1436,80 @@ export function FinanceWorkspace({
                 className="p-4 rounded-[6px] border border-[#D5DFE3] bg-[#F9FBFC] space-y-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-sm text-[#172A35]">{ag.description}</span>
+                      <span className="font-bold text-base text-[#172A35] [overflow-wrap:anywhere]">
+                        {ag.description}
+                      </span>
                       <span
                         data-testid={`agreement-status-${ag.id}`}
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                        className={`text-xs font-bold px-2 py-0.5 rounded border ${
                           ag.status === 'APPROVED'
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                             : ag.status === 'DRAFT'
-                            ? 'bg-amber-50 text-[#7A4100] border-amber-200'
+                            ? 'bg-amber-50 text-[#7A4A00] border-amber-200'
                             : 'bg-slate-100 text-[#4D606A] border-slate-300'
                         }`}
                       >
                         {AGREEMENT_STATUS_LABELS[ag.status]}
                       </span>
                     </div>
-                    <p className="text-xs text-[#4D606A]">
+                    <p className="text-sm text-[#4D606A] [overflow-wrap:anywhere]">
                       <span>الملف: <bdi dir="ltr">{ag.matterFileCode}</bdi></span>
                       <span aria-hidden="true"> • </span>
                       <span>الموكل: {ag.clientName}</span>
                       <span aria-hidden="true"> • </span>
                       <span>التاريخ: <bdi dir="ltr">{ag.agreementDate}</bdi></span>
+                      <span aria-hidden="true"> • </span>
+                      <span>{CHARGING_METHOD_LABELS[ag.chargingMethod]}</span>
                     </p>
+                    {ag.notes && (
+                      <p className="text-sm text-[#4D606A] [overflow-wrap:anywhere]">
+                        ملاحظات: {ag.notes}
+                      </p>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-[#14566B]">
-                      <bdi dir="ltr">{formatEgp(ag.totalAmountPiastres)}</bdi>
+                    <span className="text-base font-bold text-[#14566B]">
+                      <EgpAmount piastres={ag.totalAmountPiastres} />
                     </span>
-                    {ag.status === 'DRAFT' && canWriteFinance && !isReadOnly && (
-                      <button
-                        type="button"
-                        data-testid={`open-approve-agreement-${ag.id}`}
-                        onClick={() =>
-                          approvingAgreementId === ag.id
-                            ? setApprovingAgreementId(null)
-                            : openApprovePanel(ag)
-                        }
-                        className="px-3 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-[6px] min-h-[44px] print:hidden"
-                      >
-                        {approvingAgreementId === ag.id ? 'إلغاء الاعتماد' : 'اعتماد وترحيل'}
-                      </button>
+                    {ag.status === 'DRAFT' && canWriteFinance && !effectiveReadOnly && (
+                      <>
+                        <button
+                          type="button"
+                          data-testid={`edit-draft-agreement-${ag.id}`}
+                          onClick={() => openEditDraftForm(ag)}
+                          className="px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                        >
+                          تعديل المسودة
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`open-approve-agreement-${ag.id}`}
+                          aria-expanded={approvingAgreementId === ag.id}
+                          onClick={() =>
+                            approvingAgreementId === ag.id
+                              ? setApprovingAgreementId(null)
+                              : openApprovePanel(ag)
+                          }
+                          className="px-3 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                        >
+                          {approvingAgreementId === ag.id ? 'إلغاء الاعتماد' : 'اعتماد وترحيل'}
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
 
                 {/* Approve Installments Builder */}
-                {approvingAgreementId === ag.id && (
+                {approvingAgreementId === ag.id && canWriteFinance && !effectiveReadOnly && (
                   <div
                     data-testid={`approve-agreement-panel-${ag.id}`}
                     className="p-3.5 bg-white border border-[#14566B]/30 rounded-[6px] space-y-3 print:hidden"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <SubHeading className="text-xs font-bold text-[#14566B]">
+                      <SubHeading className="text-sm font-bold text-[#14566B]">
                         تحديد استحقاقات / أقساط الاتفاق قبل الاعتماد النهائي
                       </SubHeading>
                       <button
@@ -1038,17 +1526,17 @@ export function FinanceWorkspace({
                             },
                           ])
                         }
-                        className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] text-[#172A35] text-xs font-semibold rounded-[6px] min-h-[44px]"
+                        className="px-3 py-1.5 bg-[#F4F6F7] hover:bg-[#E8EEF1] border border-[#D5DFE3] text-[#172A35] text-sm font-semibold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                       >
-                        + إضافة قسط
+                        <span aria-hidden="true">+</span> إضافة قسط
                       </button>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {approveInstallments.map((row, idx) => (
-                        <div key={row.key} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
-                          <div className="sm:col-span-2 space-y-1">
-                            <label htmlFor={`inst-desc-${row.key}`} className="block text-[11px] font-semibold text-[#172A35]">
+                        <div key={row.key} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                          <div className="md:col-span-5 space-y-1">
+                            <label htmlFor={`inst-desc-${row.key}`} className="block text-sm font-semibold text-[#172A35]">
                               وصف البند #{idx + 1}
                             </label>
                             <input
@@ -1056,16 +1544,25 @@ export function FinanceWorkspace({
                               data-testid={`installment-desc-${idx}`}
                               type="text"
                               value={row.description}
+                              aria-invalid={Boolean(fieldErrors[`inst-desc-${row.key}`])}
+                              aria-describedby={
+                                fieldErrors[`inst-desc-${row.key}`] ? `inst-desc-${row.key}-error` : undefined
+                              }
                               onChange={(e) =>
                                 setApproveInstallments((prev) =>
                                   prev.map((r) => (r.key === row.key ? { ...r, description: e.target.value } : r))
                                 )
                               }
-                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs min-h-[44px]"
+                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                             />
+                            {fieldErrors[`inst-desc-${row.key}`] && (
+                              <p id={`inst-desc-${row.key}-error`} role="alert" className="text-xs text-[#A4262C]">
+                                {fieldErrors[`inst-desc-${row.key}`]}
+                              </p>
+                            )}
                           </div>
-                          <div className="space-y-1">
-                            <label htmlFor={`inst-amt-${row.key}`} className="block text-[11px] font-semibold text-[#172A35]">
+                          <div className="md:col-span-3 space-y-1">
+                            <label htmlFor={`inst-amt-${row.key}`} className="block text-sm font-semibold text-[#172A35]">
                               المبلغ (ج.م.)
                             </label>
                             <input
@@ -1073,18 +1570,31 @@ export function FinanceWorkspace({
                               data-testid={`installment-amount-${idx}`}
                               type="text"
                               dir="ltr"
+                              inputMode="decimal"
                               value={row.amountEgp}
+                              aria-invalid={Boolean(fieldErrors[`inst-amt-${row.key}`])}
+                              aria-describedby={
+                                fieldErrors[`inst-amt-${row.key}`] ? `inst-amt-${row.key}-error` : undefined
+                              }
                               onChange={(e) =>
                                 setApproveInstallments((prev) =>
                                   prev.map((r) => (r.key === row.key ? { ...r, amountEgp: e.target.value } : r))
                                 )
                               }
-                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs min-h-[44px]"
+                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                             />
+                            {fieldErrors[`inst-amt-${row.key}`] && (
+                              <p id={`inst-amt-${row.key}-error`} role="alert" className="text-xs text-[#A4262C]">
+                                {fieldErrors[`inst-amt-${row.key}`]}
+                              </p>
+                            )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="md:col-span-3 space-y-1">
+                            <label htmlFor={`inst-due-${row.key}`} className="block text-sm font-semibold text-[#172A35]">
+                              تاريخ الاستحقاق
+                            </label>
                             <input
-                              aria-label={`تاريخ استحقاق البند ${idx + 1}`}
+                              id={`inst-due-${row.key}`}
                               type="date"
                               dir="ltr"
                               value={row.dueDate}
@@ -1093,15 +1603,18 @@ export function FinanceWorkspace({
                                   prev.map((r) => (r.key === row.key ? { ...r, dueDate: e.target.value } : r))
                                 )
                               }
-                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs min-h-[44px]"
+                              className="w-full px-2.5 py-2 border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                             />
+                          </div>
+                          <div className="md:col-span-1 flex justify-end">
                             {approveInstallments.length > 1 && (
                               <button
                                 type="button"
+                                aria-label={`حذف القسط رقم ${idx + 1}`}
                                 onClick={() =>
                                   setApproveInstallments((prev) => prev.filter((r) => r.key !== row.key))
                                 }
-                                className="px-2.5 py-2 text-xs text-[#A4262C] border border-red-200 rounded-[6px] min-h-[44px]"
+                                className="px-2.5 py-2 text-sm text-[#A4262C] border border-red-200 rounded-[6px] min-h-[44px] min-w-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                               >
                                 حذف
                               </button>
@@ -1111,8 +1624,22 @@ export function FinanceWorkspace({
                       ))}
                     </div>
 
+                    <div
+                      aria-live="polite"
+                      className={`p-2.5 rounded-[6px] border text-sm font-semibold ${
+                        !approveInstallmentsLive.hasInvalid &&
+                        approveInstallmentsLive.sum === BigInt(ag.totalAmountPiastres)
+                          ? 'bg-emerald-50 border-emerald-200 text-[#176449]'
+                          : 'bg-amber-50 border-amber-200 text-[#7A4A00]'
+                      }`}
+                    >
+                      مجموع الأقساط المدخل: <EgpAmount piastres={approveInstallmentsLive.sum} /> — المطلوب:{' '}
+                      <EgpAmount piastres={ag.totalAmountPiastres} />
+                      {approveInstallmentsLive.hasInvalid && ' (أكمل مبالغ الأقساط بقيم موجبة صالحة)'}
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#E8EEF1]">
-                      <div className="flex items-center gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
                         <label htmlFor="approve-tx-date" className="font-semibold text-[#172A35]">
                           تاريخ القيد:
                         </label>
@@ -1121,16 +1648,24 @@ export function FinanceWorkspace({
                           type="date"
                           dir="ltr"
                           value={approveDate}
+                          aria-invalid={Boolean(fieldErrors['approve-tx-date'])}
+                          aria-describedby={fieldErrors['approve-tx-date'] ? 'approve-tx-date-error' : undefined}
                           onChange={(e) => setApproveDate(e.target.value)}
-                          className="px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs min-h-[44px]"
+                          className="px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
                         />
+                        {fieldErrors['approve-tx-date'] && (
+                          <p id="approve-tx-date-error" role="alert" className="text-xs text-[#A4262C]">
+                            {fieldErrors['approve-tx-date']}
+                          </p>
+                        )}
                       </div>
                       <button
                         type="button"
                         data-testid={`confirm-approve-agreement-${ag.id}`}
                         disabled={isApproving}
+                        aria-busy={isApproving}
                         onClick={() => void handleApproveAgreement(ag)}
-                        className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-[6px] min-h-[44px] disabled:opacity-50"
+                        className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                       >
                         {isApproving ? 'جارٍ الاعتماد...' : 'تأكيد الاعتماد وترحيل الاستحقاق'}
                       </button>
@@ -1143,16 +1678,23 @@ export function FinanceWorkspace({
                     {ag.charges.map((ch) => (
                       <div
                         key={ch.id}
-                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white rounded border border-[#E8EEF1] text-xs"
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-white rounded border border-[#E8EEF1] text-sm"
                       >
-                        <span className="font-semibold text-[#172A35]">
-                          قسط #{ch.installmentNumber}: {ch.description}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="font-semibold text-[#172A35]">
+                            قسط #{ch.installmentNumber}: {ch.description}
+                          </span>
+                          {ch.dueDate && (
+                            <span className="text-[#4D606A] mr-2">
+                              (استحقاق: <bdi dir="ltr">{ch.dueDate}</bdi>)
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-3 text-[#4D606A]">
-                          <span>الأصل: <bdi dir="ltr">{formatEgp(ch.amountPiastres)}</bdi></span>
-                          <span>المسدد: <bdi dir="ltr">{formatEgp(ch.allocatedPiastres)}</bdi></span>
+                          <span>الأصل: <EgpAmount piastres={ch.amountPiastres} /></span>
+                          <span>المسدد: <EgpAmount piastres={ch.allocatedPiastres} /></span>
                           <span className="font-bold text-[#14566B]">
-                            المتبقي: <bdi dir="ltr">{formatEgp(ch.remainingPiastres)}</bdi>
+                            المتبقي: <EgpAmount piastres={ch.remainingPiastres} />
                           </span>
                         </div>
                       </div>
@@ -1166,79 +1708,107 @@ export function FinanceWorkspace({
       </section>
 
       {/* 3. Collect Fee Payment Form */}
-      {canWriteFinance && !isReadOnly && (
+      {canWriteFinance && !effectiveReadOnly && (
         <section className="bg-white border border-[#D5DFE3] rounded-[6px] p-5 shadow-xs space-y-4 print:hidden">
           <div className="pb-2 border-b border-[#E8EEF1]">
             <SectionHeading className="text-base font-bold text-[#172A35]">
               تسجيل دفعة أتعاب وإصدار إيصال تحصيل
             </SectionHeading>
-            <p className="text-xs text-[#4D606A]">
+            <p className="text-sm text-[#4D606A]">
               تُخصص كل دفعة صراحةً لبنود الأتعاب المستحقة للموكل دون تجاوز المديونية.
             </p>
           </div>
 
           {allOpenCharges.length === 0 ? (
-            <p className="text-xs text-[#4D606A]">
+            <p className="text-sm text-[#4D606A]">
               لا توجد بنود أتعاب مستحقة مفتوحة للتحصيل حالياً. اعتمد اتفاق أتعاب أولاً.
             </p>
           ) : (
             <form onSubmit={handleSubmitPayment} data-testid="fee-payment-form" className="space-y-4">
+              {frozenPaymentPayload && (
+                <div
+                  role="status"
+                  className="p-3 bg-amber-50 border border-amber-200 text-[#7A4A00] rounded-[6px] text-sm font-semibold flex flex-wrap items-center justify-between gap-2"
+                >
+                  <span>
+                    الحقول مقفلة مؤقتاً لحماية الطلب المعلق من التكرار. يمكنك إعادة المحاولة أو إلغاء وتعديل الدفعة.
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {!lockedMatterId && (
                   <div className="space-y-1">
-                    <label htmlFor="pay-matter-select" className="block text-xs font-bold text-[#172A35]">
+                    <label htmlFor="pay-matter-select" className="block text-sm font-bold text-[#172A35]">
                       الملف
                     </label>
                     <select
                       id="pay-matter-select"
                       data-testid="pay-matter-select"
+                      disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                       value={effectivePayMatterId}
+                      aria-invalid={Boolean(fieldErrors['pay-matter-select'])}
+                      aria-describedby={fieldErrors['pay-matter-select'] ? 'pay-matter-select-error' : undefined}
                       onChange={(e) => {
                         const nextM = e.target.value;
                         setPayMatterId(nextM);
-                        const m = overview.selectableMatters.find((item) => item.matterId === nextM);
+                        const m = matterOptions.find((item) => item.matterId === nextM);
                         setPayClientId(m?.clients[0]?.clientMatterPartyId || '');
                         setChargeAllocations({});
                         setFrozenPaymentPayload(null);
                       }}
-                      className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                      className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                     >
-                      {overview.selectableMatters.map((m) => (
+                      <option value="">-- اختر الملف --</option>
+                      {matterOptions.map((m) => (
                         <option key={m.matterId} value={m.matterId}>
                           {m.fileCode} — {m.title}
                         </option>
                       ))}
                     </select>
+                    {fieldErrors['pay-matter-select'] && (
+                      <p id="pay-matter-select-error" role="alert" className="text-xs text-[#A4262C]">
+                        {fieldErrors['pay-matter-select']}
+                      </p>
+                    )}
                   </div>
                 )}
 
                 <div className="space-y-1">
-                  <label htmlFor="pay-client-select" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="pay-client-select" className="block text-sm font-bold text-[#172A35]">
                     الموكل المدين
                   </label>
                   <select
                     id="pay-client-select"
                     data-testid="pay-client-select"
                     required
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                     value={payClientId}
+                    aria-invalid={Boolean(fieldErrors['pay-client-select'])}
+                    aria-describedby={fieldErrors['pay-client-select'] ? 'pay-client-select-error' : undefined}
                     onChange={(e) => {
                       setPayClientId(e.target.value);
                       setChargeAllocations({});
                       setFrozenPaymentPayload(null);
                     }}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                   >
                     <option value="">-- اختر الموكل --</option>
-                    {(payMatterOption?.clients || []).map((cl) => (
+                    {payMatterClients.map((cl) => (
                       <option key={cl.clientMatterPartyId} value={cl.clientMatterPartyId}>
                         {cl.partyName}
                       </option>
                     ))}
                   </select>
+                  {fieldErrors['pay-client-select'] && (
+                    <p id="pay-client-select-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-client-select']}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="pay-amount-egp-input" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="pay-amount-egp-input" className="block text-sm font-bold text-[#172A35]">
                     المبلغ المحصل (ج.م.)
                   </label>
                   <input
@@ -1248,31 +1818,44 @@ export function FinanceWorkspace({
                     dir="ltr"
                     inputMode="decimal"
                     required
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                     value={payAmountEgp}
+                    aria-invalid={Boolean(fieldErrors['pay-amount-egp-input'])}
+                    aria-describedby={
+                      fieldErrors['pay-amount-egp-input'] ? 'pay-amount-egp-input-error' : undefined
+                    }
                     onChange={(e) => {
                       setPayAmountEgp(e.target.value);
                       setFrozenPaymentPayload(null);
                     }}
                     placeholder="5000"
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                   />
+                  {fieldErrors['pay-amount-egp-input'] && (
+                    <p id="pay-amount-egp-input-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-amount-egp-input']}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="space-y-1">
-                  <label htmlFor="pay-method-select" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="pay-method-select" className="block text-sm font-bold text-[#172A35]">
                     طريقة السداد
                   </label>
                   <select
                     id="pay-method-select"
                     data-testid="pay-method-select"
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                     value={payMethod}
+                    aria-invalid={Boolean(fieldErrors['pay-method-select'])}
+                    aria-describedby={fieldErrors['pay-method-select'] ? 'pay-method-select-error' : undefined}
                     onChange={(e) => {
                       setPayMethod(e.target.value as PaymentMethod);
                       setFrozenPaymentPayload(null);
                     }}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                   >
                     {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((m) => (
                       <option key={m} value={m}>
@@ -1280,10 +1863,15 @@ export function FinanceWorkspace({
                       </option>
                     ))}
                   </select>
+                  {fieldErrors['pay-method-select'] && (
+                    <p id="pay-method-select-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-method-select']}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="pay-date-input" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="pay-date-input" className="block text-sm font-bold text-[#172A35]">
                     تاريخ التحصيل
                   </label>
                   <input
@@ -1292,92 +1880,196 @@ export function FinanceWorkspace({
                     type="date"
                     dir="ltr"
                     required
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                     value={payDate}
+                    aria-invalid={Boolean(fieldErrors['pay-date-input'])}
+                    aria-describedby={fieldErrors['pay-date-input'] ? 'pay-date-input-error' : undefined}
                     onChange={(e) => {
                       setPayDate(e.target.value);
                       setFrozenPaymentPayload(null);
                     }}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                   />
+                  {fieldErrors['pay-date-input'] && (
+                    <p id="pay-date-input-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-date-input']}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1">
-                  <label htmlFor="pay-reference-input" className="block text-xs font-bold text-[#172A35]">
+                  <label htmlFor="pay-reference-input" className="block text-sm font-bold text-[#172A35]">
                     مرجع التحويل / الشيك (اختياري)
                   </label>
                   <input
                     id="pay-reference-input"
                     type="text"
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
                     value={payReference}
+                    aria-invalid={Boolean(fieldErrors['pay-reference-input'])}
+                    aria-describedby={
+                      fieldErrors['pay-reference-input'] ? 'pay-reference-input-error' : undefined
+                    }
                     onChange={(e) => {
                       setPayReference(e.target.value);
                       setFrozenPaymentPayload(null);
                     }}
-                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
                   />
+                  {fieldErrors['pay-reference-input'] && (
+                    <p id="pay-reference-input-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-reference-input']}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="pay-description-input" className="block text-sm font-bold text-[#172A35]">
+                    وصف الدفعة (اختياري)
+                  </label>
+                  <input
+                    id="pay-description-input"
+                    data-testid="pay-description-input"
+                    type="text"
+                    disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
+                    value={payDescription}
+                    aria-invalid={Boolean(fieldErrors['pay-description-input'])}
+                    aria-describedby={
+                      fieldErrors['pay-description-input'] ? 'pay-description-input-error' : undefined
+                    }
+                    onChange={(e) => {
+                      setPayDescription(e.target.value);
+                      setFrozenPaymentPayload(null);
+                    }}
+                    placeholder="تحصيل دفعة أتعاب محاماة"
+                    className="w-full px-3 py-2 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
+                  />
+                  {fieldErrors['pay-description-input'] && (
+                    <p id="pay-description-input-error" role="alert" className="text-xs text-[#A4262C]">
+                      {fieldErrors['pay-description-input']}
+                    </p>
+                  )}
                 </div>
               </div>
 
               {/* Explicit Per-Charge Allocation Table */}
               <div className="space-y-2 p-3 bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px]">
-                <span className="block text-xs font-bold text-[#172A35]">
-                  توزيع الدفعة على بنود الأتعاب المستحقة (إجمالي المفتوح للموكل: <bdi dir="ltr">{formatEgp(totalEligibleDue)}</bdi>):
+                <span className="block text-sm font-bold text-[#172A35]">
+                  توزيع الدفعة على بنود الأتعاب المستحقة (إجمالي المفتوح للموكل:{' '}
+                  <EgpAmount piastres={totalEligibleDue} />):
                 </span>
-                {payEligibleCharges.map((ch, idx) => (
-                  <div
-                    key={ch.id}
-                    className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white rounded border border-[#E8EEF1] text-xs"
-                  >
-                    <div>
-                      <span className="font-semibold text-[#172A35] block">
-                        قسط #{ch.installmentNumber}: {ch.description}
-                      </span>
-                      <span className="text-[#4D606A]">
-                        المتبقي: <bdi dir="ltr">{formatEgp(ch.remainingPiastres)}</bdi>
-                      </span>
+                {payEligibleCharges.length === 0 ? (
+                  <p className="text-sm text-[#4D606A] py-1" data-testid="pay-eligible-charges-empty">
+                    لا توجد بنود أتعاب مستحقة مفتوحة للملف والموكل المحددين.
+                  </p>
+                ) : (
+                  payEligibleCharges.map((ch, idx) => (
+                    <div
+                      key={ch.id}
+                      className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white rounded border border-[#E8EEF1] text-sm"
+                    >
+                      <div className="min-w-0 max-w-full">
+                        <span className="font-semibold text-[#172A35] block [overflow-wrap:anywhere]">
+                          قسط #{ch.installmentNumber}: {ch.description}
+                        </span>
+                        <span className="text-[#4D606A]">
+                          المتبقي: <EgpAmount piastres={ch.remainingPiastres} />
+                          {ch.dueDate && (
+                            <>
+                              <span aria-hidden="true"> • </span>
+                              <span>استحقاق: <bdi dir="ltr">{ch.dueDate}</bdi></span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex flex-col items-stretch sm:items-end gap-1 w-full sm:w-auto min-w-0 max-w-full">
+                        <label htmlFor={`alloc-${ch.id}`} className="sr-only">
+                          مبلغ التوزيع للبند {ch.description}
+                        </label>
+                        <input
+                          id={`alloc-${ch.id}`}
+                          data-testid={`allocation-amount-${idx}`}
+                          type="text"
+                          dir="ltr"
+                          inputMode="decimal"
+                          disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
+                          value={
+                            ch.id in chargeAllocations
+                              ? chargeAllocations[ch.id]
+                              : payEligibleCharges.length === 1
+                              ? payAmountEgp
+                              : ''
+                          }
+                          aria-invalid={Boolean(fieldErrors[`alloc-${ch.id}`])}
+                          aria-describedby={fieldErrors[`alloc-${ch.id}`] ? `alloc-${ch.id}-error` : undefined}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setChargeAllocations((prev) => ({ ...prev, [ch.id]: val }));
+                            setFrozenPaymentPayload(null);
+                          }}
+                          placeholder="0"
+                          className="w-full sm:w-36 max-w-full min-w-0 px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B] disabled:opacity-60"
+                        />
+                        {fieldErrors[`alloc-${ch.id}`] && (
+                          <p id={`alloc-${ch.id}-error`} role="alert" className="text-xs text-[#A4262C]">
+                            {fieldErrors[`alloc-${ch.id}`]}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <label htmlFor={`alloc-${ch.id}`} className="sr-only">
-                        مبلغ التوزيع للبند {ch.description}
-                      </label>
-                      <input
-                        id={`alloc-${ch.id}`}
-                        data-testid={`allocation-amount-${idx}`}
-                        type="text"
-                        dir="ltr"
-                        inputMode="decimal"
-                        value={
-                          chargeAllocations[ch.id] ??
-                          (payEligibleCharges.length === 1 ? payAmountEgp : '')
-                        }
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setChargeAllocations((prev) => ({ ...prev, [ch.id]: val }));
-                          setFrozenPaymentPayload(null);
-                        }}
-                        placeholder="0"
-                        className="w-36 px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] text-base sm:text-xs min-h-[44px]"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               {/* Mandatory Live Arabic Pre-Save Confirmation Preview */}
-              {parsedPaymentAmount !== null && previewRemainingAfter !== null && (
+              {(parsedPaymentAmount !== null ||
+                payEligibleCharges.length === 0 ||
+                invalidAllocationChargeIds.length > 0 ||
+                overAllocatedChargeIds.length > 0 ||
+                hasExplicitAllocationInput) && (
                 <div
                   role="region"
+                  aria-live="polite"
                   aria-label="معاينة الأثر المالي قبل الحفظ"
                   data-testid="finance-presave-preview"
-                  className="p-3.5 bg-teal-50 border border-[#14566B]/30 rounded-[6px] text-xs font-bold text-[#14566B]"
+                  className="p-3.5 bg-teal-50 border border-[#14566B]/30 rounded-[6px] text-sm font-bold text-[#14566B]"
                 >
-                  {previewRemainingAfter < 0n ? (
-                    <span className="text-[#A4262C]">
-                      تنبيه: المبلغ المدخل يتجاوز إجمالي الأتعاب المستحقة على الموكل المحدد ({formatEgp(totalEligibleDue)}) ولن يتم ترحيله كدفعة مقدمة تلقائياً.
+                  {payEligibleCharges.length === 0 ? (
+                    <span className="text-[#7A4A00]">
+                      تنبيه: لا توجد بنود أتعاب مفتوحة للتوزيع للملف والموكل المحددين.
                     </span>
+                  ) : invalidAllocationChargeIds.length > 0 ? (
+                    <span className="text-[#A4262C]">
+                      تنبيه: توجد قيمة توزيع غير صالحة في أحد بنود الأتعاب أعلاه.
+                    </span>
+                  ) : overAllocatedChargeIds.length > 0 ? (
+                    <span className="text-[#A4262C]">
+                      تنبيه: المبلغ الموزع على أحد البنود يتجاوز الرصيد المتبقي المستحق عليه.
+                    </span>
+                  ) : parsedPaymentAmount !== null && previewRemainingAfter !== null ? (
+                    previewRemainingAfter < 0n ? (
+                      <span className="text-[#A4262C]">
+                        تنبيه: المبلغ المدخل يتجاوز إجمالي الأتعاب المستحقة على الموكل المحدد (
+                        <EgpAmount piastres={totalEligibleDue} />) ولن يتم ترحيله كدفعة مقدمة تلقائياً.
+                      </span>
+                    ) : resolvedAllocations.length > 0 && effectiveAllocTotal !== parsedPaymentAmount ? (
+                      <span className="text-[#7A4A00]">
+                        تنبيه: مجموع التوزيع على البنود (<EgpAmount piastres={effectiveAllocTotal} />) لا يطابق
+                        مبلغ الدفعة (<EgpAmount piastres={parsedPaymentAmount} />).
+                      </span>
+                    ) : resolvedAllocations.length === 0 ? (
+                      <span className="text-[#7A4A00]">
+                        يرجى تحديد توزيع المبلغ على بنود الأتعاب المستحقة أعلاه.
+                      </span>
+                    ) : (
+                      <span>
+                        معاينة التأكيد: أتعاب <EgpAmount piastres={parsedPaymentAmount} /> — باقي الأتعاب بعد العملية{' '}
+                        <EgpAmount piastres={previewRemainingAfter} />
+                      </span>
+                    )
                   ) : (
-                    <span>
-                      معاينة التأكيد: أتعاب {formatEgp(parsedPaymentAmount)} — باقي الأتعاب بعد العملية {formatEgp(previewRemainingAfter)}
+                    <span className="text-[#7A4A00]">
+                      أدخل مبلغ التحصيل الإجمالي ليتم مطابقته مع توزيعات البنود.
                     </span>
                   )}
                 </div>
@@ -1385,10 +2077,12 @@ export function FinanceWorkspace({
 
               <div className="flex justify-end">
                 <button
+                  ref={submitBtnRef}
                   type="submit"
                   data-testid="submit-payment-button"
-                  disabled={isPostingPayment}
-                  className="px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                  disabled={isPostingPayment || Boolean(frozenPaymentPayload)}
+                  aria-busy={isPostingPayment}
+                  className="px-5 py-2.5 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                 >
                   {isPostingPayment ? 'جارٍ الترحيل...' : 'حفظ وتسجيل الدفعة وإصدار الإيصال'}
                 </button>
@@ -1405,8 +2099,8 @@ export function FinanceWorkspace({
             كشف حساب الموكل (الأتعاب)
           </SectionHeading>
           {summary && summary.clients.length > 0 && (
-            <div className="flex items-center gap-2 print:hidden">
-              <label htmlFor="statement-client-select" className="text-xs font-semibold text-[#4D606A]">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full print:hidden">
+              <label htmlFor="statement-client-select" className="text-sm font-semibold text-[#4D606A]">
                 اختر الموكل:
               </label>
               <select
@@ -1414,7 +2108,7 @@ export function FinanceWorkspace({
                 data-testid="statement-client-select"
                 value={statementClientKey}
                 onChange={(e) => void handleLoadClientStatement(e.target.value)}
-                className="px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-xs min-h-[44px]"
+                className="w-full sm:w-auto max-w-full min-w-0 px-2.5 py-1.5 border border-[#D5DFE3] rounded-[6px] bg-white text-base sm:text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-[#14566B]"
               >
                 <option value="">-- عرض كشف موكل محدد --</option>
                 {summary.clients.map((cl) => (
@@ -1428,22 +2122,121 @@ export function FinanceWorkspace({
         </div>
 
         {isLoadingStatement && (
-          <p className="text-xs text-[#4D606A]">جارٍ تحميل كشف حساب الموكل...</p>
+          <p role="status" className="text-sm text-[#4D606A]">
+            جارٍ تحميل كشف حساب الموكل...
+          </p>
         )}
 
         {loadedStatement ? (
-          <div data-testid="client-statement-summary" className="p-3.5 bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] space-y-2 text-xs">
+          <div
+            data-testid="client-statement-summary"
+            className="p-4 bg-[#F9FBFC] border border-[#D5DFE3] rounded-[6px] space-y-3 text-sm"
+          >
             <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-[#172A35]">
-              <span>الموكل: {loadedStatement.scope.partyName || '—'}</span>
-              <span className={loadedStatement.reconciled ? 'text-emerald-800' : 'text-[#A4262C]'}>
-                {loadedStatement.reconciled ? 'مطابق حسابياً مع القيود المرحلة' : 'يحتاج مراجعة مطابقة'}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span>الموكل: {loadedStatement.scope.partyName || '—'}</span>
+                <span className={loadedStatement.reconciled ? 'text-emerald-800' : 'text-[#A4262C]'}>
+                  {loadedStatement.reconciled ? 'مطابق حسابياً مع القيود المرحلة' : 'يحتاج مراجعة مطابقة'}
+                </span>
+              </div>
+              <button
+                type="button"
+                data-testid="close-client-statement-button"
+                onClick={() => {
+                  setLoadedStatement(null);
+                  setStatementClientKey('');
+                }}
+                className="px-3 py-1.5 bg-white hover:bg-[#E8EEF1] border border-[#D5DFE3] text-[#14566B] text-sm font-semibold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+              >
+                العودة لملخص الموكلين
+              </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <div>إجمالي الأتعاب: <strong dir="ltr">{formatEgp(loadedStatement.feesChargedPiastres)}</strong></div>
-              <div>المحصل: <strong dir="ltr">{formatEgp(loadedStatement.feesCollectedPiastres)}</strong></div>
-              <div>المتبقي المستحق: <strong dir="ltr">{formatEgp(loadedStatement.feesDuePiastres)}</strong></div>
+              <div>
+                إجمالي الأتعاب: <strong><EgpAmount piastres={loadedStatement.feesChargedPiastres} /></strong>
+              </div>
+              <div>
+                المحصل: <strong><EgpAmount piastres={loadedStatement.feesCollectedPiastres} /></strong>
+              </div>
+              <div>
+                المتبقي المستحق: <strong><EgpAmount piastres={loadedStatement.feesDuePiastres} /></strong>
+              </div>
             </div>
+
+            {loadedStatement.charges.length > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-[#E8EEF1]">
+                <SubHeading className="text-sm font-bold text-[#172A35]">بنود الأتعاب المستحقة</SubHeading>
+                {loadedStatement.charges.map((ch) => (
+                  <div
+                    key={ch.id}
+                    className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white rounded border border-[#E8EEF1]"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-semibold text-[#172A35]">
+                        قسط #{ch.installmentNumber}: {ch.description}
+                      </span>
+                      {ch.dueDate && (
+                        <span className="text-[#4D606A] mr-2">
+                          (استحقاق: <bdi dir="ltr">{ch.dueDate}</bdi>)
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-[#4D606A]">
+                      <span>الأصل: <EgpAmount piastres={ch.amountPiastres} /></span>
+                      <span>المسدد: <EgpAmount piastres={ch.allocatedPiastres} /></span>
+                      <span className="font-bold text-[#14566B]">
+                        المتبقي: <EgpAmount piastres={ch.remainingPiastres} />
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {loadedStatement.transactions.length > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-[#E8EEF1]">
+                <SubHeading className="text-sm font-bold text-[#172A35]">حركات وقيود الموكل</SubHeading>
+                {loadedStatement.transactions.map((tx) => (
+                  <div
+                    key={tx.id}
+                    className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-white rounded border border-[#E8EEF1]"
+                  >
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-[#172A35]">
+                          {TRANSACTION_KIND_LABELS[tx.kind] || tx.kind}
+                        </span>
+                        {tx.receiptNumber && (
+                          <bdi dir="ltr" className="font-mono text-xs text-[#14566B] bg-[#E9F2F5] px-2 py-0.5 rounded font-bold">
+                            {tx.receiptNumber}
+                          </bdi>
+                        )}
+                      </div>
+                      <p className="text-[#4D606A] [overflow-wrap:anywhere]">
+                        <span>{tx.description}</span>
+                        <span aria-hidden="true"> • </span>
+                        <span>التاريخ: <bdi dir="ltr">{tx.transactionDate}</bdi></span>
+                        {tx.paymentMethod && (
+                          <>
+                            <span aria-hidden="true"> • </span>
+                            <span>{PAYMENT_METHOD_LABELS[tx.paymentMethod]}</span>
+                          </>
+                        )}
+                        {tx.reference && (
+                          <>
+                            <span aria-hidden="true"> • </span>
+                            <span>مرجع: <bdi dir="ltr">{tx.reference}</bdi></span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <strong className="text-[#14566B]">
+                      <EgpAmount piastres={tx.totalAmountPiastres} />
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : summary && summary.clients.length > 0 ? (
           <div className="space-y-2">
@@ -1451,19 +2244,20 @@ export function FinanceWorkspace({
               <div
                 key={cl.clientMatterPartyId}
                 data-testid={`client-balance-row-${cl.clientMatterPartyId}`}
-                className="flex flex-wrap items-center justify-between gap-2 p-3 bg-[#F9FBFC] rounded border border-[#E8EEF1] text-xs"
+                className="flex flex-wrap items-center justify-between gap-2 p-3 bg-[#F9FBFC] rounded border border-[#E8EEF1] text-sm"
               >
                 <span className="font-bold text-[#172A35]">{cl.partyName}</span>
                 <div className="flex flex-wrap items-center gap-3 text-[#4D606A]">
-                  <span>المعتمد: <bdi dir="ltr">{formatEgp(cl.feesChargedPiastres)}</bdi></span>
-                  <span>المحصل: <bdi dir="ltr">{formatEgp(cl.feesCollectedPiastres)}</bdi></span>
+                  <span>المعتمد: <EgpAmount piastres={cl.feesChargedPiastres} /></span>
+                  <span>المحصل: <EgpAmount piastres={cl.feesCollectedPiastres} /></span>
                   <span className="font-bold text-[#14566B]">
-                    المتبقي: <bdi dir="ltr">{formatEgp(cl.feesDuePiastres)}</bdi>
+                    المتبقي: <EgpAmount piastres={cl.feesDuePiastres} />
                   </span>
                   <button
                     type="button"
+                    aria-label={`عرض الكشف المفصل للموكل ${cl.partyName}`}
                     onClick={() => void handleLoadClientStatement(cl.clientMatterPartyId)}
-                    className="px-2.5 py-1 text-[#14566B] border border-[#14566B]/30 rounded-[6px] font-semibold min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                    className="px-2.5 py-1 text-[#14566B] border border-[#14566B]/30 rounded-[6px] font-semibold min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                   >
                     عرض الكشف المفصل
                   </button>
@@ -1472,7 +2266,7 @@ export function FinanceWorkspace({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-[#4D606A]">
+          <p className="text-sm text-[#4D606A]">
             اختر ملف قضية أعلاه لعرض أرصدة وكشوف الموكلين المشتقة من القيود المرحلة.
           </p>
         )}
@@ -1485,32 +2279,44 @@ export function FinanceWorkspace({
         </SectionHeading>
 
         {transactions.length === 0 ? (
-          <p className="text-xs text-[#4D606A]">لا توجد قيود مالية مرحلة بعد.</p>
+          <p className="text-sm text-[#4D606A]">لا توجد قيود مالية مرحلة بعد.</p>
         ) : (
           <div className="space-y-2.5">
             {transactions.map((tx) => (
               <div
                 key={tx.id}
                 data-testid={`posted-tx-row-${tx.id}`}
-                className="p-3.5 rounded-[6px] border border-[#D5DFE3] bg-[#F9FBFC] space-y-2 text-xs"
+                className="p-3.5 rounded-[6px] border border-[#D5DFE3] bg-[#F9FBFC] space-y-2 text-sm"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-[#172A35]">
                         {TRANSACTION_KIND_LABELS[tx.kind] || tx.kind}
                       </span>
-                      <span className="px-2 py-0.5 rounded bg-slate-200 text-[#172A35] text-[11px] font-semibold">
+                      <span className="px-2 py-0.5 rounded bg-slate-200 text-[#172A35] text-xs font-semibold">
                         مرحّل ومغلق
                       </span>
                       {tx.receiptNumber && (
-                        <bdi dir="ltr" className="font-mono text-[#14566B] bg-[#E9F2F5] px-2 py-0.5 rounded font-bold">
+                        <bdi dir="ltr" className="font-mono text-xs text-[#14566B] bg-[#E9F2F5] px-2 py-0.5 rounded font-bold">
                           {tx.receiptNumber}
                         </bdi>
                       )}
                     </div>
-                    <p className="text-[#4D606A]">
+                    <p className="text-[#4D606A] [overflow-wrap:anywhere]">
                       <span>{tx.description}</span>
+                      {tx.matterFileCode && (
+                        <>
+                          <span aria-hidden="true"> • </span>
+                          <span>الملف: <bdi dir="ltr">{tx.matterFileCode}</bdi></span>
+                        </>
+                      )}
+                      {tx.payerName && (
+                        <>
+                          <span aria-hidden="true"> • </span>
+                          <span>الدافع: {tx.payerName}</span>
+                        </>
+                      )}
                       <span aria-hidden="true"> • </span>
                       <span>التاريخ: <bdi dir="ltr">{tx.transactionDate}</bdi></span>
                       {tx.paymentMethod && (
@@ -1519,20 +2325,28 @@ export function FinanceWorkspace({
                           <span>{PAYMENT_METHOD_LABELS[tx.paymentMethod]}</span>
                         </>
                       )}
+                      {tx.reference && (
+                        <>
+                          <span aria-hidden="true"> • </span>
+                          <span>مرجع: <bdi dir="ltr">{tx.reference}</bdi></span>
+                        </>
+                      )}
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-[#14566B]">
-                      <bdi dir="ltr">{formatEgp(tx.totalAmountPiastres)}</bdi>
+                    <span className="text-base font-bold text-[#14566B]">
+                      <EgpAmount piastres={tx.totalAmountPiastres} />
                     </span>
                     {tx.receiptId && (
                       <button
                         type="button"
                         data-testid={`reprint-receipt-button-${tx.receiptId}`}
                         disabled={isLoadingReceipt}
+                        aria-busy={isLoadingReceipt}
+                        aria-label={`إعادة طباعة الإيصال رقم ${tx.receiptNumber ?? tx.receiptId}`}
                         onClick={(e) => void handleOpenReceipt(tx.receiptId!, e.currentTarget)}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-[#E9F2F5] border border-[#14566B]/40 text-[#14566B] text-sm font-bold rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2 disabled:opacity-50"
                       >
                         <IconPrint className="w-4 h-4" />
                         <span>إعادة طباعة الإيصال</span>
@@ -1554,10 +2368,9 @@ export function FinanceWorkspace({
             onClick={(e) => {
               if (e.target === e.currentTarget) {
                 setActiveReceipt(null);
-                lastFocusRef.current?.focus();
               }
             }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-transparent print:p-0 print:block"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto print:static print:inset-auto print:bg-transparent print:p-0 print:block print:backdrop-blur-none print:overflow-visible"
           >
             <div
               ref={receiptModalRef}
@@ -1570,11 +2383,34 @@ export function FinanceWorkspace({
               className="bg-white rounded-[6px] border border-[#D5DFE3] max-w-lg w-full p-6 shadow-xl space-y-4 my-auto print:shadow-none print:border-0 print:max-w-none print:p-0"
             >
               <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#E8EEF1]">
-                <div>
+                <div className="space-y-0.5 min-w-0">
                   <h2 id="finance-receipt-dialog-title" className="text-base font-bold text-[#172A35]">
                     {activeReceipt.headerSnapshot.officeName}
                   </h2>
-                  <p className="text-xs text-[#4D606A]">
+                  {(activeReceipt.headerSnapshot.lawyerName ||
+                    activeReceipt.headerSnapshot.phone ||
+                    activeReceipt.headerSnapshot.address) && (
+                    <p className="text-sm text-[#4D606A] [overflow-wrap:anywhere]">
+                      {activeReceipt.headerSnapshot.lawyerName && (
+                        <span>{activeReceipt.headerSnapshot.lawyerName}</span>
+                      )}
+                      {activeReceipt.headerSnapshot.phone && (
+                        <>
+                          {activeReceipt.headerSnapshot.lawyerName && <span aria-hidden="true"> • </span>}
+                          <bdi dir="ltr">{activeReceipt.headerSnapshot.phone}</bdi>
+                        </>
+                      )}
+                      {activeReceipt.headerSnapshot.address && (
+                        <>
+                          {(activeReceipt.headerSnapshot.lawyerName || activeReceipt.headerSnapshot.phone) && (
+                            <span aria-hidden="true"> • </span>
+                          )}
+                          <span>{activeReceipt.headerSnapshot.address}</span>
+                        </>
+                      )}
+                    </p>
+                  )}
+                  <p className="text-sm text-[#4D606A]">
                     إيصال تحصيل إداري رقم:{' '}
                     <bdi dir="ltr" data-testid="receipt-number" className="font-mono font-bold text-[#14566B]">
                       {activeReceipt.receiptNumber}
@@ -1587,68 +2423,79 @@ export function FinanceWorkspace({
                   data-testid="close-receipt-dialog-button"
                   onClick={() => {
                     setActiveReceipt(null);
-                    lastFocusRef.current?.focus();
                   }}
-                  className="px-3 py-2 text-xs text-[#4D606A] hover:text-[#172A35] border border-[#D5DFE3] rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B]"
+                  className="px-3 py-2 text-sm text-[#4D606A] hover:text-[#172A35] border border-[#D5DFE3] rounded-[6px] min-h-[44px] print:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                 >
-                  ✕ إغلاق
+                  <span aria-hidden="true">✕</span> إغلاق
                 </button>
               </div>
 
-              <dl className="space-y-2 text-xs">
-                <div className="flex justify-between gap-2">
+              <dl className="space-y-2 text-sm">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="text-[#4D606A]">ملف القضية:</dt>
                   <dd className="font-bold text-[#172A35]">
-                    <bdi dir="ltr">{activeReceipt.headerSnapshot.matterFileCode}</bdi> — {activeReceipt.headerSnapshot.matterTitle}
+                    <bdi dir="ltr">{activeReceipt.headerSnapshot.matterFileCode}</bdi> —{' '}
+                    {activeReceipt.headerSnapshot.matterTitle}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="text-[#4D606A]">الموكل المسؤول:</dt>
                   <dd className="font-semibold text-[#172A35]">{activeReceipt.headerSnapshot.clientName}</dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="text-[#4D606A]">الدافع الفعلي:</dt>
                   <dd className="font-semibold text-[#172A35]">{activeReceipt.payerName}</dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="text-[#4D606A]">طريقة السداد وتاريخ العملية:</dt>
                   <dd className="font-semibold text-[#172A35]">
-                    {PAYMENT_METHOD_LABELS[activeReceipt.paymentMethod]} — <bdi dir="ltr">{formatCairoDateArabic(activeReceipt.headerSnapshot.transactionDate)}</bdi>
+                    {PAYMENT_METHOD_LABELS[activeReceipt.paymentMethod]} —{' '}
+                    {formatCairoDateArabic(activeReceipt.headerSnapshot.transactionDate)}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                {activeReceipt.headerSnapshot.reference && (
+                  <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
+                    <dt className="text-[#4D606A]">مرجع التحويل / الشيك:</dt>
+                    <dd className="font-semibold text-[#172A35]">
+                      <bdi dir="ltr">{activeReceipt.headerSnapshot.reference}</bdi>
+                    </dd>
+                  </div>
+                )}
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="text-[#4D606A]">وقت الإصدار (القاهرة):</dt>
                   <dd className="font-semibold text-[#172A35]">
-                    <bdi dir="rtl">{formatCairoTimestamp(activeReceipt.issuedAt)}</bdi>
+                    {formatCairoInstantArabic(activeReceipt.issuedAt)}
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2 pt-2 border-t border-[#E8EEF1]">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere] pt-2 border-t border-[#E8EEF1]">
                   <dt className="font-bold text-[#172A35]">المبلغ المحصل:</dt>
                   <dd className="text-base font-bold text-emerald-800" data-testid="receipt-amount">
-                    <bdi dir="ltr">{formatEgp(activeReceipt.amountPiastres)}</bdi>
+                    <EgpAmount piastres={activeReceipt.amountPiastres} />
                   </dd>
                 </div>
-                <div className="flex justify-between gap-2">
+                <div className="flex flex-wrap justify-between gap-2 [overflow-wrap:anywhere]">
                   <dt className="font-bold text-[#172A35]">باقي الأتعاب بعد العملية:</dt>
                   <dd className="font-bold text-[#14566B]" data-testid="receipt-remaining-after">
-                    <bdi dir="ltr">{formatEgp(activeReceipt.headerSnapshot.feesRemainingAfterPiastres)}</bdi>
+                    <EgpAmount piastres={activeReceipt.headerSnapshot.feesRemainingAfterPiastres} />
                   </dd>
                 </div>
               </dl>
 
-              <div className="p-2.5 bg-[#F9FBFC] border border-[#E8EEF1] rounded text-xs space-y-1">
+              <div className="p-2.5 bg-[#F9FBFC] border border-[#E8EEF1] rounded text-sm space-y-1">
                 <span className="font-bold text-[#172A35] block">تفصيل التوزيع:</span>
                 {activeReceipt.headerSnapshot.allocations.map((al) => (
-                  <div key={al.feeChargeId} className="flex justify-between gap-2 text-[#4D606A]">
+                  <div key={al.feeChargeId} className="flex flex-wrap justify-between gap-2 text-[#4D606A]">
                     <span>قسط #{al.installmentNumber}: {al.description}</span>
-                    <strong dir="ltr" className="text-[#172A35]">{formatEgp(al.amountPiastres)}</strong>
+                    <strong className="text-[#172A35]">
+                      <EgpAmount piastres={al.amountPiastres} />
+                    </strong>
                   </div>
                 ))}
               </div>
 
               <div
                 data-testid="receipt-administrative-notice"
-                className="p-2.5 bg-amber-50 border border-amber-200 text-[#7A4100] rounded text-xs font-semibold flex items-center gap-2"
+                className="p-2.5 bg-amber-50 border border-amber-200 text-[#7A4A00] rounded text-sm font-semibold flex items-center gap-2"
               >
                 <IconWarning className="w-4 h-4 shrink-0" />
                 <span>{activeReceipt.administrativeNotice || ADMINISTRATIVE_NOTICE}</span>
@@ -1659,7 +2506,7 @@ export function FinanceWorkspace({
                   type="button"
                   data-testid="print-receipt-button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-xs font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#14566B] hover:bg-[#0F4354] text-white text-sm font-bold rounded-[6px] min-h-[44px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14566B] focus-visible:ring-offset-2"
                 >
                   <IconDocument className="w-4 h-4" />
                   <span>طباعة الإيصال</span>

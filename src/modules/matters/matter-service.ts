@@ -1240,6 +1240,37 @@ export async function linkMatterParty(
   );
 }
 
+async function assertNoClientFinancialObligations(
+  tx: Prisma.TransactionClient,
+  matterPartyId: string
+): Promise<void> {
+  const [linkedFeeAgreement, linkedFeeCharge, linkedMoneyAccount, linkedMoneyLine] =
+    await Promise.all([
+      tx.feeAgreement.findFirst({
+        where: { clientMatterPartyId: matterPartyId },
+        select: { id: true },
+      }),
+      tx.feeCharge.findFirst({
+        where: { clientMatterPartyId: matterPartyId },
+        select: { id: true },
+      }),
+      tx.moneyAccount.findFirst({
+        where: { clientMatterPartyId: matterPartyId },
+        select: { id: true },
+      }),
+      tx.moneyLine.findFirst({
+        where: { clientMatterPartyId: matterPartyId },
+        select: { id: true },
+      }),
+    ]);
+
+  if (linkedFeeAgreement || linkedFeeCharge || linkedMoneyAccount || linkedMoneyLine) {
+    throw new ActiveObligationError(
+      'لا يمكن تعديل أو إزالة الموكل لوجود اتفاقات أتعاب أو قيود مالية مرتبطة به في هذا الملف.'
+    );
+  }
+}
+
 export async function updateMatterParty(
   actor: Actor,
   rawInput: UpdateMatterPartyInput,
@@ -1373,6 +1404,8 @@ export async function updateMatterParty(
         if (poaDocumentDep) {
           throw new ClientPoaDependencyError('لا يمكن تغيير صفة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
         }
+
+        await assertNoClientFinancialObligations(tx, input.id);
 
         if (matter.status === 'ACTIVE') {
           const otherClients = await tx.matterParty.count({
@@ -1549,52 +1582,38 @@ export async function unlinkMatterParty(
       }
 
       if (existing.role === 'CLIENT') {
-        const [linkedPoas, poaDocumentDep, linkedFeeAgreement, linkedMoneyAccount, linkedMoneyLine] =
-          await Promise.all([
-            tx.matterAuthorization.findFirst({
-              where: {
-                matterId: input.matterId,
-                powerOfAttorney: { partyId: existing.partyId },
-              },
-              select: { id: true },
-            }),
-            tx.powerOfAttorney.findFirst({
-              where: {
-                partyId: existing.partyId,
-                document: { matterId: input.matterId },
-              },
-              select: { id: true },
-            }),
-            tx.feeAgreement.findFirst({
-              where: { clientMatterPartyId: input.id },
-              select: { id: true },
-            }),
-            tx.moneyAccount.findFirst({
-              where: { clientMatterPartyId: input.id },
-              select: { id: true },
-            }),
-            tx.moneyLine.findFirst({
-              where: { clientMatterPartyId: input.id },
-              select: { id: true },
-            }),
-          ]);
+        const [linkedPoas, poaDocumentDep] = await Promise.all([
+          tx.matterAuthorization.findFirst({
+            where: {
+              matterId: input.matterId,
+              powerOfAttorney: { partyId: existing.partyId },
+            },
+            select: { id: true },
+          }),
+          tx.powerOfAttorney.findFirst({
+            where: {
+              partyId: existing.partyId,
+              document: { matterId: input.matterId },
+            },
+            select: { id: true },
+          }),
+        ]);
         if (linkedPoas) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيلات مرتبطة بهذا الملف.');
         }
         if (poaDocumentDep) {
           throw new ClientPoaDependencyError('لا يمكن إزالة الموكل لوجود توكيل يخصه مرتبط بمستند تابع لهذا الملف.');
         }
-        if (linkedFeeAgreement || linkedMoneyAccount || linkedMoneyLine) {
-          throw new ActiveObligationError('لا يمكن إزالة الموكل لوجود اتفاقات أتعاب أو قيود مالية مرتبطة به في هذا الملف.');
-        }
+      }
 
-        if (matter.status === 'ACTIVE') {
-          const otherClients = await tx.matterParty.count({
-            where: { matterId: input.matterId, role: 'CLIENT', id: { not: input.id } },
-          });
-          if (otherClients === 0) {
-            throw new LastClientRequiredError();
-          }
+      await assertNoClientFinancialObligations(tx, input.id);
+
+      if (existing.role === 'CLIENT' && matter.status === 'ACTIVE') {
+        const otherClients = await tx.matterParty.count({
+          where: { matterId: input.matterId, role: 'CLIENT', id: { not: input.id } },
+        });
+        if (otherClients === 0) {
+          throw new LastClientRequiredError();
         }
       }
 
