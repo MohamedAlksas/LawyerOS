@@ -9,6 +9,7 @@ const ALLOWED_EXACT_ROUTES = new Set([
   '/tasks',
   '/deadlines',
   '/documents',
+  '/finance',
   '/search',
   '/matters',
   '/matters/new',

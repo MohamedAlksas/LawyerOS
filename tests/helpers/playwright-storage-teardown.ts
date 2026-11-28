@@ -22,8 +22,7 @@ export default async function playwrightStorageTeardown(): Promise<void> {
     !path.isAbsolute(rel);
 
   const base = path.basename(resolved);
-  const hasAllowedPrefix =
-    base.startsWith('lawoffice-t11-e2e-') || base.startsWith('lawoffice-t12-e2e-');
+  const hasAllowedPrefix = /^lawoffice-t\d+-e2e-/.test(base);
 
   if (!isInsideTmp || !hasAllowedPrefix) {
     return;

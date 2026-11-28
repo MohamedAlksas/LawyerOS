@@ -101,10 +101,12 @@ export function useAccessibleModal(options: {
   onClose: () => void;
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef } = options;
+  const { isOpen, isSubmitting = false, hasPending, onClose, dialogRef, initialFocusRef, returnFocusRef } = options;
   const onCloseRef = useRef(onClose);
   const hasPendingRef = useRef(hasPending);
+  const returnFocusRefHolder = useRef(returnFocusRef);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -113,6 +115,10 @@ export function useAccessibleModal(options: {
   useEffect(() => {
     hasPendingRef.current = hasPending;
   }, [hasPending]);
+
+  useEffect(() => {
+    returnFocusRefHolder.current = returnFocusRef;
+  }, [returnFocusRef]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -132,9 +138,20 @@ export function useAccessibleModal(options: {
         if (prevHidden === null) shell.removeAttribute('aria-hidden');
         else shell.setAttribute('aria-hidden', prevHidden);
       }
-      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+      const preferredTarget = returnFocusRefHolder.current?.current ?? null;
+      const isFocusableTarget = (el: HTMLElement | null): el is HTMLElement => {
+        if (!el || !el.isConnected) return false;
+        if (el === document.body || el === document.documentElement) return false;
+        if ('disabled' in el && (el as HTMLButtonElement).disabled) return false;
+        if (el.getAttribute('aria-disabled') === 'true') return false;
+        return typeof el.focus === 'function';
+      };
+
+      if (preferredTarget || previouslyFocused) {
         requestAnimationFrame(() => {
-          if (previouslyFocused.isConnected) {
+          if (isFocusableTarget(preferredTarget)) {
+            preferredTarget.focus();
+          } else if (isFocusableTarget(previouslyFocused)) {
             previouslyFocused.focus();
           } else {
             document.getElementById('main-content')?.focus();

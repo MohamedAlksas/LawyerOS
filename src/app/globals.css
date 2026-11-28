@@ -80,6 +80,10 @@ body {
     color: #000000 !important;
   }
 
+  body:has(#app-shell-modal-root > *) #app-shell-content {
+    display: none !important;
+  }
+
   #app-shell-content,
   #main-content {
     margin: 0 !important;

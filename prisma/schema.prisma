@@ -165,6 +165,8 @@ model Party {
   powersOfAttorney        PowerOfAttorney[]
   matterParties           MatterParty[]
   documents               Document[]
+  payerMoneyTransactions  MoneyTransaction[]  @relation("MoneyTransactionPayer")
+  payeeMoneyTransactions  MoneyTransaction[]  @relation("MoneyTransactionPayee")
 
   @@index([nameNormalized])
   @@index([primaryPhoneNormalized])
@@ -267,6 +269,8 @@ model IdempotencyRecord {
   createdAt          DateTime          @default(now()) @db.Timestamptz(3)
   completedAt        DateTime?         @db.Timestamptz(3)
 
+  moneyTransaction   MoneyTransaction?
+
   @@unique([actorId, commandType, key])
   @@index([createdAt])
   @@map("idempotency_record")
@@ -354,6 +358,11 @@ model Matter {
   noteRevisions   MatterNoteRevision[]
   reminderDeliveries ReminderDelivery[]
   documents       Document[]
+  moneyAccounts   MoneyAccount[]
+  moneyTransactions MoneyTransaction[]
+  moneyLines      MoneyLine[]
+  feeAgreements   FeeAgreement[]
+  feeCharges      FeeCharge[]
 
   @@index([status])
   @@index([status, updatedAt])
@@ -395,6 +404,10 @@ model MatterParty {
   matter            Matter            @relation(fields: [matterId], references: [id], onDelete: Cascade)
   party             Party             @relation(fields: [partyId], references: [id], onDelete: Cascade)
   proceedingParties ProceedingParty[]
+  moneyAccounts     MoneyAccount[]
+  moneyLines        MoneyLine[]
+  feeAgreements     FeeAgreement[]
+  feeCharges        FeeCharge[]
 
   @@unique([matterId, partyId, role])
   @@index([partyId])
@@ -957,6 +970,7 @@ model Document {
   powersOfAttorney       PowerOfAttorney[]        @relation("PoaDocument")
   hearingResultDecisions HearingResult[]          @relation("HearingResultDecisionDocument")
   deadlineSources        Deadline[]               @relation("DeadlineSourceDocument")
+  feeAgreements          FeeAgreement[]           @relation("FeeAgreementDocument")
 
   @@index([matterId, createdAt])
   @@index([partyId, createdAt])
@@ -1050,4 +1064,275 @@ model BackupFilePin {
   @@unique([backupId, documentVersionId])
   @@index([documentVersionId, releasedAt])
   @@map("backup_file_pin")
+}
+
+enum MoneyAccountType {
+  CASH_CLEARING
+  FEE_RECEIVABLE
+  FEE_BASIS
+  EXPENSE_RECEIVABLE
+  CLIENT_ADVANCE
+  OPENING_BRIDGE
+}
+
+enum MoneyTransactionKind {
+  FEE_CHARGE
+  FEE_PAYMENT
+  REIMBURSABLE_EXPENSE
+  EXPENSE_REIMBURSEMENT
+  ADVANCE_RECEIPT
+  ADVANCE_SPEND
+  ADVANCE_TO_FEE
+  MIXED_RECEIPT
+  REFUND
+  REVERSAL
+  OPENING_BALANCE
+  FEE_ADJUSTMENT
+}
+
+enum MoneyTransactionStatus {
+  DRAFT
+  POSTED
+}
+
+enum MoneyLineSide {
+  DEBIT
+  CREDIT
+}
+
+enum MoneyAllocationAction {
+  APPLY
+  RELEASE
+}
+
+enum FeeAgreementStatus {
+  DRAFT
+  APPROVED
+  CANCELLED
+}
+
+enum FeeChargingMethod {
+  FIXED
+  INSTALLMENTS
+  HOURLY_ESTIMATE
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  INSTAPAY
+  CHEQUE
+  WALLET
+  OTHER
+}
+
+model MoneyAccount {
+  id                  String           @id @default(uuid()) @map("id")
+  type                MoneyAccountType @map("type")
+  matterId            String?          @map("matter_id")
+  clientMatterPartyId String?          @map("client_matter_party_id")
+  cashMethod          PaymentMethod?   @map("cash_method")
+  currency            String           @default("EGP") @map("currency")
+  createdAt           DateTime         @default(now()) @db.Timestamptz(3) @map("created_at")
+
+  matter              Matter?          @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  clientMatterParty   MatterParty?     @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
+  lines               MoneyLine[]
+
+  @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
+  @@index([type])
+  @@map("money_account")
+}
+
+model MoneyTransaction {
+  id                    String                 @id @default(uuid()) @map("id")
+  kind                  MoneyTransactionKind   @map("kind")
+  status                MoneyTransactionStatus @default(POSTED) @map("status")
+  transactionDate       DateTime               @db.Date @map("transaction_date")
+  currency              String                 @default("EGP") @map("currency")
+  totalAmountPiastres   BigInt                 @map("total_amount_piastres")
+  paymentMethod         PaymentMethod?         @map("payment_method")
+  reference             String?                @map("reference")
+  description           String                 @map("description")
+  matterId              String?                @map("matter_id")
+  payerPartyId          String?                @map("payer_party_id")
+  payeePartyId          String?                @map("payee_party_id")
+  idempotencyRecordId   String?                @unique @map("idempotency_record_id")
+  postedById            String?                @map("posted_by_id")
+  postedAt              DateTime?              @db.Timestamptz(3) @map("posted_at")
+  reversalOfId          String?                @unique @map("reversal_of_id")
+  refundOfId            String?                @map("refund_of_id")
+  reason                String?                @map("reason")
+  createdAt             DateTime               @default(now()) @db.Timestamptz(3) @map("created_at")
+  createdById           String                 @map("created_by_id")
+
+  matter                Matter?                @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  payerParty            Party?                 @relation("MoneyTransactionPayer", fields: [payerPartyId], references: [id], onDelete: Restrict)
+  payeeParty            Party?                 @relation("MoneyTransactionPayee", fields: [payeePartyId], references: [id], onDelete: Restrict)
+  idempotencyRecord     IdempotencyRecord?     @relation(fields: [idempotencyRecordId], references: [id], onDelete: Restrict)
+  reversalOf            MoneyTransaction?      @relation("TransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy            MoneyTransaction?      @relation("TransactionReversal")
+  refundOf              MoneyTransaction?      @relation("TransactionRefund", fields: [refundOfId], references: [id], onDelete: Restrict)
+  refunds               MoneyTransaction[]     @relation("TransactionRefund")
+  lines                 MoneyLine[]
+  adjustmentAllocations MoneyAllocation[]      @relation("AdjustmentTransactionAllocations")
+  receipt               Receipt?
+  approvedFeeAgreement  FeeAgreement?          @relation("FeeAgreementTransaction")
+
+  @@index([matterId, transactionDate])
+  @@index([kind, status, transactionDate])
+  @@index([status, transactionDate(sort: Desc), createdAt(sort: Desc)])
+  @@index([payerPartyId])
+  @@index([payeePartyId])
+  @@index([refundOfId])
+  @@map("money_transaction")
+}
+
+model MoneyLine {
+  id                    String            @id @default(uuid()) @map("id")
+  transactionId         String            @map("transaction_id")
+  accountId             String            @map("account_id")
+  side                  MoneyLineSide     @map("side")
+  amountPiastres        BigInt            @map("amount_piastres")
+  currency              String            @default("EGP") @map("currency")
+  matterId              String?           @map("matter_id")
+  clientMatterPartyId   String?           @map("client_matter_party_id")
+  originalLineId        String?           @map("original_line_id")
+  description           String?           @map("description")
+  createdAt             DateTime          @default(now()) @db.Timestamptz(3) @map("created_at")
+
+  transaction           MoneyTransaction  @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account               MoneyAccount      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  matter                Matter?           @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  clientMatterParty     MatterParty?      @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
+  originalLine          MoneyLine?        @relation("MoneyLineOriginal", fields: [originalLineId], references: [id], onDelete: Restrict)
+  derivedLines          MoneyLine[]       @relation("MoneyLineOriginal")
+  feeCharge             FeeCharge?
+  settlementAllocations MoneyAllocation[] @relation("SettlementAllocations")
+  receivableAllocations MoneyAllocation[] @relation("ReceivableAllocations")
+
+  @@index([accountId, transactionId])
+  @@index([transactionId])
+  @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
+  @@index([originalLineId])
+  @@map("money_line")
+}
+
+model FeeAgreement {
+  id                    String             @id @default(uuid()) @map("id")
+  matterId              String             @map("matter_id")
+  clientMatterPartyId   String             @map("client_matter_party_id")
+  description           String             @map("description")
+  totalAmountPiastres   BigInt             @map("total_amount_piastres")
+  currency              String             @default("EGP") @map("currency")
+  agreementDate         DateTime           @db.Date @map("agreement_date")
+  chargingMethod        FeeChargingMethod  @map("charging_method")
+  agreementDocumentId   String?            @map("agreement_document_id")
+  status                FeeAgreementStatus @default(DRAFT) @map("status")
+  approvedTransactionId String?            @unique @map("approved_transaction_id")
+  approvedAt            DateTime?          @db.Timestamptz(3) @map("approved_at")
+  approvedById          String?            @map("approved_by_id")
+  cancelledAt           DateTime?          @db.Timestamptz(3) @map("cancelled_at")
+  cancelledReason       String?            @map("cancelled_reason")
+  notes                 String?            @map("notes")
+  version               Int                @default(1) @map("version")
+  createdAt             DateTime           @default(now()) @db.Timestamptz(3) @map("created_at")
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3) @map("updated_at")
+  createdById           String             @map("created_by_id")
+  updatedById           String             @map("updated_by_id")
+
+  matter                Matter             @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  clientMatterParty     MatterParty        @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
+  agreementDocument     Document?          @relation("FeeAgreementDocument", fields: [agreementDocumentId], references: [id], onDelete: Restrict)
+  approvedTransaction   MoneyTransaction?  @relation("FeeAgreementTransaction", fields: [approvedTransactionId], references: [id], onDelete: Restrict)
+  charges               FeeCharge[]
+
+  @@index([matterId, status])
+  @@index([clientMatterPartyId, status])
+  @@index([agreementDocumentId])
+  @@index([createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("fee_agreement")
+}
+
+model FeeCharge {
+  id                  String       @id @default(uuid()) @map("id")
+  feeAgreementId      String       @map("fee_agreement_id")
+  matterId            String       @map("matter_id")
+  clientMatterPartyId String       @map("client_matter_party_id")
+  installmentNumber   Int          @default(1) @map("installment_number")
+  description         String       @map("description")
+  dueDate             DateTime?    @db.Date @map("due_date")
+  amountPiastres      BigInt       @map("amount_piastres")
+  currency            String       @default("EGP") @map("currency")
+  receivableLineId    String       @unique @map("receivable_line_id")
+  createdAt           DateTime     @default(now()) @db.Timestamptz(3) @map("created_at")
+  createdById         String       @map("created_by_id")
+
+  feeAgreement        FeeAgreement @relation(fields: [feeAgreementId], references: [id], onDelete: Restrict)
+  matter              Matter       @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  clientMatterParty   MatterParty  @relation(fields: [clientMatterPartyId], references: [id], onDelete: Restrict)
+  receivableLine      MoneyLine    @relation(fields: [receivableLineId], references: [id], onDelete: Restrict)
+
+  @@unique([feeAgreementId, installmentNumber])
+  @@index([matterId, clientMatterPartyId])
+  @@index([clientMatterPartyId])
+  @@index([dueDate])
+  @@map("fee_charge")
+}
+
+model MoneyAllocation {
+  id                      String                @id @default(uuid()) @map("id")
+  settlementLineId        String                @map("settlement_line_id")
+  receivableLineId        String                @map("receivable_line_id")
+  amountPiastres          BigInt                @map("amount_piastres")
+  currency                String                @default("EGP") @map("currency")
+  action                  MoneyAllocationAction @default(APPLY) @map("action")
+  releasesAllocationId    String?               @map("releases_allocation_id")
+  adjustmentTransactionId String?               @map("adjustment_transaction_id")
+  createdAt               DateTime              @default(now()) @db.Timestamptz(3) @map("created_at")
+  createdById             String                @map("created_by_id")
+
+  settlementLine          MoneyLine             @relation("SettlementAllocations", fields: [settlementLineId], references: [id], onDelete: Restrict)
+  receivableLine          MoneyLine             @relation("ReceivableAllocations", fields: [receivableLineId], references: [id], onDelete: Restrict)
+  releasesAllocation      MoneyAllocation?      @relation("AllocationRelease", fields: [releasesAllocationId], references: [id], onDelete: Restrict)
+  releasedBy              MoneyAllocation[]     @relation("AllocationRelease")
+  adjustmentTransaction   MoneyTransaction?     @relation("AdjustmentTransactionAllocations", fields: [adjustmentTransactionId], references: [id], onDelete: Restrict)
+
+  @@index([receivableLineId])
+  @@index([settlementLineId])
+  @@index([releasesAllocationId])
+  @@index([adjustmentTransactionId])
+  @@map("money_allocation")
+}
+
+model ReceiptSequence {
+  year      Int      @id @map("year")
+  nextVal   Int      @default(1) @map("next_val")
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3) @map("updated_at")
+
+  @@map("receipt_sequence")
+}
+
+model Receipt {
+  id             String           @id @default(uuid()) @map("id")
+  transactionId  String           @unique @map("transaction_id")
+  receiptNumber  String           @unique @map("receipt_number")
+  year           Int              @map("year")
+  paymentMethod  PaymentMethod    @map("payment_method")
+  payerName      String           @map("payer_name")
+  amountPiastres BigInt           @map("amount_piastres")
+  currency       String           @default("EGP") @map("currency")
+  issuedAt       DateTime         @default(now()) @db.Timestamptz(3) @map("issued_at")
+  issuedById     String           @map("issued_by_id")
+  headerSnapshot Json             @map("header_snapshot")
+
+  transaction    MoneyTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([year, receiptNumber])
+  @@index([issuedAt])
+  @@map("receipt")
 }
